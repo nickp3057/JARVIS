@@ -1,0 +1,738 @@
+"""Tool definitions exposed to the Claude agent.
+
+Each custom tool is a thin wrapper around an existing function in the
+codebase, plus an Anthropic-shaped schema describing its inputs. The single
+``TOOL_SPECS`` list is what we send to the API; the ``execute_tool``
+dispatcher is what we call when Claude returns a tool_use block.
+
+The list also contains Anthropic's built-in *server tools* (like
+``web_search``) - those are executed on Anthropic's side, so we just declare
+them and don't dispatch them locally.
+"""
+
+from __future__ import annotations
+
+import os
+from datetime import datetime
+from typing import Any, Callable
+
+from brain.apps import close_app, focus_app, list_open_apps, open_app
+from brain.clipboard_tool import read_clipboard, write_clipboard
+from brain.history import clear_history, history_stats
+from brain.memory import forget_fact, remember_fact
+from brain.timers import cancel_timer, dismiss_timer, list_timers, pause_timer, resume_timer, set_timer
+from brain.reminders import add_reminder, complete_reminder, delete_reminder, list_reminders
+from brain.reminders import _format_due as _format_reminder_due
+from brain.settings import get_setting, list_settings, update_setting
+from brain.vision import describe_screen
+from brain.weather import get_weather
+from integrations import spotify as spotify
+from integrations.home_assistant import (
+    handle_device_command,
+    list_entities,
+    test_connection,
+)
+from jarvis_logger import get_logger
+
+log = get_logger(__name__)
+
+
+def _web_search_enabled() -> bool:
+    return os.getenv("WEB_SEARCH_ENABLED", "true").strip().lower() in (
+        "1", "true", "yes", "on",
+    )
+
+
+# --- Tool implementations ---------------------------------------------------
+
+def _tool_get_time(_: dict[str, Any]) -> str:
+    now = datetime.now()
+    hour_minute = now.strftime("%I:%M").lstrip("0")
+    am_pm = now.strftime("%p")
+    weekday = now.strftime("%A")
+    month = now.strftime("%B")
+    day = now.day
+    return f"It is {hour_minute} {am_pm} on {weekday}, {month} {day}."
+
+
+def _tool_control_device(args: dict[str, Any]) -> str:
+    command = args.get("command", "")
+    if not command:
+        return "Tool error: missing 'command'."
+    return handle_device_command(command)
+
+
+def _tool_list_devices(args: dict[str, Any]) -> str:
+    domain = args.get("domain")
+    success, result = list_entities(domain)
+    if not success:
+        return f"Tool error: {result}"
+    if not result:
+        return f"No {domain or 'matching'} entities found."
+    return ", ".join(result)  # type: ignore[arg-type]
+
+
+def _tool_test_home_assistant(_: dict[str, Any]) -> str:
+    _, message = test_connection()
+    return message
+
+
+def _tool_remember_fact(args: dict[str, Any]) -> str:
+    return remember_fact(args.get("category", "general"), args.get("content", ""))
+
+
+def _tool_forget_fact(args: dict[str, Any]) -> str:
+    return forget_fact(args.get("fact_id", ""))
+
+
+def _tool_get_weather(args: dict[str, Any]) -> str:
+    return get_weather(args.get("location"))
+
+
+def _tool_set_timer(args: dict[str, Any]) -> str:
+    duration_seconds = float(args.get("duration_seconds", 0) or 0)
+    duration_minutes = float(args.get("duration_minutes", 0) or 0)
+    duration_hours = float(args.get("duration_hours", 0) or 0)
+    total = duration_seconds + duration_minutes * 60 + duration_hours * 3600
+    if total <= 0:
+        return "Tool error: timer duration must be positive."
+    return set_timer(total, args.get("message", "Timer up"))
+
+
+def _tool_cancel_timer(args: dict[str, Any]) -> str:
+    return cancel_timer(args.get("timer_id", ""))
+
+def _tool_pause_timer(args: dict[str, Any]) -> str:
+    return pause_timer(args.get("timer_id", ""))
+
+def _tool_resume_timer(args: dict[str, Any]) -> str:
+    return resume_timer(args.get("timer_id", ""))
+
+def _tool_dismiss_timer(args: dict[str, Any]) -> str:
+    return dismiss_timer(args.get("timer_id", ""))
+
+
+def _tool_list_timers(_: dict[str, Any]) -> str:
+    return list_timers()
+
+
+def _tool_play_music(args: dict[str, Any]) -> str:
+    return spotify.play_music(args.get("query", ""))
+
+
+def _tool_pause_music(_: dict[str, Any]) -> str:
+    return spotify.pause_music()
+
+
+def _tool_resume_music(_: dict[str, Any]) -> str:
+    return spotify.resume_music()
+
+
+def _tool_skip_track(_: dict[str, Any]) -> str:
+    return spotify.skip_track()
+
+
+def _tool_previous_track(_: dict[str, Any]) -> str:
+    return spotify.previous_track()
+
+
+def _tool_current_track(_: dict[str, Any]) -> str:
+    return spotify.current_track()
+
+
+def _tool_set_volume(args: dict[str, Any]) -> str:
+    percent = args.get("percent")
+    if percent is None:
+        return "Tool error: missing 'percent' (0-100)."
+    return spotify.set_volume(int(percent))
+
+
+def _tool_list_speakers(_: dict[str, Any]) -> str:
+    return spotify.list_speakers()
+
+
+def _tool_transfer_playback(args: dict[str, Any]) -> str:
+    return spotify.transfer_playback(args.get("device_name", ""))
+
+
+
+
+def _tool_open_app(args: dict[str, Any]) -> str:
+    return open_app(args.get("name", ""))
+
+def _tool_close_app(args: dict[str, Any]) -> str:
+    return close_app(args.get("name", ""))
+
+def _tool_focus_app(args: dict[str, Any]) -> str:
+    return focus_app(args.get("name", ""))
+
+def _tool_list_open_apps(_: dict[str, Any]) -> str:
+    return list_open_apps()
+
+def _tool_read_clipboard(_: dict[str, Any]) -> str:
+    return read_clipboard()
+
+def _tool_write_clipboard(args: dict[str, Any]) -> str:
+    return write_clipboard(args.get("text", ""))
+
+def _tool_look_at_screen(args: dict[str, Any]) -> str:
+    question = args.get("question", "What's on the screen right now?")
+    return describe_screen(question)
+
+def _tool_clear_conversation(_: dict[str, Any]) -> str:
+    return clear_history()
+
+
+def _tool_conversation_stats(_: dict[str, Any]) -> str:
+    return history_stats()
+
+
+def _tool_update_setting(args: dict[str, Any]) -> str:
+    return update_setting(args.get("key", ""), args.get("value", ""))
+
+
+def _tool_get_setting(args: dict[str, Any]) -> str:
+    return get_setting(args.get("key", ""))
+
+
+def _tool_list_settings(_: dict[str, Any]) -> str:
+    return list_settings()
+
+
+def _tool_morning_briefing(_: dict[str, Any]) -> str:
+    from brain.briefing import compose_briefing
+    return compose_briefing()
+
+
+def _tool_add_reminder(args: dict[str, Any]) -> str:
+    text = (args.get("text") or "").strip()
+    if not text:
+        return "Tool error: missing reminder text."
+    due_at = None
+    due_iso = args.get("due_iso")
+    in_minutes = args.get("in_minutes")
+    in_hours = args.get("in_hours")
+    if due_iso:
+        try:
+            due_at = datetime.fromisoformat(str(due_iso)).timestamp()
+        except ValueError:
+            return "Tool error: due_iso must look like 2026-06-16T15:00."
+    elif in_minutes or in_hours:
+        secs = float(in_minutes or 0) * 60 + float(in_hours or 0) * 3600
+        if secs > 0:
+            due_at = datetime.now().timestamp() + secs
+    reminder = add_reminder(text, due_at)
+    if due_at is not None:
+        return f"Reminder set for {_format_reminder_due(due_at)}: {text}. (id {reminder.id})"
+    return f"Added to your list: {text}. (id {reminder.id})"
+
+
+def _tool_list_reminders(_: dict[str, Any]) -> str:
+    return list_reminders()
+
+
+def _tool_complete_reminder(args: dict[str, Any]) -> str:
+    return complete_reminder(args.get("reminder_id", ""))
+
+
+def _tool_delete_reminder(args: dict[str, Any]) -> str:
+    return delete_reminder(args.get("reminder_id", ""))
+
+
+def _tool_todays_agenda(_: dict[str, Any]) -> str:
+    from integrations.google_calendar import todays_agenda
+    return todays_agenda()
+
+
+def _tool_next_event(_: dict[str, Any]) -> str:
+    from integrations.google_calendar import next_event_spoken
+    return next_event_spoken()
+
+
+# --- Anthropic tool schemas -------------------------------------------------
+
+_CUSTOM_TOOLS: list[dict[str, Any]] = [
+    {
+        "name": "get_time",
+        "description": "Get the current local time and date. Use this any time the user asks what time or day it is.",
+        "input_schema": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "control_device",
+        "description": (
+            "Turn a device on or off via Home Assistant. Pass the user's "
+            "natural-language phrasing (e.g. 'turn on the desk fan') as the "
+            "command - the integration does fuzzy matching against known "
+            "entities. Use this for any lights, fans, switches, plugs, etc."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "command": {"type": "string", "description": "The user's device command in natural language."}
+            },
+            "required": ["command"],
+        },
+    },
+    {
+        "name": "list_devices",
+        "description": "List entities of a given domain (light, switch, fan) from Home Assistant.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "domain": {"type": "string", "description": "Entity domain to filter by, e.g. 'light', 'switch', 'fan'. Omit to list everything."}
+            },
+        },
+    },
+    {
+        "name": "test_home_assistant",
+        "description": "Ping Home Assistant to confirm the connection is healthy.",
+        "input_schema": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "remember_fact",
+        "description": (
+            "Save a durable fact about Nick to long-term memory. Use this any "
+            "time you learn something worth knowing across future conversations: "
+            "people in his life, interests, preferences, projects, plans. Be "
+            "selective - skip ephemera. Don't ask permission, just remember."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "category": {"type": "string", "description": "Short category label."},
+                "content": {"type": "string", "description": "The fact, in a concise sentence."},
+            },
+            "required": ["category", "content"],
+        },
+    },
+    {
+        "name": "forget_fact",
+        "description": "Remove a fact from memory by its id.",
+        "input_schema": {
+            "type": "object",
+            "properties": {"fact_id": {"type": "string", "description": "The 8-character id."}},
+            "required": ["fact_id"],
+        },
+    },
+    {
+        "name": "clear_conversation",
+        "description": (
+            "Wipe the persistent conversation history database. Use when Nick "
+            "says 'forget our conversation', 'clear your memory of our chats', "
+            "'start fresh', etc. Does NOT affect the long-term memory profile "
+            "(profile.json) - use forget_fact for individual memory items."
+        ),
+        "input_schema": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "conversation_history_stats",
+        "description": "Report how many conversation turns are stored in long-term history.",
+        "input_schema": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "get_weather",
+        "description": (
+            "Get current weather and today's forecast for a place. If no "
+            "location is given, the default location from configuration is "
+            "used. Format the location as 'City, State' or 'City, Country' "
+            "when known (e.g. 'Herriman, Utah', 'Tokyo, Japan') - this gives "
+            "the best geocoding hits. The lookup is forgiving though, so "
+            "just 'Herriman' or 'Herriman Utah' (no comma) will also work. "
+            "Don't ask the user to clarify - try the lookup first."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "location": {
+                    "type": "string",
+                    "description": "City name, optionally with state/country (e.g. 'Herriman, Utah'). Optional - defaults to DEFAULT_LOCATION.",
+                }
+            },
+        },
+    },
+    {
+        "name": "set_timer",
+        "description": "Set a timer or reminder. JARVIS speaks the message when it expires.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "duration_seconds": {"type": "number"},
+                "duration_minutes": {"type": "number"},
+                "duration_hours": {"type": "number"},
+                "message": {"type": "string", "description": "What JARVIS should say when the timer fires."},
+            },
+            "required": ["message"],
+        },
+    },
+    {
+        "name": "cancel_timer",
+        "description": "Cancel an active timer by its 6-character id.",
+        "input_schema": {
+            "type": "object",
+            "properties": {"timer_id": {"type": "string"}},
+            "required": ["timer_id"],
+        },
+    },
+    {
+        "name": "pause_timer",
+        "description": "Pause an active timer, freezing its countdown.",
+        "input_schema": {
+            "type": "object",
+            "properties": {"timer_id": {"type": "string"}},
+            "required": ["timer_id"],
+        },
+    },
+    {
+        "name": "resume_timer",
+        "description": "Resume a previously paused timer from where it left off.",
+        "input_schema": {
+            "type": "object",
+            "properties": {"timer_id": {"type": "string"}},
+            "required": ["timer_id"],
+        },
+    },
+    {
+        "name": "dismiss_timer",
+        "description": "Dismiss an alarm that has already gone off (removes the alarming timer from the display).",
+        "input_schema": {
+            "type": "object",
+            "properties": {"timer_id": {"type": "string"}},
+            "required": ["timer_id"],
+        },
+    },
+    {
+        "name": "list_timers",
+        "description": "List all currently active timers and their remaining time.",
+        "input_schema": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "play_music",
+        "description": (
+            "Play music on Spotify. Pass any natural-language request - song, "
+            "artist, album, genre, or vibe (e.g. 'Bohemian Rhapsody', 'play "
+            "some jazz', 'lofi study music'). Plays on the preferred Spotify "
+            "device if configured, else the active device, else the first "
+            "available. Use for any 'play' request."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {"query": {"type": "string", "description": "What to play."}},
+            "required": ["query"],
+        },
+    },
+    {
+        "name": "pause_music",
+        "description": "Pause Spotify playback.",
+        "input_schema": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "resume_music",
+        "description": "Resume Spotify playback after a pause.",
+        "input_schema": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "skip_track",
+        "description": "Skip to the next track on Spotify.",
+        "input_schema": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "previous_track",
+        "description": "Go back to the previous track on Spotify.",
+        "input_schema": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "current_track",
+        "description": "Get the title and artist of the currently playing Spotify track.",
+        "input_schema": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "set_volume",
+        "description": "Set Spotify playback volume from 0 to 100.",
+        "input_schema": {
+            "type": "object",
+            "properties": {"percent": {"type": "integer", "description": "0 to 100."}},
+            "required": ["percent"],
+        },
+    },
+    {
+        "name": "list_speakers",
+        "description": (
+            "List all currently available Spotify Connect devices (computers, "
+            "phones, speakers, TVs). Use this when Nick asks 'what speakers do "
+            "I have' or 'where can I play music'."
+        ),
+        "input_schema": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "transfer_playback",
+        "description": (
+            "Move active Spotify playback to a different device by name. The "
+            "match is case-insensitive substring (e.g. 'kitchen' matches "
+            "'Kitchen Echo'). Use when Nick says 'play this on the X' or "
+            "'move it to the Y'."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {"device_name": {"type": "string", "description": "Substring of the target device's name."}},
+            "required": ["device_name"],
+        },
+    },
+    # --- Computer control --------------------------------------------------
+    {
+        "name": "open_app",
+        "description": (
+            "Open an application on Nick's computer by name. Works for Chrome, "
+            "Spotify, Discord, Cursor, VS Code, Terminal, File Explorer, etc. "
+            "Use any natural-language name — 'browser', 'files', 'terminal'."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {"name": {"type": "string", "description": "App name to open."}},
+            "required": ["name"],
+        },
+    },
+    {
+        "name": "close_app",
+        "description": "Close / quit an application on Nick's computer by name.",
+        "input_schema": {
+            "type": "object",
+            "properties": {"name": {"type": "string"}},
+            "required": ["name"],
+        },
+    },
+    {
+        "name": "focus_app",
+        "description": "Bring an already-open application window to the foreground.",
+        "input_schema": {
+            "type": "object",
+            "properties": {"name": {"type": "string"}},
+            "required": ["name"],
+        },
+    },
+    {
+        "name": "list_open_apps",
+        "description": "List all currently running applications that have a visible window.",
+        "input_schema": {"type": "object", "properties": {}},
+    },
+    # --- Clipboard ---------------------------------------------------------
+    {
+        "name": "read_clipboard",
+        "description": (
+            "Read the current text content of Nick's clipboard. Use this when "
+            "he says 'summarize what I copied', 'translate that', 'fix this', "
+            "'what did I just copy', etc."
+        ),
+        "input_schema": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "write_clipboard",
+        "description": "Write text to Nick's clipboard so he can paste it anywhere.",
+        "input_schema": {
+            "type": "object",
+            "properties": {"text": {"type": "string", "description": "Text to copy to clipboard."}},
+            "required": ["text"],
+        },
+    },
+    # --- Vision ------------------------------------------------------------
+    {
+        "name": "look_at_screen",
+        "description": (
+            "Take a screenshot and use vision to answer a question about what's "
+            "currently on Nick's screen. Use this whenever he says 'what's on my "
+            "screen', 'what am I looking at', 'can you see this', 'look at my screen', "
+            "or asks about something that would require seeing his display."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "question": {
+                    "type": "string",
+                    "description": "What to look for or answer about the screen. Default: 'What's on the screen right now?'",
+                }
+            },
+        },
+    },
+
+    {
+        "name": "list_settings",
+        "description": "List all editable runtime settings JARVIS can change (voice speed, humor level, default location, what to call Nick, etc.).",
+        "input_schema": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "get_setting",
+        "description": "Read the current value of a single runtime setting by its key (e.g. HUMOR_PERCENT, ADDRESS, ELEVENLABS_SPEED, DEFAULT_LOCATION).",
+        "input_schema": {
+            "type": "object",
+            "properties": {"key": {"type": "string", "description": "The setting key to read."}},
+            "required": ["key"],
+        },
+    },
+    {
+        "name": "update_setting",
+        "description": (
+            "Change a runtime setting live, without a restart. Use for any "
+            "'set X to Y' request and any time you infer a setting should "
+            "change: ELEVENLABS_SPEED (0.7-1.2), HUMOR_PERCENT (0-100), "
+            "ADDRESS (what to call Nick), DEFAULT_LOCATION, etc. Don't ask "
+            "permission - just update and confirm in one sentence."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "key": {"type": "string", "description": "The setting key to change."},
+                "value": {"type": "string", "description": "The new value."},
+            },
+            "required": ["key", "value"],
+        },
+    },
+    {
+        "name": "morning_briefing",
+        "description": (
+            "Give Nick a short spoken briefing: greeting, the current time and "
+            "date, today's weather, and any running timers. Use this whenever he "
+            "says 'good morning', 'brief me', 'what's my day look like', 'give me "
+            "the rundown', or asks for a status update on the day."
+        ),
+        "input_schema": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "add_reminder",
+        "description": (
+            "Add a reminder or to-do. For a timed reminder ('remind me at 3pm "
+            "to call mom', 'in 20 minutes'), work out the time using the "
+            "current time and pass either due_iso (local ISO 8601 like "
+            "2026-06-16T15:00) or in_minutes / in_hours. For an open to-do "
+            "with no time ('add milk to my list'), pass just the text. JARVIS "
+            "speaks timed reminders aloud when they come due."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "text": {"type": "string", "description": "What to be reminded of."},
+                "due_iso": {"type": "string", "description": "Local ISO 8601 due time, e.g. 2026-06-16T15:00. Optional."},
+                "in_minutes": {"type": "number", "description": "Minutes from now until due. Optional."},
+                "in_hours": {"type": "number", "description": "Hours from now until due. Optional."},
+            },
+            "required": ["text"],
+        },
+    },
+    {
+        "name": "list_reminders",
+        "description": "List all open reminders and to-dos with their ids and due times.",
+        "input_schema": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "complete_reminder",
+        "description": "Mark a reminder or to-do as done by its id (e.g. 'r1a2b3c4').",
+        "input_schema": {
+            "type": "object",
+            "properties": {"reminder_id": {"type": "string"}},
+            "required": ["reminder_id"],
+        },
+    },
+    {
+        "name": "delete_reminder",
+        "description": "Delete a reminder or to-do entirely by its id.",
+        "input_schema": {
+            "type": "object",
+            "properties": {"reminder_id": {"type": "string"}},
+            "required": ["reminder_id"],
+        },
+    },
+    {
+        "name": "todays_agenda",
+        "description": (
+            "Read Nick's Google Calendar agenda for the rest of today. Use for "
+            "'what's on my calendar', 'what's my day look like', 'am I free this "
+            "afternoon'. Returns events with their times."
+        ),
+        "input_schema": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "next_event",
+        "description": "Get Nick's next upcoming calendar event and when it starts.",
+        "input_schema": {"type": "object", "properties": {}},
+    },
+]
+
+
+# Map each tool name to the local function that executes it. Server tools
+# (like web_search) are intentionally absent - Anthropic runs those.
+_DISPATCH: dict[str, Callable[[dict[str, Any]], str]] = {
+    "get_time": _tool_get_time,
+    "control_device": _tool_control_device,
+    "list_devices": _tool_list_devices,
+    "test_home_assistant": _tool_test_home_assistant,
+    "remember_fact": _tool_remember_fact,
+    "forget_fact": _tool_forget_fact,
+    "clear_conversation": _tool_clear_conversation,
+    "conversation_history_stats": _tool_conversation_stats,
+    "get_weather": _tool_get_weather,
+    "set_timer": _tool_set_timer,
+    "cancel_timer": _tool_cancel_timer,
+    "pause_timer": _tool_pause_timer,
+    "resume_timer": _tool_resume_timer,
+    "dismiss_timer": _tool_dismiss_timer,
+    "list_timers": _tool_list_timers,
+    "play_music": _tool_play_music,
+    "pause_music": _tool_pause_music,
+    "resume_music": _tool_resume_music,
+    "skip_track": _tool_skip_track,
+    "previous_track": _tool_previous_track,
+    "current_track": _tool_current_track,
+    "set_volume": _tool_set_volume,
+    "list_speakers": _tool_list_speakers,
+    "transfer_playback": _tool_transfer_playback,
+    "open_app": _tool_open_app,
+    "close_app": _tool_close_app,
+    "focus_app": _tool_focus_app,
+    "list_open_apps": _tool_list_open_apps,
+    "read_clipboard": _tool_read_clipboard,
+    "write_clipboard": _tool_write_clipboard,
+    "look_at_screen": _tool_look_at_screen,
+    "list_settings": _tool_list_settings,
+    "get_setting": _tool_get_setting,
+    "update_setting": _tool_update_setting,
+    "morning_briefing": _tool_morning_briefing,
+    "add_reminder": _tool_add_reminder,
+    "list_reminders": _tool_list_reminders,
+    "complete_reminder": _tool_complete_reminder,
+    "delete_reminder": _tool_delete_reminder,
+    "todays_agenda": _tool_todays_agenda,
+    "next_event": _tool_next_event,
+}
+
+
+def _web_search_server_tool() -> dict[str, Any]:
+    """Anthropic-hosted web search server tool spec."""
+    max_uses = int(os.getenv("WEB_SEARCH_MAX_USES", "5") or 5)
+    return {"type": "web_search_20250305", "name": "web_search", "max_uses": max_uses}
+
+
+def get_tool_specs() -> list[dict[str, Any]]:
+    """Return the full tool list sent to the Anthropic API each turn.
+
+    Includes every custom tool plus, when enabled, Anthropic's hosted
+    web_search server tool.
+    """
+    specs: list[dict[str, Any]] = list(_CUSTOM_TOOLS)
+    if _web_search_enabled():
+        specs.append(_web_search_server_tool())
+    return specs
+
+
+# Backwards-compatible alias; some call sites import TOOL_SPECS directly.
+TOOL_SPECS = _CUSTOM_TOOLS
+
+
+def execute_tool(name: str, args: dict[str, Any]) -> str:
+    """Dispatch a tool_use block to its handler and return spoken-friendly text."""
+    handler = _DISPATCH.get(name)
+    if handler is None:
+        log.warning("Unknown tool requested: %s", name)
+        return f"Tool error: no such tool '{name}'."
+    try:
+        return handler(args or {})
+    except Exception as exc:  # noqa: BLE001
+        log.exception("Tool %s raised", name)
+        return f"Tool error while running {name}: {exc}"

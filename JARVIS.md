@@ -1,0 +1,353 @@
+# Pearson Stark JARVIS — Project Context
+
+> **Read this first in every new session.** It covers what JARVIS is, how it's built, every file that matters, and what to do next.
+
+---
+
+## What This Is
+
+JARVIS is Nick's personal AI assistant — a fully local Python desktop app modelled on Tony Stark's JARVIS crossed with TARS from Interstellar. It lives on his Windows machine as a PyQt6 GUI with an animated red orb, iMessage-style chat bubbles, a voice wake-word pipeline, and a growing set of tools that let it actually control his computer and smart home.
+
+The character never breaks. It calls Nick "sir", uses dry British wit, answers in 1-3 spoken sentences, and never refers to itself as Claude or an AI.
+
+---
+
+## Stack
+
+| Layer | Tech |
+|---|---|
+| LLM brain | Anthropic Claude (Haiku 4.5 by default, configurable) |
+| STT | faster-whisper (small.en model) |
+| Wake word | openWakeWord ("hey jarvis") |
+| TTS | ElevenLabs Flash v2.5 (Piper as fallback) |
+| UI | PyQt6 — custom QPainter orb, QTextEdit chat, status column |
+| Home control | Home Assistant REST API |
+| Music | Spotify Web API via spotipy (Premium required) |
+| Memory | SQLite (conversation history) + JSON (profile facts) |
+| Settings | `.env` file, hot-reloaded at runtime |
+
+---
+
+## File Map
+
+```
+Pearson-Stark-Jarvis/
+├── app/
+│   └── main.py              Entry point. --text / --voice / (default) GUI
+│
+├── brain/
+│   ├── agent.py             JarvisAgent: session management, tool loop, history
+│   ├── apps.py              Windows app launcher (open/close/focus via PowerShell)
+│   ├── clipboard_tool.py    Read/write clipboard via PowerShell Get/Set-Clipboard
+│   ├── history.py           SQLite conversation history with session support
+│   ├── intents.py           Keyword intent router (fallback if brain offline)
+│   ├── memory.py            JSON long-term memory (profile.json) — remember_fact/forget_fact
+│   ├── briefing.py          Spoken situational briefing (time, weather, agenda, timers)
+│   ├── personality.py       System prompt builder (humor%, address, tool descriptions)
+│   ├── reminders.py         Persistent reminders & to-dos (timed + open list)
+│   ├── router.py            Top-level request dispatcher
+│   ├── runtime.py           JarvisRuntime — wraps agent + status snapshot
+│   ├── settings.py          Whitelist-based .env editor (update_setting tool)
+│   ├── timers.py            Timer store: set/cancel/pause/resume/dismiss/alarming state
+│   ├── tools.py             All tool schemas + dispatch (35+ tools)
+│   ├── vision.py            Screenshot via PyQt6 + Claude vision API call
+│   └── weather.py           Open-Meteo weather lookup
+│
+├── integrations/
+│   ├── home_assistant.py    HA REST API: control_device / list_entities
+│   ├── google_calendar.py   Read-only Google Calendar: agenda / next event / alerts
+│   └── spotify.py           Spotipy wrapper: play/pause/skip/volume/transfer/now-playing
+│
+├── speech/
+│   ├── audio.py             MicStream rolling buffer, record_until_silence, rms()
+│   ├── chime.py             Activation chime playback
+│   ├── stt.py               faster-whisper Transcriber
+│   ├── tts.py               ElevenLabs TTS with RMS envelope computation
+│   ├── voice_loop.py        Headless voice loop (--voice mode)
+│   └── wake.py              openWakeWord WakeDetector
+│
+├── ui/
+│   ├── chat_widget.py       iMessage-style bubbles, QThread agent/speak workers
+│   ├── main_window.py       JarvisMainWindow: header buttons, orb, chat, status column
+│   ├── hud.py               HUDFrame: cyan corner-bracket panel chrome
+│   ├── orb.py               Animated QPainter orb (cyan; amber THINKING, red ALERT)
+│   ├── status_panels.py     Right column: NowPlaying, Runtime, Tasks, Home, Weather,
+│   │                        Events, Sessions, Memory, Timers
+│   └── voice_runner.py      VoiceRunner QThread: wake→listen→think→speak loop
+│
+├── memory/
+│   ├── history.db           SQLite conversation history (auto-created)
+│   └── profile.json         Long-term memory facts (auto-created)
+│
+├── .env                     API keys and runtime settings (never commit)
+├── JARVIS.md                This file
+├── create_shortcut.py       One-time: creates JARVIS.lnk on the Desktop
+└── requirements.txt         Python deps
+```
+
+---
+
+## How a Turn Works
+
+### Chat mode (typed)
+1. User types → `ChatWidget._on_send()` → disables input
+2. `_AgentWorker` thread calls `agent.respond(text)`
+3. `JarvisAgent._run_tool_loop()` → Claude API → tool calls → final reply
+4. Reply appended to transcript, `input re-enabled immediately` (non-blocking)
+5. If not muted: `_SpeakWorker` thread calls `speak(reply)` → ElevenLabs TTS → RMS envelope → orb reacts
+
+### Voice mode
+1. `VoiceRunner` (QThread) waits for wake word
+2. Snapshots rolling mic buffer pre-chime (fixes trailing wake word)
+3. Plays chime → captures utterance → transcribes
+4. `agent.respond(text)` → `_speak_interruptible()` with RMS envelope driving orb
+5. Follow-up window: short (2.5s) after tools, long (10s) after conversation
+
+---
+
+## The Orb
+
+State machine with 4 states:
+
+| State | Color | Behavior |
+|---|---|---|
+| IDLE | Dim cyan `(0,150,190)` | Slow 0.25Hz pulse |
+| LISTENING | Bright cyan `(0,205,245)` | 1.4Hz pulse, fast rings |
+| THINKING | Amber `(240,172,40)` | Fast ring spin (38°/s), 4 spikes — "targeting" mode |
+| SPEAKING | Electric cyan `(40,220,255)` | 12 RMS-reactive spikes, breathes with voice |
+| ALERT | Hot red `(255,70,50)` | 8 spikes, fast — errors / warnings |
+
+Background is dark blue-black `(8,16,24)` → `(2,5,10)` with faint cyan scanlines.
+
+RMS envelope from ElevenLabs audio drives the orb in real time using a monotonic clock to avoid timer drift. The orb goes THINKING when user sends, SPEAKING when TTS starts, IDLE when TTS finishes or when muted.
+
+---
+
+## Tools (35+)
+
+### Time & Info
+- `get_time` — current local time/date
+- `get_weather(location?)` — Open-Meteo current + forecast
+- `morning_briefing` — spoken greeting + time + weather + running timers
+
+### Home Assistant
+- `control_device(command)` — fuzzy natural-language device control
+- `list_devices(domain?)` — list HA entities
+- `test_home_assistant` — ping HA
+
+### Memory & History
+- `remember_fact(category, content)` — save to profile.json
+- `forget_fact(fact_id)` — remove from profile.json
+- `clear_conversation` — wipe history.db
+- `conversation_history_stats` — turn/session count
+
+### Timers
+- `set_timer(duration_*, message)` — creates timer
+- `cancel_timer(id)` / `pause_timer(id)` / `resume_timer(id)` / `dismiss_timer(id)`
+- `list_timers` — all active timers
+- UI shows per-timer cards with PAUSE/CANCEL/DISMISS buttons + alarm sound
+
+### Reminders & Calendar *(new)*
+- `add_reminder(text, due_iso?/in_minutes?/in_hours?)` — timed reminder or open to-do
+- `list_reminders` / `complete_reminder(id)` / `delete_reminder(id)`
+- `todays_agenda` — Google Calendar schedule for the rest of today
+- `next_event` — the next upcoming calendar event
+
+### Spotify
+- `play_music(query)` — natural-language play
+- `pause_music` / `resume_music` / `skip_track` / `previous_track`
+- `current_track` — what's playing
+- `set_volume(percent)` / `list_speakers` / `transfer_playback(device_name)`
+
+### Computer Control *(new)*
+- `open_app(name)` — opens any app by natural name (Chrome, Cursor, Discord, etc.)
+- `close_app(name)` — kills the process
+- `focus_app(name)` — brings window to front
+- `list_open_apps` — lists running windowed apps
+
+### Clipboard *(new)*
+- `read_clipboard` — reads current clipboard text (for "summarize what I copied")
+- `write_clipboard(text)` — writes to clipboard
+
+### Vision *(new)*
+- `look_at_screen(question?)` — screenshot via PyQt6 → Claude vision API → spoken answer
+
+### Settings
+- `update_setting(key, value)` — live-edits `.env` (HUMOR_PERCENT, ADDRESS, ELEVENLABS_SPEED, etc.)
+- `get_setting(key)` / `list_settings`
+- `web_search` — Anthropic server tool (togglable via WEB_SEARCH_ENABLED)
+
+---
+
+## Key Design Patterns
+
+**Session-based history**: Every launch creates a new session UUID. `append_turn(user, reply, session_id=...)` persists turns to SQLite. The Sessions panel shows all past sessions as clickable cards — clicking one loads that session into the agent context and repopulates the transcript.
+
+**Non-blocking input**: Input is re-enabled as soon as the agent replies, before TTS completes. Mute button skips TTS entirely and immediately emits `speak_finished` so the orb resets.
+
+**Live settings**: `.env` is written directly by `update_setting`. All settings are read fresh at call time (`os.getenv()` inside functions, not at import time). JARVIS can change its own behavior mid-conversation.
+
+**RMS envelope**: `tts.py` computes a per-frame RMS envelope from the ElevenLabs WAV before playback. `voice_runner.py` drives the orb's `rms_level` using a monotonic clock thread so audio and visual stay in sync.
+
+**Vision**: `brain/vision.py` uses `QScreen.grabWindow(0)` (PyQt6, no extra deps) to capture the screen, encodes to PNG/base64, then makes a separate Claude API call with the image. Falls back to a PowerShell `System.Drawing` capture in headless mode.
+
+---
+
+## .env Variables
+
+```env
+# Required
+ANTHROPIC_API_KEY=sk-ant-...
+ELEVENLABS_API_KEY=...
+ELEVENLABS_VOICE_ID=...
+
+# Spotify (optional but great)
+SPOTIFY_CLIENT_ID=...
+SPOTIFY_CLIENT_SECRET=...
+SPOTIFY_REDIRECT_URI=http://127.0.0.1:8888/callback
+SPOTIFY_PREFERRED_DEVICE=JARVIS  # device name substring
+
+# Home Assistant (optional)
+HA_URL=http://homeassistant.local:8123
+HA_TOKEN=...
+
+# Tunable at runtime via JARVIS voice commands
+HUMOR_PERCENT=30           # 0-100
+ADDRESS=sir                # how JARVIS addresses Nick
+ELEVENLABS_SPEED=1.0       # TTS speed
+ELEVENLABS_MODEL_ID=eleven_flash_v2_5
+DEFAULT_LOCATION=Herriman, Utah
+ANTHROPIC_MODEL=claude-haiku-4-5-20251001
+WEB_SEARCH_ENABLED=true
+
+# Voice tuning
+WAKE_THRESHOLD=0.5
+PREROLL_SECONDS=4.0
+FOLLOWUP_TIMEOUT_S=10.0
+FOLLOWUP_TASK_S=2.5
+INTERRUPT_RMS_THRESHOLD=1500
+WHISPER_MODEL=small.en
+
+# Feature flags / tuning (all optional, sensible defaults)
+BRIEFING_ON_LAUNCH=false    # speak a briefing at startup
+STREAMING_TTS=false         # opt-in sentence-streamed TTS (text mode)
+MEMORY_MAX_FACTS=60         # cap facts injected into the prompt (0 = no cap)
+VISION_MODEL=claude-sonnet-4-6
+VISION_ALL_MONITORS=true    # capture the whole virtual desktop
+WEB_SEARCH_MAX_USES=5       # max web_search calls per turn
+BOOT_SEQUENCE=true          # movie-style power-up on GUI launch
+
+# Google Calendar (optional, read-only)
+GOOGLE_CREDENTIALS_FILE=    # path to OAuth client-secret JSON (Desktop app)
+GOOGLE_TOKEN_FILE=          # token cache; defaults to memory/google_token.json
+GOOGLE_CALENDAR_ID=primary
+CALENDAR_MONITOR_ENABLED=true
+CALENDAR_MONITOR_INTERVAL_S=120
+CALENDAR_ALERT_LEAD_MIN=10  # warn this many minutes before a meeting
+```
+
+## Google Calendar setup (one time)
+
+1. Google Cloud Console -> create a project -> enable the Google Calendar API.
+2. Create OAuth credentials of type **Desktop app**; download the JSON.
+3. Put its path in `GOOGLE_CREDENTIALS_FILE` in `.env`.
+4. Launch JARVIS and ask "what's on my calendar" — a browser opens once for
+   consent, then the token is cached to `memory/google_token.json` and refreshes
+   silently after that. Access is read-only.
+
+---
+
+## UI Layout
+
+```
+┌──────────────────────────────────────────────────────────────────┐
+│  PEARSON STARK // JARVIS     [+NEW CHAT | CHAT  VOICE]   [MUTE]  │
+├─────────────────────────────┬────────────────────────────────────┤
+│                             │  NOW PLAYING (Spotify, hides if    │
+│         ORB                 │  nothing playing)                  │
+│   (animated, red,           │  RUNTIME STATUS                    │
+│    RMS-reactive)            │  ACTIVE TASKS                      │
+│                             │  HOME (HA devices)                 │
+│  [chat transcript]          │  WEATHER                           │
+│  User bubbles →             │  EVENTS                            │
+│  ← JARVIS bubbles           │  RECENT SESSIONS (clickable)       │
+│                             │  MEMORY (scrollable facts)         │
+│  [Type a message]  [SEND]   │  ACTIVE TIMERS (cards w/ buttons)  │
+└─────────────────────────────┴────────────────────────────────────┘
+```
+
+---
+
+## Recently Shipped
+
+- **Reminders & to-dos** (`brain/reminders.py`) — timed reminders ("remind me at
+  3pm") and open to-dos, persisted, spoken aloud when due. Tools: add_reminder /
+  list_reminders / complete_reminder / delete_reminder.
+- **Google Calendar** (`integrations/google_calendar.py`) — todays_agenda /
+  next_event tools, agenda folded into the briefing, and a proactive monitor that
+  announces meetings as they approach. Read-only OAuth; see setup below.
+- **Proactive announcement queue** — runtime `announce()` + `pop_due_reminders()`
+  now speak calendar alerts, timers, and reminders in *both* voice and chat modes.
+- **Boot sequence + sound** (`speech/sounds.py`, `ui/hud.py`) — movie-style
+  power-up on launch: orb spin-up, staggered telemetry init, arc-reactor hum +
+  blips, spoken "all systems nominal" greeting (then the briefing). Toggle with
+  BOOT_SEQUENCE.
+- **Persistent timers** — timers now serialize to `memory/timers.json` and
+  rehydrate on launch. A timer that lapses while JARVIS is closed is in the
+  alarming state on next start.
+- **Morning briefing** — `brain/briefing.py` composes a spoken greeting + time
+  + weather + running timers. Exposed as the `morning_briefing` tool ("brief
+  me", "good morning") and auto-spoken at launch when `BRIEFING_ON_LAUNCH=true`.
+- **Multi-monitor vision** — `look_at_screen` now captures the full virtual
+  desktop (all monitors) by default; set `VISION_ALL_MONITORS=false` for primary
+  only. Vision model is configurable via `VISION_MODEL`.
+- **Streaming TTS (opt-in)** — `STREAMING_TTS=true` streams Claude's reply and
+  speaks it sentence-by-sentence via `speak_stream`, cutting perceived latency.
+  Default off; GUI/voice still use the proven blocking path until adopted there.
+- **Scalable memory** — `render_memory_block` caps injected facts at
+  `MEMORY_MAX_FACTS` (default 60) so the system prompt doesn't bloat as memory
+  grows; older facts stay on disk.
+
+## What's Not Done Yet (Roadmap)
+
+- **Home Assistant** — Govee LAN device integration (Nick's lights aren't in HA yet)
+- **Briefing in GUI/voice** — wire the launch briefing into the GUI greeting and
+  voice loop (currently text mode + on-demand tool).
+- **Streaming in GUI/voice** — adopt `respond_streaming` + `speak_stream` in the
+  voice runner and chat widget once validated against live audio.
+- **Email awareness** — read unread email summaries
+- **Ambient music control** — detect silence and auto-dim volume
+- **Double-clap wake** — alternative to voice wake word (from reference script)
+
+---
+
+## Running
+
+```bash
+# GUI (default, recommended daily driver)
+python -m app.main
+
+# Headless voice loop
+python -m app.main --voice
+
+# Text REPL (debug / no mic)
+python -m app.main --text
+
+# Create Desktop shortcut (run once)
+python create_shortcut.py
+```
+
+---
+
+## Nick's Preferences & Context
+
+- Goes by "sir" (default address, Nick can change it mid-conversation)
+- Based in Herriman, Utah
+- Uses Cursor (VS Code fork) as his IDE
+- Has a Govee smart lighting setup (HA integration pending)
+- Spotify Premium user
+- Wants JARVIS to be proactive — update settings, remember things, and evolve itself without being asked
+- Movie-accurate JARVIS aesthetic: cyan (#00d9ff) holographic HUD on near-black,
+  amber when thinking, hot-red reserved for alerts. Corner brackets (HUDFrame),
+  scanlines, mono caps. (Overhauled June 2026 — supersedes the earlier red theme.)
+- Response style: short, dry, confident — never wordy or apologetic
