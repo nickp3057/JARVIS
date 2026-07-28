@@ -168,7 +168,7 @@ def _play_async_and_wait(
         import winsound
     except ImportError:
         # Non-Windows fallback: blocking PowerShell SoundPlayer (no interrupt support).
-        return _play_powershell_blocking(wav_path)
+        return _play_posix_blocking(wav_path)
 
     try:
         winsound.PlaySound(
@@ -360,3 +360,27 @@ def speak_stream(
         speak(tail, interrupt_event=interrupt_event, on_envelope=on_envelope)
         spoke_any = True
     return spoke_any
+
+
+def _play_posix_blocking(wav_path: Path) -> bool:
+    """Linux/macOS playback via aplay (ALSA), with interrupt support."""
+    player = "aplay" if sys.platform.startswith("linux") else "afplay"
+    try:
+        proc = subprocess.Popen(
+            [player, "-q", str(wav_path)] if player == "aplay" else [player, str(wav_path)],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
+        )
+    except FileNotFoundError:
+        log.error("%s not found; cannot play audio.", player)
+        return False
+    except Exception:  # noqa: BLE001
+        log.exception("Unexpected error starting audio playback.")
+        return False
+
+    proc.wait()
+    if proc.returncode != 0:
+        stderr = proc.stderr.read().decode(errors="replace") if proc.stderr else ""
+        log.error("Audio playback failed (exit %s): %s", proc.returncode, stderr.strip())
+        return False
+    return True
