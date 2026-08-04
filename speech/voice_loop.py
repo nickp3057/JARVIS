@@ -21,6 +21,7 @@ from __future__ import annotations
 import os
 import re
 import threading
+import time
 
 import numpy as np
 
@@ -33,6 +34,11 @@ from speech.tts import speak
 from speech.wake import WAKE_THRESHOLD, WakeDetector
 
 log = get_logger(__name__)
+
+
+def _log_stage(label: str, seconds: float) -> None:
+    """Print a stage timing line to stdout. Temporary profiling instrumentation."""
+    print(f"[TIMING] {label}: {seconds * 1000:.0f}ms")
 
 GREETING = "Pearson Stark JARVIS online. Standing by, sir."
 GOODBYE = "Shutting down. See you, sir."
@@ -198,6 +204,7 @@ def run_voice_loop(runtime: JarvisRuntime, *, greet: bool = True) -> int:
         while True:
             stream.drain()
 
+            t_wake = time.perf_counter()
             try:
                 _wait_for_wake_with_timers(runtime, detector, stream)
             except KeyboardInterrupt:
@@ -211,16 +218,19 @@ def run_voice_loop(runtime: JarvisRuntime, *, greet: bool = True) -> int:
             play_chime()
 
             audio = _capture_utterance(stream, preroll=preroll_snapshot)
+            _log_stage("1. wake detected -> transcription start (chime+capture)", time.perf_counter() - t_wake)
             if audio is None or audio.size == 0:
                 log.debug("No audio captured around wake word.")
                 continue
 
+            t0 = time.perf_counter()
             try:
                 raw_text = transcriber.transcribe(audio)
             except Exception:  # noqa: BLE001
                 log.exception("Transcription failed")
                 _speak_interruptible(stream, "I missed that, sir.")
                 continue
+            _log_stage("2. STT (Whisper)", time.perf_counter() - t0)
 
             text = _strip_wake_word(raw_text).strip()
 
@@ -229,11 +239,13 @@ def run_voice_loop(runtime: JarvisRuntime, *, greet: bool = True) -> int:
                 if _is_exit_phrase(text):
                     _speak_interruptible(stream, GOODBYE)
                     return 0
+                t0 = time.perf_counter()
                 try:
                     reply = runtime.respond(text)
                 except Exception:  # noqa: BLE001
                     log.exception("Agent respond() failed")
                     reply = "Something went wrong, sir."
+                _log_stage("3. Claude (tool loop)", time.perf_counter() - t0)
                 interrupted = _speak_interruptible(stream, reply)
             else:
                 # Wake word only - no command stripped out.  Prompt briefly
@@ -253,6 +265,7 @@ def run_voice_loop(runtime: JarvisRuntime, *, greet: bool = True) -> int:
 
             while True:
                 stream.drain()
+                t0 = time.perf_counter()
                 try:
                     follow = record_until_silence(
                         stream,
@@ -262,15 +275,18 @@ def run_voice_loop(runtime: JarvisRuntime, *, greet: bool = True) -> int:
                 except KeyboardInterrupt:
                     _say(GOODBYE)
                     return 0
+                _log_stage("1. follow-up capture (start-wait + record)", time.perf_counter() - t0)
 
                 if follow is None or follow.size == 0:
                     break
 
+                t0 = time.perf_counter()
                 try:
                     follow_text = transcriber.transcribe(follow)
                 except Exception:  # noqa: BLE001
                     log.exception("Follow-up transcription failed")
                     break
+                _log_stage("2. STT (Whisper)", time.perf_counter() - t0)
 
                 follow_text = _strip_wake_word(follow_text).strip()
                 if not follow_text:
@@ -281,11 +297,13 @@ def run_voice_loop(runtime: JarvisRuntime, *, greet: bool = True) -> int:
                     _speak_interruptible(stream, GOODBYE)
                     return 0
 
+                t0 = time.perf_counter()
                 try:
                     reply = runtime.respond(follow_text)
                 except Exception:  # noqa: BLE001
                     log.exception("Agent respond() failed")
                     reply = "Something went wrong, sir."
+                _log_stage("3. Claude (tool loop)", time.perf_counter() - t0)
 
                 follow_interrupted = _speak_interruptible(stream, reply)
                 followup_timeout = (

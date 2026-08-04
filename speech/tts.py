@@ -170,6 +170,7 @@ def _play_async_and_wait(
         # Non-Windows fallback: blocking PowerShell SoundPlayer (no interrupt support).
         return _play_posix_blocking(wav_path)
 
+    t0 = time.perf_counter()
     try:
         winsound.PlaySound(
             str(wav_path),
@@ -178,6 +179,7 @@ def _play_async_and_wait(
     except Exception:  # noqa: BLE001
         log.exception("winsound async start failed")
         return False
+    print(f"[TIMING] 5. winsound playback start: {(time.perf_counter() - t0) * 1000:.0f}ms")
 
     duration = _wav_duration_seconds(wav_path)
     deadline = time.time() + duration + 0.4
@@ -282,10 +284,13 @@ def speak(
 
     log.debug("speak(): %s", text)
 
+    t0 = time.perf_counter()
     if _synthesize_elevenlabs(text):
         log.debug("Synthesized via ElevenLabs.")
+        print(f"[TIMING] 4. TTS synthesis (ElevenLabs): {(time.perf_counter() - t0) * 1000:.0f}ms")
     elif _synthesize_piper(text):
         log.debug("Synthesized via Piper fallback.")
+        print(f"[TIMING] 4. TTS synthesis (Piper): {(time.perf_counter() - t0) * 1000:.0f}ms")
     else:
         log.error("All TTS engines failed; staying silent.")
         return
@@ -365,6 +370,7 @@ def speak_stream(
 def _play_posix_blocking(wav_path: Path) -> bool:
     """Linux/macOS playback via aplay (ALSA), with interrupt support."""
     player = "aplay" if sys.platform.startswith("linux") else "afplay"
+    t0 = time.perf_counter()
     try:
         proc = subprocess.Popen(
             [player, "-q", str(wav_path)] if player == "aplay" else [player, str(wav_path)],
@@ -377,6 +383,7 @@ def _play_posix_blocking(wav_path: Path) -> bool:
     except Exception:  # noqa: BLE001
         log.exception("Unexpected error starting audio playback.")
         return False
+    print(f"[TIMING] 5. {player} playback start (process spawn): {(time.perf_counter() - t0) * 1000:.0f}ms")
 
     proc.wait()
     if proc.returncode != 0:
