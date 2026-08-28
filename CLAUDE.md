@@ -1,0 +1,53 @@
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
+## Read first
+
+This repo maintains its own living docs — read them before making changes:
+
+- `JARVIS.md` — full project context: file map, stack, .env variables, tool list, how a turn works, UI layout, roadmap. The canonical reference.
+- `ARCHITECTURE.md` — the target layered architecture (Perception / Memory / Reasoning / Agency / Presence) and the runtime design rule.
+
+Keep both updated when you change behavior they describe (new tools, new .env vars, new monitors, shipped roadmap items).
+
+## What this is
+
+JARVIS is a fully local Python desktop AI assistant (PyQt6 GUI + voice + text REPL) built on the Anthropic API, with a persistent character (calls the user "sir", dry wit, never breaks persona). No web server, no build step, no compiled artifacts — it's a long-running desktop process.
+
+## Commands
+
+```bash
+# Install deps (use the repo's venv)
+.venv/bin/pip install -r requirements.txt
+
+# Run — GUI is the default daily driver
+python -m app.main            # GUI (PyQt6 orb + chat + status panels)
+python -m app.main --voice    # headless wake-word voice loop
+python -m app.main --text     # keyboard REPL, no mic/GUI required — best for quick manual testing
+
+# One-time: create a Desktop shortcut for the GUI
+python create_shortcut.py
+```
+
+There is no test suite, linter, or formatter configured in this repo (no `pytest`, no `.flake8`/`pyproject.toml` lint config, no CI). Verify changes by running `python -m app.main --text` and exercising the relevant tool/command manually, or `--voice`/GUI mode when the change touches speech or UI.
+
+Config lives in `.env` at the project root (never commit it — see `JARVIS.md` for the full variable list). Settings are read live via `os.getenv()` inside functions, not cached at import time, so `.env` edits (including ones JARVIS makes to itself via `update_setting`) take effect without a restart.
+
+## Architecture
+
+**Everything routes through `brain.runtime.JarvisRuntime`.** GUI (`ui/`), voice (`speech/voice_loop.py`), and text REPL (`app/main.py`) are three thin front ends over the same runtime instance — they should never call low-level modules (history, memory, tools) directly. When adding a feature, ask whether it belongs on the runtime as a capability or background monitor rather than in a UI widget or the speech loop.
+
+**Conversation loop** (`brain/agent.py`, `JarvisAgent`):
+- One `JarvisAgent` per process. `respond()` / `respond_streaming()` run `_run_tool_loop()`: call Claude with the full tool spec (`brain/tools.py:get_tool_specs()`), execute any `tool_use` blocks via `execute_tool()`, feed results back, repeat up to `_MAX_TOOL_TURNS` (6), then return the final text.
+- If `ANTHROPIC_API_KEY` is missing or the SDK fails to init, `is_available()` is False and every mode falls back to `brain/intents.py` + `brain/router.py` — a dependency-free keyword matcher (`route_command`) so the app is never fully dark even with the brain offline.
+- History persists to SQLite (`brain/history.py`) per session (`memory/history.db`); each launch starts a new session UUID via `start_new_session()`. In-memory history is trimmed to `_HISTORY_KEEP_TURNS` (20 turns) each turn.
+- `last_used_tools` is set after every `respond()` call — the voice runner reads it to choose a short vs. long follow-up listening window (task done via tool vs. open-ended conversation).
+
+**Tools** (`brain/tools.py`): single dispatch point (`execute_tool(name, input) -> str`) for 45+ tools spanning Home Assistant, Spotify, timers, reminders/calendar, media library (Radarr/Sonarr), app launching, clipboard, vision, and self-modifying settings (`update_setting` edits `.env` directly). Adding a tool means: define the schema + handler in `tools.py`, and if it needs new state, back it with its own module (pattern: `brain/timers.py`, `brain/reminders.py`) rather than growing `tools.py`'s logic inline.
+
+**Memory is two-tier, don't conflate them**: `brain/history.py` (SQLite, short-term conversation transcript, session-scoped) vs. `brain/memory.py` (JSON `memory/profile.json`, durable cross-session facts via `remember_fact`/`forget_fact`, injected into the system prompt each turn by `render_memory_block()`, capped at `MEMORY_MAX_FACTS`).
+
+**Background monitors** run on the runtime and feed a proactive event inbox (Home Assistant state polling, weather refresh, calendar alerts) — see `ARCHITECTURE.md`'s "Runtime Monitor Settings" for the relevant `.env` toggles. New sensors/proactive behavior should be added as a monitor here, not polled from the UI.
+
+**Personality is centralized**: `brain/personality.py` builds the system prompt (tone, address form, humor level, tool descriptions) from `.env` settings — this is the one place that defines how JARVIS "sounds," so persona changes belong there, not scattered across tool reply strings.

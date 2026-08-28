@@ -255,7 +255,7 @@ SONARR_QUALITY_MAP=1080p => HD-1080p; 4k => Ultra-HD
 # Tunable at runtime via JARVIS voice commands
 HUMOR_PERCENT=30           # 0-100
 ADDRESS=sir                # how JARVIS addresses Nick
-ELEVENLABS_SPEED=1.0       # TTS speed
+ELEVENLABS_SPEED=1.155     # TTS speed; clamped to 0.7–1.2 in speech/tts.py (code default 1.05)
 ELEVENLABS_MODEL_ID=eleven_flash_v2_5
 DEFAULT_LOCATION=Herriman, Utah
 ANTHROPIC_MODEL=claude-haiku-4-5-20251001
@@ -321,6 +321,13 @@ CALENDAR_ALERT_LEAD_MIN=10  # warn this many minutes before a meeting
 
 ## Recently Shipped
 
+- **Persona tightening** (`brain/personality.py`) — replies are terse by
+  default now (one or two sentences, lead with the answer, no filler / hedging /
+  preamble / sign-offs). Media adds confirm once: the user's match selection
+  *is* the confirmation, no redundant "are you sure" round-trip (the
+  schema-level `confirmed: true` guard is unchanged). `ELEVENLABS_SPEED` raised
+  to 1.155 (was the implicit 1.05 default), still clamped to 0.7–1.2 in
+  `speech/tts.py`.
 - **Radarr / Sonarr requests** (`integrations/servarr_common.py`, `radarr.py`,
   `sonarr.py`) — "add Deadpool in 4k efficient" → JARVIS looks it up, reports the
   match (title, year, TMDB/TVDB id), and waits for an explicit yes before
@@ -400,4 +407,7 @@ python create_shortcut.py
 - Movie-accurate JARVIS aesthetic: cyan (#00d9ff) holographic HUD on near-black,
   amber when thinking, hot-red reserved for alerts. Corner brackets (HUDFrame),
   scanlines, mono caps. (Overhauled June 2026 — supersedes the earlier red theme.)
-- Response style: short, dry, confident — never wordy or apologetic
+- Response style: terse by default — one or two sentences, lead with the
+  answer, no filler / hedging / preamble / sign-offs, never restate the
+  request back. Dry, confident, never apologetic. (Persona rules live in
+  `brain/personality.py`; tightened August 2026.)
