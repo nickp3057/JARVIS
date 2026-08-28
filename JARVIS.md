@@ -22,6 +22,7 @@ The character never breaks. It calls Nick "sir", uses dry British wit, answers i
 | TTS | ElevenLabs Flash v2.5 (Piper as fallback) |
 | UI | PyQt6 — custom QPainter orb, QTextEdit chat, status column |
 | Home control | Home Assistant REST API |
+| Media library | Radarr + Sonarr v3 REST API (movie / TV requests) |
 | Music | Spotify Web API via spotipy (Premium required) |
 | Memory | SQLite (conversation history) + JSON (profile facts) |
 | Settings | `.env` file, hot-reloaded at runtime |
@@ -56,6 +57,10 @@ Pearson-Stark-Jarvis/
 ├── integrations/
 │   ├── home_assistant.py    HA REST API: control_device / list_entities
 │   ├── google_calendar.py   Read-only Google Calendar: agenda / next event / alerts
+│   ├── servarr_common.py    Shared Radarr/Sonarr HTTP client + quality/root-folder
+│   │                        resolver + NL quality-phrase fuzzy matching
+│   ├── radarr.py            find_movie (lookup) / add_movie (confirm-gated)
+│   ├── sonarr.py            find_series (lookup) / add_series (confirm-gated)
 │   └── spotify.py           Spotipy wrapper: play/pause/skip/volume/transfer/now-playing
 │
 ├── speech/
@@ -159,6 +164,25 @@ RMS envelope from ElevenLabs audio drives the orb in real time using a monotonic
 - `current_track` — what's playing
 - `set_volume(percent)` / `list_speakers` / `transfer_playback(device_name)`
 
+### Media Library (Radarr / Sonarr) *(new)*
+- `find_movie(title)` — Radarr `/movie/lookup`. Search only; returns best
+  match(es) with year + TMDB id, or "no match" / a numbered short-list.
+- `add_movie(tmdb_id, quality?, root_folder?, confirmed)` — Radarr `/movie`
+  POST with `monitored: true`, `addOptions.searchForMovie: true`. Refuses
+  unless `confirmed: true`; quality is a natural phrase fuzzy-matched to a
+  profile.
+- `find_series(title)` — Sonarr `/series/lookup`. Same shape, TVDB id.
+- `add_series(tvdb_id, quality?, root_folder?, monitor?, season_folder?, confirmed)`
+  — Sonarr `/series` POST with `addOptions.searchForMissingEpisodes: true`.
+  `monitor` defaults to `future` (new episodes only); accepts `all`,
+  `firstSeason`, `pilot`, `latestSeason`, `none`, or natural phrasing.
+- `list_quality_profiles(service?)` — the profile names defined in Radarr /
+  Sonarr, for when a quality phrase doesn't match.
+- **Always confirm first**: the agent must surface the match and get an
+  explicit yes before calling `add_*`; never auto-adds on ambiguous results.
+  Quality-phrase → profile-name mapping lives in `.env`
+  (`RADARR_QUALITY_MAP` / `SONARR_QUALITY_MAP`), not in code.
+
 ### Computer Control *(new)*
 - `open_app(name)` — opens any app by natural name (Chrome, Cursor, Discord, etc.)
 - `close_app(name)` — kills the process
@@ -210,6 +234,23 @@ SPOTIFY_PREFERRED_DEVICE=JARVIS  # device name substring
 # Home Assistant (optional)
 HA_URL=http://homeassistant.local:8123
 HA_TOKEN=...
+
+# Radarr / Sonarr (optional — movie & TV requests)
+RADARR_URL=http://localhost:7878
+RADARR_API_KEY=...
+SONARR_URL=http://localhost:8989
+SONARR_API_KEY=...
+# root folders: leave blank to use the service's first root folder
+RADARR_ROOT_FOLDER=
+SONARR_ROOT_FOLDER=
+# quality phrase used when a request omits one
+RADARR_DEFAULT_QUALITY=1080p
+SONARR_DEFAULT_QUALITY=1080p
+# future | all | firstSeason | latestSeason | lastSeason | pilot | none
+SONARR_MONITOR_STRATEGY=future
+# NL phrase => quality-profile name (exact name from the app); ';'-separated
+RADARR_QUALITY_MAP=4k efficient => UHD Bluray + WEB; 1080p => HD-1080p; 4k => Ultra-HD
+SONARR_QUALITY_MAP=1080p => HD-1080p; 4k => Ultra-HD
 
 # Tunable at runtime via JARVIS voice commands
 HUMOR_PERCENT=30           # 0-100
@@ -280,6 +321,15 @@ CALENDAR_ALERT_LEAD_MIN=10  # warn this many minutes before a meeting
 
 ## Recently Shipped
 
+- **Radarr / Sonarr requests** (`integrations/servarr_common.py`, `radarr.py`,
+  `sonarr.py`) — "add Deadpool in 4k efficient" → JARVIS looks it up, reports the
+  match (title, year, TMDB/TVDB id), and waits for an explicit yes before
+  adding. Two tools per service: `find_*` (search only) and `add_*`
+  (confirm-gated). Quality phrases fuzzy-match a `.env`-defined
+  phrase→profile-name map against the live `/qualityprofile` list — no
+  hardcoded IDs. TV defaults to monitoring `future` episodes only. No-match and
+  multi-match cases are handled explicitly; unconfigured services degrade to a
+  polite line like Home Assistant.
 - **Reminders & to-dos** (`brain/reminders.py`) — timed reminders ("remind me at
   3pm") and open to-dos, persisted, spoken aloud when due. Tools: add_reminder /
   list_reminders / complete_reminder / delete_reminder.

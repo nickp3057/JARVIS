@@ -48,8 +48,12 @@ Near-term responsibilities:
    - The agent should report outcomes, not narrate internals.
 
 4. Agency
-   - Tools that can change the world: home, music, reminders, files, browser,
-     research, coding, and automations.
+   - Tools that can change the world: home, music, media library
+     (Radarr/Sonarr), reminders, files, browser, research, coding, and
+     automations.
+   - World-changing tools that are hard to undo (e.g. adding to the media
+     library) are split into a read-only lookup tool and a confirm-gated
+     write tool; the write never fires without explicit user confirmation.
 
 5. Presence
    - GUI cockpit, orb state, voice pacing, interruption, proactive notices, and

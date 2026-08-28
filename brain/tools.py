@@ -26,6 +26,9 @@ from brain.reminders import _format_due as _format_reminder_due
 from brain.settings import get_setting, list_settings, update_setting
 from brain.vision import describe_screen
 from brain.weather import get_weather
+from integrations import radarr as radarr
+from integrations import servarr_common as servarr
+from integrations import sonarr as sonarr
 from integrations import spotify as spotify
 from integrations.home_assistant import (
     handle_device_command,
@@ -237,6 +240,50 @@ def _tool_complete_reminder(args: dict[str, Any]) -> str:
 
 def _tool_delete_reminder(args: dict[str, Any]) -> str:
     return delete_reminder(args.get("reminder_id", ""))
+
+
+def _tool_find_movie(args: dict[str, Any]) -> str:
+    return radarr.find_movie(args.get("title", ""))
+
+
+def _tool_add_movie(args: dict[str, Any]) -> str:
+    return radarr.add_movie(
+        args.get("tmdb_id", ""),
+        quality=args.get("quality"),
+        root_folder=args.get("root_folder"),
+        confirmed=bool(args.get("confirmed", False)),
+    )
+
+
+def _tool_find_series(args: dict[str, Any]) -> str:
+    return sonarr.find_series(args.get("title", ""))
+
+
+def _tool_add_series(args: dict[str, Any]) -> str:
+    return sonarr.add_series(
+        args.get("tvdb_id", ""),
+        quality=args.get("quality"),
+        root_folder=args.get("root_folder"),
+        monitor=args.get("monitor"),
+        season_folder=bool(args.get("season_folder", True)),
+        confirmed=bool(args.get("confirmed", False)),
+    )
+
+
+def _tool_list_quality_profiles(args: dict[str, Any]) -> str:
+    service = (args.get("service") or "").strip().lower()
+    services = [service] if service in ("radarr", "sonarr") else ["radarr", "sonarr"]
+    lines: list[str] = []
+    for svc in services:
+        if not servarr.is_configured(svc):
+            lines.append(f"{svc.title()} isn't configured.")
+            continue
+        names = servarr.list_profile_names(svc)
+        if names:
+            lines.append(f"{svc.title()} quality profiles: {', '.join(names)}.")
+        else:
+            lines.append(f"{svc.title()}: I couldn't read its quality profiles.")
+    return " ".join(lines)
 
 
 def _tool_todays_agenda(_: dict[str, Any]) -> str:
@@ -653,6 +700,101 @@ _CUSTOM_TOOLS: list[dict[str, Any]] = [
         "description": "Get Nick's next upcoming calendar event and when it starts.",
         "input_schema": {"type": "object", "properties": {}},
     },
+    # --- Media library (Radarr / Sonarr) ---------------------------------
+    {
+        "name": "find_movie",
+        "description": (
+            "Search Radarr for a movie by title. Use this FIRST whenever Nick "
+            "asks to add / download / get a movie. It only searches - it never "
+            "adds anything. Returns the best match(es) with year and TMDB id, "
+            "or says no match / lists several. Show Nick the result(s) and wait "
+            "for him to confirm which one before calling add_movie."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "title": {"type": "string", "description": "Movie title, optionally with a year."}
+            },
+            "required": ["title"],
+        },
+    },
+    {
+        "name": "add_movie",
+        "description": (
+            "Add a movie to Radarr and start searching for it. ONLY call this "
+            "after find_movie has returned a specific match AND Nick has "
+            "explicitly confirmed that exact title in a prior turn. Never call "
+            "it on an ambiguous or unconfirmed result. 'quality' is a natural "
+            "phrase like '4k efficient' or '1080p' - it's fuzzy-matched to a "
+            "configured quality profile; omit it to use the default."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "tmdb_id": {"type": "integer", "description": "TMDB id from a find_movie result."},
+                "quality": {"type": "string", "description": "Natural-language quality phrase, e.g. '4k efficient', '1080p'. Optional."},
+                "root_folder": {"type": "string", "description": "Root folder path override. Optional - defaults to the configured / first folder."},
+                "confirmed": {"type": "boolean", "description": "Must be true, and only set it once Nick has explicitly confirmed this exact movie."},
+            },
+            "required": ["tmdb_id", "confirmed"],
+        },
+    },
+    {
+        "name": "find_series",
+        "description": (
+            "Search Sonarr for a TV show by title. Use this FIRST whenever Nick "
+            "asks to add / download / get a show or series. It only searches - "
+            "it never adds anything. Returns the best match(es) with year and "
+            "TVDB id, or says no match / lists several. Show Nick the result(s) "
+            "and wait for him to confirm which one before calling add_series."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "title": {"type": "string", "description": "Show title, optionally with a year."}
+            },
+            "required": ["title"],
+        },
+    },
+    {
+        "name": "add_series",
+        "description": (
+            "Add a TV show to Sonarr and start searching. ONLY call this after "
+            "find_series has returned a specific match AND Nick has explicitly "
+            "confirmed that exact title in a prior turn. Never call it on an "
+            "ambiguous or unconfirmed result. 'quality' is a natural phrase "
+            "fuzzy-matched to a quality profile. 'monitor' controls which "
+            "episodes to watch for: default 'future' (new episodes only); use "
+            "'all' for the whole back catalogue, or 'firstSeason' / 'pilot' / "
+            "'latestSeason' / 'none' - accepts natural phrasing too."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "tvdb_id": {"type": "integer", "description": "TVDB id from a find_series result."},
+                "quality": {"type": "string", "description": "Natural-language quality phrase, e.g. '4k efficient', '1080p'. Optional."},
+                "root_folder": {"type": "string", "description": "Root folder path override. Optional."},
+                "monitor": {"type": "string", "description": "Monitor strategy: 'future' (default), 'all', 'firstSeason', 'latestSeason', 'lastSeason', 'pilot', 'none', or natural phrasing like 'whole series'."},
+                "season_folder": {"type": "boolean", "description": "Organise episodes into per-season folders. Default true."},
+                "confirmed": {"type": "boolean", "description": "Must be true, and only set it once Nick has explicitly confirmed this exact show."},
+            },
+            "required": ["tvdb_id", "confirmed"],
+        },
+    },
+    {
+        "name": "list_quality_profiles",
+        "description": (
+            "List the quality profiles defined in Radarr and/or Sonarr. Use "
+            "when Nick asks what quality options he has, or when a quality "
+            "phrase didn't match and you need to offer him the real names."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "service": {"type": "string", "description": "'radarr' or 'sonarr'. Omit for both."}
+            },
+        },
+    },
 ]
 
 
@@ -700,6 +842,11 @@ _DISPATCH: dict[str, Callable[[dict[str, Any]], str]] = {
     "delete_reminder": _tool_delete_reminder,
     "todays_agenda": _tool_todays_agenda,
     "next_event": _tool_next_event,
+    "find_movie": _tool_find_movie,
+    "add_movie": _tool_add_movie,
+    "find_series": _tool_find_series,
+    "add_series": _tool_add_series,
+    "list_quality_profiles": _tool_list_quality_profiles,
 }
 
 
