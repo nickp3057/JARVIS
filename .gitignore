@@ -7,4 +7,5 @@ chime.wav
 jarvis.log*
 jarvis_output.wav
 .env.*
-*.bakmemory/*.db
+*.bak
+memory/*.db

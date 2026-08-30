@@ -34,7 +34,8 @@ The character never breaks. It calls Nick "sir", uses dry British wit, answers i
 ```
 Pearson-Stark-Jarvis/
 ├── app/
-│   └── main.py              Entry point. --text / --voice / (default) GUI
+│   ├── main.py              Entry point. GUI / text / voice / server modes
+│   └── server.py            Authenticated HTTP bridge for the iOS companion
 │
 ├── brain/
 │   ├── agent.py             JarvisAgent: session management, tool loop, history
@@ -288,6 +289,11 @@ VISION_ALL_MONITORS=true    # capture the whole virtual desktop
 WEB_SEARCH_MAX_USES=5       # max web_search calls per turn
 BOOT_SEQUENCE=true          # movie-style power-up on GUI launch
 
+# iOS companion server
+JARVIS_API_TOKEN=           # required bearer token
+JARVIS_SERVER_HOST=0.0.0.0
+JARVIS_SERVER_PORT=8000
+
 # Google Calendar (optional, read-only)
 GOOGLE_CREDENTIALS_FILE=    # path to OAuth client-secret JSON (Desktop app)
 GOOGLE_TOKEN_FILE=          # token cache; defaults to memory/google_token.json
@@ -331,6 +337,10 @@ CALENDAR_ALERT_LEAD_MIN=10  # warn this many minutes before a meeting
 
 ## Recently Shipped
 
+- **Full companion chat baseline** — authenticated JARVIS Core HTTP server,
+  isolated server session IDs, synchronized server/device history, streamed
+  replies with Stop, health/offline status, Keychain token storage, saved
+  drafts, history search, rename/delete swipe actions, and message copy/share.
 - **iOS local chat history** (`ios/JarvisCompanion`) — conversations persist as
   a device-local JSON archive with a history picker and manual New Chat action.
   Returning after five minutes inactive automatically opens a clean chat while
@@ -404,6 +414,9 @@ python -m app.main --voice
 
 # Text REPL (debug / no mic)
 python -m app.main --text
+
+# iOS companion API (requires JARVIS_API_TOKEN)
+python -m app.main --server
 
 # Create Desktop shortcut (run once)
 python create_shortcut.py

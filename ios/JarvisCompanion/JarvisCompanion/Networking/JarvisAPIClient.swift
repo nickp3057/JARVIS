@@ -67,6 +67,32 @@ enum JarvisAPIError: LocalizedError {
     }
 }
 
+struct ServerSession: Decodable {
+    let sessionID: String
+    let createdAt: String?
+    let updatedAt: String?
+    let title: String?
+    let preview: String?
+
+    enum CodingKeys: String, CodingKey {
+        case sessionID = "session_id"
+        case createdAt = "created_at"
+        case updatedAt = "updated_at"
+        case title, preview
+    }
+}
+
+struct ServerMessage: Decodable {
+    let role: String
+    let content: String
+    let createdAt: String?
+
+    enum CodingKeys: String, CodingKey {
+        case role, content
+        case createdAt = "created_at"
+    }
+}
+
 /// Thin wrapper over `POST {baseURL}/chat`.
 ///
 /// This is the only type in the app that knows the wire format. JARVIS Core
@@ -111,20 +137,50 @@ struct JarvisAPIClient {
 
     private struct ChatRequest: Encodable {
         let message: String
+        let sessionID: String?
+
+        enum CodingKeys: String, CodingKey {
+            case message
+            case sessionID = "session_id"
+        }
     }
 
     private struct ChatResponse: Decodable {
         let reply: String
+        let sessionID: String?
+
+        enum CodingKeys: String, CodingKey {
+            case reply
+            case sessionID = "session_id"
+        }
     }
 
-    func send(message: String) async throws -> String {
-        var request = URLRequest(url: baseURL.appending(path: "chat"))
-        request.httpMethod = "POST"
+    private func request(path: String, method: String = "GET") -> URLRequest {
+        var request = URLRequest(url: baseURL.appending(path: path))
+        request.httpMethod = method
         request.timeoutInterval = timeout
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue("application/json", forHTTPHeaderField: "Accept")
-        request.httpBody = try JSONEncoder().encode(ChatRequest(message: message))
+        return request
+    }
+
+    private func validate(_ response: URLResponse, data: Data? = nil) throws -> HTTPURLResponse {
+        guard let http = response as? HTTPURLResponse else {
+            throw JarvisAPIError.malformedResponse(nil)
+        }
+        let body = data.flatMap { String(data: $0, encoding: .utf8) }
+        switch http.statusCode {
+        case 200..<300: return http
+        case 401, 403: throw JarvisAPIError.unauthorized
+        default: throw JarvisAPIError.server(status: http.statusCode, body: body)
+        }
+    }
+
+    func send(message: String, sessionID: String?) async throws -> (reply: String, sessionID: String?) {
+        var request = request(path: "chat", method: "POST")
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONEncoder().encode(ChatRequest(message: message, sessionID: sessionID))
 
         let data: Data
         let response: URLResponse
@@ -134,25 +190,84 @@ struct JarvisAPIClient {
             throw JarvisAPIError.transport(error)
         }
 
-        guard let http = response as? HTTPURLResponse else {
-            throw JarvisAPIError.malformedResponse(nil)
-        }
-
         let body = String(data: data, encoding: .utf8)
-
-        switch http.statusCode {
-        case 200..<300:
-            break
-        case 401, 403:
-            throw JarvisAPIError.unauthorized
-        default:
-            throw JarvisAPIError.server(status: http.statusCode, body: body)
-        }
+        _ = try validate(response, data: data)
 
         guard let decoded = try? JSONDecoder().decode(ChatResponse.self, from: data) else {
             throw JarvisAPIError.malformedResponse(body)
         }
 
-        return decoded.reply
+        return (decoded.reply, decoded.sessionID)
+    }
+
+    func stream(
+        message: String,
+        sessionID: String?,
+        onSession: @escaping @MainActor (String) -> Void,
+        onChunk: @escaping @MainActor (String) -> Void
+    ) async throws -> String? {
+        var request = request(path: "chat/stream", method: "POST")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("text/plain", forHTTPHeaderField: "Accept")
+        request.httpBody = try JSONEncoder().encode(ChatRequest(message: message, sessionID: sessionID))
+
+        do {
+            let (bytes, response) = try await Self.session.bytes(for: request)
+            let http = try validate(response)
+            if let boundSessionID = http.value(forHTTPHeaderField: "X-Jarvis-Session-ID") {
+                await onSession(boundSessionID)
+            }
+            var pending = Data()
+            for try await byte in bytes {
+                try Task.checkCancellation()
+                pending.append(byte)
+                if let text = String(data: pending, encoding: .utf8) {
+                    await onChunk(text)
+                    pending.removeAll(keepingCapacity: true)
+                }
+            }
+            if !pending.isEmpty, let text = String(data: pending, encoding: .utf8) {
+                await onChunk(text)
+            }
+            return http.value(forHTTPHeaderField: "X-Jarvis-Session-ID")
+        } catch let error as URLError {
+            throw JarvisAPIError.transport(error)
+        }
+    }
+
+    func checkHealth() async throws {
+        let request = request(path: "health")
+        let (data, response) = try await Self.session.data(for: request)
+        _ = try validate(response, data: data)
+    }
+
+    func renameSession(_ sessionID: String, title: String) async throws {
+        var request = request(path: "sessions/\(sessionID)", method: "PATCH")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONSerialization.data(withJSONObject: ["title": title])
+        let (data, response) = try await Self.session.data(for: request)
+        _ = try validate(response, data: data)
+    }
+
+    func deleteSession(_ sessionID: String) async throws {
+        let request = request(path: "sessions/\(sessionID)", method: "DELETE")
+        let (data, response) = try await Self.session.data(for: request)
+        _ = try validate(response, data: data)
+    }
+
+    func sessions() async throws -> [ServerSession] {
+        struct Envelope: Decodable { let sessions: [ServerSession] }
+        let request = request(path: "sessions")
+        let (data, response) = try await Self.session.data(for: request)
+        _ = try validate(response, data: data)
+        return try JSONDecoder().decode(Envelope.self, from: data).sessions
+    }
+
+    func messages(for sessionID: String) async throws -> [ServerMessage] {
+        struct Envelope: Decodable { let messages: [ServerMessage] }
+        let request = request(path: "sessions/\(sessionID)")
+        let (data, response) = try await Self.session.data(for: request)
+        _ = try validate(response, data: data)
+        return try JSONDecoder().decode(Envelope.self, from: data).messages
     }
 }

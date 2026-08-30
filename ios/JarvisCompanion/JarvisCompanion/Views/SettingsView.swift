@@ -46,7 +46,7 @@ struct SettingsView: View {
                 } header: {
                     Text("API token")
                 } footer: {
-                    Text("Sent as a bearer token on every request. Stored in UserDefaults for now, not the Keychain.")
+                    Text("Sent as a bearer token on every request and stored securely in the iOS Keychain.")
                 }
 
                 Section {

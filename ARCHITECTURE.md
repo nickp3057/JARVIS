@@ -23,6 +23,8 @@ Current responsibilities:
 - Compose situational briefings (time, weather, running timers) via
   `compose_briefing` / `launch_briefing`.
 - Stream replies fragment-by-fragment (`respond_streaming`) for streaming TTS.
+- Atomically switch and answer named sessions for remote clients through
+  `respond_in_session` / `respond_streaming_in_session`.
 
 Near-term responsibilities:
 
@@ -58,8 +60,19 @@ Near-term responsibilities:
 5. Presence
    - GUI cockpit, orb state, voice pacing, interruption, proactive notices, and
      a stable personality.
-   - The iOS companion may retain device-local presentation history, but durable
-     synchronized conversation history remains a server/runtime responsibility.
+   - The iOS companion retains an offline device cache while the server/runtime
+     owns synchronized sessions, conversation context, titles, and deletion.
+
+## Companion API
+
+`app.server` is the authenticated HTTP edge over the runtime. It provides
+health, session CRUD/history, blocking chat, and streamed chat endpoints. Every
+chat request carries a server session ID; the API selects that session and runs
+the turn under the runtime lock so contexts cannot bleed into each other.
+
+The bearer token comes from `JARVIS_API_TOKEN`. The API is a transport adapter,
+not a second brain: it must route conversation through `JarvisRuntime` and use
+`brain.history` for persisted session metadata.
 
 ## Design Rule
 

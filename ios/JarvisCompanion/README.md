@@ -34,33 +34,33 @@ server" prompt:
    endpoint the app will POST to. Worth a glance — it's the fastest way to catch
    a typo'd Tailscale IP.
 
-Both values are stored in `UserDefaults`. The token belongs in the Keychain;
-that swap is deliberately deferred, and `AppSettings` is the only file that
-would need to change.
+The address is stored in `UserDefaults`; the token is stored in the iOS
+Keychain. Existing installations automatically migrate the legacy
+UserDefaults token and remove the insecure copy.
 
 ## Architecture
 
 This is a **thin client** — deliberately so. JARVIS Core owns the personality,
-server conversation context, the memory tier, and all 45+ tools (Home Assistant,
+conversation context and history, the memory tier, and all 45+ tools (Home Assistant,
 Spotify, Radarr/Sonarr, timers, and the rest). The app knows none of that. It
 sends one string and renders one string back; if a turn involved six server-side
 tool calls, the app is none the wiser, which is exactly why the request timeout
 is a generous 30s. The layering is: `JarvisAPIClient` (the only type that knows
 the wire format) → `ChatViewModel` (owns the transcript and the single in-flight
 request) → `ChatView`/`SettingsView` (dumb rendering). Persistence sits behind
-the `ChatStore` protocol with a plain JSON-file implementation. It stores an
-archive of device-local conversations and migrates the original single
-transcript format automatically. Server-side history sync is planned and can
-replace this store without touching the views.
+the `ChatStore` protocol with a plain JSON-file implementation. It is an offline
+cache of server conversations and migrates the original single-transcript
+format automatically. Server history is synchronized whenever health checks
+succeed.
 
 ```
 JarvisCompanion/
   JarvisCompanionApp.swift     app entry, wires settings + view model
   Models/ChatMessage.swift     transcript line + local conversation/archive models
   Storage/ChatStore.swift      ChatStore protocol + JSON archive implementation
-  Storage/AppSettings.swift    base URL + token, UserDefaults-backed
-  Networking/JarvisAPIClient.swift   POST {baseURL}/chat, error mapping
-  ViewModels/ChatViewModel.swift     transcript state, send/retry
+  Storage/AppSettings.swift    base URL + Keychain-backed token
+  Networking/JarvisAPIClient.swift   health, sessions, chat + streaming
+  ViewModels/ChatViewModel.swift     history sync, drafts, streaming, retry
   Views/ChatView.swift         transcript, composer, empty state
   Views/MessageBubble.swift    bubbles + typing indicator
   Views/SettingsView.swift     server configuration
@@ -72,15 +72,29 @@ survives an app restart — the pending text is recovered from the transcript.
 
 ## Local chat history
 
-The **history** button in the top-left opens prior conversations stored on this
-device. **New chat** starts a blank conversation without deleting older ones;
-**Clear conversation** only empties the currently open conversation.
+The **history** button opens synchronized conversations. Search matches titles
+and message text. Swipe or long-press a row to rename or delete it. **New chat**
+starts a blank, isolated server session without deleting older conversations.
+Long-press a message to copy or share it.
 
 When the app remains inactive or closed for at least five minutes, returning to
 it starts a clean conversation automatically. The previous conversation stays
-in History. Short app switches keep the current chat open. This is local UI
-history only—the `/chat` request format has no conversation identifier yet, so
-server-side history and session synchronization remain future work.
+in History. Short app switches keep the current chat open. Drafts are saved per
+conversation. Replies stream into the JARVIS bubble as they arrive; the send
+button becomes Stop while generation is active.
+
+## Running JARVIS Core
+
+Set `JARVIS_API_TOKEN` in the root `.env`, install `requirements.txt`, then run:
+
+```bash
+python -m app.main --server
+```
+
+The server defaults to `0.0.0.0:8000`. `JARVIS_SERVER_HOST` and
+`JARVIS_SERVER_PORT` override the bind address. It exposes authenticated health,
+session CRUD/history, `/chat`, and `/chat/stream` endpoints. Each request carries
+a server session ID so New Chat genuinely starts clean context.
 
 ## Networking notes
 
@@ -117,5 +131,5 @@ The phone must be **connected to your tailnet** for the app to reach the server 
 the Tailscale app installed, logged into the same account, and its VPN toggle on.
 There is no fallback to a LAN address.
 
-Not implemented, by design: push notifications, device dashboards, streaming
-responses, voice input, and server-side history sync.
+Not implemented, by design: push notifications, device dashboards, and voice
+input.

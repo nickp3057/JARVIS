@@ -12,6 +12,9 @@ Three launch modes (default = GUI):
 * **Text mode** (``python -m app.main --text``) - the original keyboard
   REPL. Useful for development, debugging, or when the GUI isn't available.
 
+* **Server mode** (``python -m app.main --server``) - authenticated HTTP API
+  for the iOS companion.
+
 If voice deps are missing or the agent itself can't initialize, we
 degrade gracefully so JARVIS is never fully dark.
 """
@@ -182,6 +185,11 @@ def main(argv: list[str] | None = None) -> int:
     args = sys.argv[1:] if argv is None else argv
 
     log.info("JARVIS starting up. argv=%s", args)
+    if "--server" in args:
+        from app.server import run_server
+        run_server()
+        return 0
+
     runtime = JarvisRuntime()
 
     if "--text" in args:

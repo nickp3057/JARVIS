@@ -59,10 +59,18 @@ def _ensure_schema(conn: sqlite3.Connection) -> None:
         """
         CREATE TABLE IF NOT EXISTS sessions (
             session_id  TEXT PRIMARY KEY,
-            created_at  TEXT DEFAULT (datetime('now'))
+            created_at  TEXT DEFAULT (datetime('now')),
+            updated_at  TEXT DEFAULT (datetime('now')),
+            title       TEXT
         )
         """
     )
+    session_cols = {r[1] for r in conn.execute("PRAGMA table_info(sessions)")}
+    if "updated_at" not in session_cols:
+        conn.execute("ALTER TABLE sessions ADD COLUMN updated_at TEXT")
+        conn.execute("UPDATE sessions SET updated_at = created_at WHERE updated_at IS NULL")
+    if "title" not in session_cols:
+        conn.execute("ALTER TABLE sessions ADD COLUMN title TEXT")
     conn.commit()
 
 
@@ -107,7 +115,7 @@ def start_new_session() -> str:
 def list_sessions(limit: int = 30) -> list[dict[str, Any]]:
     """Return recent sessions, newest first.
 
-    Each dict has: session_id, created_at, turn_count, preview (first user msg).
+    Each dict has session metadata plus a preview of the first user message.
     """
     try:
         with _connect() as conn:
@@ -117,12 +125,20 @@ def list_sessions(limit: int = 30) -> list[dict[str, Any]]:
                 SELECT
                     s.session_id,
                     s.created_at,
+                    COALESCE(s.updated_at, s.created_at) AS updated_at,
+                    s.title,
                     COUNT(c.id) / 2            AS turn_count,
-                    MIN(CASE WHEN c.role = 'user' THEN c.content END) AS preview
+                    (
+                        SELECT first.content
+                        FROM conversation AS first
+                        WHERE first.session_id = s.session_id AND first.role = 'user'
+                        ORDER BY first.id ASC
+                        LIMIT 1
+                    ) AS preview
                 FROM sessions s
                 LEFT JOIN conversation c ON c.session_id = s.session_id
                 GROUP BY s.session_id
-                ORDER BY s.created_at DESC
+                ORDER BY COALESCE(s.updated_at, s.created_at) DESC
                 LIMIT ?
                 """,
                 (limit,),
@@ -133,20 +149,27 @@ def list_sessions(limit: int = 30) -> list[dict[str, Any]]:
         return []
 
 
-def load_session_messages(session_id: str) -> list[dict[str, Any]]:
+def load_session_messages(
+    session_id: str, *, include_timestamps: bool = False
+) -> list[dict[str, Any]]:
     """Return all messages for a session in chronological order."""
     try:
         with _connect() as conn:
             _ensure_schema(conn)
             rows = conn.execute(
                 """
-                SELECT role, content
+                SELECT role, content, created_at
                 FROM conversation
                 WHERE session_id = ?
                 ORDER BY id ASC
                 """,
                 (session_id,),
             ).fetchall()
+        if include_timestamps:
+            return [
+                {"role": r["role"], "content": r["content"], "created_at": r["created_at"]}
+                for r in rows
+            ]
         return [{"role": r["role"], "content": r["content"]} for r in rows]
     except Exception:  # noqa: BLE001
         log.exception("Failed to load session messages.")
@@ -194,10 +217,60 @@ def append_turn(user_text: str, assistant_text: str, session_id: str = "default"
                 "INSERT INTO conversation (session_id, role, content) VALUES (?, ?, ?)",
                 [(session_id, "user", user_text), (session_id, "assistant", assistant_text)],
             )
+            conn.execute(
+                "UPDATE sessions SET updated_at = datetime('now') WHERE session_id = ?",
+                (session_id,),
+            )
             conn.commit()
             _prune(conn, session_id)
     except Exception:  # noqa: BLE001
         log.exception("Failed to persist conversation turn.")
+
+
+def session_exists(session_id: str) -> bool:
+    """Return whether a session is registered."""
+    try:
+        with _connect() as conn:
+            _ensure_schema(conn)
+            return conn.execute(
+                "SELECT 1 FROM sessions WHERE session_id = ?", (session_id,)
+            ).fetchone() is not None
+    except Exception:  # noqa: BLE001
+        log.exception("Failed to query session %s.", session_id)
+        return False
+
+
+def rename_session(session_id: str, title: str) -> bool:
+    """Set a user-visible session title."""
+    clean = title.strip()[:120]
+    if not clean:
+        return False
+    try:
+        with _connect() as conn:
+            _ensure_schema(conn)
+            cursor = conn.execute(
+                "UPDATE sessions SET title = ?, updated_at = datetime('now') WHERE session_id = ?",
+                (clean, session_id),
+            )
+            conn.commit()
+            return cursor.rowcount > 0
+    except Exception:  # noqa: BLE001
+        log.exception("Failed to rename session %s.", session_id)
+        return False
+
+
+def delete_session(session_id: str) -> bool:
+    """Delete one session and its messages."""
+    try:
+        with _connect() as conn:
+            _ensure_schema(conn)
+            conn.execute("DELETE FROM conversation WHERE session_id = ?", (session_id,))
+            cursor = conn.execute("DELETE FROM sessions WHERE session_id = ?", (session_id,))
+            conn.commit()
+            return cursor.rowcount > 0
+    except Exception:  # noqa: BLE001
+        log.exception("Failed to delete session %s.", session_id)
+        return False
 
 
 def clear_history() -> str:

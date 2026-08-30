@@ -1,10 +1,10 @@
 import Foundation
+import Security
 
 /// Where JARVIS Core lives and how to authenticate against it.
 ///
-/// Backed by `UserDefaults` for now. The token belongs in the Keychain
-/// eventually — every read and write is funnelled through this one type so
-/// that swap stays a single-file change.
+/// The address is harmless UserDefaults state; the bearer token is stored in
+/// the iOS Keychain and migrated out of UserDefaults on first launch.
 @MainActor
 final class AppSettings: ObservableObject {
     private enum Key {
@@ -13,19 +13,26 @@ final class AppSettings: ObservableObject {
     }
 
     private let defaults: UserDefaults
+    private let keychain: KeychainTokenStore
 
     @Published var baseURLString: String {
         didSet { defaults.set(baseURLString, forKey: Key.baseURL) }
     }
 
     @Published var apiToken: String {
-        didSet { defaults.set(apiToken, forKey: Key.apiToken) }
+        didSet { keychain.save(apiToken) }
     }
 
-    init(defaults: UserDefaults = .standard) {
+    init(defaults: UserDefaults = .standard, keychain: KeychainTokenStore = KeychainTokenStore()) {
         self.defaults = defaults
+        self.keychain = keychain
         baseURLString = defaults.string(forKey: Key.baseURL) ?? ""
-        apiToken = defaults.string(forKey: Key.apiToken) ?? ""
+        let legacyToken = defaults.string(forKey: Key.apiToken) ?? ""
+        apiToken = keychain.load() ?? legacyToken
+        if !legacyToken.isEmpty {
+            keychain.save(legacyToken)
+            defaults.removeObject(forKey: Key.apiToken)
+        }
     }
 
     /// The base URL with the rough edges knocked off: surrounding whitespace
@@ -54,5 +61,37 @@ final class AppSettings: ObservableObject {
 
     var isConfigured: Bool {
         resolvedBaseURL != nil && !apiToken.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+}
+
+final class KeychainTokenStore {
+    private let service = "com.nickolaspearson.JarvisCompanion"
+    private let account = "jarvis-api-token"
+
+    func load() -> String? {
+        var query = baseQuery
+        query[kSecReturnData as String] = true
+        query[kSecMatchLimit as String] = kSecMatchLimitOne
+        var result: CFTypeRef?
+        guard SecItemCopyMatching(query as CFDictionary, &result) == errSecSuccess,
+              let data = result as? Data else { return nil }
+        return String(data: data, encoding: .utf8)
+    }
+
+    func save(_ token: String) {
+        SecItemDelete(baseQuery as CFDictionary)
+        guard !token.isEmpty else { return }
+        var query = baseQuery
+        query[kSecValueData as String] = Data(token.utf8)
+        query[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
+        SecItemAdd(query as CFDictionary, nil)
+    }
+
+    private var baseQuery: [String: Any] {
+        [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: account,
+        ]
     }
 }

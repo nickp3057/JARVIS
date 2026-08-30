@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 /// A single transcript row. Alignment carries the speaker: the user is on the
 /// right in the accent colour, JARVIS on the left in a neutral fill, and a
@@ -9,17 +10,27 @@ struct MessageBubble: View {
     var onRetry: (() -> Void)?
 
     var body: some View {
-        switch message.role {
-        case .user:
-            row(alignment: .trailing) {
-                bubble(background: Color.accentColor, foreground: .white)
+        Group {
+            switch message.role {
+            case .user:
+                row(alignment: .trailing) {
+                    bubble(background: Color.accentColor, foreground: .white)
+                }
+            case .jarvis:
+                row(alignment: .leading) {
+                    bubble(background: Color(.secondarySystemBackground), foreground: .primary)
+                }
+            case .error:
+                errorNotice
             }
-        case .jarvis:
-            row(alignment: .leading) {
-                bubble(background: Color(.secondarySystemBackground), foreground: .primary)
+        }
+        .contextMenu {
+            Button("Copy", systemImage: "doc.on.doc") {
+                UIPasteboard.general.string = message.text
             }
-        case .error:
-            errorNotice
+            ShareLink(item: message.text) {
+                Label("Share", systemImage: "square.and.arrow.up")
+            }
         }
     }
 

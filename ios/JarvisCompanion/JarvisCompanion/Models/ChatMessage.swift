@@ -33,21 +33,31 @@ struct ChatConversation: Identifiable, Codable, Equatable {
     let createdAt: Date
     var updatedAt: Date
     var messages: [ChatMessage]
+    var customTitle: String?
+    var serverSessionID: String?
+    var draft: String?
 
     init(
         id: UUID = UUID(),
         createdAt: Date = Date(),
         updatedAt: Date = Date(),
-        messages: [ChatMessage] = []
+        messages: [ChatMessage] = [],
+        customTitle: String? = nil,
+        serverSessionID: String? = nil,
+        draft: String? = nil
     ) {
         self.id = id
         self.createdAt = createdAt
         self.updatedAt = updatedAt
         self.messages = messages
+        self.customTitle = customTitle
+        self.serverSessionID = serverSessionID
+        self.draft = draft
     }
 
     var title: String {
-        messages.first(where: { $0.role == .user })?.text ?? "New chat"
+        if let customTitle, !customTitle.isEmpty { return customTitle }
+        return messages.first(where: { $0.role == .user })?.text ?? "New chat"
     }
 
     var preview: String {

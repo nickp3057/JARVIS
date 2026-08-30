@@ -36,14 +36,18 @@ JARVIS is a fully local Python desktop AI assistant (PyQt6 GUI + voice + text RE
 python -m app.main            # GUI (PyQt6 orb + chat + status panels)
 python -m app.main --voice    # headless wake-word voice loop
 python -m app.main --text     # keyboard REPL, no mic/GUI required — best for quick manual testing
+python -m app.main --server   # authenticated HTTP API for the iOS companion
 
 # One-time: create a Desktop shortcut for the GUI
 python create_shortcut.py
 ```
 
-There is no test suite, linter, or formatter configured in this repo (no `pytest`, no `.flake8`/`pyproject.toml` lint config, no CI). Verify changes by running `python -m app.main --text` and exercising the relevant tool/command manually, or `--voice`/GUI mode when the change touches speech or UI.
+Server API tests use the standard-library runner: `.venv/bin/python -m unittest tests.test_server -v`. There is no linter, formatter, or CI configured. Verify desktop changes by running `python -m app.main --text` and exercising the relevant tool/command manually, or `--voice`/GUI mode when the change touches speech or UI. Type-check iOS sources with the device SDK when a matching Simulator runtime is unavailable.
 
 Config lives in `.env` at the project root (never commit it — see `JARVIS.md` for the full variable list). Settings are read live via `os.getenv()` inside functions, not cached at import time, so `.env` edits (including ones JARVIS makes to itself via `update_setting`) take effect without a restart.
+
+The companion server requires `JARVIS_API_TOKEN`; its bind address and port are
+controlled by `JARVIS_SERVER_HOST` and `JARVIS_SERVER_PORT`.
 
 ## Architecture
 

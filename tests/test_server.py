@@ -1,0 +1,96 @@
+import os
+import tempfile
+import unittest
+from pathlib import Path
+from unittest.mock import patch
+
+from fastapi.testclient import TestClient
+
+import app.server as server
+import brain.history as history
+
+
+class FakeRuntime:
+    brain_online = True
+    brain_label = "Test brain"
+
+    def start_session(self) -> str:
+        return history.start_new_session()
+
+    def respond_in_session(self, session_id: str, message: str) -> str:
+        reply = f"Reply: {message}"
+        history.append_turn(message, reply, session_id)
+        return reply
+
+    def respond_streaming_in_session(self, session_id: str, message: str):
+        reply = f"Stream: {message}"
+        yield "Stream: "
+        yield message
+        history.append_turn(message, reply, session_id)
+
+
+class ServerTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.tempdir = tempfile.TemporaryDirectory()
+        self.old_db_path = history._DB_PATH
+        history._DB_PATH = Path(self.tempdir.name) / "history.db"
+        server._runtime = FakeRuntime()
+        self.token_patch = patch.dict(os.environ, {"JARVIS_API_TOKEN": "test-token"})
+        self.token_patch.start()
+        self.client = TestClient(server.app)
+        self.headers = {"Authorization": "Bearer test-token"}
+
+    def tearDown(self) -> None:
+        self.client.close()
+        self.token_patch.stop()
+        server._runtime = None
+        history._DB_PATH = self.old_db_path
+        self.tempdir.cleanup()
+
+    def test_auth_sessions_chat_history_rename_and_delete(self) -> None:
+        self.assertEqual(self.client.get("/health").status_code, 401)
+        health = self.client.get("/health", headers=self.headers)
+        self.assertEqual(health.status_code, 200)
+
+        created = self.client.post("/sessions", headers=self.headers)
+        self.assertEqual(created.status_code, 201)
+        session_id = created.json()["session_id"]
+
+        reply = self.client.post(
+            "/chat",
+            headers=self.headers,
+            json={"message": "hello", "session_id": session_id},
+        )
+        self.assertEqual(reply.json(), {"reply": "Reply: hello", "session_id": session_id})
+
+        transcript = self.client.get(f"/sessions/{session_id}", headers=self.headers).json()
+        self.assertEqual([item["role"] for item in transcript["messages"]], ["user", "assistant"])
+
+        renamed = self.client.patch(
+            f"/sessions/{session_id}", headers=self.headers, json={"title": "Greeting"}
+        )
+        self.assertEqual(renamed.status_code, 204)
+        sessions = self.client.get("/sessions", headers=self.headers).json()["sessions"]
+        self.assertEqual(sessions[0]["title"], "Greeting")
+
+        deleted = self.client.delete(f"/sessions/{session_id}", headers=self.headers)
+        self.assertEqual(deleted.status_code, 204)
+        self.assertEqual(
+            self.client.get(f"/sessions/{session_id}", headers=self.headers).status_code,
+            404,
+        )
+
+    def test_stream_binds_and_persists_session(self) -> None:
+        with self.client.stream(
+            "POST", "/chat/stream", headers=self.headers, json={"message": "hello"}
+        ) as response:
+            self.assertEqual(response.status_code, 200)
+            session_id = response.headers["x-jarvis-session-id"]
+            self.assertEqual(response.read().decode(), "Stream: hello")
+
+        transcript = self.client.get(f"/sessions/{session_id}", headers=self.headers).json()
+        self.assertEqual(transcript["messages"][-1]["content"], "Stream: hello")
+
+
+if __name__ == "__main__":
+    unittest.main()

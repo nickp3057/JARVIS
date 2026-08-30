@@ -8,6 +8,10 @@ struct ChatView: View {
     @State private var showingSettings = false
     @State private var showingHistory = false
     @State private var confirmingClear = false
+    @State private var historySearch = ""
+    @State private var renameTarget: ChatConversation?
+    @State private var renameText = ""
+    @State private var deleteTarget: ChatConversation?
     @FocusState private var composerFocused: Bool
 
     /// Anchor for `scrollTo` — the transcript's own ids are message ids, and
@@ -17,6 +21,7 @@ struct ChatView: View {
     var body: some View {
         NavigationStack {
             VStack(spacing: 0) {
+                connectionBanner
                 if model.messages.isEmpty && !model.isAwaitingReply {
                     emptyState
                 } else {
@@ -48,7 +53,7 @@ struct ChatView: View {
                     }
                 }
             }
-            .sheet(isPresented: $showingSettings) {
+            .sheet(isPresented: $showingSettings, onDismiss: model.refreshConnectionStatus) {
                 SettingsView().environmentObject(settings)
             }
             .sheet(isPresented: $showingHistory) {
@@ -61,9 +66,55 @@ struct ChatView: View {
             ) {
                 Button("Clear", role: .destructive) { model.clearTranscript() }
             } message: {
-                Text("This only clears the transcript stored on this device.")
+                Text("This permanently deletes the current conversation from this device and JARVIS Core.")
+            }
+            .alert("Rename conversation", isPresented: Binding(
+                get: { renameTarget != nil },
+                set: { if !$0 { renameTarget = nil } }
+            )) {
+                TextField("Name", text: $renameText)
+                Button("Cancel", role: .cancel) { renameTarget = nil }
+                Button("Save") {
+                    if let renameTarget { model.renameConversation(renameTarget.id, to: renameText) }
+                    renameTarget = nil
+                }
+            }
+            .confirmationDialog(
+                "Delete this conversation?",
+                isPresented: Binding(
+                    get: { deleteTarget != nil },
+                    set: { if !$0 { deleteTarget = nil } }
+                ),
+                titleVisibility: .visible
+            ) {
+                Button("Delete", role: .destructive) {
+                    if let deleteTarget { model.deleteConversation(deleteTarget.id) }
+                    deleteTarget = nil
+                }
+            } message: {
+                Text("This deletes the conversation from this device and JARVIS Core.")
             }
         }
+    }
+
+    private var connectionBanner: some View {
+        Button {
+            if case .offline = model.connectionState { model.refreshConnectionStatus() }
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: model.connectionState.symbol)
+                Text(model.connectionState.label)
+                if case .offline(let detail) = model.connectionState {
+                    Text("· \(detail)").lineLimit(1)
+                }
+            }
+            .font(.caption)
+            .foregroundStyle(model.connectionState == .online ? Color.green : Color.secondary)
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 5)
+            .background(Color(.secondarySystemBackground))
+        }
+        .buttonStyle(.plain)
     }
 
     private var historySheet: some View {
@@ -76,29 +127,12 @@ struct ChatView: View {
                         description: Text("Conversations saved on this device will appear here.")
                     )
                 } else {
-                    List(model.visibleConversations) { conversation in
-                        Button {
-                            model.openConversation(conversation.id)
-                            showingHistory = false
-                        } label: {
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text(conversation.title)
-                                    .font(.headline)
-                                    .lineLimit(1)
-                                Text(conversation.preview)
-                                    .font(.subheadline)
-                                    .foregroundStyle(.secondary)
-                                    .lineLimit(2)
-                                Text(conversation.updatedAt, format: .dateTime.month().day().hour().minute())
-                                    .font(.caption)
-                                    .foregroundStyle(.tertiary)
-                            }
-                            .padding(.vertical, 4)
-                        }
-                        .buttonStyle(.plain)
+                    List(model.filteredConversations(matching: historySearch)) { conversation in
+                        conversationRow(conversation)
                     }
                 }
             }
+            .searchable(text: $historySearch, prompt: "Search conversations")
             .navigationTitle("Chat history")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -113,6 +147,40 @@ struct ChatView: View {
                 }
             }
         }
+    }
+
+    private func conversationRow(_ conversation: ChatConversation) -> some View {
+        Button {
+            model.openConversation(conversation.id)
+            showingHistory = false
+        } label: {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(conversation.title).font(.headline).lineLimit(1)
+                Text(conversation.preview).font(.subheadline).foregroundStyle(.secondary).lineLimit(2)
+                Text(conversation.updatedAt, format: .dateTime.month().day().hour().minute())
+                    .font(.caption).foregroundStyle(.tertiary)
+            }
+            .padding(.vertical, 4)
+        }
+        .buttonStyle(.plain)
+        .swipeActions(edge: .trailing) {
+            Button("Delete", systemImage: "trash", role: .destructive) {
+                deleteTarget = conversation
+            }
+            Button("Rename", systemImage: "pencil") { beginRename(conversation) }
+                .tint(.blue)
+        }
+        .contextMenu {
+            Button("Rename", systemImage: "pencil") { beginRename(conversation) }
+            Button("Delete", systemImage: "trash", role: .destructive) {
+                deleteTarget = conversation
+            }
+        }
+    }
+
+    private func beginRename(_ conversation: ChatConversation) {
+        renameText = conversation.title
+        renameTarget = conversation
     }
 
     private var transcript: some View {
@@ -191,13 +259,13 @@ struct ChatView: View {
                 .submitLabel(.send)
                 .onChange(of: model.draft) { model.draftChanged() }
 
-            Button(action: model.send) {
-                Image(systemName: "arrow.up.circle.fill")
+            Button(action: model.isAwaitingReply ? model.stopGenerating : model.send) {
+                Image(systemName: model.isAwaitingReply ? "stop.circle.fill" : "arrow.up.circle.fill")
                     .font(.system(size: 30))
                     .symbolRenderingMode(.hierarchical)
             }
-            .disabled(!model.canSend)
-            .accessibilityLabel("Send")
+            .disabled(!model.isAwaitingReply && !model.canSend)
+            .accessibilityLabel(model.isAwaitingReply ? "Stop generating" : "Send")
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 10)

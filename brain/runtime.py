@@ -18,7 +18,7 @@ import threading
 from typing import Any, Iterator
 
 from brain.agent import JarvisAgent
-from brain.history import load_session_messages
+from brain.history import load_session_messages, session_exists
 from brain.memory import list_facts
 from brain.timers import Timer, active_timers, pop_expired
 from brain.reminders import active_reminders, pop_due_reminders as _pop_due_reminders
@@ -227,6 +227,22 @@ class JarvisRuntime:
                 title="Tool action completed",
                 detail=user_input.strip(),
             )
+
+    def respond_in_session(self, session_id: str, user_input: str) -> str:
+        """Atomically select a session and run one turn for remote clients."""
+        with self._lock:
+            if not session_exists(session_id):
+                raise KeyError(session_id)
+            self.agent.switch_session(session_id)
+            return self.respond(user_input)
+
+    def respond_streaming_in_session(self, session_id: str, user_input: str) -> Iterator[str]:
+        """Streaming remote turn with session selection held under one lock."""
+        with self._lock:
+            if not session_exists(session_id):
+                raise KeyError(session_id)
+            self.agent.switch_session(session_id)
+            yield from self.respond_streaming(user_input)
 
     def compose_briefing(self) -> str:
         """Build a short situational briefing and log it as a runtime event."""
