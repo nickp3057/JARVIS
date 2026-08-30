@@ -294,17 +294,35 @@ final class ChatViewModel: ObservableObject {
             guard let self else { return }
             do {
                 let client = try JarvisAPIClient.make(from: settings)
-                let returnedSessionID = try await client.stream(
-                    message: text,
-                    sessionID: serverSessionID,
-                    onSession: { [weak self] id in
-                        self?.setServerSessionID(id)
+                do {
+                    _ = try await streamReply(
+                        client: client,
+                        text: text,
+                        sessionID: serverSessionID,
+                        responseID: responseID
+                    )
+                } catch JarvisAPIError.server(let status, _) where status == 404 {
+                    // A restarted server may no longer know a cached session.
+                    // Retry once without it; if streaming itself is the missing
+                    // route, transparently fall back to the legacy /chat API.
+                    setServerSessionID(nil)
+                    do {
+                        _ = try await streamReply(
+                            client: client,
+                            text: text,
+                            sessionID: nil,
+                            responseID: responseID
+                        )
+                    } catch JarvisAPIError.server(let retryStatus, _) where retryStatus == 404 {
+                        let legacy = try await client.send(message: text, sessionID: nil)
+                        replaceMessage(
+                            responseID,
+                            text: legacy.reply.trimmingCharacters(in: .whitespacesAndNewlines)
+                        )
+                        setServerSessionID(legacy.sessionID)
                     }
-                ) { [weak self] chunk in
-                    self?.appendChunk(chunk, to: responseID)
                 }
                 guard !Task.isCancelled else { return }
-                if let returnedSessionID { setServerSessionID(returnedSessionID) }
                 if messages.last?.id == responseID, messages.last?.text.isEmpty == true {
                     replaceMessage(responseID, text: "(no reply)")
                 }
@@ -315,7 +333,11 @@ final class ChatViewModel: ObservableObject {
                 guard !Task.isCancelled else { return }
                 if messages.last?.id == responseID { messages.removeLast() }
                 append(ChatMessage(role: .error, text: error.localizedDescription))
-                connectionState = .offline(error.localizedDescription)
+                if case JarvisAPIError.server = error {
+                    connectionState = .online
+                } else {
+                    connectionState = .offline(error.localizedDescription)
+                }
             }
             isAwaitingReply = false
             inFlight = nil
@@ -327,7 +349,22 @@ final class ChatViewModel: ObservableObject {
         conversations.first(where: { $0.id == activeConversationID })
     }
 
-    private func setServerSessionID(_ id: String) {
+    private func streamReply(
+        client: JarvisAPIClient,
+        text: String,
+        sessionID: String?,
+        responseID: UUID
+    ) async throws -> String? {
+        try await client.stream(
+            message: text,
+            sessionID: sessionID,
+            onSession: { [weak self] id in self?.setServerSessionID(id) }
+        ) { [weak self] chunk in
+            self?.appendChunk(chunk, to: responseID)
+        }
+    }
+
+    private func setServerSessionID(_ id: String?) {
         guard let index = conversations.firstIndex(where: { $0.id == activeConversationID }) else { return }
         conversations[index].serverSessionID = id
         persist()

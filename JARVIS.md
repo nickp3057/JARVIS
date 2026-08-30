@@ -341,6 +341,8 @@ CALENDAR_ALERT_LEAD_MIN=10  # warn this many minutes before a meeting
   isolated server session IDs, synchronized server/device history, streamed
   replies with Stop, health/offline status, Keychain token storage, saved
   drafts, history search, rename/delete swipe actions, and message copy/share.
+  The client recovers stale sessions and falls back to legacy `/chat` when a
+  running server has not deployed `/chat/stream` yet.
 - **iOS local chat history** (`ios/JarvisCompanion`) — conversations persist as
   a device-local JSON archive with a history picker and manual New Chat action.
   Returning after five minutes inactive automatically opens a clean chat while

@@ -83,6 +83,11 @@ in History. Short app switches keep the current chat open. Drafts are saved per
 conversation. Replies stream into the JARVIS bubble as they arrive; the send
 button becomes Stop while generation is active.
 
+For rolling upgrades, the app retries without a cached session when the server
+returns 404, then falls back from `/chat/stream` to the legacy `/chat` endpoint
+when streaming is not deployed yet. An HTTP route error does not mark the
+otherwise reachable server offline.
+
 ## Running JARVIS Core
 
 Set `JARVIS_API_TOKEN` in the root `.env`, install `requirements.txt`, then run:
