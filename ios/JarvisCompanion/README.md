@@ -1,0 +1,121 @@
+# Jarvis Companion (iOS)
+
+A native SwiftUI chat client for JARVIS Core. It sends text to the server's
+`/chat` endpoint, shows what comes back, and keeps device-local conversation
+history.
+
+Requires iOS 17+ and Xcode 16 or newer.
+
+## Opening the project
+
+```bash
+open ios/JarvisCompanion/JarvisCompanion.xcodeproj
+```
+
+The `JarvisCompanion` scheme is shared and preselected. There are no packages to
+resolve and no `pod install` step.
+
+The app target uses a file-system-synchronized group, so anything you drop into
+`JarvisCompanion/` is picked up automatically — no need to add files to the
+project manually.
+
+## First launch
+
+The app ships with no server baked in. On first launch you get a "Set up your
+server" prompt:
+
+1. Tap **Open Settings** (or the **⋯** menu in the top right → **Settings**).
+2. **Server** — the base URL of JARVIS Core, *without* the `/chat` path, e.g.
+   `http://100.92.14.7:8000`. A bare `host:port` works too; `http://` is
+   assumed. A trailing slash is fine.
+3. **API token** — the bearer token JARVIS Core expects. Sent as
+   `Authorization: Bearer <token>` on every request.
+4. The **Status** row reads "Ready" once both are usable, and shows the exact
+   endpoint the app will POST to. Worth a glance — it's the fastest way to catch
+   a typo'd Tailscale IP.
+
+Both values are stored in `UserDefaults`. The token belongs in the Keychain;
+that swap is deliberately deferred, and `AppSettings` is the only file that
+would need to change.
+
+## Architecture
+
+This is a **thin client** — deliberately so. JARVIS Core owns the personality,
+server conversation context, the memory tier, and all 45+ tools (Home Assistant,
+Spotify, Radarr/Sonarr, timers, and the rest). The app knows none of that. It
+sends one string and renders one string back; if a turn involved six server-side
+tool calls, the app is none the wiser, which is exactly why the request timeout
+is a generous 30s. The layering is: `JarvisAPIClient` (the only type that knows
+the wire format) → `ChatViewModel` (owns the transcript and the single in-flight
+request) → `ChatView`/`SettingsView` (dumb rendering). Persistence sits behind
+the `ChatStore` protocol with a plain JSON-file implementation. It stores an
+archive of device-local conversations and migrates the original single
+transcript format automatically. Server-side history sync is planned and can
+replace this store without touching the views.
+
+```
+JarvisCompanion/
+  JarvisCompanionApp.swift     app entry, wires settings + view model
+  Models/ChatMessage.swift     transcript line + local conversation/archive models
+  Storage/ChatStore.swift      ChatStore protocol + JSON archive implementation
+  Storage/AppSettings.swift    base URL + token, UserDefaults-backed
+  Networking/JarvisAPIClient.swift   POST {baseURL}/chat, error mapping
+  ViewModels/ChatViewModel.swift     transcript state, send/retry
+  Views/ChatView.swift         transcript, composer, empty state
+  Views/MessageBubble.swift    bubbles + typing indicator
+  Views/SettingsView.swift     server configuration
+```
+
+Failed turns become an inline error notice in the transcript rather than an
+alert, with a **Try again** button that re-sends without retyping. That retry
+survives an app restart — the pending text is recovered from the transcript.
+
+## Local chat history
+
+The **history** button in the top-left opens prior conversations stored on this
+device. **New chat** starts a blank conversation without deleting older ones;
+**Clear conversation** only empties the currently open conversation.
+
+When the app remains inactive or closed for at least five minutes, returning to
+it starts a clean conversation automatically. The previous conversation stays
+in History. Short app switches keep the current chat open. This is local UI
+history only—the `/chat` request format has no conversation identifier yet, so
+server-side history and session synchronization remain future work.
+
+## Networking notes
+
+`Info.plist` sets `NSAppTransportSecurity → NSAllowsArbitraryLoads`. This is
+required: JARVIS Core is reached over plain `http://` at a Tailscale CGNAT
+address (`100.64.0.0/10`), which ATS blocks by default. `NSAllowsLocalNetworking`
+does **not** cover it — that key only exempts loopback, `.local` and link-local
+addresses. The traffic is already encrypted by WireGuard inside the Tailscale
+tunnel and this app is not App Store bound, so the blanket exception is the
+pragmatic call. If the server ever gets a real certificate (Tailscale Serve /
+MagicDNS), delete the whole `NSAppTransportSecurity` dict.
+
+### Export compliance
+
+`Info.plist` declares `ITSAppUsesNonExemptEncryption = false`, which suppresses
+the export-compliance questionnaire on every TestFlight/App Store upload instead
+of answering it by hand each time. The declaration is accurate for this app: it
+makes no use of encryption beyond what the OS provides for standard networking
+(HTTPS via `URLSession`, and the Tailscale tunnel, which is outside the app), and
+it implements no cryptography of its own. That falls under the exemption for apps
+using only standard/exempt encryption.
+
+Two things to know. Comments do not survive in this file — Xcode rewrites the
+source `Info.plist` when it merges the generated keys in, so this README is the
+place for the rationale. And if the app ever adds its own cryptography, this
+declaration stops being true: the value must become `true`, and Apple will then
+issue a code to record alongside it as `ITSEncryptionExportComplianceCode`
+(a string). Only add that key once Apple has actually issued a code — an invented
+value will fail review.
+
+### Networking
+
+The phone must be **connected to your tailnet** for the app to reach the server —
+the Tailscale app installed, logged into the same account, and its VPN toggle on.
+There is no fallback to a LAN address.
+
+Not implemented, by design: push notifications, device dashboards, streaming
+responses, voice input, and server-side history sync.

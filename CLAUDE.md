@@ -11,6 +11,18 @@ This repo maintains its own living docs — read them before making changes:
 
 Keep both updated when you change behavior they describe (new tools, new .env vars, new monitors, shipped roadmap items).
 
+`AGENTS.md` is a symlink to this file. Keep these instructions and every other
+relevant Markdown document synchronized with repository changes; documentation
+updates are part of the change, not a later cleanup task.
+
+## Commit versioning
+
+Every commit must increase the iOS companion's Xcode build number
+(`CURRENT_PROJECT_VERSION`) in
+`ios/JarvisCompanion/JarvisCompanion.xcodeproj/project.pbxproj`. Keep the Debug
+and Release values identical. Only change `MARKETING_VERSION` when the commit
+is intended to create a new user-facing release version.
+
 ## What this is
 
 JARVIS is a fully local Python desktop AI assistant (PyQt6 GUI + voice + text REPL) built on the Anthropic API, with a persistent character (calls the user "sir", dry wit, never breaks persona). No web server, no build step, no compiled artifacts — it's a long-running desktop process.

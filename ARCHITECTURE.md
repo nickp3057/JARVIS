@@ -58,6 +58,8 @@ Near-term responsibilities:
 5. Presence
    - GUI cockpit, orb state, voice pacing, interruption, proactive notices, and
      a stable personality.
+   - The iOS companion may retain device-local presentation history, but durable
+     synchronized conversation history remains a server/runtime responsibility.
 
 ## Design Rule
 

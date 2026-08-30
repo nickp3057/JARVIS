@@ -84,11 +84,21 @@ Pearson-Stark-Jarvis/
 │   ├── history.db           SQLite conversation history (auto-created)
 │   └── profile.json         Long-term memory facts (auto-created)
 │
+├── ios/
+│   └── JarvisCompanion/     Xcode project for the iOS companion app
+│
 ├── .env                     API keys and runtime settings (never commit)
+├── AGENTS.md                Agent guidance (symlink to CLAUDE.md)
+├── ARCHITECTURE.md          Runtime layers and architectural direction
+├── CLAUDE.md                Shared repository/agent working instructions
 ├── JARVIS.md                This file
 ├── create_shortcut.py       One-time: creates JARVIS.lnk on the Desktop
 └── requirements.txt         Python deps
 ```
+
+Every commit increments the iOS Xcode `CURRENT_PROJECT_VERSION` build number
+in both Debug and Release configurations. `MARKETING_VERSION` changes only for
+a user-facing release version.
 
 ---
 
@@ -321,6 +331,11 @@ CALENDAR_ALERT_LEAD_MIN=10  # warn this many minutes before a meeting
 
 ## Recently Shipped
 
+- **iOS local chat history** (`ios/JarvisCompanion`) — conversations persist as
+  a device-local JSON archive with a history picker and manual New Chat action.
+  Returning after five minutes inactive automatically opens a clean chat while
+  retaining the previous conversation. Existing single-transcript data migrates
+  in place; server-side history synchronization remains future work.
 - **Persona tightening** (`brain/personality.py`) — replies are terse by
   default now (one or two sentences, lead with the answer, no filler / hedging /
   preamble / sign-offs). Media adds confirm once: the user's match selection
