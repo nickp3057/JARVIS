@@ -96,9 +96,9 @@ Pearson-Stark-Jarvis/
 └── requirements.txt         Python deps
 ```
 
-Every commit increments the iOS Xcode `CURRENT_PROJECT_VERSION` build number
-in both Debug and Release configurations. `MARKETING_VERSION` changes only for
-a user-facing release version.
+Every commit increments both iOS Xcode version fields: the user-facing
+`MARKETING_VERSION` and the integer `CURRENT_PROJECT_VERSION` build number.
+Debug and Release configurations must stay identical.
 
 ---
 

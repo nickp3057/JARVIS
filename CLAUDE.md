@@ -17,11 +17,10 @@ updates are part of the change, not a later cleanup task.
 
 ## Commit versioning
 
-Every commit must increase the iOS companion's Xcode build number
-(`CURRENT_PROJECT_VERSION`) in
-`ios/JarvisCompanion/JarvisCompanion.xcodeproj/project.pbxproj`. Keep the Debug
-and Release values identical. Only change `MARKETING_VERSION` when the commit
-is intended to create a new user-facing release version.
+Every commit must increase both iOS companion version fields in
+`ios/JarvisCompanion/JarvisCompanion.xcodeproj/project.pbxproj`: increment the
+user-facing `MARKETING_VERSION` and the integer `CURRENT_PROJECT_VERSION` build
+number. Keep the Debug and Release values identical.
 
 ## What this is
 
