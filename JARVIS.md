@@ -147,8 +147,12 @@ RMS envelope from ElevenLabs audio drives the orb in real time using a monotonic
 - `morning_briefing` — spoken greeting + time + weather + running timers
 
 ### Home Assistant
-- `control_device(command)` — fuzzy natural-language device control
-- `list_devices(domain?)` — list HA entities
+- `control_device(command)` — fuzzy natural-language on/off device control;
+  explicit off phrases take precedence over location wording such as "on my desk"
+- `activate_home_action(kind, name)` — fuzzy-match and activate an existing HA
+  scene, script, or automation
+- `list_devices(domain?)` — list HA entities, including scene/script/automation
+  domains when requested
 - `test_home_assistant` — ping HA
 
 ### Memory & History
@@ -243,8 +247,9 @@ SPOTIFY_REDIRECT_URI=http://127.0.0.1:8888/callback
 SPOTIFY_PREFERRED_DEVICE=JARVIS  # device name substring
 
 # Home Assistant (optional)
-HA_URL=http://homeassistant.local:8123
-HA_TOKEN=...
+HOME_ASSISTANT_URL=http://homeassistant.local:8123
+HOME_ASSISTANT_TOKEN=...
+# Legacy HA_URL / HA_TOKEN names are also accepted during migration.
 
 # Radarr / Sonarr (optional — movie & TV requests)
 RADARR_URL=http://localhost:7878
@@ -337,6 +342,13 @@ CALENDAR_ALERT_LEAD_MIN=10  # warn this many minutes before a meeting
 
 ## Recently Shipped
 
+- **Reliable Home Assistant off commands + actions**
+  (`integrations/home_assistant.py`) — explicit `turn off` / `switch off` and a
+  trailing `off` now win over location language such as "the light on my desk."
+  HA configuration is read live and accepts both canonical
+  `HOME_ASSISTANT_URL` / `HOME_ASSISTANT_TOKEN` names and the older short
+  aliases. JARVIS can also fuzzy-match and activate existing HA scenes,
+  scripts, and automations with the `activate_home_action` tool.
 - **Full companion chat baseline** — authenticated JARVIS Core HTTP server,
   isolated server session IDs, synchronized server/device history, streamed
   replies with Stop, health/offline status, Keychain token storage, saved

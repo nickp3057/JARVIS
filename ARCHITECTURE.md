@@ -53,6 +53,9 @@ Near-term responsibilities:
    - Tools that can change the world: home, music, media library
      (Radarr/Sonarr), reminders, files, browser, research, coding, and
      automations.
+   - Home Assistant owns device definitions and automation logic. JARVIS may
+     discover and activate existing scenes, scripts, and automations through
+     the runtime rather than duplicating their definitions.
    - World-changing tools that are hard to undo (e.g. adding to the media
      library) are split into a read-only lookup tool and a confirm-gated
      write tool; the write never fires without explicit user confirmation.

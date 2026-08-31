@@ -31,6 +31,7 @@ from integrations import servarr_common as servarr
 from integrations import sonarr as sonarr
 from integrations import spotify as spotify
 from integrations.home_assistant import (
+    activate_home_action,
     handle_device_command,
     list_entities,
     test_connection,
@@ -78,6 +79,10 @@ def _tool_list_devices(args: dict[str, Any]) -> str:
 def _tool_test_home_assistant(_: dict[str, Any]) -> str:
     _, message = test_connection()
     return message
+
+
+def _tool_activate_home_action(args: dict[str, Any]) -> str:
+    return activate_home_action(args.get("kind", ""), args.get("name", ""))
 
 
 def _tool_remember_fact(args: dict[str, Any]) -> str:
@@ -334,6 +339,30 @@ _CUSTOM_TOOLS: list[dict[str, Any]] = [
         "name": "test_home_assistant",
         "description": "Ping Home Assistant to confirm the connection is healthy.",
         "input_schema": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "activate_home_action",
+        "description": (
+            "Activate a Home Assistant scene, script, or automation by name. "
+            "Use this when Nick asks to run, trigger, start, or activate one "
+            "of those Home Assistant actions. This does not create or edit "
+            "automations."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "kind": {
+                    "type": "string",
+                    "enum": ["scene", "script", "automation"],
+                    "description": "The Home Assistant entity domain.",
+                },
+                "name": {
+                    "type": "string",
+                    "description": "Natural-language name of the scene, script, or automation.",
+                },
+            },
+            "required": ["kind", "name"],
+        },
     },
     {
         "name": "remember_fact",
@@ -805,6 +834,7 @@ _DISPATCH: dict[str, Callable[[dict[str, Any]], str]] = {
     "control_device": _tool_control_device,
     "list_devices": _tool_list_devices,
     "test_home_assistant": _tool_test_home_assistant,
+    "activate_home_action": _tool_activate_home_action,
     "remember_fact": _tool_remember_fact,
     "forget_fact": _tool_forget_fact,
     "clear_conversation": _tool_clear_conversation,

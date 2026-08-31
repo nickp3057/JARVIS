@@ -20,26 +20,30 @@ load_dotenv()
 
 log = get_logger(__name__)
 
-HOME_ASSISTANT_URL = os.getenv("HOME_ASSISTANT_URL", "").rstrip("/")
-HOME_ASSISTANT_TOKEN = os.getenv("HOME_ASSISTANT_TOKEN", "")
-
 _TIMEOUT_SECONDS = 10
 
 # Single pooled session reused for every HA call.
 _session = requests.Session()
-if HOME_ASSISTANT_TOKEN:
-    _session.headers.update(
-        {
-            "Authorization": f"Bearer {HOME_ASSISTANT_TOKEN}",
-            "Content-Type": "application/json",
-        }
-    )
 
 
 # --- Core API wrappers ------------------------------------------------------
 
+def _config() -> tuple[str, str]:
+    """Return live HA config, accepting the old short aliases for migration."""
+    url = (
+        os.getenv("HOME_ASSISTANT_URL", "").strip()
+        or os.getenv("HA_URL", "").strip()
+    ).rstrip("/")
+    token = (
+        os.getenv("HOME_ASSISTANT_TOKEN", "").strip()
+        or os.getenv("HA_TOKEN", "").strip()
+    )
+    return url, token
+
+
 def _is_configured() -> bool:
-    return bool(HOME_ASSISTANT_URL and HOME_ASSISTANT_TOKEN)
+    url, token = _config()
+    return bool(url and token)
 
 
 def _unconfigured() -> tuple[bool, str]:
@@ -48,12 +52,26 @@ def _unconfigured() -> tuple[bool, str]:
 
 def _request(method: str, path: str, **kwargs: Any) -> tuple[bool, Any]:
     """Perform a REST call against Home Assistant."""
-    if not _is_configured():
+    base_url, token = _config()
+    if not base_url or not token:
         return _unconfigured()
 
-    url = f"{HOME_ASSISTANT_URL}{path}"
+    url = f"{base_url}{path}"
+    headers = dict(kwargs.pop("headers", {}))
+    headers.update(
+        {
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json",
+        }
+    )
     try:
-        response = _session.request(method, url, timeout=_TIMEOUT_SECONDS, **kwargs)
+        response = _session.request(
+            method,
+            url,
+            timeout=_TIMEOUT_SECONDS,
+            headers=headers,
+            **kwargs,
+        )
     except requests.RequestException as exc:
         log.warning("HA request failed: %s %s -> %s", method, path, exc)
         return False, f"Could not reach Home Assistant: {exc}"
@@ -133,12 +151,14 @@ def _normalize_text(text: str) -> str:
 
 def _extract_action(command: str) -> str | None:
     command = _normalize_text(command)
-    padded = f" {command} "
 
-    if "turn on" in command or command.endswith(" on") or " on " in padded:
-        return "turn_on"
-    if "turn off" in command or command.endswith(" off") or " off " in padded:
+    # Explicit verb phrases and a trailing state describe the requested
+    # action. Check OFF first so a location phrase such as "the light on my
+    # desk" cannot override "turn off".
+    if "turn off" in command or "switch off" in command or command.endswith(" off"):
         return "turn_off"
+    if "turn on" in command or "switch on" in command or command.endswith(" on"):
+        return "turn_on"
     return None
 
 
@@ -213,4 +233,33 @@ def handle_device_command(command: str) -> str:
 
     domain = entity_or_message.split(".", 1)[0]
     success, message = call_service(domain, action, entity_or_message)
+    return message if success else f"Command failed. {message}"
+
+
+_ACTION_SERVICES = {
+    "scene": "turn_on",
+    "script": "turn_on",
+    "automation": "trigger",
+}
+
+
+def activate_home_action(kind: str, name: str) -> str:
+    """Activate one HA scene, script, or automation by fuzzy entity name."""
+    kind = _normalize_text(kind).removesuffix("s")
+    if kind not in _ACTION_SERVICES:
+        return "I can activate Home Assistant scenes, scripts, or automations."
+
+    name = (name or "").strip()
+    if not name:
+        return f"I need the name of the {kind} to activate."
+
+    success, entity_or_message = _find_best_entity(name, [kind])
+    if not success:
+        return entity_or_message
+
+    success, message = call_service(
+        kind,
+        _ACTION_SERVICES[kind],
+        entity_or_message,
+    )
     return message if success else f"Command failed. {message}"
