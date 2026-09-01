@@ -8,6 +8,7 @@ import UIKit
 struct MessageBubble: View {
     let message: ChatMessage
     var onRetry: (() -> Void)?
+    var onReport: (() -> Void)?
 
     var body: some View {
         Group {
@@ -30,6 +31,11 @@ struct MessageBubble: View {
             }
             ShareLink(item: message.text) {
                 Label("Share", systemImage: "square.and.arrow.up")
+            }
+            if let onReport {
+                Button("Send to AI to debug", systemImage: "ladybug") {
+                    onReport()
+                }
             }
         }
     }
@@ -67,6 +73,12 @@ struct MessageBubble: View {
 
             if let onRetry {
                 Button("Try again", systemImage: "arrow.clockwise", action: onRetry)
+                    .font(.footnote.weight(.medium))
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+            }
+            if let onReport {
+                Button("Send to AI to debug", systemImage: "ladybug", action: onReport)
                     .font(.footnote.weight(.medium))
                     .buttonStyle(.bordered)
                     .controlSize(.small)

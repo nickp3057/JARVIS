@@ -25,6 +25,7 @@ from brain.automation_workshop import (
     rollback_automation_change,
 )
 from brain.clipboard_tool import read_clipboard, write_clipboard
+from brain.debug_reports import describe_debug_report, summarize_debug_reports
 from brain.history import clear_history, history_stats
 from brain.memory import forget_fact, remember_fact
 from brain.knowledge_vault import describe_search
@@ -159,6 +160,14 @@ def _tool_search_memory(args: dict[str, Any]) -> str:
     if not query:
         return "Tool error: missing 'query'."
     return describe_search(query)
+
+
+def _tool_list_debug_reports(_: dict[str, Any]) -> str:
+    return summarize_debug_reports()
+
+
+def _tool_inspect_debug_report(args: dict[str, Any]) -> str:
+    return describe_debug_report(str(args.get("report_id", "")))
 
 
 def _tool_get_weather(args: dict[str, Any]) -> str:
@@ -598,6 +607,26 @@ _CUSTOM_TOOLS: list[dict[str, Any]] = [
             "type": "object",
             "properties": {"query": {"type": "string"}},
             "required": ["query"],
+        },
+    },
+    {
+        "name": "list_debug_reports",
+        "description": (
+            "List recent issue reports Nick explicitly submitted from the companion app. "
+            "Use when he asks what went wrong, what needs debugging, or to review feedback."
+        ),
+        "input_schema": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "inspect_debug_report",
+        "description": (
+            "Inspect one companion debug report, including Nick's issue description, "
+            "app context, focused response, and submitted conversation transcript."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {"report_id": {"type": "string"}},
+            "required": ["report_id"],
         },
     },
     {
@@ -1101,6 +1130,8 @@ _DISPATCH: dict[str, Callable[[dict[str, Any]], str]] = {
     "remember_fact": _tool_remember_fact,
     "forget_fact": _tool_forget_fact,
     "search_memory": _tool_search_memory,
+    "list_debug_reports": _tool_list_debug_reports,
+    "inspect_debug_report": _tool_inspect_debug_report,
     "clear_conversation": _tool_clear_conversation,
     "conversation_history_stats": _tool_conversation_stats,
     "get_weather": _tool_get_weather,

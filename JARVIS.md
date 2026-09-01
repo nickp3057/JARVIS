@@ -42,6 +42,7 @@ Pearson-Stark-Jarvis/
 │   ├── apps.py              Windows app launcher (open/close/focus via PowerShell)
 │   ├── automation_workshop.py Staged HA automation drafts, diffs, apply + rollback
 │   ├── clipboard_tool.py    Read/write clipboard via PowerShell Get/Set-Clipboard
+│   ├── debug_reports.py     Durable user-submitted companion failure reports
 │   ├── history.py           SQLite conversation history with session support
 │   ├── intents.py           Keyword intent router (fallback if brain offline)
 │   ├── memory.py            JSON long-term memory (profile.json) — remember_fact/forget_fact
@@ -178,6 +179,9 @@ RMS envelope from ElevenLabs audio drives the orb in real time using a monotonic
 - `forget_fact(fact_id)` — remove from profile.json
 - `search_memory(query)` — search authorized Obsidian folders and return
   bounded excerpts with their note paths
+- `list_debug_reports` / `inspect_debug_report(report_id)` — review explicit
+  companion-app feedback with the reported response, surrounding chat,
+  frustration/correction follow-ups, and non-secret app context
 - `clear_conversation` — wipe history.db
 - `conversation_history_stats` — turn/session count
 
@@ -429,7 +433,9 @@ CALENDAR_ALERT_LEAD_MIN=10  # warn this many minutes before a meeting
   replies with Stop, health/offline status, Keychain token storage, saved
   drafts, history search, rename/delete swipe actions, and message copy/share.
   The client recovers stale sessions and falls back to legacy `/chat` when a
-  running server has not deployed `/chat/stream` yet.
+  running server has not deployed `/chat/stream` yet. Tool-heavy streamed turns
+  have a three-minute timeout and reconcile against server history, preventing
+  completed Radarr/Sonarr operations from appearing failed until app reopen.
 - **iOS local chat history** (`ios/JarvisCompanion`) — conversations persist as
   a device-local JSON archive with a history picker and manual New Chat action.
   Returning after five minutes inactive automatically opens a clean chat while
@@ -484,6 +490,11 @@ CALENDAR_ALERT_LEAD_MIN=10  # warn this many minutes before a meeting
   bounded set of relevant excerpts with source paths, and injects those instead
   of uploading the whole vault. A disconnected vault never prevents JSON facts
   from being saved.
+- **Companion debug feedback** — the iOS app can explicitly submit a bounded
+  conversation and "what went wrong" description to authenticated
+  `/debug-reports`. Reports persist separately from personality memory in
+  `memory/debug_reports.json`; JARVIS can list and inspect them as untrusted
+  diagnostic evidence. API tokens and server addresses are never included.
 
 ## What's Not Done Yet (Roadmap)
 

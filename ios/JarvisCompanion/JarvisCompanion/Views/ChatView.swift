@@ -12,6 +12,8 @@ struct ChatView: View {
     @State private var renameTarget: ChatConversation?
     @State private var renameText = ""
     @State private var deleteTarget: ChatConversation?
+    @State private var showingDebugReport = false
+    @State private var debugFocusMessageID: UUID?
     @FocusState private var composerFocused: Bool
 
     /// Anchor for `scrollTo` — the transcript's own ids are message ids, and
@@ -44,6 +46,10 @@ struct ChatView: View {
                             model.startNewConversation()
                         }
                         Button("Settings", systemImage: "gearshape") { showingSettings = true }
+                        Button("Send to AI to debug", systemImage: "ladybug") {
+                            beginDebugReport()
+                        }
+                        .disabled(model.messages.isEmpty || model.isAwaitingReply)
                         Button("Clear conversation", systemImage: "trash", role: .destructive) {
                             confirmingClear = true
                         }
@@ -58,6 +64,18 @@ struct ChatView: View {
             }
             .sheet(isPresented: $showingHistory) {
                 historySheet
+            }
+            .sheet(isPresented: $showingDebugReport) {
+                DebugReportSheet(
+                    messageCount: min(model.messages.count, 100),
+                    focusedMessage: model.messages.first(where: { $0.id == debugFocusMessageID })?.text,
+                    onSend: { issue in
+                        try await model.submitDebugReport(
+                            issue: issue,
+                            focusMessageID: debugFocusMessageID
+                        )
+                    }
+                )
             }
             .confirmationDialog(
                 "Clear this conversation?",
@@ -190,7 +208,8 @@ struct ChatView: View {
                     ForEach(model.messages) { message in
                         MessageBubble(
                             message: message,
-                            onRetry: retryAction(for: message)
+                            onRetry: retryAction(for: message),
+                            onReport: reportAction(for: message)
                         )
                         .id(message.id)
                     }
@@ -219,6 +238,16 @@ struct ChatView: View {
             return nil
         }
         return { model.retry() }
+    }
+
+    private func reportAction(for message: ChatMessage) -> (() -> Void)? {
+        guard message.role != .user, !model.isAwaitingReply else { return nil }
+        return { beginDebugReport(focusing: message.id) }
+    }
+
+    private func beginDebugReport(focusing messageID: UUID? = nil) {
+        debugFocusMessageID = messageID
+        showingDebugReport = true
     }
 
     private var emptyState: some View {
@@ -275,6 +304,83 @@ struct ChatView: View {
     private func scrollToBottom(_ proxy: ScrollViewProxy) {
         withAnimation(.easeOut(duration: 0.25)) {
             proxy.scrollTo(bottomID, anchor: .bottom)
+        }
+    }
+}
+
+private struct DebugReportSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    let messageCount: Int
+    let focusedMessage: String?
+    let onSend: (String) async throws -> String
+
+    @State private var issue = ""
+    @State private var isSending = false
+    @State private var errorText: String?
+    @State private var sentReportID: String?
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("What went wrong?") {
+                    TextEditor(text: $issue)
+                        .frame(minHeight: 120)
+                        .accessibilityLabel("What went wrong")
+                }
+                if let focusedMessage {
+                    Section("Response being reported") {
+                        Text(focusedMessage).lineLimit(6)
+                    }
+                }
+                Section("Included with your approval") {
+                    Label("Up to \(messageCount) messages from this conversation", systemImage: "bubble.left.and.bubble.right")
+                    Label("App version, device type, and connection state", systemImage: "iphone")
+                    Text("Your API token and server address are never included.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+                if let sentReportID {
+                    Section {
+                        Label("Saved as report \(sentReportID)", systemImage: "checkmark.circle.fill")
+                            .foregroundStyle(.green)
+                    }
+                }
+                if let errorText {
+                    Section {
+                        Label(errorText, systemImage: "exclamationmark.triangle.fill")
+                            .foregroundStyle(.orange)
+                    }
+                }
+            }
+            .navigationTitle("Send to AI to debug")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button(sentReportID == nil ? "Cancel" : "Done") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Send") { submit() }
+                        .disabled(
+                            isSending
+                            || sentReportID != nil
+                            || issue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                        )
+                }
+            }
+            .interactiveDismissDisabled(isSending)
+        }
+    }
+
+    private func submit() {
+        isSending = true
+        errorText = nil
+        Task {
+            do {
+                sentReportID = try await onSend(issue)
+            } catch {
+                errorText = error.localizedDescription
+            }
+            isSending = false
         }
     }
 }

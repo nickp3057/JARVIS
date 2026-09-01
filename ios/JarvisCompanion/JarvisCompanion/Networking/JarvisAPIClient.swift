@@ -93,6 +93,18 @@ struct ServerMessage: Decodable {
     }
 }
 
+struct DebugReportMessagePayload: Encodable {
+    let id: String
+    let role: String
+    let content: String
+    let createdAt: String
+
+    enum CodingKeys: String, CodingKey {
+        case id, role, content
+        case createdAt = "created_at"
+    }
+}
+
 /// Thin wrapper over `POST {baseURL}/chat`.
 ///
 /// This is the only type in the app that knows the wire format. JARVIS Core
@@ -102,6 +114,7 @@ struct JarvisAPIClient {
     /// Generous by design: a single turn can fan out into several server-side
     /// tool calls before Claude produces its final text.
     static let defaultTimeout: TimeInterval = 30
+    static let streamingTimeout: TimeInterval = 3 * 60
 
     /// One session for the whole app. A `URLSession` retains itself until it is
     /// invalidated, so building one per request would leak; the per-request
@@ -153,6 +166,27 @@ struct JarvisAPIClient {
             case reply
             case sessionID = "session_id"
         }
+    }
+
+    private struct DebugReportRequest: Encodable {
+        let issue: String
+        let messages: [DebugReportMessagePayload]
+        let sessionID: String?
+        let conversationTitle: String
+        let focusMessageID: String?
+        let appContext: [String: String]
+
+        enum CodingKeys: String, CodingKey {
+            case issue, messages
+            case sessionID = "session_id"
+            case conversationTitle = "conversation_title"
+            case focusMessageID = "focus_message_id"
+            case appContext = "app_context"
+        }
+    }
+
+    private struct DebugReportResponse: Decodable {
+        let id: String
     }
 
     private func request(path: String, method: String = "GET") -> URLRequest {
@@ -207,6 +241,9 @@ struct JarvisAPIClient {
         onChunk: @escaping @MainActor (String) -> Void
     ) async throws -> String? {
         var request = request(path: "chat/stream", method: "POST")
+        // Tool rounds can be silent while Radarr, Sonarr, HA, or another local
+        // service is working. Do not mistake that silence for a dead request.
+        request.timeoutInterval = max(timeout, Self.streamingTimeout)
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue("text/plain", forHTTPHeaderField: "Accept")
         request.httpBody = try JSONEncoder().encode(ChatRequest(message: message, sessionID: sessionID))
@@ -269,5 +306,38 @@ struct JarvisAPIClient {
         let (data, response) = try await Self.session.data(for: request)
         _ = try validate(response, data: data)
         return try JSONDecoder().decode(Envelope.self, from: data).messages
+    }
+
+    func submitDebugReport(
+        issue: String,
+        messages: [DebugReportMessagePayload],
+        sessionID: String?,
+        conversationTitle: String,
+        focusMessageID: String?,
+        appContext: [String: String]
+    ) async throws -> String {
+        var request = request(path: "debug-reports", method: "POST")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONEncoder().encode(DebugReportRequest(
+            issue: issue,
+            messages: messages,
+            sessionID: sessionID,
+            conversationTitle: conversationTitle,
+            focusMessageID: focusMessageID,
+            appContext: appContext
+        ))
+        let data: Data
+        let response: URLResponse
+        do {
+            (data, response) = try await Self.session.data(for: request)
+        } catch let error as URLError {
+            throw JarvisAPIError.transport(error)
+        }
+        let body = String(data: data, encoding: .utf8)
+        _ = try validate(response, data: data)
+        guard let decoded = try? JSONDecoder().decode(DebugReportResponse.self, from: data) else {
+            throw JarvisAPIError.malformedResponse(body)
+        }
+        return decoded.id
     }
 }

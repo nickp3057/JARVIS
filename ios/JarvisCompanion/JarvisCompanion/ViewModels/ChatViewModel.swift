@@ -1,4 +1,5 @@
 import Foundation
+import UIKit
 
 @MainActor
 final class ChatViewModel: ObservableObject {
@@ -272,6 +273,36 @@ final class ChatViewModel: ObservableObject {
         request(text)
     }
 
+    func submitDebugReport(issue: String, focusMessageID: UUID?) async throws -> String {
+        let cleanIssue = issue.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleanIssue.isEmpty else { throw JarvisAPIError.malformedResponse("Describe what went wrong.") }
+        let formatter = ISO8601DateFormatter()
+        let transcript = messages.suffix(100).map { message in
+            DebugReportMessagePayload(
+                id: message.id.uuidString,
+                role: message.role == .jarvis ? "assistant" : message.role.rawValue,
+                content: String(message.text.prefix(20_000)),
+                createdAt: formatter.string(from: message.date)
+            )
+        }
+        let device = UIDevice.current
+        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "unknown"
+        let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "unknown"
+        return try await JarvisAPIClient.make(from: settings).submitDebugReport(
+            issue: cleanIssue,
+            messages: transcript,
+            sessionID: activeConversation?.serverSessionID,
+            conversationTitle: activeTitle,
+            focusMessageID: focusMessageID?.uuidString,
+            appContext: [
+                "app_version": "\(version) (\(build))",
+                "device": device.model,
+                "system": "\(device.systemName) \(device.systemVersion)",
+                "connection": connectionState.label,
+            ]
+        )
+    }
+
     func stopGenerating() {
         inFlight?.cancel()
         inFlight = nil
@@ -292,8 +323,10 @@ final class ChatViewModel: ObservableObject {
 
         inFlight = Task { [weak self] in
             guard let self else { return }
+            var recoveryClient: JarvisAPIClient?
             do {
                 let client = try JarvisAPIClient.make(from: settings)
+                recoveryClient = client
                 do {
                     _ = try await streamReply(
                         client: client,
@@ -323,6 +356,18 @@ final class ChatViewModel: ObservableObject {
                     }
                 }
                 guard !Task.isCancelled else { return }
+                // Core owns the authoritative completed transcript. This also
+                // repairs a stream that ended with a temporary fallback while
+                // the server successfully persisted the real answer.
+                if let sessionID = activeConversation?.serverSessionID {
+                    _ = await reconcileCompletedTurn(
+                        client: client,
+                        sessionID: sessionID,
+                        userText: text,
+                        responseID: responseID,
+                        attempts: 2
+                    )
+                }
                 if messages.last?.id == responseID, messages.last?.text.isEmpty == true {
                     replaceMessage(responseID, text: "(no reply)")
                 }
@@ -331,12 +376,29 @@ final class ChatViewModel: ObservableObject {
                 return
             } catch {
                 guard !Task.isCancelled else { return }
-                if messages.last?.id == responseID { messages.removeLast() }
-                append(ChatMessage(role: .error, text: error.localizedDescription))
-                if case JarvisAPIError.server = error {
+                let recovered: Bool
+                if let recoveryClient,
+                   let sessionID = activeConversation?.serverSessionID {
+                    recovered = await reconcileCompletedTurn(
+                        client: recoveryClient,
+                        sessionID: sessionID,
+                        userText: text,
+                        responseID: responseID,
+                        attempts: 12
+                    )
+                } else {
+                    recovered = false
+                }
+                if recovered {
                     connectionState = .online
                 } else {
-                    connectionState = .offline(error.localizedDescription)
+                    if messages.last?.id == responseID { messages.removeLast() }
+                    append(ChatMessage(role: .error, text: error.localizedDescription))
+                    if case JarvisAPIError.server = error {
+                        connectionState = .online
+                    } else {
+                        connectionState = .offline(error.localizedDescription)
+                    }
                 }
             }
             isAwaitingReply = false
@@ -362,6 +424,42 @@ final class ChatViewModel: ObservableObject {
         ) { [weak self] chunk in
             self?.appendChunk(chunk, to: responseID)
         }
+    }
+
+    /// Fetch the server-owned transcript after a stream ends or disconnects.
+    /// A matching user turn must be followed by an assistant turn, preventing
+    /// an older answer from being mistaken for recovery of the current request.
+    private func reconcileCompletedTurn(
+        client: JarvisAPIClient,
+        sessionID: String,
+        userText: String,
+        responseID: UUID,
+        attempts: Int
+    ) async -> Bool {
+        for attempt in 0..<max(1, attempts) {
+            guard !Task.isCancelled else { return false }
+            do {
+                let remote = try await client.messages(for: sessionID)
+                if let userIndex = remote.lastIndex(where: {
+                    $0.role == "user" && $0.content == userText
+                }) {
+                    let replyIndex = remote.index(after: userIndex)
+                    if replyIndex < remote.endIndex, remote[replyIndex].role == "assistant" {
+                        let reply = remote[replyIndex].content.trimmingCharacters(in: .whitespacesAndNewlines)
+                        if !reply.isEmpty {
+                            replaceMessage(responseID, text: reply)
+                            return true
+                        }
+                    }
+                }
+            } catch {
+                // The original error is more useful if recovery never succeeds.
+            }
+            if attempt + 1 < attempts {
+                try? await Task.sleep(for: .seconds(2))
+            }
+        }
+        return false
     }
 
     private func setServerSessionID(_ id: String?) {

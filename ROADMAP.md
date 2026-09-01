@@ -30,6 +30,11 @@ needed for “JARVIS runs everything.”
 **Goal:** JARVIS starts reliably, reports its health accurately, and has a
 tested foundation before more features depend on it.
 
+**Feedback baseline shipped:** the iOS companion can submit explicit,
+authenticated debug reports containing a bounded conversation, focused reply,
+user description, and non-secret app context. Core stores them durably and
+exposes read-only review tools to JARVIS.
+
 ### Work
 
 - Verify the resolved Home Assistant environment compatibility on the live

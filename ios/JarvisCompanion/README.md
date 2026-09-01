@@ -70,6 +70,15 @@ Failed turns become an inline error notice in the transcript rather than an
 alert, with a **Try again** button that re-sends without retyping. That retry
 survives an app restart — the pending text is recovered from the transcript.
 
+Use **⋯ → Send to AI to debug** to submit the current conversation, or
+long-press a particular JARVIS response to focus the report on it. Failed-turn
+notices also show a visible debug button. A review sheet requires a description
+of what went wrong and explains exactly what will be included before anything
+is uploaded. The authenticated report contains at most 100 current-conversation
+messages plus app version, device type, OS version, connection state, and the
+selected response ID. It never contains the API token or server address. JARVIS
+Core stores reports separately from personality memory for later inspection.
+
 ## Local chat history
 
 The **history** button opens synchronized conversations. Search matches titles
@@ -88,6 +97,13 @@ returns 404, then falls back from `/chat/stream` to the legacy `/chat` endpoint
 when streaming is not deployed yet. An HTTP route error does not mark the
 otherwise reachable server offline.
 
+Streaming turns use a three-minute timeout because local tool chains can be
+silent while Radarr, Sonarr, Home Assistant, or another service works. After a
+stream completes or disconnects, the companion reconciles the answer with
+Core's authoritative session history. If Core finished successfully, that full
+response replaces a temporary stream error automatically instead of requiring
+an app restart.
+
 ## Running JARVIS Core
 
 Set `JARVIS_API_TOKEN` in the root `.env`, install `requirements.txt`, then run:
@@ -98,8 +114,9 @@ python -m app.main --server
 
 The server defaults to `0.0.0.0:8000`. `JARVIS_SERVER_HOST` and
 `JARVIS_SERVER_PORT` override the bind address. It exposes authenticated health,
-session CRUD/history, `/chat`, and `/chat/stream` endpoints. Each request carries
-a server session ID so New Chat genuinely starts clean context.
+session CRUD/history, `/chat`, `/chat/stream`, and write-only `/debug-reports`
+endpoints. Each chat request carries a server session ID so New Chat genuinely
+starts clean context.
 
 ## Networking notes
 

@@ -10,3 +10,4 @@ jarvis_output.wav
 *.bak
 memory/*.db
 memory/obsidian/
+memory/debug_reports.json

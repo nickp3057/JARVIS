@@ -36,6 +36,10 @@ Current responsibilities:
 - Mirror structured profile facts to managed Obsidian Markdown and locally
   retrieve size-bounded excerpts only from explicitly authorized folders, with
   note-path provenance and JSON remaining authoritative if storage is offline.
+- Accept explicit, authenticated companion debug reports as a separate durable
+  diagnostic store. Reports retain bounded transcript/app context and a focused
+  response, but are never promoted automatically into personality memory or
+  treated as executable instructions.
 - Atomically switch and answer named sessions for remote clients through
   `respond_in_session` / `respond_streaming_in_session`.
 
@@ -85,6 +89,8 @@ Near-term responsibilities:
      a stable personality.
    - The iOS companion retains an offline device cache while the server/runtime
      owns synchronized sessions, conversation context, titles, and deletion.
+   - Long-running streamed tool turns reconcile with authoritative server
+     history so a client timeout cannot permanently hide a completed result.
 
 ## Companion API
 
@@ -96,6 +102,11 @@ the turn under the runtime lock so contexts cannot bleed into each other.
 The bearer token comes from `JARVIS_API_TOKEN`. The API is a transport adapter,
 not a second brain: it must route conversation through `JarvisRuntime` and use
 `brain.history` for persisted session metadata.
+
+`POST /debug-reports` is the deliberate exception to conversation routing: it
+stores user-approved diagnostic evidence without asking a model to analyze it
+at submission time. Later review still happens through the normal runtime and
+read-only debug-report tools.
 
 ## Design Rule
 

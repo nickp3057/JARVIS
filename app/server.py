@@ -17,6 +17,7 @@ from brain.history import (
     rename_session,
     session_exists,
 )
+from brain.debug_reports import create_debug_report
 from brain.runtime import JarvisRuntime
 
 app = FastAPI(title="JARVIS Core", version="1.0")
@@ -51,6 +52,22 @@ class ChatResponse(BaseModel):
 
 class RenameRequest(BaseModel):
     title: str = Field(min_length=1, max_length=120)
+
+
+class DebugMessage(BaseModel):
+    id: str = Field(default="", max_length=100)
+    role: str = Field(pattern="^(user|assistant|error)$")
+    content: str = Field(min_length=1, max_length=20_000)
+    created_at: str = Field(default="", max_length=100)
+
+
+class DebugReportRequest(BaseModel):
+    issue: str = Field(min_length=1, max_length=4_000)
+    messages: list[DebugMessage] = Field(min_length=1, max_length=100)
+    session_id: str | None = Field(default=None, max_length=100)
+    conversation_title: str | None = Field(default=None, max_length=200)
+    focus_message_id: str | None = Field(default=None, max_length=100)
+    app_context: dict[str, str] = Field(default_factory=dict)
 
 
 @app.get("/health")
@@ -121,6 +138,25 @@ def chat_stream(request: ChatRequest, _: None = Depends(authorize)) -> Streaming
         media_type="text/plain; charset=utf-8",
         headers={"X-Jarvis-Session-ID": session_id},
     )
+
+
+@app.post("/debug-reports", status_code=status.HTTP_201_CREATED)
+def submit_debug_report(
+    request: DebugReportRequest,
+    _: None = Depends(authorize),
+) -> dict[str, object]:
+    """Store user-approved companion context for later JARVIS diagnosis."""
+    try:
+        return create_debug_report(
+            issue=request.issue,
+            messages=[message.model_dump() for message in request.messages],
+            session_id=request.session_id,
+            conversation_title=request.conversation_title,
+            focus_message_id=request.focus_message_id,
+            app_context=request.app_context,
+        )
+    except (OSError, ValueError) as exc:
+        raise HTTPException(status_code=500, detail=f"Could not store debug report: {exc}") from exc
 
 
 def run_server() -> None:
