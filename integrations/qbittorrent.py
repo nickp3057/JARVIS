@@ -52,7 +52,13 @@ def _session() -> tuple[requests.Session | None, str]:
         )
     except requests.RequestException as exc:
         return None, f"Could not reach qBittorrent: {exc}"
-    if response.status_code != 200 or response.text.strip().lower() != "ok.":
+    # qBittorrent 5.2 may return 204 No Content while still setting a valid SID.
+    # Older versions return 200 with the literal body "Ok.".
+    login_ok = (
+        response.status_code == 204
+        or (response.status_code == 200 and response.text.strip().lower() == "ok.")
+    )
+    if not login_ok:
         return None, f"qBittorrent login failed ({response.status_code})."
     _session_cache = (session, url, username, password)
     return session, ""

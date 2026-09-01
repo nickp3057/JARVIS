@@ -208,8 +208,8 @@ RMS envelope from ElevenLabs audio drives the orb in real time using a monotonic
   match(es) with year + TMDB id, or "no match" / a numbered short-list.
 - `add_movie(tmdb_id, quality?, root_folder?, confirmed)` — Radarr `/movie`
   POST with `monitored: true`, `addOptions.searchForMovie: true`. Refuses
-  unless `confirmed: true`; quality is a natural phrase fuzzy-matched to a
-  profile.
+  unless `confirmed: true` and the ID came from the same session's latest,
+  unexpired lookup; quality is a natural phrase fuzzy-matched to a profile.
 - `find_series(title)` — Sonarr `/series/lookup`. Same shape, TVDB id.
 - `add_series(tvdb_id, quality?, root_folder?, monitor?, season_folder?, confirmed)`
   — Sonarr `/series` POST with `addOptions.searchForMissingEpisodes: true`.
@@ -223,6 +223,10 @@ RMS envelope from ElevenLabs audio drives the orb in real time using a monotonic
   Servarr health warnings
 - **Always confirm first**: the agent must surface the match and get an
   explicit yes before calling `add_*`; never auto-adds on ambiguous results.
+  Selection receipts bind the allowed TMDB/TVDB IDs to the conversation for
+  15 minutes, and are consumed after a successful add. One selection or “yes”
+  is sufficient; configured quality/monitor defaults must not trigger more
+  confirmation questions.
   Quality-phrase → profile-name mapping lives in `.env`
   (`RADARR_QUALITY_MAP` / `SONARR_QUALITY_MAP`), not in code.
 
@@ -231,6 +235,8 @@ RMS envelope from ElevenLabs audio drives the orb in real time using a monotonic
   ETA, state, and errors; supports downloading/all/completed/seeding/stalled/etc.
 - Expired qBittorrent WebUI sessions automatically reauthenticate once before
   reporting failure.
+- qBittorrent 5.2's successful `204 No Content` login response is supported in
+  addition to the older `200 Ok.` response.
 - `test_qbittorrent` — verify WebUI authentication and report the version
 - Runtime monitor records errors and can announce newly completed downloads.
 

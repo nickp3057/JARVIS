@@ -59,6 +59,21 @@ class QBittorrentTests(unittest.TestCase):
         self.assertIn("1 hour 30 minutes", result)
         self.assertIn("2.0 MB/s down", result)
 
+    def test_qbittorrent_52_accepts_204_login(self) -> None:
+        session = Mock(headers={})
+        session.post.return_value = Mock(status_code=204, text="")
+        env = {
+            "QBITTORRENT_URL": "http://qbit:8080",
+            "QBITTORRENT_USERNAME": "jarvis",
+            "QBITTORRENT_PASSWORD": "secret",
+        }
+        with patch.dict(os.environ, env, clear=True), patch.object(
+            qbit.requests, "Session", return_value=session,
+        ):
+            result, error = qbit._session()
+        self.assertIs(result, session)
+        self.assertEqual(error, "")
+
     def test_download_snapshot_preserves_completed_items_for_monitor(self) -> None:
         torrents = [
             {"hash": "one", "name": "Done", "progress": 1, "state": "uploading", "eta": 0},

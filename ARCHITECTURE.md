@@ -23,6 +23,9 @@ Current responsibilities:
   qBittorrent and Radarr/Sonarr queue status on demand.
 - Keep structured home and weather snapshots for cockpit panels.
 - Track whether the last turn used tools.
+- Retain a bounded, session-isolated summary of recent tool results so short
+  follow-ups such as “yes” retain exact identifiers without leaking between
+  companion conversations.
 - Sanitize Anthropic response blocks at the agent boundary before replaying
   them into a multi-round tool conversation; SDK-only parsed fields must never
   leak into Messages API input payloads.
@@ -83,7 +86,8 @@ Near-term responsibilities:
      the runtime rather than duplicating their definitions.
    - World-changing tools that are hard to undo (e.g. adding to the media
      library) are split into a read-only lookup tool and a confirm-gated
-     write tool; the write never fires without explicit user confirmation.
+     write tool; the write never fires without explicit user confirmation or
+     a fresh session-bound receipt proving its ID appeared in the latest lookup.
    - Home Assistant automation changes follow a stricter draft/diff/approve/
      apply/verify workflow with optimistic concurrency and rollback records.
 

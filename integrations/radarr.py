@@ -12,6 +12,7 @@ from __future__ import annotations
 from typing import Any
 
 from integrations import servarr_common as servarr
+from integrations import media_selections
 from jarvis_logger import get_logger
 
 log = get_logger(__name__)
@@ -36,7 +37,7 @@ def _lookup(term: str) -> tuple[bool, Any]:
     )
 
 
-def find_movie(title: str) -> str:
+def find_movie(title: str, session_id: str | None = None) -> str:
     """Search Radarr for ``title`` and report candidates without adding anything."""
     title = (title or "").strip()
     if not title:
@@ -49,6 +50,7 @@ def find_movie(title: str) -> str:
         return str(payload)
 
     results = [m for m in payload if m.get("tmdbId")] if isinstance(payload, list) else []
+    media_selections.record(_SERVICE, session_id, results[:_MAX_CANDIDATES], "tmdbId")
     if not results:
         return f"No match on Radarr for '{title}', sir. Try the exact title or add a year."
 
@@ -66,7 +68,7 @@ def find_movie(title: str) -> str:
     return (
         f"{len(results)} matches on Radarr for '{title}'{more}, sir:\n"
         + "\n".join(lines)
-        + "\nWhich one, and at what quality?"
+        + "\nWhich one?"
     )
 
 
@@ -75,6 +77,7 @@ def add_movie(
     quality: str | None = None,
     root_folder: str | None = None,
     confirmed: bool = False,
+    session_id: str | None = None,
 ) -> str:
     """Add the movie with ``tmdb_id`` to Radarr and trigger a search.
 
@@ -91,6 +94,10 @@ def add_movie(
         tmdb_id = int(tmdb_id)
     except (TypeError, ValueError):
         return "That doesn't look like a TMDB id, sir. Run a lookup first."
+
+    allowed, reason = media_selections.validate(_SERVICE, session_id, tmdb_id)
+    if not allowed:
+        return reason
 
     ok, payload = _lookup(f"tmdb:{tmdb_id}")
     if not ok:
@@ -125,6 +132,8 @@ def add_movie(
     ok, result = servarr.request(_SERVICE, "POST", "/api/v3/movie", json=body)
     if not ok:
         return str(result)
+
+    media_selections.consume(_SERVICE, session_id)
 
     year = movie.get("year", "")
     return (

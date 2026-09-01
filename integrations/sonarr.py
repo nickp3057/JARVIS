@@ -12,6 +12,7 @@ import os
 from typing import Any
 
 from integrations import servarr_common as servarr
+from integrations import media_selections
 from jarvis_logger import get_logger
 
 log = get_logger(__name__)
@@ -80,7 +81,7 @@ def _lookup(term: str) -> tuple[bool, Any]:
     )
 
 
-def find_series(title: str) -> str:
+def find_series(title: str, session_id: str | None = None) -> str:
     """Search Sonarr for ``title`` and report candidates without adding anything."""
     title = (title or "").strip()
     if not title:
@@ -93,6 +94,7 @@ def find_series(title: str) -> str:
         return str(payload)
 
     results = [s for s in payload if s.get("tvdbId")] if isinstance(payload, list) else []
+    media_selections.record(_SERVICE, session_id, results[:_MAX_CANDIDATES], "tvdbId")
     if not results:
         return f"No match on Sonarr for '{title}', sir. Try the exact title or add a year."
 
@@ -102,8 +104,7 @@ def find_series(title: str) -> str:
             return f"{_describe(series)}. It's already in your library, sir — nothing to do."
         return (
             f"One match on Sonarr: {_describe(series)}. "
-            f"Say the word and I'll add it — tell me the quality and whether to monitor "
-            f"future episodes only or the whole series."
+            f"Say the word and I'll add it with your configured defaults."
         )
 
     lines = [f"{i}. {_describe(s)}" for i, s in enumerate(results[:_MAX_CANDIDATES], 1)]
@@ -111,7 +112,7 @@ def find_series(title: str) -> str:
     return (
         f"{len(results)} matches on Sonarr for '{title}'{more}, sir:\n"
         + "\n".join(lines)
-        + "\nWhich one, at what quality, and how much should I monitor?"
+        + "\nWhich one?"
     )
 
 
@@ -122,6 +123,7 @@ def add_series(
     monitor: str | None = None,
     season_folder: bool = True,
     confirmed: bool = False,
+    session_id: str | None = None,
 ) -> str:
     """Add the series with ``tvdb_id`` to Sonarr and trigger a search.
 
@@ -138,6 +140,10 @@ def add_series(
         tvdb_id = int(tvdb_id)
     except (TypeError, ValueError):
         return "That doesn't look like a TVDB id, sir. Run a lookup first."
+
+    allowed, reason = media_selections.validate(_SERVICE, session_id, tvdb_id)
+    if not allowed:
+        return reason
 
     ok, payload = _lookup(f"tvdb:{tvdb_id}")
     if not ok:
@@ -177,6 +183,8 @@ def add_series(
     ok, result = servarr.request(_SERVICE, "POST", "/api/v3/series", json=body)
     if not ok:
         return str(result)
+
+    media_selections.consume(_SERVICE, session_id)
 
     year = series.get("year", "")
     monitor_phrase = "future episodes" if monitor_strategy == "future" else f"'{monitor_strategy}'"

@@ -325,7 +325,7 @@ def _tool_delete_reminder(args: dict[str, Any]) -> str:
 
 
 def _tool_find_movie(args: dict[str, Any]) -> str:
-    return radarr.find_movie(args.get("title", ""))
+    return radarr.find_movie(args.get("title", ""), session_id=args.get("_jarvis_session_id"))
 
 
 def _tool_add_movie(args: dict[str, Any]) -> str:
@@ -334,11 +334,12 @@ def _tool_add_movie(args: dict[str, Any]) -> str:
         quality=args.get("quality"),
         root_folder=args.get("root_folder"),
         confirmed=bool(args.get("confirmed", False)),
+        session_id=args.get("_jarvis_session_id"),
     )
 
 
 def _tool_find_series(args: dict[str, Any]) -> str:
-    return sonarr.find_series(args.get("title", ""))
+    return sonarr.find_series(args.get("title", ""), session_id=args.get("_jarvis_session_id"))
 
 
 def _tool_add_series(args: dict[str, Any]) -> str:
@@ -349,6 +350,7 @@ def _tool_add_series(args: dict[str, Any]) -> str:
         monitor=args.get("monitor"),
         season_folder=bool(args.get("season_folder", True)),
         confirmed=bool(args.get("confirmed", False)),
+        session_id=args.get("_jarvis_session_id"),
     )
 
 
@@ -994,7 +996,8 @@ _CUSTOM_TOOLS: list[dict[str, Any]] = [
             "explicitly confirmed that exact title in a prior turn. Never call "
             "it on an ambiguous or unconfirmed result. 'quality' is a natural "
             "phrase like '4k efficient' or '1080p' - it's fuzzy-matched to a "
-            "configured quality profile; omit it to use the default."
+            "configured quality profile; omit it to use the default. The runtime "
+            "will reject any ID not returned by this session's latest lookup."
         ),
         "input_schema": {
             "type": "object",
@@ -1034,7 +1037,8 @@ _CUSTOM_TOOLS: list[dict[str, Any]] = [
             "fuzzy-matched to a quality profile. 'monitor' controls which "
             "episodes to watch for: default 'future' (new episodes only); use "
             "'all' for the whole back catalogue, or 'firstSeason' / 'pilot' / "
-            "'latestSeason' / 'none' - accepts natural phrasing too."
+            "'latestSeason' / 'none' - accepts natural phrasing too. Omit optional "
+            "choices to use defaults; never ask about them unless Nick requests them."
         ),
         "input_schema": {
             "type": "object",
@@ -1201,14 +1205,17 @@ def get_tool_specs() -> list[dict[str, Any]]:
 TOOL_SPECS = _CUSTOM_TOOLS
 
 
-def execute_tool(name: str, args: dict[str, Any]) -> str:
+def execute_tool(name: str, args: dict[str, Any], session_id: str | None = None) -> str:
     """Dispatch a tool_use block to its handler and return spoken-friendly text."""
     handler = _DISPATCH.get(name)
     if handler is None:
         log.warning("Unknown tool requested: %s", name)
         return f"Tool error: no such tool '{name}'."
     try:
-        return handler(args or {})
+        safe_args = dict(args or {})
+        if session_id:
+            safe_args["_jarvis_session_id"] = session_id
+        return handler(safe_args)
     except Exception as exc:  # noqa: BLE001
         log.exception("Tool %s raised", name)
         return f"Tool error while running {name}: {exc}"

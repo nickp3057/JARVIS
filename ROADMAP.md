@@ -35,6 +35,11 @@ authenticated debug reports containing a bounded conversation, focused reply,
 user description, and non-secret app context. Core stores them durably and
 exposes read-only review tools to JARVIS.
 
+**Media safety baseline shipped:** Radarr/Sonarr writes require a fresh,
+session-bound receipt for an ID returned by the latest lookup, so a model cannot
+substitute a different title after confirmation. Recent exact tool results are
+kept across short follow-ups, and qBittorrent 5.2 authentication is supported.
+
 ### Work
 
 - Verify the resolved Home Assistant environment compatibility on the live

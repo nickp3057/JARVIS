@@ -19,6 +19,7 @@ Failure modes:
 from __future__ import annotations
 
 import os
+import json
 from pathlib import Path
 from threading import RLock
 from typing import Any, Iterator
@@ -116,6 +117,7 @@ class JarvisAgent:
         # Set after each respond() call: True if any custom tool was invoked
         # this turn. Voice runner reads this to decide follow-up window length.
         self.last_used_tools: bool = False
+        self._recent_tool_context: dict[str, str] = {}
 
     # --- Public ----------------------------------------------------------
 
@@ -207,9 +209,10 @@ class JarvisAgent:
     def _run_tool_loop(self) -> str:
         """Call Claude, execute any tools it wants, repeat until done."""
         latest_user_text = str(self._history[-1].get("content", "")) if self._history else ""
-        system = build_system_prompt(render_memory_block(latest_user_text))
+        system = self._system_prompt(latest_user_text)
         messages: list[dict[str, Any]] = list(self._history)
         used_tools_this_turn = False
+        tool_context: list[dict[str, Any]] = []
 
         for _ in range(_MAX_TOOL_TURNS):
             response = self._client.messages.create(  # type: ignore[union-attr]
@@ -234,7 +237,9 @@ class JarvisAgent:
 
                 tool_results: list[dict[str, Any]] = []
                 for use in tool_uses:
-                    result_text = execute_tool(use.name, dict(use.input))
+                    tool_input = dict(use.input)
+                    result_text = execute_tool(use.name, tool_input, session_id=self._session_id)
+                    tool_context.append({"tool": use.name, "input": tool_input, "result": result_text})
                     tool_results.append(
                         {
                             "type": "tool_result",
@@ -247,6 +252,7 @@ class JarvisAgent:
 
             text = "".join(getattr(b, "text", "") for b in text_blocks).strip()
             self.last_used_tools = used_tools_this_turn
+            self._save_tool_context(tool_context)
             return text or "..."
 
         log.warning("Tool loop exceeded %d turns; bailing out.", _MAX_TOOL_TURNS)
@@ -260,10 +266,11 @@ class JarvisAgent:
         text so the caller can persist it to history.
         """
         latest_user_text = str(self._history[-1].get("content", "")) if self._history else ""
-        system = build_system_prompt(render_memory_block(latest_user_text))
+        system = self._system_prompt(latest_user_text)
         messages: list[dict[str, Any]] = list(self._history)
         used_tools_this_turn = False
         text_parts: list[str] = []
+        tool_context: list[dict[str, Any]] = []
 
         for _ in range(_MAX_TOOL_TURNS):
             with self._client.messages.stream(  # type: ignore[union-attr]
@@ -290,7 +297,9 @@ class JarvisAgent:
                 )
                 tool_results: list[dict[str, Any]] = []
                 for use in tool_uses:
-                    result_text = execute_tool(use.name, dict(use.input))
+                    tool_input = dict(use.input)
+                    result_text = execute_tool(use.name, tool_input, session_id=self._session_id)
+                    tool_context.append({"tool": use.name, "input": tool_input, "result": result_text})
                     tool_results.append(
                         {
                             "type": "tool_result",
@@ -302,6 +311,7 @@ class JarvisAgent:
                 continue
 
             self.last_used_tools = used_tools_this_turn
+            self._save_tool_context(tool_context)
             return "".join(text_parts).strip() or "..."
 
         self.last_used_tools = used_tools_this_turn
@@ -311,3 +321,19 @@ class JarvisAgent:
         if len(self._history) <= _HISTORY_KEEP_TURNS * 2:
             return
         self._history = self._history[-_HISTORY_KEEP_TURNS * 2 :]
+
+    def _system_prompt(self, latest_user_text: str) -> str:
+        prompt = build_system_prompt(render_memory_block(latest_user_text))
+        context = self._recent_tool_context.get(self._session_id)
+        if context:
+            prompt += (
+                "\n\n# Recent trusted tool results for this session\n"
+                "Use the exact identifiers below for follow-ups. If Nick says yes after one exact "
+                "media match, add it immediately with the default quality; do not reconfirm.\n"
+                f"{context}"
+            )
+        return prompt
+
+    def _save_tool_context(self, entries: list[dict[str, Any]]) -> None:
+        if entries:
+            self._recent_tool_context[self._session_id] = json.dumps(entries, ensure_ascii=False)[:6000]
