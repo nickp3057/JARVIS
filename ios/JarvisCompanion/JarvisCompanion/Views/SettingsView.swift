@@ -19,7 +19,7 @@ struct SettingsView: View {
                 } header: {
                     Text("Server")
                 } footer: {
-                    Text("The base URL of JARVIS Core, without the /chat path. A bare host is fine — http:// is assumed.")
+                    Text("The base URL of JARVIS Core. A bare host is fine — http:// is assumed and port \(String(AppSettings.defaultServerPort)) is used unless you specify one.")
                 }
 
                 Section {
@@ -54,15 +54,17 @@ struct SettingsView: View {
                         Text(settings.isConfigured ? "Ready" : "Incomplete")
                             .foregroundStyle(settings.isConfigured ? .green : .secondary)
                     }
-                    if settings.isConfigured, let url = settings.resolvedBaseURL {
-                        LabeledContent("Endpoint") {
-                            Text(url.appending(path: "chat").absoluteString)
+                    if let url = settings.resolvedBaseURL {
+                        LabeledContent("Effective URL") {
+                            Text(url.absoluteString)
                                 .font(.footnote.monospaced())
                                 .foregroundStyle(.secondary)
                                 .lineLimit(1)
                                 .truncationMode(.head)
                         }
                     }
+                } footer: {
+                    Text("Every request — chat and the Hub — goes to this address.")
                 }
             }
             .navigationTitle("Settings")

@@ -35,10 +35,14 @@ final class AppSettings: ObservableObject {
         }
     }
 
+    /// The port JARVIS Core actually serves on (`JARVIS_SERVER_PORT` default).
+    static let defaultServerPort = 8000
+
     /// The base URL with the rough edges knocked off: surrounding whitespace
-    /// trimmed, a trailing slash dropped, and a scheme added when the user
-    /// typed a bare host (`100.x.y.z:8000`), which is the common case for a
-    /// Tailscale address.
+    /// trimmed, a trailing slash dropped, a scheme added when the user typed a
+    /// bare host, and the server's real port (8000) filled in when a plain
+    /// http address names none — so `100.x.y.z` just works for the common
+    /// Tailscale case. An explicit port and https URLs are left alone.
     var resolvedBaseURL: URL? {
         var text = baseURLString.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return nil }
@@ -50,13 +54,17 @@ final class AppSettings: ObservableObject {
             text.removeLast()
         }
 
-        guard let url = URL(string: text),
-              let scheme = url.scheme?.lowercased(),
+        guard var components = URLComponents(string: text),
+              let scheme = components.scheme?.lowercased(),
               scheme == "http" || scheme == "https",
-              url.host?.isEmpty == false
+              components.host?.isEmpty == false
         else { return nil }
 
-        return url
+        if scheme == "http", components.port == nil {
+            components.port = Self.defaultServerPort
+        }
+
+        return components.url
     }
 
     var isConfigured: Bool {

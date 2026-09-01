@@ -316,6 +316,107 @@ struct JarvisAPIClient {
         return try JSONDecoder().decode(Envelope.self, from: data).messages
     }
 
+    // MARK: - Dashboard hub
+
+    /// Shared GET-and-decode for the read-only dashboard endpoints. They all
+    /// return 200 with an `error` field when a backing service is down, so a
+    /// thrown error here means the request itself failed, not the service.
+    private func getJSON<T: Decodable>(_ type: T.Type, path: String) async throws -> T {
+        let request = request(path: path)
+        let data: Data
+        let response: URLResponse
+        do {
+            (data, response) = try await Self.session.data(for: request)
+        } catch let error as URLError {
+            throw JarvisAPIError.transport(error)
+        }
+        _ = try validate(response, data: data)
+        guard let decoded = try? JSONDecoder().decode(type, from: data) else {
+            throw JarvisAPIError.malformedResponse(String(data: data, encoding: .utf8))
+        }
+        return decoded
+    }
+
+    private func postJSON<Body: Encodable, T: Decodable>(
+        _ type: T.Type, path: String, body: Body
+    ) async throws -> T {
+        var request = request(path: path, method: "POST")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONEncoder().encode(body)
+        let data: Data
+        let response: URLResponse
+        do {
+            (data, response) = try await Self.session.data(for: request)
+        } catch let error as URLError {
+            throw JarvisAPIError.transport(error)
+        }
+        _ = try validate(response, data: data)
+        guard let decoded = try? JSONDecoder().decode(type, from: data) else {
+            throw JarvisAPIError.malformedResponse(String(data: data, encoding: .utf8))
+        }
+        return decoded
+    }
+
+    func torrentsStatus() async throws -> TorrentsStatus {
+        try await getJSON(TorrentsStatus.self, path: "api/status/torrents")
+    }
+
+    func mediaStatus() async throws -> MediaStatus {
+        try await getJSON(MediaStatus.self, path: "api/status/media")
+    }
+
+    func servicesStatus() async throws -> ServicesStatus {
+        try await getJSON(ServicesStatus.self, path: "api/status/services")
+    }
+
+    func serviceLinks() async throws -> ServiceLinks {
+        try await getJSON(ServiceLinks.self, path: "api/links")
+    }
+
+    func homeEntities() async throws -> HomeEntities {
+        try await getJSON(HomeEntities.self, path: "api/home/entities")
+    }
+
+    private struct HomeControlRequest: Encodable {
+        let entityID: String
+        let action: String
+
+        enum CodingKeys: String, CodingKey {
+            case action
+            case entityID = "entity_id"
+        }
+    }
+
+    func homeControl(entityID: String, turnOn: Bool) async throws -> HomeControlResult {
+        try await postJSON(
+            HomeControlResult.self,
+            path: "api/home/control",
+            body: HomeControlRequest(entityID: entityID, action: turnOn ? "on" : "off")
+        )
+    }
+
+    private struct TorrentControlRequest: Encodable {
+        let torrentHash: String
+        let action: String
+        let confirmed: Bool
+
+        enum CodingKeys: String, CodingKey {
+            case action, confirmed
+            case torrentHash = "torrent_hash"
+        }
+    }
+
+    /// `confirmed: true` is deliberate: on this surface the user's tap on a
+    /// specific torrent's pause/resume button *is* the confirmation, and the
+    /// hash comes straight from the live list response.
+    func torrentControl(hash: String, action: String) async throws -> TorrentControlResult {
+        try await postJSON(
+            TorrentControlResult.self,
+            path: "api/torrents/control",
+            body: TorrentControlRequest(torrentHash: hash, action: action, confirmed: true)
+        )
+    }
+
     func submitDebugReport(
         issue: String,
         messages: [DebugReportMessagePayload],

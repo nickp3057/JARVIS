@@ -444,6 +444,19 @@ CALENDAR_ALERT_LEAD_MIN=10  # warn this many minutes before a meeting
 
 ## Recently Shipped
 
+- **iOS Hub screen** (`ios/JarvisCompanion`) — a tab bar now pairs Chat with a
+  Hub dashboard rendering the seven server endpoints: per-service up/latency
+  rows, live torrent transfers with progress/speed/ETA (pause/resume buttons
+  appear once the server includes each torrent's `hash` in
+  `/api/status/torrents` — a pending one-line server change), Radarr/Sonarr
+  queues with collapsible recent additions, allowlisted quick-action toggles
+  (optimistic, reconciled from the POST response, reverted with an alert on
+  failure), and browser links. Pull-to-refresh everywhere; torrents and
+  services auto-poll every 5s (matching the server TTL) only while the Hub is
+  visible and foregrounded. Every section loads and fails independently — a
+  dead service shows an inline error while the rest render. Settings now
+  fills in port 8000 for plain-http addresses typed without a port and shows
+  the effective URL. All Hub networking reuses `JarvisAPIClient`.
 - **Companion quick actions** (`app/status_hub.py`, `app/server.py`) — two
   bearer-auth'd write endpoints for the iOS hub. `POST /api/home/control`
   turns an allowlisted entity on or off (entity must be in
