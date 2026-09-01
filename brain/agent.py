@@ -30,7 +30,7 @@ from brain.history import append_turn, load_history, load_session_messages, star
 from brain.intents import routed_offline_reply
 from brain.local_model import is_configured as local_model_configured
 from brain.memory import render_memory_block
-from brain.personality import build_system_prompt
+from brain.personality import build_memory_section, build_persona_prompt
 from brain.tools import execute_tool, get_tool_specs
 from jarvis_logger import get_logger
 
@@ -228,7 +228,8 @@ class JarvisAgent:
     def _run_tool_loop(self) -> str:
         """Call Claude, execute any tools it wants, repeat until done."""
         latest_user_text = str(self._history[-1].get("content", "")) if self._history else ""
-        system = self._system_prompt(latest_user_text)
+        system = self._system_blocks(latest_user_text)
+        tools = get_tool_specs()
         messages: list[dict[str, Any]] = list(self._history)
         used_tools_this_turn = False
         tool_context: list[dict[str, Any]] = []
@@ -238,7 +239,7 @@ class JarvisAgent:
                 model=ANTHROPIC_MODEL,
                 max_tokens=_MAX_TOKENS,
                 system=system,
-                tools=get_tool_specs(),
+                tools=tools,
                 messages=messages,
             )
 
@@ -285,7 +286,8 @@ class JarvisAgent:
         text so the caller can persist it to history.
         """
         latest_user_text = str(self._history[-1].get("content", "")) if self._history else ""
-        system = self._system_prompt(latest_user_text)
+        system = self._system_blocks(latest_user_text)
+        tools = get_tool_specs()
         messages: list[dict[str, Any]] = list(self._history)
         used_tools_this_turn = False
         text_parts: list[str] = []
@@ -296,7 +298,7 @@ class JarvisAgent:
                 model=ANTHROPIC_MODEL,
                 max_tokens=_MAX_TOKENS,
                 system=system,
-                tools=get_tool_specs(),
+                tools=tools,
                 messages=messages,
             ) as stream:
                 for delta in stream.text_stream:
@@ -341,17 +343,35 @@ class JarvisAgent:
             return
         self._history = self._history[-_HISTORY_KEEP_TURNS * 2 :]
 
-    def _system_prompt(self, latest_user_text: str) -> str:
-        prompt = build_system_prompt(render_memory_block(latest_user_text))
+    def _system_blocks(self, latest_user_text: str) -> list[dict[str, Any]]:
+        """Build the system prompt as blocks so the stable prefix caches.
+
+        The persona is identical from turn to turn (until Nick changes a
+        persona setting), so it carries a cache breakpoint; together with the
+        breakpoint on the tool schemas this lets the API reuse the large
+        stable prefix on every call, including each round of a tool loop.
+        The memory block and recent tool context vary per turn and stay in a
+        separate uncached block after it.
+        """
+        blocks: list[dict[str, Any]] = [
+            {
+                "type": "text",
+                "text": build_persona_prompt(),
+                "cache_control": {"type": "ephemeral"},
+            }
+        ]
+        dynamic = build_memory_section(render_memory_block(latest_user_text))
         context = self._recent_tool_context.get(self._session_id)
         if context:
-            prompt += (
+            dynamic += (
                 "\n\n# Recent trusted tool results for this session\n"
                 "Use the exact identifiers below for follow-ups. If Nick says yes after one exact "
                 "media match, add it immediately with the default quality; do not reconfirm.\n"
                 f"{context}"
             )
-        return prompt
+        if dynamic.strip():
+            blocks.append({"type": "text", "text": dynamic})
+        return blocks
 
     def _save_tool_context(self, entries: list[dict[str, Any]]) -> None:
         if entries:

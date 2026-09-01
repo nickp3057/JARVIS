@@ -891,7 +891,13 @@ class TimersPanel(QFrame):
 # ---------------------------------------------------------------------------
 
 class NowPlayingPanel(QFrame):
-    """Shows the current Spotify track; hides itself when nothing is playing."""
+    """Shows the current Spotify track; hides itself when nothing is playing.
+
+    The Spotify lookup is a network call, so it runs on a worker thread and
+    posts the result back through a signal — the UI thread never blocks on it.
+    """
+
+    _track_ready = pyqtSignal(object)
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -916,6 +922,9 @@ class NowPlayingPanel(QFrame):
         self._artist.setStyleSheet("color: #80A8B8; font-size: 9pt;")
         layout.addWidget(self._artist)
 
+        self._fetching = False
+        self._track_ready.connect(self._apply_track)
+
         self._timer = QTimer(self)
         self._timer.setInterval(8_000)
         self._timer.timeout.connect(self.refresh)
@@ -923,14 +932,22 @@ class NowPlayingPanel(QFrame):
         self.refresh()
 
     def refresh(self) -> None:
+        if self._fetching:
+            return
+        self._fetching = True
+        threading.Thread(target=self._fetch_track, daemon=True).start()
+
+    def _fetch_track(self) -> None:
         try:
             from integrations.spotify import current_track_structured
             info = current_track_structured()
         except Exception:  # noqa: BLE001
-            self.hide()
-            return
+            info = None
+        self._track_ready.emit(info)
 
-        if not info:
+    def _apply_track(self, info: object) -> None:
+        self._fetching = False
+        if not isinstance(info, dict) or not info:
             self.hide()
             return
 

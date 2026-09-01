@@ -1587,6 +1587,10 @@ def get_tool_specs() -> list[dict[str, Any]]:
     web_search server tool.
     """
     specs: list[dict[str, Any]] = list(_CUSTOM_TOOLS)
+    # Cache breakpoint on the last custom tool: the tool schemas are by far the
+    # largest stable chunk of every request, so let the API reuse them instead
+    # of re-processing them on each call (including every round of a tool loop).
+    specs[-1] = {**specs[-1], "cache_control": {"type": "ephemeral"}}
     if _web_search_enabled():
         specs.append(_web_search_server_tool())
     return specs

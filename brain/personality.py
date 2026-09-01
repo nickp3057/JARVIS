@@ -42,7 +42,7 @@ def _humor_descriptor(percent: int) -> str:
     return "Heavy on the wit and sass. Almost every line has a beat."
 
 
-def _build_persona_prompt() -> str:
+def build_persona_prompt() -> str:
     address = _current_address()
     humor = _current_humor_percent()
     humor_line = _humor_descriptor(humor)
@@ -204,19 +204,27 @@ You: "Four. I trust this is a warmup question."
 """
 
 
+def build_memory_section(memory_block: str = "") -> str:
+    """Render the per-turn memory section, or "" when there is nothing to add.
+
+    Kept separate from the persona so the agent can send the stable persona as
+    a cacheable system block and this varying part as a second, uncached one.
+    """
+    memory_block = (memory_block or "").strip()
+    if not memory_block:
+        return ""
+    return (
+        "\n\n# What you remember about Nick\n"
+        "These are durable facts from earlier conversations. Use them "
+        "naturally when relevant - don't recite them back.\n\n"
+        f"{memory_block}\n"
+    )
+
+
 def build_system_prompt(memory_block: str = "") -> str:
     """Assemble the full system prompt: persona + long-term memory.
 
     Rebuilt on every turn so live setting changes (humor, address) and any
     newly remembered facts take effect immediately.
     """
-    prompt = _build_persona_prompt()
-    memory_block = (memory_block or "").strip()
-    if memory_block:
-        prompt += (
-            "\n\n# What you remember about Nick\n"
-            "These are durable facts from earlier conversations. Use them "
-            "naturally when relevant - don't recite them back.\n\n"
-            f"{memory_block}\n"
-        )
-    return prompt
+    return build_persona_prompt() + build_memory_section(memory_block)

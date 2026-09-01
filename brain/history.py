@@ -40,8 +40,16 @@ def _connect() -> sqlite3.Connection:
     return conn
 
 
+# Schema creation/migration is idempotent but not free (table creation plus
+# PRAGMA scans); run it once per database path instead of on every query.
+# Keyed by path so tests that repoint _DB_PATH still initialize fresh files.
+_schema_ready_paths: set[str] = set()
+
+
 def _ensure_schema(conn: sqlite3.Connection) -> None:
-    """Create tables and migrate older schemas in place."""
+    """Create tables and migrate older schemas in place (once per DB path)."""
+    if str(_DB_PATH) in _schema_ready_paths:
+        return
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS conversation (
@@ -82,6 +90,7 @@ def _ensure_schema(conn: sqlite3.Connection) -> None:
     if "summarized_at" not in session_cols:
         conn.execute("ALTER TABLE sessions ADD COLUMN summarized_at TEXT")
     conn.commit()
+    _schema_ready_paths.add(str(_DB_PATH))
 
 
 def _prune(conn: sqlite3.Connection, session_id: str) -> None:
