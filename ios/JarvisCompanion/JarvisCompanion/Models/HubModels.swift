@@ -28,8 +28,9 @@ struct TorrentTransfer: Decodable, Identifiable {
     let upSpeed: Int
     let eta: Int
     let size: Int
-    /// Not yet emitted by the server's list response; pause/resume controls
-    /// appear only when it is. (Requires a one-line server-side addition.)
+    /// Targets pause/resume. Optional so the app still renders the list when
+    /// talking to an older JARVIS Core that predates the field; the controls
+    /// simply stay hidden there.
     let hash: String?
 
     var id: String { hash ?? name }

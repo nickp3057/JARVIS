@@ -39,6 +39,25 @@ class QBittorrentTests(unittest.TestCase):
         self.assertEqual(session.headers["Origin"], "http://qbit.local:8080")
         session.post.assert_called_once()
 
+    def test_list_transfers_passes_hash_through(self) -> None:
+        torrents = [{
+            "hash": "a" * 40,
+            "name": "Example Movie",
+            "progress": 0.5,
+            "dlspeed": 1024,
+            "upspeed": 0,
+            "eta": 600,
+            "size": 2048,
+            "state": "downloading",
+        }]
+        transfer = {"dl_info_speed": 1024, "up_info_speed": 0}
+        with patch.object(qbit, "torrent_info", return_value=(True, torrents)), patch.object(
+            qbit, "transfer_info", return_value=(True, transfer),
+        ):
+            ok, payload = qbit.list_transfers()
+        self.assertTrue(ok)
+        self.assertEqual(payload["torrents"][0]["hash"], "a" * 40)
+
     def test_download_status_reports_progress_speed_and_eta(self) -> None:
         torrents = [{
             "name": "Example Movie",

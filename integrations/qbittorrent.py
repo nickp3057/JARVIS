@@ -228,6 +228,7 @@ def list_transfers(scope: str = "active") -> tuple[bool, dict[str, Any] | str]:
             continue
         torrents.append(
             {
+                "hash": str(item.get("hash", "")),
                 "name": str(item.get("name", "Unknown download")),
                 "progress": float(item.get("progress", 0) or 0),
                 "state": state,

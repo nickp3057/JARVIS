@@ -446,9 +446,9 @@ CALENDAR_ALERT_LEAD_MIN=10  # warn this many minutes before a meeting
 
 - **iOS Hub screen** (`ios/JarvisCompanion`) — a tab bar now pairs Chat with a
   Hub dashboard rendering the seven server endpoints: per-service up/latency
-  rows, live torrent transfers with progress/speed/ETA (pause/resume buttons
-  appear once the server includes each torrent's `hash` in
-  `/api/status/torrents` — a pending one-line server change), Radarr/Sonarr
+  rows, live torrent transfers with progress/speed/ETA and per-torrent
+  pause/resume (targeting the `hash` now included in `/api/status/torrents`;
+  the buttons hide gracefully against an older Core), Radarr/Sonarr
   queues with collapsible recent additions, allowlisted quick-action toggles
   (optimistic, reconciled from the POST response, reverted with an alert on
   failure), and browser links. Pull-to-refresh everywhere; torrents and
