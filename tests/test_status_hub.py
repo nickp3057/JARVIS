@@ -160,5 +160,154 @@ class StatusHubEndpointTests(unittest.TestCase):
         self.assertEqual(body["entities"], [])
 
 
+class QuickActionEndpointTests(unittest.TestCase):
+    def setUp(self) -> None:
+        status_hub.clear_cache()
+        env = dict(_NO_SERVICES_ENV)
+        env["HOME_DASHBOARD_ENTITIES"] = "light.desk,switch.lamp"
+        self.env_patch = patch.dict(os.environ, env)
+        self.env_patch.start()
+        self.client = TestClient(server.app)
+        self.headers = {"Authorization": "Bearer test-token"}
+
+    def tearDown(self) -> None:
+        self.client.close()
+        self.env_patch.stop()
+        status_hub.clear_cache()
+
+    # --- /api/home/control -------------------------------------------------
+
+    def test_home_control_requires_auth(self) -> None:
+        response = self.client.post(
+            "/api/home/control", json={"entity_id": "light.desk", "action": "on"}
+        )
+        self.assertEqual(response.status_code, 401)
+
+    def test_home_control_rejects_non_allowlisted_entity(self) -> None:
+        with patch.object(status_hub, "call_discovered_service") as call:
+            response = self.client.post(
+                "/api/home/control",
+                headers=self.headers,
+                json={"entity_id": "lock.front_door", "action": "on"},
+            )
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("allowlist", response.json()["detail"])
+        call.assert_not_called()
+
+    def test_home_control_rejects_unsupported_action(self) -> None:
+        response = self.client.post(
+            "/api/home/control",
+            headers=self.headers,
+            json={"entity_id": "light.desk", "action": "toggle"},
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("on", response.json()["detail"])
+
+    def test_home_control_success_returns_state_and_invalidates_cache(self) -> None:
+        states = [{"entity_id": "light.desk", "state": "on",
+                   "attributes": {"friendly_name": "Desk"}}]
+        with patch.object(status_hub, "get_states", return_value=(True, states)) as get:
+            # Prime the entities cache, then control, then read again: the
+            # cache must be dropped so the second read refetches.
+            self.client.get("/api/home/entities", headers=self.headers)
+            with patch.object(
+                status_hub, "call_discovered_service",
+                return_value="Turn On command sent to light.desk.",
+            ) as call:
+                response = self.client.post(
+                    "/api/home/control",
+                    headers=self.headers,
+                    json={"entity_id": "light.desk", "action": "on"},
+                )
+            self.client.get("/api/home/entities", headers=self.headers)
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual(body["error"], "")
+        self.assertEqual(body["state"], "on")
+        call.assert_called_once_with("light", "turn_on", entity_id="light.desk")
+        # entities prime + control readback + entities refetch after invalidation
+        self.assertEqual(get.call_count, 3)
+
+    def test_home_control_service_failure_degrades_to_error_field(self) -> None:
+        with patch.object(
+            status_hub, "call_discovered_service",
+            return_value="Command failed. Could not reach Home Assistant.",
+        ):
+            response = self.client.post(
+                "/api/home/control",
+                headers=self.headers,
+                json={"entity_id": "switch.lamp", "action": "off"},
+            )
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertIn("Command failed", body["error"])
+        self.assertIsNone(body["state"])
+
+    # --- /api/torrents/control ---------------------------------------------
+
+    def test_torrent_control_requires_auth(self) -> None:
+        response = self.client.post(
+            "/api/torrents/control",
+            json={"torrent_hash": "a" * 40, "action": "pause", "confirmed": True},
+        )
+        self.assertEqual(response.status_code, 401)
+
+    def test_torrent_control_rejects_unsupported_action(self) -> None:
+        for action in ("delete", "recheck", "priority_top"):
+            response = self.client.post(
+                "/api/torrents/control",
+                headers=self.headers,
+                json={"torrent_hash": "a" * 40, "action": action, "confirmed": True},
+            )
+            self.assertEqual(response.status_code, 400, action)
+
+    def test_torrent_control_confirmation_gate_surfaces_as_error(self) -> None:
+        with patch.object(
+            status_hub, "manage_torrent",
+            return_value=f"Confirmation required before pause on torrent {'a' * 40}.",
+        ) as manage:
+            response = self.client.post(
+                "/api/torrents/control",
+                headers=self.headers,
+                json={"torrent_hash": "a" * 40, "action": "pause", "confirmed": False},
+            )
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("Confirmation required", response.json()["error"])
+        manage.assert_called_once_with("pause", "a" * 40, confirmed=False)
+
+    def test_torrent_control_success_invalidates_torrents_cache(self) -> None:
+        empty = {"dl_speed": 0, "up_speed": 0, "torrents": []}
+        with patch.object(
+            status_hub, "list_transfers", return_value=(True, empty)
+        ) as fetch:
+            self.client.get("/api/status/torrents", headers=self.headers)
+            with patch.object(
+                status_hub, "manage_torrent",
+                return_value="Pause accepted for Some Torrent.",
+            ) as manage:
+                response = self.client.post(
+                    "/api/torrents/control",
+                    headers=self.headers,
+                    json={"torrent_hash": "a" * 40, "action": "pause", "confirmed": True},
+                )
+            self.client.get("/api/status/torrents", headers=self.headers)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["error"], "")
+        manage.assert_called_once_with("pause", "a" * 40, confirmed=True)
+        self.assertEqual(fetch.call_count, 2)  # cache dropped after control
+
+    def test_torrent_control_never_passes_delete_files(self) -> None:
+        with patch.object(
+            status_hub, "manage_torrent", return_value="Pause accepted for X.",
+        ) as manage:
+            self.client.post(
+                "/api/torrents/control",
+                headers=self.headers,
+                json={"torrent_hash": "a" * 40, "action": "pause",
+                      "confirmed": True, "delete_files": True},
+            )
+        self.assertNotIn("delete_files", manage.call_args.kwargs)
+
+
 if __name__ == "__main__":
     unittest.main()

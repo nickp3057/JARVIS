@@ -444,6 +444,17 @@ CALENDAR_ALERT_LEAD_MIN=10  # warn this many minutes before a meeting
 
 ## Recently Shipped
 
+- **Companion quick actions** (`app/status_hub.py`, `app/server.py`) — two
+  bearer-auth'd write endpoints for the iOS hub. `POST /api/home/control`
+  turns an allowlisted entity on or off (entity must be in
+  `HOME_DASHBOARD_ENTITIES` — the allowlist is the security boundary, not a
+  display filter; non-allowlisted entities and unsupported actions are 400s)
+  and returns the resulting state; it delegates to the guarded
+  `call_discovered_service` path. `POST /api/torrents/control` pauses or
+  resumes one torrent via `manage_torrent`, preserving its exact-hash and
+  explicit-confirmation gates; `delete_files` is never passed. Successful
+  actions invalidate the matching status cache; refused or failed service
+  calls return 200 with an `error` field.
 - **Companion dashboard endpoints** (`app/status_hub.py`, `app/server.py`) —
   five bearer-auth'd, read-only JSON endpoints so the iOS app can render a
   status hub without ever talking to the NAS services directly:

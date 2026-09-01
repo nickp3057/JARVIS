@@ -184,15 +184,26 @@ stores user-approved diagnostic evidence without asking a model to analyze it
 at submission time. Later review still happens through the normal runtime and
 read-only debug-report tools.
 
-The read-only dashboard endpoints (`/api/status/torrents`, `/api/status/media`,
+The dashboard endpoints (`/api/status/torrents`, `/api/status/media`,
 `/api/status/services`, `/api/links`, `/api/home/entities`) are a second
 non-conversational surface, aggregated in `app.status_hub` directly over the
 integration modules. They keep the thin-client principle: all service
 credentials and URLs stay server-side (read from the same `.env` values the
 integrations use), responses are TTL-cached in process so companion polling
 cannot hammer the NAS, and a down service degrades to a 200 with an `error`
-field — never a hard failure. These endpoints are not registered as LLM tools
-and perform no writes; Home Assistant exposure is state-only.
+field — never a hard failure. These endpoints are not registered as LLM tools.
+
+Two guarded quick-action routes extend that surface with bounded writes:
+`POST /api/home/control` (on/off only, and only for entities on the
+`HOME_DASHBOARD_ENTITIES` allowlist — the allowlist is the security boundary
+for the app's home surface, not just a display filter; anything else is a
+400) and `POST /api/torrents/control` (pause/resume only). Both delegate to
+the integrations' existing guarded paths — `call_discovered_service` with its
+blocked-domain and confirmation gates, and `manage_torrent` with its
+exact-hash and explicit-confirmation gates; `delete_files` is never passed
+from the HTTP surface. A successful action invalidates the corresponding
+status cache so the app's next poll reflects the change; a refused or failed
+call returns 200 with an `error` field.
 
 ## Design Rule
 

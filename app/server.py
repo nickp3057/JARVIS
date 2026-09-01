@@ -191,6 +191,43 @@ def home_entities(_: None = Depends(authorize)) -> dict[str, object]:
     return status_hub.home_entities()
 
 
+# --- Quick actions ----------------------------------------------------------
+# Guarded writes for the companion hub. Invalid input (bad action, entity not
+# on the HOME_DASHBOARD_ENTITIES allowlist) is a 400; a failed or refused
+# service call still returns 200 with an ``error`` field.
+
+
+class HomeControlRequest(BaseModel):
+    entity_id: str = Field(min_length=1, max_length=200)
+    action: str = Field(min_length=1, max_length=32)
+
+
+class TorrentControlRequest(BaseModel):
+    torrent_hash: str = Field(min_length=1, max_length=64)
+    action: str = Field(min_length=1, max_length=32)
+    confirmed: bool = False
+
+
+@app.post("/api/home/control")
+def home_control(request: HomeControlRequest, _: None = Depends(authorize)) -> dict[str, object]:
+    try:
+        return status_hub.home_control(request.entity_id, request.action)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post("/api/torrents/control")
+def torrents_control(
+    request: TorrentControlRequest, _: None = Depends(authorize)
+) -> dict[str, object]:
+    try:
+        return status_hub.torrent_control(
+            request.torrent_hash, request.action, request.confirmed
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
 def run_server() -> None:
     """Run the companion API using environment-configured bind settings."""
     import uvicorn

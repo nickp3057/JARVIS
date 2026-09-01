@@ -1,9 +1,11 @@
-"""Read-only status aggregation for the companion dashboard endpoints.
+"""Status aggregation and guarded quick actions for the companion dashboard.
 
-This module backs the ``/api/status/*``, ``/api/links``, and
-``/api/home/entities`` routes in ``app.server``. It is server-side glue over
-the existing integrations — no credentials or service logic live in the iOS
-client, and nothing here mutates any service.
+This module backs the ``/api/status/*``, ``/api/links``, ``/api/home/*``, and
+``/api/torrents/control`` routes in ``app.server``. It is server-side glue
+over the existing integrations — no credentials or service logic live in the
+iOS client. The only mutations are the two quick-action functions
+(``home_control``, ``torrent_control``), which delegate to the integrations'
+existing guarded control paths rather than reimplementing them.
 
 Design points:
 - Service base URLs and credentials are read from the SAME config helpers the
@@ -28,9 +30,9 @@ from typing import Any, Callable
 import requests
 
 from integrations.home_assistant import _config as _ha_config
-from integrations.home_assistant import get_states
+from integrations.home_assistant import call_discovered_service, get_states
 from integrations.qbittorrent import _config as _qbt_config
-from integrations.qbittorrent import list_transfers
+from integrations.qbittorrent import list_transfers, manage_torrent
 from integrations.servarr_common import (
     _queue_title,
     _service_url,
@@ -74,6 +76,12 @@ def clear_cache() -> None:
     """Drop all cached entries (used by tests)."""
     with _cache_lock:
         _cache.clear()
+
+
+def invalidate(key: str) -> None:
+    """Drop one cached entry so the next read reflects a just-made change."""
+    with _cache_lock:
+        _cache.pop(key, None)
 
 
 # --- Torrents --------------------------------------------------------------
@@ -217,12 +225,18 @@ def home_entities() -> dict[str, Any]:
     return _cached("entities", _ENTITIES_TTL_S, _home_entities_uncached)
 
 
-def _home_entities_uncached() -> dict[str, Any]:
-    allowlist = [
-        entity_id.strip()
+def _dashboard_allowlist() -> list[str]:
+    """The ``HOME_DASHBOARD_ENTITIES`` allowlist — the security boundary for
+    the app's home surface (both display and control)."""
+    return [
+        entity_id.strip().lower()
         for entity_id in os.getenv("HOME_DASHBOARD_ENTITIES", "").split(",")
         if entity_id.strip()
     ]
+
+
+def _home_entities_uncached() -> dict[str, Any]:
+    allowlist = _dashboard_allowlist()
     if not allowlist:
         return {"error": "", "entities": []}
 
@@ -246,3 +260,62 @@ def _home_entities_uncached() -> dict[str, Any]:
             }
         )
     return {"error": "", "entities": entities}
+
+
+# --- Quick actions (guarded, allowlist-bound) -------------------------------
+#
+# Both integrations' guarded control paths return human-readable strings, not
+# status tuples. Their success replies are stable and distinctive, so we
+# detect success by marker; anything else is surfaced verbatim in ``error``.
+_HA_SUCCESS_MARKER = "command sent"       # call_service success reply
+_QBT_SUCCESS_MARKER = "accepted for"      # manage_torrent success reply
+
+
+def home_control(entity_id: str, action: str) -> dict[str, Any]:
+    """Turn one allowlisted Home Assistant entity on or off.
+
+    Delegates to ``call_discovered_service`` so all its guards (identifier
+    validation, blocked admin domains, confirmation-gated domains) stay in
+    force. Raises ``ValueError`` for invalid input — the HTTP layer maps that
+    to a 400; service failures degrade to an ``error`` field instead.
+    """
+    entity_id = (entity_id or "").strip().lower()
+    action = (action or "").strip().lower()
+    if action not in {"on", "off"}:
+        raise ValueError("action must be 'on' or 'off'")
+    if entity_id not in _dashboard_allowlist():
+        raise ValueError("entity_id is not in the HOME_DASHBOARD_ENTITIES allowlist")
+
+    domain = entity_id.split(".", 1)[0]
+    message = call_discovered_service(domain, f"turn_{action}", entity_id=entity_id)
+    if _HA_SUCCESS_MARKER not in message.lower():
+        return {"error": message, "entity_id": entity_id, "state": None}
+
+    invalidate("entities")
+    state = None
+    ok, states = get_states()
+    if ok and isinstance(states, list):
+        for entity in states:
+            if str(entity.get("entity_id", "")) == entity_id:
+                state = str(entity.get("state", "unknown"))
+                break
+    return {"error": "", "entity_id": entity_id, "state": state}
+
+
+def torrent_control(torrent_hash: str, action: str, confirmed: bool) -> dict[str, Any]:
+    """Pause or resume one torrent via the existing confirm-gated path.
+
+    ``manage_torrent`` keeps its exact-hash validation, live-list check, and
+    explicit-confirmation gate; ``delete_files`` is never passed from here.
+    Raises ``ValueError`` for an unsupported action (HTTP 400); every guard
+    refusal or service failure comes back as an ``error`` field.
+    """
+    action = (action or "").strip().lower()
+    if action not in {"pause", "resume"}:
+        raise ValueError("action must be 'pause' or 'resume'")
+
+    message = manage_torrent(action, torrent_hash, confirmed=bool(confirmed))
+    if _QBT_SUCCESS_MARKER not in message.lower():
+        return {"error": message, "message": ""}
+    invalidate("torrents")
+    return {"error": "", "message": message}
