@@ -17,6 +17,7 @@ from brain.history import (
     rename_session,
     session_exists,
 )
+from app import status_hub
 from brain.debug_reports import create_debug_report
 from brain.runtime import JarvisRuntime
 
@@ -157,6 +158,37 @@ def submit_debug_report(
         )
     except (OSError, ValueError) as exc:
         raise HTTPException(status_code=500, detail=f"Could not store debug report: {exc}") from exc
+
+
+# --- Read-only dashboard endpoints -----------------------------------------
+# Aggregated in app.status_hub over the existing integrations. Every route
+# returns 200 with an ``error`` field when a backing service is down — the
+# companion app must never see a hard failure because the NAS is unreachable.
+
+
+@app.get("/api/status/torrents")
+def status_torrents(_: None = Depends(authorize)) -> dict[str, object]:
+    return status_hub.torrents_status()
+
+
+@app.get("/api/status/media")
+def status_media(_: None = Depends(authorize)) -> dict[str, object]:
+    return status_hub.media_status()
+
+
+@app.get("/api/status/services")
+def status_services(_: None = Depends(authorize)) -> dict[str, object]:
+    return status_hub.services_status()
+
+
+@app.get("/api/links")
+def service_links(_: None = Depends(authorize)) -> dict[str, object]:
+    return status_hub.links()
+
+
+@app.get("/api/home/entities")
+def home_entities(_: None = Depends(authorize)) -> dict[str, object]:
+    return status_hub.home_entities()
 
 
 def run_server() -> None:

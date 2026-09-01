@@ -397,6 +397,9 @@ LOCAL_MODEL_API_KEY=         # optional; never logged
 JARVIS_API_TOKEN=           # required bearer token
 JARVIS_SERVER_HOST=0.0.0.0
 JARVIS_SERVER_PORT=8000
+# Companion dashboard (read-only status hub endpoints)
+PLEX_URL=                   # Plex base URL for /api/links + /api/status/services
+HOME_DASHBOARD_ENTITIES=    # comma-separated HA entity_ids for /api/home/entities
 
 # Google Calendar (optional, read-only)
 GOOGLE_CREDENTIALS_FILE=    # path to OAuth client-secret JSON (Desktop app)
@@ -441,6 +444,30 @@ CALENDAR_ALERT_LEAD_MIN=10  # warn this many minutes before a meeting
 
 ## Recently Shipped
 
+- **Companion dashboard endpoints** (`app/status_hub.py`, `app/server.py`) —
+  five bearer-auth'd, read-only JSON endpoints so the iOS app can render a
+  status hub without ever talking to the NAS services directly:
+  `/api/status/torrents` (qBittorrent transfers + global rates),
+  `/api/status/media` (Radarr/Sonarr queues + 5 most recent library
+  additions each), `/api/status/services` (reachability + latency for Home
+  Assistant, Plex, Sonarr, Radarr, qBittorrent), `/api/links` (web-UI links
+  derived from the same `.env` base URLs the integrations read; unset
+  services are omitted), and `/api/home/entities` (state of the
+  `HOME_DASHBOARD_ENTITIES` allowlist — read-only, no control). A short
+  in-process TTL cache (5s torrents/services/entities, 15s media) absorbs
+  app polling, and every endpoint returns 200 with an `error` field and
+  empty data when a backing service is down. New `.env` vars: `PLEX_URL`
+  and `HOME_DASHBOARD_ENTITIES`; a full `.env.example` now exists at the
+  repo root. `integrations/qbittorrent.py` gained a structured
+  `list_transfers()` used by the torrents endpoint.
+- **Efficiency pass: prompt caching + non-blocking cockpit** — API requests
+  now mark the tool schemas and the stable persona system block with
+  `cache_control: ephemeral`, so the large stable prefix is cached across
+  turns and across every round of a tool loop (the per-turn memory block and
+  recent tool context stay in a separate uncached system block). The Now
+  Playing panel fetches Spotify state on a worker thread instead of blocking
+  the UI thread, and SQLite schema creation/migration runs once per database
+  path instead of on every query.
 - **Streaming standalone voice mode** (`speech/voice_loop.py`) — headless
   `--voice` now pipelines `respond_streaming` into sentence-level TTS when
   `STREAMING_TTS=true`, while retaining mic interruption and blocking fallback.
@@ -605,6 +632,52 @@ CALENDAR_ALERT_LEAD_MIN=10  # warn this many minutes before a meeting
   diagnostic evidence. API tokens and server addresses are never included.
 
 ## What's Not Done Yet (Roadmap)
+
+### Performance debt (from the September 2026 efficiency audit)
+
+Shipped from that audit: prompt caching, the Now Playing worker thread, and
+once-per-path SQLite schema checks (see Recently Shipped). Still open, roughly
+in value order:
+
+- **UI panels poll and rebuild from scratch** — `RuntimePanel` (2s) calls
+  `status_snapshot()`, which reads and parses `memory/profile.json` from disk
+  every tick just to show a fact count; `MemoryPanel` (5s) re-reads the same
+  file and destroys/recreates every QLabel even when nothing changed;
+  `SessionsPanel` (30s) re-queries and rebuttons; `EventsPanel` likewise.
+  Cheap fix: cache facts behind an mtime check and skip rebuilds when the
+  data is unchanged. Right fix per ARCHITECTURE.md: panels subscribe to
+  runtime change events instead of owning QTimers.
+- **Runtime lock held across the whole Claude turn** —
+  `JarvisRuntime.respond()` holds `_lock` for the entire multi-second API
+  call, so monitor `record_event()` calls and task/event UI reads block until
+  the turn ends. Locking is also inconsistent: `respond_streaming()` takes no
+  lock while `respond_streaming_in_session()` holds it for the entire stream
+  (serializing the runtime during companion streams). The agent already has
+  its own conversation lock; the runtime lock should cover only session
+  switching and shared-state mutation.
+- **`ANTHROPIC_API_KEY` / `ANTHROPIC_MODEL` read at import time** in
+  `brain/agent.py` — breaks the repo's "settings are read live" rule, so
+  changing the model via `update_setting` silently does nothing until
+  restart. Read them inside the request path (or at least re-read the model
+  per call).
+- **Per-turn memory disk reads** — `render_memory_block()` re-reads
+  `profile.json` and re-tokenizes every fact each turn. Bounded and fine at
+  60 facts; add an in-memory cache invalidated on write before the vault
+  grows (the roadmap's indexed store supersedes this).
+- **Per-turn SQLite housekeeping** — `append_turn()` still runs the summary
+  refresh, an `updated_at` update, and the prune DELETE-with-subquery every
+  turn on a fresh connection (connections are dropped, not `.close()`d —
+  CPython refcounting saves us, but it's sloppy). Consider a shared
+  connection and pruning every N turns.
+- **Streaming is still opt-in** (`STREAMING_TTS=false`), so GUI chat waits
+  for the full completion before showing anything. The streaming path exists
+  in every mode; consider making it the default once trusted.
+- **Cache-invalidation footnote** — persona `.env` changes (humor, address)
+  and toggling `WEB_SEARCH_ENABLED` invalidate the cached prompt prefix for
+  one full-price request each. Harmless, just worth knowing; keep the
+  persona block byte-stable when editing `personality.py`.
+
+### Feature roadmap
 
 - **Evolving structured memory** — expand the shipped typed/proposal/
   contradiction/confidence/summary baseline into an indexed store

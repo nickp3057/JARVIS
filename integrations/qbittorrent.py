@@ -197,6 +197,56 @@ def download_snapshot() -> tuple[bool, list[dict[str, Any]] | str]:
     ]
 
 
+# States that count as "active or queued" for the companion dashboard.
+_TRANSFER_STATES = {
+    "downloading", "metaDL", "forcedDL", "allocating", "checkingDL",
+    "stalledDL", "queuedDL", "queuedUP",
+}
+
+
+def list_transfers(scope: str = "active") -> tuple[bool, dict[str, Any] | str]:
+    """Return structured transfer data for the companion dashboard.
+
+    On success the payload is ``{"dl_speed", "up_speed", "torrents": [...]}``
+    with per-torrent name, progress (0-1), state, dl_speed, up_speed, eta
+    (seconds, -1 unknown), and size (bytes). ``scope="active"`` (default)
+    keeps torrents that are downloading, queued, stalled, or currently
+    transferring; ``scope="all"`` returns everything.
+    """
+    ok, payload = torrent_info("all")
+    if not ok:
+        return False, str(payload)
+    if not isinstance(payload, list):
+        return False, "Unexpected qBittorrent torrent response."
+
+    torrents: list[dict[str, Any]] = []
+    for item in payload:
+        state = str(item.get("state", "unknown"))
+        dl_speed = int(item.get("dlspeed", 0) or 0)
+        up_speed = int(item.get("upspeed", 0) or 0)
+        if scope != "all" and state not in _TRANSFER_STATES and dl_speed <= 0 and up_speed <= 0:
+            continue
+        torrents.append(
+            {
+                "name": str(item.get("name", "Unknown download")),
+                "progress": float(item.get("progress", 0) or 0),
+                "state": state,
+                "dl_speed": dl_speed,
+                "up_speed": up_speed,
+                "eta": int(item.get("eta", -1) or -1),
+                "size": int(item.get("size", 0) or 0),
+            }
+        )
+
+    dl_rate = up_rate = 0
+    transfer_ok, transfer = transfer_info()
+    if transfer_ok and isinstance(transfer, dict):
+        dl_rate = int(transfer.get("dl_info_speed", 0) or 0)
+        up_rate = int(transfer.get("up_info_speed", 0) or 0)
+
+    return True, {"dl_speed": dl_rate, "up_speed": up_rate, "torrents": torrents}
+
+
 def download_status(scope: str = "downloading") -> str:
     """Return a spoken-friendly live download and transfer summary."""
     scope = (scope or "downloading").strip().lower()

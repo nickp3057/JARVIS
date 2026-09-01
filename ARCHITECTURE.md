@@ -29,6 +29,11 @@ Current responsibilities:
 - Sanitize Anthropic response blocks at the agent boundary before replaying
   them into a multi-round tool conversation; SDK-only parsed fields must never
   leak into Messages API input payloads.
+- Keep the stable request prefix cacheable: tool schemas carry a
+  `cache_control` breakpoint and the system prompt is sent as a stable persona
+  block (cached) plus a separate per-turn block for memory facts and recent
+  tool context (uncached). Anything that varies per turn must go in the
+  dynamic block or in messages, never spliced into the persona text.
 - Compose situational briefings (time, weather, agenda, reminders, and timers)
   via `compose_briefing` / `launch_briefing`. The launch method is a
   once-per-runtime claim shared by text, headless voice, and GUI front ends;
@@ -99,6 +104,16 @@ Current responsibilities:
 
 Near-term responsibilities:
 
+- Narrow runtime lock scope: `_lock` should guard session switching and
+  shared-state mutation, not span an entire Claude turn or stream. Today
+  `respond()` holds it for the full API call (blocking monitor events and UI
+  reads) while `respond_streaming()` takes none — the granularity should be
+  made consistent, leaning on the agent's own conversation lock.
+- Push panel updates instead of polling: cockpit panels currently own QTimers
+  and re-read disk/SQLite on fixed intervals. They should subscribe to runtime
+  change events (the inbox already exists), with disk reads cached behind
+  mtime checks. Any remaining panel work that can block (network, disk) runs
+  off the UI thread, as Now Playing does.
 - Run proactive monitors for calendar, Home Assistant, weather, files, and
   system state.
 - Add more monitor workers that feed the event inbox: calendar, files, and
@@ -168,6 +183,16 @@ not a second brain: it must route conversation through `JarvisRuntime` and use
 stores user-approved diagnostic evidence without asking a model to analyze it
 at submission time. Later review still happens through the normal runtime and
 read-only debug-report tools.
+
+The read-only dashboard endpoints (`/api/status/torrents`, `/api/status/media`,
+`/api/status/services`, `/api/links`, `/api/home/entities`) are a second
+non-conversational surface, aggregated in `app.status_hub` directly over the
+integration modules. They keep the thin-client principle: all service
+credentials and URLs stay server-side (read from the same `.env` values the
+integrations use), responses are TTL-cached in process so companion polling
+cannot hammer the NAS, and a down service degrades to a 200 with an `error`
+field — never a hard failure. These endpoints are not registered as LLM tools
+and perform no writes; Home Assistant exposure is state-only.
 
 ## Design Rule
 
