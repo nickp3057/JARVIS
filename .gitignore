@@ -12,3 +12,4 @@ memory/*.db
 memory/obsidian/
 memory/debug_reports.json
 !.env.example
+.DS_Store
