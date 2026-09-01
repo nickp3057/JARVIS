@@ -46,6 +46,36 @@ _MAX_TOOL_TURNS = 6
 _HISTORY_KEEP_TURNS = 20
 
 
+def _serialize_content_block(block: Any) -> dict[str, Any]:
+    """Convert an SDK response block back into API-safe message content.
+
+    Anthropic SDK 0.120 adds ``parsed_output`` to parsed text response models.
+    Pydantic's ``model_dump`` includes that response-only field, but the
+    Messages API rejects it when the assistant content is sent back after a
+    tool call. Strip it recursively while preserving future legitimate fields.
+    """
+    if isinstance(block, dict):
+        dumped: Any = dict(block)
+    else:
+        dumped = block.model_dump(exclude_none=True)
+
+    def clean(value: Any) -> Any:
+        if isinstance(value, dict):
+            return {
+                key: clean(item)
+                for key, item in value.items()
+                if key != "parsed_output"
+            }
+        if isinstance(value, list):
+            return [clean(item) for item in value]
+        return value
+
+    result = clean(dumped)
+    if not isinstance(result, dict):
+        raise TypeError("Anthropic content block did not serialize to an object")
+    return result
+
+
 def _get_client() -> Any | None:
     if not ANTHROPIC_API_KEY:
         log.warning(
@@ -198,7 +228,7 @@ class JarvisAgent:
                 messages.append(
                     {
                         "role": "assistant",
-                        "content": [block.model_dump() for block in response.content],
+                        "content": [_serialize_content_block(block) for block in response.content],
                     }
                 )
 
@@ -253,7 +283,10 @@ class JarvisAgent:
             if final.stop_reason == "tool_use" and tool_uses:
                 used_tools_this_turn = True
                 messages.append(
-                    {"role": "assistant", "content": [b.model_dump() for b in final.content]}
+                    {
+                        "role": "assistant",
+                        "content": [_serialize_content_block(block) for block in final.content],
+                    }
                 )
                 tool_results: list[dict[str, Any]] = []
                 for use in tool_uses:

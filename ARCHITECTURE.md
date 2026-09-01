@@ -23,6 +23,9 @@ Current responsibilities:
   qBittorrent and Radarr/Sonarr queue status on demand.
 - Keep structured home and weather snapshots for cockpit panels.
 - Track whether the last turn used tools.
+- Sanitize Anthropic response blocks at the agent boundary before replaying
+  them into a multi-round tool conversation; SDK-only parsed fields must never
+  leak into Messages API input payloads.
 - Compose situational briefings (time, weather, running timers) via
   `compose_briefing` / `launch_briefing`.
 - Stream replies fragment-by-fragment (`respond_streaming`) for streaming TTS.

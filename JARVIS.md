@@ -436,6 +436,10 @@ CALENDAR_ALERT_LEAD_MIN=10  # warn this many minutes before a meeting
   running server has not deployed `/chat/stream` yet. Tool-heavy streamed turns
   have a three-minute timeout and reconcile against server history, preventing
   completed Radarr/Sonarr operations from appearing failed until app reopen.
+- **Anthropic multi-round serialization compatibility** — assistant content
+  returned after a custom tool call is sanitized before being sent back to the
+  Messages API. Response-only SDK fields such as `parsed_output` are removed,
+  preventing immediate HTTP 400 failures on Radarr and other tool-driven turns.
 - **iOS local chat history** (`ios/JarvisCompanion`) — conversations persist as
   a device-local JSON archive with a history picker and manual New Chat action.
   Returning after five minutes inactive automatically opens a clean chat while
