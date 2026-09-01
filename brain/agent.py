@@ -27,7 +27,8 @@ from typing import Any, Iterator
 from dotenv import load_dotenv
 
 from brain.history import append_turn, load_history, load_session_messages, start_new_session
-from brain.intents import fallback_reply
+from brain.intents import routed_offline_reply
+from brain.local_model import is_configured as local_model_configured
 from brain.memory import render_memory_block
 from brain.personality import build_system_prompt
 from brain.tools import execute_tool, get_tool_specs
@@ -122,7 +123,15 @@ class JarvisAgent:
     # --- Public ----------------------------------------------------------
 
     def is_available(self) -> bool:
-        return self._client is not None
+        return self._client is not None or local_model_configured()
+
+    @property
+    def brain_label(self) -> str:
+        if self._client is not None:
+            return "Claude (online)"
+        if local_model_configured():
+            return "Local model (fallback)"
+        return "Keyword router (fallback)"
 
     def respond(self, user_input: str) -> str:
         """Run one turn of conversation. Returns Jarvis's spoken reply."""
@@ -139,8 +148,13 @@ class JarvisAgent:
         """
         with self._lock:
             if self._client is None:
-                reply = fallback_reply(user_input)
+                reply = routed_offline_reply(user_input, self._history)
                 self.last_used_tools = False
+                self._history.extend((
+                    {"role": "user", "content": user_input},
+                    {"role": "assistant", "content": reply},
+                ))
+                self._trim_history()
                 append_turn(user_input, reply, session_id=self._session_id)
                 yield reply
                 return
@@ -172,7 +186,12 @@ class JarvisAgent:
     def _respond_locked(self, user_input: str) -> str:
         if self._client is None:
             self.last_used_tools = False
-            reply = fallback_reply(user_input)
+            reply = routed_offline_reply(user_input, self._history)
+            self._history.extend((
+                {"role": "user", "content": user_input},
+                {"role": "assistant", "content": reply},
+            ))
+            self._trim_history()
             append_turn(user_input, reply, session_id=self._session_id)
             return reply
 

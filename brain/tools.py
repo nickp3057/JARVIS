@@ -27,7 +27,22 @@ from brain.automation_workshop import (
 from brain.clipboard_tool import read_clipboard, write_clipboard
 from brain.debug_reports import describe_debug_report, summarize_debug_reports
 from brain.history import clear_history, history_stats
-from brain.memory import forget_fact, remember_fact
+from brain.memory import (
+    describe_facts,
+    describe_contradiction_candidates,
+    adjust_fact_confidence,
+    forget_fact,
+    remember_fact,
+    remember_profile_record,
+    update_fact,
+)
+from brain.memory_proposals import (
+    apply_memory_proposal,
+    describe_memory_proposals,
+    propose_memory_fact,
+    reject_memory_proposal,
+)
+from brain.history import describe_session_summaries
 from brain.knowledge_vault import describe_search
 from brain.timers import cancel_timer, dismiss_timer, list_timers, pause_timer, resume_timer, set_timer
 from brain.reminders import add_reminder, complete_reminder, delete_reminder, list_reminders
@@ -43,6 +58,7 @@ from integrations import spotify as spotify
 from integrations.home_assistant import (
     activate_home_action,
     call_discovered_service,
+    describe_home_status,
     describe_services,
     handle_device_command,
     list_entities,
@@ -86,6 +102,10 @@ def _tool_list_devices(args: dict[str, Any]) -> str:
     if not result:
         return f"No {domain or 'matching'} entities found."
     return ", ".join(result)  # type: ignore[arg-type]
+
+
+def _tool_home_status(args: dict[str, Any]) -> str:
+    return describe_home_status(str(args.get("query") or ""))
 
 
 def _tool_test_home_assistant(_: dict[str, Any]) -> str:
@@ -148,11 +168,78 @@ def _tool_rollback_automation_change(args: dict[str, Any]) -> str:
 
 
 def _tool_remember_fact(args: dict[str, Any]) -> str:
-    return remember_fact(args.get("category", "general"), args.get("content", ""))
+    return remember_fact(
+        args.get("category", "general"),
+        args.get("content", ""),
+        key=args.get("key", ""),
+        confidence=args.get("confidence"),
+        source=args.get("source", "conversation"),
+    )
+
+
+def _tool_remember_profile_record(args: dict[str, Any]) -> str:
+    return remember_profile_record(
+        args.get("record_type", ""),
+        args.get("name", ""),
+        args.get("detail", ""),
+        confidence=args.get("confidence"),
+        source=args.get("source", "conversation"),
+    )
 
 
 def _tool_forget_fact(args: dict[str, Any]) -> str:
     return forget_fact(args.get("fact_id", ""))
+
+
+def _tool_update_fact(args: dict[str, Any]) -> str:
+    return update_fact(
+        args.get("fact_id", ""),
+        args.get("content", ""),
+        args.get("category"),
+        key=args.get("key"),
+        confidence=args.get("confidence"),
+        source=args.get("source"),
+    )
+
+
+def _tool_adjust_fact_confidence(args: dict[str, Any]) -> str:
+    return adjust_fact_confidence(
+        args.get("fact_id", ""), args.get("signal", ""), args.get("amount"),
+    )
+
+
+def _tool_list_memory_facts(args: dict[str, Any]) -> str:
+    return describe_facts(args.get("category", ""), args.get("query", ""))
+
+
+def _tool_find_memory_contradictions(args: dict[str, Any]) -> str:
+    return describe_contradiction_candidates(
+        args.get("category", "general"), args.get("content", ""),
+    )
+
+
+def _tool_propose_memory_fact(args: dict[str, Any]) -> str:
+    return propose_memory_fact(
+        args.get("category", "general"),
+        args.get("content", ""),
+        key=args.get("key", ""),
+        confidence=args.get("confidence", 0.7),
+        evidence=args.get("evidence", ""),
+    )
+
+
+def _tool_list_memory_proposals(args: dict[str, Any]) -> str:
+    return describe_memory_proposals(args.get("status", "pending"))
+
+
+def _tool_apply_memory_proposal(args: dict[str, Any]) -> str:
+    return apply_memory_proposal(
+        args.get("proposal_id", ""), confirmed=bool(args.get("confirmed", False)),
+    )
+
+
+def _tool_reject_memory_proposal(args: dict[str, Any]) -> str:
+    return reject_memory_proposal(args.get("proposal_id", ""))
 
 
 def _tool_search_memory(args: dict[str, Any]) -> str:
@@ -160,6 +247,14 @@ def _tool_search_memory(args: dict[str, Any]) -> str:
     if not query:
         return "Tool error: missing 'query'."
     return describe_search(query)
+
+
+def _tool_search_session_summaries(args: dict[str, Any]) -> str:
+    try:
+        limit = int(args.get("limit", 5) or 5)
+    except (TypeError, ValueError):
+        limit = 5
+    return describe_session_summaries(str(args.get("query", "")), limit)
 
 
 def _tool_list_debug_reports(_: dict[str, Any]) -> str:
@@ -374,6 +469,19 @@ def _tool_download_status(args: dict[str, Any]) -> str:
     return qbittorrent.download_status(args.get("scope", "downloading"))
 
 
+def _tool_torrent_inventory(args: dict[str, Any]) -> str:
+    return qbittorrent.torrent_inventory(args.get("limit", 20))
+
+
+def _tool_manage_torrent(args: dict[str, Any]) -> str:
+    return qbittorrent.manage_torrent(
+        args.get("action", ""),
+        args.get("torrent_hash", ""),
+        confirmed=bool(args.get("confirmed", False)),
+        delete_files=bool(args.get("delete_files", False)),
+    )
+
+
 def _tool_test_qbittorrent(_: dict[str, Any]) -> str:
     return qbittorrent.test_connection()
 
@@ -384,6 +492,26 @@ def _tool_media_queue(args: dict[str, Any]) -> str:
 
 def _tool_media_health(args: dict[str, Any]) -> str:
     return servarr.health_status(args.get("service"))
+
+
+def _media_service(args: dict[str, Any]):
+    service = (args.get("service") or "").strip().lower()
+    return {"radarr": radarr, "sonarr": sonarr}.get(service)
+
+
+def _tool_media_history(args: dict[str, Any]) -> str:
+    service = _media_service(args)
+    return service.history(args.get("limit", 10)) if service else "Choose radarr or sonarr."
+
+
+def _tool_missing_media(args: dict[str, Any]) -> str:
+    service = _media_service(args)
+    return service.missing(args.get("limit", 10)) if service else "Choose radarr or sonarr."
+
+
+def _tool_upcoming_media(args: dict[str, Any]) -> str:
+    service = _media_service(args)
+    return service.upcoming(args.get("days", 14)) if service else "Choose radarr or sonarr."
 
 
 def _tool_todays_agenda(_: dict[str, Any]) -> str:
@@ -427,6 +555,24 @@ _CUSTOM_TOOLS: list[dict[str, Any]] = [
             "type": "object",
             "properties": {
                 "domain": {"type": "string", "description": "Entity domain to filter by, e.g. 'light', 'switch', 'fan'. Omit to list everything."}
+            },
+        },
+    },
+    {
+        "name": "home_status",
+        "description": (
+            "Answer a read-only question about current Home Assistant state using "
+            "friendly device names. Use this for questions such as which lights are "
+            "on, whether a named device is off, which fans are running, or a thermostat's "
+            "current state. Pass the user's concise state question as query."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "State, domain, or device-name filter in natural language.",
+                }
             },
         },
     },
@@ -586,6 +732,23 @@ _CUSTOM_TOOLS: list[dict[str, Any]] = [
             "properties": {
                 "category": {"type": "string", "description": "Short category label."},
                 "content": {"type": "string", "description": "The fact, in a concise sentence."},
+                "key": {
+                    "type": "string",
+                    "description": (
+                        "Stable semantic attribute key such as preferences.favorite_color. "
+                        "Reuse the same key when the value changes so memory is revised in place."
+                    ),
+                },
+                "confidence": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1,
+                    "description": "Certainty from 0 to 1; use 1 for Nick's explicit statements.",
+                },
+                "source": {
+                    "type": "string",
+                    "description": "Short provenance label such as conversation, inferred, or imported.",
+                },
             },
             "required": ["category", "content"],
         },
@@ -600,6 +763,141 @@ _CUSTOM_TOOLS: list[dict[str, Any]] = [
         },
     },
     {
+        "name": "remember_profile_record",
+        "description": (
+            "Save or revise one structured person, preference, project, routine, or goal. "
+            "The type and name form a stable semantic key, so later details replace the "
+            "same record with revision history instead of creating duplicates."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "record_type": {"type": "string", "enum": ["person", "preference", "project", "routine", "goal"]},
+                "name": {"type": "string", "description": "Stable subject or attribute name."},
+                "detail": {"type": "string", "description": "Current concise detail."},
+                "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+                "source": {"type": "string"},
+            },
+            "required": ["record_type", "name", "detail"],
+        },
+    },
+    {
+        "name": "update_fact",
+        "description": (
+            "Correct or replace an existing durable fact by id. Prefer this over "
+            "forgetting and re-adding when new information contradicts a memory; "
+            "it preserves a bounded revision trail."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "fact_id": {"type": "string", "description": "The existing 8-character id."},
+                "content": {"type": "string", "description": "The corrected fact."},
+                "category": {"type": "string", "description": "Optional corrected category."},
+                "key": {"type": "string", "description": "Optional stable semantic attribute key."},
+                "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+                "source": {"type": "string", "description": "Optional provenance label."},
+            },
+            "required": ["fact_id", "content"],
+        },
+    },
+    {
+        "name": "list_memory_facts",
+        "description": (
+            "List durable profile memories with ids and revision metadata. Use when Nick "
+            "asks what you remember or when you need an id to correct or forget a fact."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "category": {"type": "string", "description": "Optional exact category filter."},
+                "query": {"type": "string", "description": "Optional text filter."},
+            },
+        },
+    },
+    {
+        "name": "adjust_fact_confidence",
+        "description": (
+            "Explicitly reinforce or decay one remembered fact's confidence by ID. "
+            "Use only when evidence was confirmed or weakened; this records an audit timestamp."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "fact_id": {"type": "string"},
+                "signal": {"type": "string", "enum": ["reinforce", "decay"]},
+                "amount": {"type": "number", "exclusiveMinimum": 0, "maximum": 1},
+            },
+            "required": ["fact_id", "signal"],
+        },
+    },
+    {
+        "name": "propose_memory_fact",
+        "description": (
+            "Stage an inferred or extracted long-term memory for review without writing it "
+            "to the durable profile. Use for model-inferred facts; explicit statements may "
+            "still use remember_fact directly."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "category": {"type": "string", "enum": ["person", "preference", "routine", "project", "goal", "general"]},
+                "content": {"type": "string"},
+                "key": {"type": "string"},
+                "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+                "evidence": {"type": "string", "description": "Short source excerpt supporting the proposal."},
+            },
+            "required": ["category", "content"],
+        },
+    },
+    {
+        "name": "find_memory_contradictions",
+        "description": (
+            "Find legacy unkeyed memories that may conflict with a proposed fact. "
+            "This is advisory only and never changes memory."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "category": {"type": "string"},
+                "content": {"type": "string"},
+            },
+            "required": ["category", "content"],
+        },
+    },
+    {
+        "name": "list_memory_proposals",
+        "description": "List reviewable memory proposals and their stable IDs.",
+        "input_schema": {
+            "type": "object",
+            "properties": {"status": {"type": "string", "enum": ["pending", "applied", "rejected", "all"]}},
+        },
+    },
+    {
+        "name": "apply_memory_proposal",
+        "description": (
+            "Apply one exact pending memory proposal. Only call after Nick explicitly "
+            "approves that proposal ID in a later message."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "proposal_id": {"type": "string"},
+                "confirmed": {"type": "boolean"},
+            },
+            "required": ["proposal_id", "confirmed"],
+        },
+    },
+    {
+        "name": "reject_memory_proposal",
+        "description": "Reject one pending memory proposal by exact ID without changing durable memory.",
+        "input_schema": {
+            "type": "object",
+            "properties": {"proposal_id": {"type": "string"}},
+            "required": ["proposal_id"],
+        },
+    },
+    {
         "name": "search_memory",
         "description": (
             "Search Nick's explicitly authorized Obsidian Markdown notes. Use when he asks "
@@ -609,6 +907,21 @@ _CUSTOM_TOOLS: list[dict[str, Any]] = [
             "type": "object",
             "properties": {"query": {"type": "string"}},
             "required": ["query"],
+        },
+    },
+    {
+        "name": "search_session_summaries",
+        "description": (
+            "Deliberately search compact summaries of prior conversation sessions. Use "
+            "when Nick asks what you discussed or accomplished before. Do not call for "
+            "ordinary turns; current companion sessions remain isolated by default."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "Optional topic to find."},
+                "limit": {"type": "integer", "minimum": 1, "maximum": 20},
+            },
         },
     },
     {
@@ -1091,6 +1404,32 @@ _CUSTOM_TOOLS: list[dict[str, Any]] = [
         "input_schema": {"type": "object", "properties": {}},
     },
     {
+        "name": "torrent_inventory",
+        "description": "List current torrents with exact hashes for a later confirmed operation.",
+        "input_schema": {
+            "type": "object",
+            "properties": {"limit": {"type": "integer", "minimum": 1, "maximum": 50}},
+        },
+    },
+    {
+        "name": "manage_torrent",
+        "description": (
+            "Pause, resume, recheck, reprioritize, or delete one exact live torrent. "
+            "Only call after listing torrents and receiving explicit approval for the exact "
+            "hash and action. Deleting downloaded files requires delete_files=true explicitly."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "action": {"type": "string", "enum": ["pause", "resume", "recheck", "priority_top", "priority_bottom", "priority_increase", "priority_decrease", "delete"]},
+                "torrent_hash": {"type": "string", "description": "Full 40-character hash from torrent_inventory."},
+                "confirmed": {"type": "boolean"},
+                "delete_files": {"type": "boolean", "description": "Only meaningful for delete; defaults false."},
+            },
+            "required": ["action", "torrent_hash", "confirmed"],
+        },
+    },
+    {
         "name": "media_queue",
         "description": (
             "Show Radarr and Sonarr activity queues with title, progress, remaining "
@@ -1113,6 +1452,42 @@ _CUSTOM_TOOLS: list[dict[str, Any]] = [
             },
         },
     },
+    {
+        "name": "media_history",
+        "description": "Show recent read-only Radarr or Sonarr import/download activity.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "service": {"type": "string", "enum": ["radarr", "sonarr"]},
+                "limit": {"type": "integer", "minimum": 1, "maximum": 50},
+            },
+            "required": ["service"],
+        },
+    },
+    {
+        "name": "missing_media",
+        "description": "List monitored movies or episodes that are currently missing files.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "service": {"type": "string", "enum": ["radarr", "sonarr"]},
+                "limit": {"type": "integer", "minimum": 1, "maximum": 50},
+            },
+            "required": ["service"],
+        },
+    },
+    {
+        "name": "upcoming_media",
+        "description": "Show monitored movie releases or TV episodes coming up soon.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "service": {"type": "string", "enum": ["radarr", "sonarr"]},
+                "days": {"type": "integer", "minimum": 1, "maximum": 90},
+            },
+            "required": ["service"],
+        },
+    },
 ]
 
 
@@ -1122,6 +1497,7 @@ _DISPATCH: dict[str, Callable[[dict[str, Any]], str]] = {
     "get_time": _tool_get_time,
     "control_device": _tool_control_device,
     "list_devices": _tool_list_devices,
+    "home_status": _tool_home_status,
     "test_home_assistant": _tool_test_home_assistant,
     "activate_home_action": _tool_activate_home_action,
     "list_home_services": _tool_list_home_services,
@@ -1132,8 +1508,18 @@ _DISPATCH: dict[str, Callable[[dict[str, Any]], str]] = {
     "apply_automation_draft": _tool_apply_automation_draft,
     "rollback_automation_change": _tool_rollback_automation_change,
     "remember_fact": _tool_remember_fact,
+    "remember_profile_record": _tool_remember_profile_record,
     "forget_fact": _tool_forget_fact,
+    "update_fact": _tool_update_fact,
+    "adjust_fact_confidence": _tool_adjust_fact_confidence,
+    "list_memory_facts": _tool_list_memory_facts,
+    "find_memory_contradictions": _tool_find_memory_contradictions,
+    "propose_memory_fact": _tool_propose_memory_fact,
+    "list_memory_proposals": _tool_list_memory_proposals,
+    "apply_memory_proposal": _tool_apply_memory_proposal,
+    "reject_memory_proposal": _tool_reject_memory_proposal,
     "search_memory": _tool_search_memory,
+    "search_session_summaries": _tool_search_session_summaries,
     "list_debug_reports": _tool_list_debug_reports,
     "inspect_debug_report": _tool_inspect_debug_report,
     "clear_conversation": _tool_clear_conversation,
@@ -1177,9 +1563,14 @@ _DISPATCH: dict[str, Callable[[dict[str, Any]], str]] = {
     "add_series": _tool_add_series,
     "list_quality_profiles": _tool_list_quality_profiles,
     "download_status": _tool_download_status,
+    "torrent_inventory": _tool_torrent_inventory,
+    "manage_torrent": _tool_manage_torrent,
     "test_qbittorrent": _tool_test_qbittorrent,
     "media_queue": _tool_media_queue,
     "media_health": _tool_media_health,
+    "media_history": _tool_media_history,
+    "missing_media": _tool_missing_media,
+    "upcoming_media": _tool_upcoming_media,
 }
 
 

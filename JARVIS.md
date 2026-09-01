@@ -17,6 +17,7 @@ The character never breaks. It calls Nick "sir", uses dry British wit, answers i
 | Layer | Tech |
 |---|---|
 | LLM brain | Anthropic Claude (Haiku 4.5 by default, configurable) |
+| Local fallback | Optional OpenAI-compatible endpoint for tool-free conversation |
 | STT | faster-whisper (small.en model) |
 | Wake word | openWakeWord ("hey jarvis") |
 | TTS | ElevenLabs Flash v2.5 (Piper as fallback) |
@@ -45,8 +46,9 @@ Pearson-Stark-Jarvis/
 │   ├── debug_reports.py     Durable user-submitted companion failure reports
 │   ├── history.py           SQLite conversation history with session support
 │   ├── intents.py           Keyword intent router (fallback if brain offline)
-│   ├── memory.py            JSON long-term memory (profile.json) — remember_fact/forget_fact
+│   ├── memory.py            JSON long-term memory, correction history, inspection
 │   ├── knowledge_vault.py   Authorized Obsidian search + managed profile mirror
+│   ├── local_model.py       Optional OpenAI-compatible conversational fallback
 │   ├── briefing.py          Spoken situational briefing (time, weather, agenda, timers)
 │   ├── personality.py       System prompt builder (humor%, address, tool descriptions)
 │   ├── reminders.py         Persistent reminders & to-dos (timed + open list)
@@ -157,6 +159,9 @@ RMS envelope from ElevenLabs audio drives the orb in real time using a monotonic
   scene, script, or automation
 - `list_devices(domain?)` — list HA entities, including scene/script/automation
   domains when requested
+- `home_status(query?)` — answer read-only live-state questions with friendly
+  names, including which lights are on, whether a named device is off, running
+  fans, and current thermostat state/temperature
 - `test_home_assistant` — ping HA
 - `list_home_services(domain?)` — discover the live service/action catalogue
   advertised by the connected HA instance
@@ -175,7 +180,21 @@ RMS envelope from ElevenLabs audio drives the orb in real time using a monotonic
   pre-change configuration after explicit approval
 
 ### Memory & History
-- `remember_fact(category, content)` — save to profile.json
+- `remember_fact(category, content, key?, confidence?, source?)` — save to
+  profile.json; reusing a semantic key revises the existing value in place
+- `remember_profile_record(type, name, detail, ...)` — stable typed person,
+  preference, project, routine, or goal record with revision-backed updates
+- `propose_memory_fact` / `list_memory_proposals` /
+  `apply_memory_proposal` / `reject_memory_proposal` — review inferred memories
+  through exact-ID approval; proposals never write silently
+- `find_memory_contradictions(category, content)` — advisory candidates among
+  legacy unkeyed facts; never mutates memory
+- `adjust_fact_confidence(id, signal, amount?)` — explicit, audited confidence
+  reinforcement or decay
+- `list_memory_facts(category?, query?)` — inspect durable facts with stable IDs
+  and revision metadata
+- `update_fact(fact_id, content, category?)` — correct a contradicted fact in
+  place while retaining its last 20 revisions
 - `forget_fact(fact_id)` — remove from profile.json
 - `search_memory(query)` — search authorized Obsidian folders and return
   bounded excerpts with their note paths
@@ -184,6 +203,9 @@ RMS envelope from ElevenLabs audio drives the orb in real time using a monotonic
   frustration/correction follow-ups, and non-secret app context
 - `clear_conversation` — wipe history.db
 - `conversation_history_stats` — turn/session count
+- `search_session_summaries(query?, limit?)` — deliberately retrieve bounded,
+  topic-ranked digests of prior sessions when Nick asks about earlier work;
+  summaries are never injected into unrelated isolated sessions
 
 ### Timers
 - `set_timer(duration_*, message)` — creates timer
@@ -221,6 +243,8 @@ RMS envelope from ElevenLabs audio drives the orb in real time using a monotonic
   progress, size remaining, ETA, tracked status, and error detail
 - `media_health(service?)` — current download-client, indexer, disk, and other
   Servarr health warnings
+- `media_history(service, limit?)` / `missing_media(service, limit?)` /
+  `upcoming_media(service, days?)` — bounded read-only operational views
 - **Always confirm first**: the agent must surface the match and get an
   explicit yes before calling `add_*`; never auto-adds on ambiguous results.
   Selection receipts bind the allowed TMDB/TVDB IDs to the conversation for
@@ -238,6 +262,10 @@ RMS envelope from ElevenLabs audio drives the orb in real time using a monotonic
 - qBittorrent 5.2's successful `204 No Content` login response is supported in
   addition to the older `200 Ok.` response.
 - `test_qbittorrent` — verify WebUI authentication and report the version
+- `torrent_inventory(limit?)` — list live torrents with exact hashes
+- `manage_torrent(action, hash, confirmed, delete_files?)` — confirm-gated
+  pause/resume/recheck/priority/delete; deletion of downloaded files is a
+  separate explicit flag and every action revalidates the live exact hash
 - Runtime monitor records errors and can announce newly completed downloads.
 
 ### Computer Control *(new)*
@@ -354,6 +382,17 @@ VISION_ALL_MONITORS=true    # capture the whole virtual desktop
 WEB_SEARCH_MAX_USES=5       # max web_search calls per turn
 BOOT_SEQUENCE=true          # movie-style power-up on GUI launch
 
+# Optional local conversational fallback (OpenAI-compatible API)
+LOCAL_MODEL_ENABLED=false
+LOCAL_MODEL_URL=http://127.0.0.1:11434  # /v1 is appended when omitted
+LOCAL_MODEL_NAME=            # e.g. qwen2.5:7b-instruct
+LOCAL_MODEL_TIMEOUT_S=8      # clamped to 1–60 seconds
+LOCAL_MODEL_FAILURE_COOLDOWN_S=30 # avoid repeated calls while endpoint is down
+LOCAL_MODEL_SEMANTIC_ROUTING=true # classify read-only offline intents
+LOCAL_MODEL_HOME_CONTROL_CONFIDENCE=0.85 # minimum for bounded home-control routing
+LOCAL_MODEL_SUMMARIES=false # opt-in abstractive digest; extractive fallback remains
+LOCAL_MODEL_API_KEY=         # optional; never logged
+
 # iOS companion server
 JARVIS_API_TOKEN=           # required bearer token
 JARVIS_SERVER_HOST=0.0.0.0
@@ -412,7 +451,8 @@ CALENDAR_ALERT_LEAD_MIN=10  # warn this many minutes before a meeting
   speeds, progress, ETA, stalled/error state, and seeding status, then correlate
   operational context through Radarr/Sonarr queues and health warnings. A
   runtime monitor notices new download errors and optionally announces
-  completions. qBittorrent access is read-only in this phase.
+  completions. Exact-hash pause/resume/recheck/priority/delete operations are
+  confirm-gated; downloaded-file deletion requires a separate explicit flag.
 - **Home Assistant automation workshop** (`brain/automation_workshop.py`) —
   JARVIS can inventory and inspect editor-managed automations, validate entity
   and service references, draft creates/updates/deletes, show a diff, and wait
@@ -442,6 +482,12 @@ CALENDAR_ALERT_LEAD_MIN=10  # warn this many minutes before a meeting
   running server has not deployed `/chat/stream` yet. Tool-heavy streamed turns
   have a three-minute timeout and reconcile against server history, preventing
   completed Radarr/Sonarr operations from appearing failed until app reopen.
+  Connection status now reflects reachability instead of changing to
+  “Connecting…” for every healthy chat request. Stream rendering is batched and
+  the local archive is saved once per completed turn, avoiding per-character
+  disk rewrites and transcript stutter. Debug-report sheets present reliably
+  from menus, show submission progress, reject empty transcript entries, and
+  explain when the connected Core needs updating for report support.
 - **Anthropic multi-round serialization compatibility** — assistant content
   returned after a custom tool call is sanitized before being sent back to the
   Messages API. Response-only SDK fields such as `parsed_output` are removed,
@@ -484,7 +530,10 @@ CALENDAR_ALERT_LEAD_MIN=10  # warn this many minutes before a meeting
   alarming state on next start.
 - **Morning briefing** — `brain/briefing.py` composes a spoken greeting + time
   + weather + running timers. Exposed as the `morning_briefing` tool ("brief
-  me", "good morning") and auto-spoken at launch when `BRIEFING_ON_LAUNCH=true`.
+  me", "good morning") and auto-spoken once per runtime at launch when
+  `BRIEFING_ON_LAUNCH=true`. Text, headless voice, animated GUI boot, and the
+  GUI's boot-disabled path all share the runtime gate. GUI composition runs on
+  a background thread so weather/calendar latency cannot freeze the cockpit.
 - **Multi-monitor vision** — `look_at_screen` now captures the full virtual
   desktop (all monitors) by default; set `VISION_ALL_MONITORS=false` for primary
   only. Vision model is configurable via `VISION_MODEL`.
@@ -500,6 +549,55 @@ CALENDAR_ALERT_LEAD_MIN=10  # warn this many minutes before a meeting
   bounded set of relevant excerpts with source paths, and injects those instead
   of uploading the whole vault. A disconnected vault never prevents JSON facts
   from being saved.
+- **Auditable memory corrections** — profile facts can be listed with stable
+  IDs, filtered by category or text, and corrected in place. Corrections retain
+  a bounded 20-entry revision trail in `profile.json`, update timestamps, and
+  refresh the managed Obsidian mirror. Facts may also carry normalized semantic
+  keys, confidence from 0–1, and a short provenance label. Reusing a key for a
+  new value automatically treats it as a contradiction and revises the prior
+  fact instead of adding an incompatible duplicate. Existing facts need no
+  migration.
+- **Governed evolving memory** — inferred facts stage as persistent reviewable
+  proposals and require approval of an exact ID. Typed people/preferences/
+  projects/routines/goals revise by stable key, legacy unkeyed contradictions
+  can be surfaced without mutation, and confidence changes are explicit and
+  timestamped. Optional local abstractive session summaries retain the bounded
+  extractive digest as a failure fallback.
+- **Media history and guarded operations** — Radarr/Sonarr expose recent
+  history, missing items, and upcoming calendars. qBittorrent mutations require
+  a freshly verified full hash and explicit confirmation.
+- **Isolated session summaries** — every persisted turn refreshes a compact,
+  dependency-free digest of that session's five most recent exchanges in
+  SQLite. JARVIS can deliberately search recent or topic-relevant digests with
+  stable session IDs when asked about prior work. Summaries are not injected
+  automatically, preserving companion session isolation, and disappear with
+  their session on delete/clear. Same-second session ordering is deterministic.
+- **Optional local conversational routing** — when Claude is unavailable and
+  `LOCAL_MODEL_ENABLED=true`, unknown conversational requests can use a bounded
+  OpenAI-compatible `/chat/completions` endpoint with configurable model and
+  timeout. Deterministic time/Home Assistant commands always run first, and the
+  local model receives no tools, so it cannot claim or initiate world-changing
+  actions. Invalid URLs, network failures, HTTP errors, and malformed responses
+  fall through to the dependency-free keyword router. Local replies retain the
+  current session's bounded conversational context and persist normally. A
+  structured semantic classifier can recognize paraphrases for a strict
+  read-only allowlist (time, HA connection test, device listings, and filtered
+  live-state questions); only an exact JSON intent is accepted, then ordinary
+  deterministic Python performs the read. Common state questions also work
+  through the dependency-free keyword router. High-confidence semantic on/off
+  requests may also target only lights, switches/plugs, or fans. Explicit
+  0–100 percent brightness requests can target one uniquely resolved light.
+  Named color requests use a fixed ten-color allowlist and require both the
+  specific light name and requested color to appear in the user's request.
+  Explicit thermostat setpoints are accepted only with a named target, unit,
+  and conservative range (45–90°F or 7–32°C); JARVIS reads the thermostat's
+  live unit and converts before sending the service call.
+  The structured target must overlap the
+  user's own words and then pass the existing unique Home Assistant entity
+  matcher; ambiguity performs no action. Locks, doors, garages, covers, alarms,
+  scenes, scripts, automations, playback, deletion, and arbitrary services are
+  excluded. A configurable failure cooldown prevents a down endpoint from
+  causing two timeouts per request.
 - **Companion debug feedback** — the iOS app can explicitly submit a bounded
   conversation and "what went wrong" description to authenticated
   `/debug-reports`. Reports persist separately from personality memory in
@@ -508,22 +606,20 @@ CALENDAR_ALERT_LEAD_MIN=10  # warn this many minutes before a meeting
 
 ## What's Not Done Yet (Roadmap)
 
-- **Briefing in GUI/voice** — wire the launch briefing into the GUI greeting and
-  voice loop (currently text mode + on-demand tool).
-- **Evolving structured memory** — expand the shipped Obsidian retrieval and
-  profile mirror into people, preferences, routines, projects, goals, session
-  summaries, corrections, confidence, contradiction handling, edit controls,
-  and an indexed store suitable for very large vaults. Keep the live database
-  on the Optiplex and synchronize or back up the vault to the NAS.
-- **Local model routing** — optionally run a small tool-capable model on the
-  Optiplex for offline intent routing, entity matching, memory extraction, and
-  summarization while retaining Claude for complex reasoning and planning.
+- **Evolving structured memory** — expand the shipped typed/proposal/
+  contradiction/confidence/summary baseline into an indexed store
+  suitable for very large vaults. Keep the live database on the Optiplex and
+  synchronize or back up the vault to the NAS.
+- **Local model routing phase two** — extend the shipped tool-free
+  conversational fallback and bounded home on/off/brightness/color/climate
+  router with broader governed tool calling while retaining Claude for complex
+  reasoning and planning.
 - **Governed self-modification** — allow JARVIS to propose source/configuration
   changes through patches, tests, approval, activation, and automatic rollback;
   never permit unrestricted silent code rewriting.
-- **Media operations phase two** — add confirm-gated qBittorrent pause/resume,
-  recheck, priority and deletion controls plus Radarr/Sonarr history, missing
-  items, manual search, retry, and upcoming-release views.
+- **Media operations phase two** — add Radarr/Sonarr manual search and retry
+  operations; guarded torrent controls and read-only history/missing/upcoming
+  views are shipped.
 - **Email awareness** — read unread email summaries
 - **Ambient music control** — detect silence and auto-dim volume
 - **Double-clap wake** — alternative to voice wake word (from reference script)

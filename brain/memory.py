@@ -11,7 +11,8 @@ Design notes:
 - Each fact is a small dict with ``category``, ``content``, and an
   ``added_at`` timestamp. Categories are free-form so the model can
   invent useful ones (people, interests, preferences, projects, ...).
-- ``forget_fact`` removes by id so the model can correct itself.
+- ``update_fact`` replaces a contradicted fact in place while retaining a
+  bounded revision trail; ``forget_fact`` removes by id.
 - Reads/writes are atomic enough for single-process use; we don't need
   concurrency control here.
 """
@@ -20,6 +21,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -31,6 +33,12 @@ log = get_logger(__name__)
 
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 _MEMORY_FILE = _PROJECT_ROOT / "memory" / "profile.json"
+_KEY_RE = re.compile(r"[^a-z0-9._-]+")
+_FACT_WORD_RE = re.compile(r"[a-z0-9]+")
+_CONTRADICTION_STOP_WORDS = {
+    "a", "an", "and", "at", "for", "he", "her", "his", "i", "in", "is",
+    "it", "my", "of", "on", "she", "that", "the", "to", "was",
+}
 
 
 # --- Storage primitives -----------------------------------------------------
@@ -77,7 +85,29 @@ def _save(data: dict[str, Any]) -> bool:
 
 # --- Public API -------------------------------------------------------------
 
-def remember_fact(category: str, content: str) -> str:
+def _normalize_key(value: str | None) -> str:
+    return _KEY_RE.sub("_", (value or "").strip().lower()).strip("_")[:120]
+
+
+def _normalize_confidence(value: Any, default: float = 1.0) -> float:
+    try:
+        return round(max(0.0, min(1.0, float(value))), 2)
+    except (TypeError, ValueError):
+        return default
+
+
+def _normalize_source(value: str | None, default: str = "conversation") -> str:
+    return (" ".join((value or default).split()) or default)[:120]
+
+
+def remember_fact(
+    category: str,
+    content: str,
+    *,
+    key: str = "",
+    confidence: float | None = None,
+    source: str = "conversation",
+) -> str:
     """Add a new fact to memory. Returns a short confirmation."""
     category = (category or "general").strip().lower() or "general"
     content = (content or "").strip()
@@ -85,6 +115,29 @@ def remember_fact(category: str, content: str) -> str:
         return "Refused: empty fact."
 
     data = _load()
+    key = _normalize_key(key)
+    normalized_confidence = _normalize_confidence(confidence)
+    source = _normalize_source(source)
+
+    # A semantic key identifies one evolving attribute (for example,
+    # ``preferences.favorite_color``). Learning a different value revises the
+    # existing fact instead of silently accumulating a contradiction.
+    if key:
+        keyed = next((
+            fact for fact in data["facts"]
+            if fact.get("key") == key
+        ), None)
+        if keyed is not None:
+            if keyed.get("content") == content:
+                return f"Already remembered: {content}"
+            return update_fact(
+                str(keyed.get("id") or ""),
+                content,
+                category,
+                key=key,
+                confidence=normalized_confidence,
+                source=source,
+            ).replace("Updated", "Revised conflicting memory", 1)
 
     # De-dupe: if an existing fact in the same category has identical content,
     # don't add another copy.
@@ -97,13 +150,48 @@ def remember_fact(category: str, content: str) -> str:
         "category": category,
         "content": content,
         "added_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "confidence": normalized_confidence,
+        "source": source,
     }
+    if key:
+        fact["key"] = key
     data["facts"].append(fact)
 
     if _save(data):
         log.info("Remembered [%s] %s", category, content)
         return f"Remembered ({category}): {content}"
     return "Failed to write to memory."
+
+
+_PROFILE_RECORD_TYPES = {"person", "preference", "project", "routine", "goal"}
+
+
+def remember_profile_record(
+    record_type: str,
+    name: str,
+    detail: str,
+    *,
+    confidence: float | None = None,
+    source: str = "conversation",
+) -> str:
+    """Store one typed, stable profile entity using the revision-aware fact layer."""
+    record_type = (record_type or "").strip().lower()
+    name = " ".join((name or "").split())[:120]
+    detail = " ".join((detail or "").split())[:500]
+    if record_type not in _PROFILE_RECORD_TYPES:
+        return f"Refused: record type must be one of {', '.join(sorted(_PROFILE_RECORD_TYPES))}."
+    if not name or not detail:
+        return "Refused: profile record requires both a name and detail."
+    semantic_name = _normalize_key(name)
+    if not semantic_name:
+        return "Refused: profile record name has no usable identifier."
+    return remember_fact(
+        record_type,
+        f"{name}: {detail}",
+        key=f"{record_type}.{semantic_name}",
+        confidence=confidence,
+        source=source,
+    )
 
 
 def forget_fact(fact_id: str) -> str:
@@ -125,9 +213,193 @@ def forget_fact(fact_id: str) -> str:
     return "Failed to write to memory."
 
 
+def update_fact(
+    fact_id: str,
+    content: str,
+    category: str | None = None,
+    *,
+    key: str | None = None,
+    confidence: float | None = None,
+    source: str | None = None,
+) -> str:
+    """Replace a contradicted fact while preserving its identity and history."""
+    fact_id = (fact_id or "").strip()
+    content = (content or "").strip()
+    if not fact_id:
+        return "Refused: missing fact id."
+    if not content:
+        return "Refused: empty fact."
+
+    data = _load()
+    target = next((fact for fact in data["facts"] if fact.get("id") == fact_id), None)
+    if target is None:
+        return f"No fact found with id {fact_id}."
+
+    next_category = (
+        (category or "").strip().lower() or str(target.get("category") or "general")
+    )
+    current_category = str(target.get("category") or "general")
+    current_content = str(target.get("content") or "")
+    next_key = _normalize_key(key) if key is not None else str(target.get("key") or "")
+    next_confidence = (
+        _normalize_confidence(confidence)
+        if confidence is not None else _normalize_confidence(target.get("confidence"))
+    )
+    next_source = (
+        _normalize_source(source)
+        if source is not None else _normalize_source(target.get("source"))
+    )
+    if (
+        current_category == next_category
+        and current_content == content
+        and str(target.get("key") or "") == next_key
+        and _normalize_confidence(target.get("confidence")) == next_confidence
+        and _normalize_source(target.get("source")) == next_source
+    ):
+        return f"No change needed: {content}"
+
+    changed_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    revisions = target.get("revisions")
+    if not isinstance(revisions, list):
+        revisions = []
+    revisions.append({
+        "category": current_category,
+        "content": current_content,
+        "key": target.get("key", ""),
+        "confidence": target.get("confidence", 1.0),
+        "source": target.get("source", "conversation"),
+        "replaced_at": changed_at,
+    })
+    target["revisions"] = revisions[-20:]
+    target["category"] = next_category
+    target["content"] = content
+    if next_key:
+        target["key"] = next_key
+    else:
+        target.pop("key", None)
+    target["confidence"] = next_confidence
+    target["source"] = next_source
+    target["updated_at"] = changed_at
+
+    if _save(data):
+        log.info("Updated fact id=%s [%s] %s", fact_id, next_category, content)
+        return f"Updated {fact_id} ({next_category}): {content}"
+    return "Failed to write to memory."
+
+
+def adjust_fact_confidence(fact_id: str, signal: str, amount: float | None = None) -> str:
+    """Explicitly reinforce or decay one fact's confidence with an audit timestamp."""
+    fact_id = (fact_id or "").strip()
+    signal = (signal or "").strip().lower()
+    if signal not in {"reinforce", "decay"}:
+        return "Refused: confidence signal must be reinforce or decay."
+    try:
+        delta = float(amount if amount is not None else (0.1 if signal == "reinforce" else 0.05))
+    except (TypeError, ValueError):
+        return "Refused: invalid confidence amount."
+    if not 0 < delta <= 1:
+        return "Refused: confidence amount must be greater than 0 and at most 1."
+    data = _load()
+    target = next((fact for fact in data["facts"] if fact.get("id") == fact_id), None)
+    if target is None:
+        return f"No fact found with id {fact_id}."
+    current = _normalize_confidence(target.get("confidence"))
+    next_value = _normalize_confidence(current + delta if signal == "reinforce" else current - delta)
+    if next_value == current:
+        return f"Confidence already at {'maximum' if signal == 'reinforce' else 'minimum'} for {fact_id}."
+    timestamp = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    target["confidence"] = next_value
+    target[f"last_{'reinforced' if signal == 'reinforce' else 'decayed'}_at"] = timestamp
+    if _save(data):
+        past = "Reinforced" if signal == "reinforce" else "Decayed"
+        return f"{past} confidence for {fact_id}: {current:.2f} → {next_value:.2f}."
+    return "Failed to write to memory."
+
+
 def list_facts() -> list[dict[str, Any]]:
     """Return every stored fact (used by tools, debugging)."""
     return _load()["facts"]
+
+
+def describe_facts(category: str = "", query: str = "") -> str:
+    """Return inspectable fact IDs and metadata for correction or deletion."""
+    category = (category or "").strip().lower()
+    query = (query or "").strip().lower()
+    facts = list_facts()
+    if category:
+        facts = [fact for fact in facts if str(fact.get("category", "")).lower() == category]
+    if query:
+        facts = [
+            fact for fact in facts
+            if query in f"{fact.get('category', '')} {fact.get('content', '')}".lower()
+        ]
+    if not facts:
+        return "No remembered facts matched."
+
+    lines = [f"Remembered facts ({len(facts)}):"]
+    for fact in facts:
+        revised = fact.get("revisions")
+        revision_note = f", revisions={len(revised)}" if isinstance(revised, list) and revised else ""
+        changed = fact.get("updated_at") or fact.get("added_at") or "unknown"
+        metadata = []
+        if fact.get("key"):
+            metadata.append(f"key={fact['key']}")
+        metadata.append(f"confidence={_normalize_confidence(fact.get('confidence')):.2f}")
+        metadata.append(f"source={_normalize_source(fact.get('source'))}")
+        lines.append(
+            f"- {fact.get('id', '?')} [{fact.get('category', 'general')}] "
+            f"{fact.get('content', '')} (changed={changed}, {', '.join(metadata)}{revision_note})"
+        )
+    return "\n".join(lines)
+
+
+def find_contradiction_candidates(
+    category: str,
+    content: str,
+    *,
+    threshold: float = 0.45,
+) -> list[dict[str, Any]]:
+    """Find review-only lexical conflicts among legacy facts without semantic keys."""
+    category = (category or "general").strip().lower() or "general"
+    incoming = {
+        token for token in _FACT_WORD_RE.findall((content or "").lower())
+        if token not in _CONTRADICTION_STOP_WORDS
+    }
+    if len(incoming) < 2:
+        return []
+    threshold = max(0.2, min(0.9, float(threshold)))
+    matches: list[tuple[float, dict[str, Any]]] = []
+    for fact in list_facts():
+        if fact.get("key") or str(fact.get("category") or "").lower() != category:
+            continue
+        existing_content = str(fact.get("content") or "")
+        if existing_content.strip().lower() == (content or "").strip().lower():
+            continue
+        existing = {
+            token for token in _FACT_WORD_RE.findall(existing_content.lower())
+            if token not in _CONTRADICTION_STOP_WORDS
+        }
+        union = incoming | existing
+        score = len(incoming & existing) / len(union) if union else 0.0
+        if score >= threshold:
+            candidate = dict(fact)
+            candidate["similarity"] = round(score, 2)
+            matches.append((score, candidate))
+    matches.sort(key=lambda item: item[0], reverse=True)
+    return [item[1] for item in matches[:10]]
+
+
+def describe_contradiction_candidates(category: str, content: str) -> str:
+    candidates = find_contradiction_candidates(category, content)
+    if not candidates:
+        return "No possible unkeyed contradictions found."
+    lines = ["Possible contradictions for review; no memory was changed:"]
+    for fact in candidates:
+        lines.append(
+            f"- {fact.get('id')} [{fact.get('category')}] {fact.get('content')} "
+            f"(similarity={fact.get('similarity'):.2f})"
+        )
+    return "\n".join(lines)
 
 
 def render_memory_block(query: str = "") -> str:
@@ -198,7 +470,17 @@ def render_memory_block(query: str = "") -> str:
         for fact in by_category[category]:
             content = fact.get("content", "")
             fact_id = fact.get("id", "")
-            lines.append(f"- ({fact_id}) {content}")
+            metadata = []
+            if fact.get("key"):
+                metadata.append(f"key={fact['key']}")
+            confidence = _normalize_confidence(fact.get("confidence"))
+            if confidence < 1.0:
+                metadata.append(f"confidence={confidence:.2f}")
+            source = _normalize_source(fact.get("source"))
+            if source != "conversation":
+                metadata.append(f"source={source}")
+            suffix = f" [{' | '.join(metadata)}]" if metadata else ""
+            lines.append(f"- ({fact_id}) {content}{suffix}")
         lines.append("")
 
     block = "\n".join(lines).strip()

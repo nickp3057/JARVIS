@@ -22,6 +22,9 @@ enum JarvisAPIError: LocalizedError {
             return "JARVIS rejected the API token (401). Check the token in Settings."
 
         case .server(let status, let body):
+            if status == 404, body?.contains("Not Found") == true {
+                return "This JARVIS Core does not support that feature yet. Update and restart the server, then try again."
+            }
             let detail = Self.snippet(body).map { ": \($0)" } ?? "."
             return "JARVIS returned an error (HTTP \(status))\(detail)"
 
@@ -255,12 +258,17 @@ struct JarvisAPIClient {
                 await onSession(boundSessionID)
             }
             var pending = Data()
+            let clock = ContinuousClock()
+            var lastDelivery = clock.now
             for try await byte in bytes {
                 try Task.checkCancellation()
                 pending.append(byte)
-                if let text = String(data: pending, encoding: .utf8) {
+                let deliveryDue = pending.count >= 512
+                    || lastDelivery.duration(to: clock.now) >= .milliseconds(40)
+                if deliveryDue, let text = String(data: pending, encoding: .utf8) {
                     await onChunk(text)
                     pending.removeAll(keepingCapacity: true)
+                    lastDelivery = clock.now
                 }
             }
             if !pending.isEmpty, let text = String(data: pending, encoding: .utf8) {

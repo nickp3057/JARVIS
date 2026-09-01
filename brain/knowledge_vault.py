@@ -201,6 +201,17 @@ def sync_profile_note(facts: list[dict[str, Any]]) -> None:
         for fact in grouped[category]:
             content = str(fact.get("content") or "").replace("\n", " ").strip()
             lines.append(f"- {content} <!-- jarvis:{fact.get('id', '')} -->")
+            metadata = []
+            if fact.get("key"):
+                metadata.append(f"key={fact['key']}")
+            if "confidence" in fact:
+                metadata.append(f"confidence={fact['confidence']}")
+            if fact.get("source"):
+                metadata.append(f"source={fact['source']}")
+            if fact.get("updated_at"):
+                metadata.append(f"updated={fact['updated_at']}")
+            if metadata:
+                lines.append(f"  - Metadata: {', '.join(metadata)}")
         lines.append("")
     temporary = target.with_suffix(".md.tmp")
     temporary.write_text("\n".join(lines).rstrip() + "\n", encoding="utf-8")

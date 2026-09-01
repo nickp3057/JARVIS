@@ -16,8 +16,12 @@ from datetime import datetime
 from typing import Callable
 
 from integrations.home_assistant import (
+    describe_home_status,
     handle_device_command,
     list_entities,
+    set_light_brightness,
+    set_light_color,
+    set_climate_temperature,
     test_connection,
 )
 from jarvis_logger import get_logger
@@ -181,6 +185,11 @@ def fallback_reply(user_input: str) -> str:
 
     intent = route_command(user_input)
     log.info("Fallback reply intent=%s input=%r", intent, user_input)
+    return fallback_reply_for_intent(intent, user_input)
+
+
+def fallback_reply_for_intent(intent: str, user_input: str) -> str:
+    """Execute one already-classified deterministic fallback intent."""
 
     try:
         if intent == "exit":
@@ -208,6 +217,8 @@ def fallback_reply(user_input: str) -> str:
                     return str(result)
                 parts.append(_format_entity_list(title, result))
             return " ".join(parts)
+        if intent == "home_status":
+            return describe_home_status(user_input)
         if intent == "device_control":
             return handle_device_command(user_input)
     except Exception:  # noqa: BLE001
@@ -218,3 +229,43 @@ def fallback_reply(user_input: str) -> str:
         f"My higher reasoning is offline, {_address()}, so I only know "
         "basic commands right now."
     )
+
+
+def routed_offline_reply(user_input: str, history: list[dict] | None = None) -> str:
+    """Use deterministic intents first, then the optional conversational model."""
+    from brain.local_model import classify_semantic_route, generate_reply
+    from brain.router import route_command
+
+    intent = route_command(user_input)
+    if intent != "unknown":
+        return fallback_reply_for_intent(intent, user_input)
+    semantic_route = classify_semantic_route(user_input)
+    if semantic_route and semantic_route.get("kind") == "intent":
+        semantic_intent = semantic_route["intent"]
+        log.info("Local semantic router selected intent=%s", semantic_intent)
+        return fallback_reply_for_intent(semantic_intent, user_input)
+    if semantic_route and semantic_route.get("kind") == "home_control":
+        action = "turn on" if semantic_route["action"] == "turn_on" else "turn off"
+        command = f"{action} {semantic_route['target']}"
+        log.info("Local semantic router selected bounded home command=%r", command)
+        return handle_device_command(command)
+    if semantic_route and semantic_route.get("kind") == "light_brightness":
+        log.info(
+            "Local semantic router selected brightness target=%r percent=%s",
+            semantic_route["target"], semantic_route["brightness_pct"],
+        )
+        return set_light_brightness(
+            semantic_route["target"], int(semantic_route["brightness_pct"]),
+        )
+    if semantic_route and semantic_route.get("kind") == "light_color":
+        log.info("Local semantic router selected bounded light color")
+        return set_light_color(semantic_route["target"], semantic_route["color"])
+    if semantic_route and semantic_route.get("kind") == "climate_temperature":
+        log.info("Local semantic router selected bounded thermostat temperature")
+        return set_climate_temperature(
+            semantic_route["target"],
+            float(semantic_route["temperature"]),
+            semantic_route["unit"],
+        )
+    local_reply = generate_reply(history or [], user_input)
+    return local_reply or fallback_reply(user_input)

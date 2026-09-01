@@ -93,6 +93,88 @@ class KnowledgeVaultTests(unittest.TestCase):
         self.assertIn("Remembered", result)
         self.assertEqual(memory.list_facts()[0]["content"], "Build JARVIS.")
 
+    def test_update_fact_preserves_id_and_revision_history(self) -> None:
+        memory.remember_fact("preferences", "Favorite color is red.")
+        fact_id = memory.list_facts()[0]["id"]
+        result = memory.update_fact(fact_id, "Favorite color is cyan.", "identity")
+        updated = memory.list_facts()[0]
+        self.assertIn("Updated", result)
+        self.assertEqual(updated["id"], fact_id)
+        self.assertEqual(updated["category"], "identity")
+        self.assertEqual(updated["content"], "Favorite color is cyan.")
+        self.assertEqual(updated["revisions"][0]["content"], "Favorite color is red.")
+        self.assertIn("updated_at", updated)
+        self.assertIn("Favorite color is cyan.", (
+            self.root / "Jarvis Memory" / "Profile.md"
+        ).read_text(encoding="utf-8"))
+
+    def test_keyed_fact_automatically_revises_conflicting_value(self) -> None:
+        memory.remember_fact(
+            "preferences",
+            "Favorite color is red.",
+            key=" Preferences.Favorite Color ",
+            confidence=0.7,
+            source="inferred",
+        )
+        original = memory.list_facts()[0]
+        result = memory.remember_fact(
+            "identity",
+            "Favorite color is cyan.",
+            key="preferences.favorite_color",
+            confidence=1,
+            source="Nick said so",
+        )
+        facts = memory.list_facts()
+        self.assertEqual(len(facts), 1)
+        self.assertEqual(facts[0]["id"], original["id"])
+        self.assertIn("Revised conflicting memory", result)
+        self.assertEqual(facts[0]["category"], "identity")
+        self.assertEqual(facts[0]["content"], "Favorite color is cyan.")
+        self.assertEqual(facts[0]["confidence"], 1.0)
+        self.assertEqual(facts[0]["source"], "Nick said so")
+        self.assertEqual(facts[0]["revisions"][0]["confidence"], 0.7)
+
+    def test_memory_metadata_is_normalized_rendered_and_mirrored(self) -> None:
+        memory.remember_fact(
+            "projects",
+            "Building JARVIS.",
+            key=" Projects/JARVIS Status ",
+            confidence=4,
+            source=" imported\nnotes ",
+        )
+        fact = memory.list_facts()[0]
+        self.assertEqual(fact["key"], "projects_jarvis_status")
+        self.assertEqual(fact["confidence"], 1.0)
+        self.assertEqual(fact["source"], "imported notes")
+        listing = memory.describe_facts(query="JARVIS")
+        self.assertIn("key=projects_jarvis_status", listing)
+        self.assertIn("source=imported notes", listing)
+        note = (self.root / "Jarvis Memory" / "Profile.md").read_text(encoding="utf-8")
+        self.assertIn("confidence=1.0", note)
+        self.assertIn("source=imported notes", note)
+
+    def test_update_fact_validates_and_bounds_revision_history(self) -> None:
+        memory.remember_fact("general", "Version 0")
+        fact_id = memory.list_facts()[0]["id"]
+        for number in range(1, 23):
+            memory.update_fact(fact_id, f"Version {number}")
+        updated = memory.list_facts()[0]
+        self.assertEqual(len(updated["revisions"]), 20)
+        self.assertEqual(updated["revisions"][0]["content"], "Version 2")
+        self.assertIn("missing fact id", memory.update_fact("", "value"))
+        self.assertIn("empty fact", memory.update_fact(fact_id, ""))
+        self.assertIn("No fact found", memory.update_fact("missing", "value"))
+
+    def test_list_memory_facts_exposes_ids_and_filters(self) -> None:
+        memory.remember_fact("people", "Morgan is a lab partner.")
+        memory.remember_fact("projects", "Build JARVIS.")
+        fact_id = memory.list_facts()[0]["id"]
+        listing = memory.describe_facts(category="people")
+        self.assertIn(fact_id, listing)
+        self.assertIn("Morgan", listing)
+        self.assertNotIn("Build JARVIS", listing)
+        self.assertIn("No remembered facts", memory.describe_facts(query="missing"))
+
     def test_existing_json_memory_gets_a_first_use_mirror(self) -> None:
         memory._MEMORY_FILE.write_text(json.dumps({"facts": [
             {"id": "legacy", "category": "people", "content": "Sam is a friend."}
@@ -124,7 +206,75 @@ class KnowledgeVaultTests(unittest.TestCase):
     def test_search_memory_tool_is_registered_and_validates_query(self) -> None:
         names = {spec.get("name") for spec in get_tool_specs()}
         self.assertIn("search_memory", names)
+        self.assertIn("update_fact", names)
+        self.assertIn("list_memory_facts", names)
         self.assertIn("missing 'query'", execute_tool("search_memory", {}))
+
+    def test_typed_profile_record_uses_stable_key_and_revision_history(self) -> None:
+        first = memory.remember_profile_record(
+            "project", "JARVIS", "Desktop assistant prototype", confidence=0.8,
+        )
+        second = memory.remember_profile_record(
+            "project", "JARVIS", "Daily-driver home assistant", confidence=1.0,
+        )
+        self.assertIn("Remembered", first)
+        self.assertIn("Revised conflicting memory", second)
+        facts = memory.list_facts()
+        self.assertEqual(len(facts), 1)
+        self.assertEqual(facts[0]["key"], "project.jarvis")
+        self.assertEqual(facts[0]["content"], "JARVIS: Daily-driver home assistant")
+        self.assertEqual(facts[0]["revisions"][0]["content"], "JARVIS: Desktop assistant prototype")
+
+    def test_typed_profile_record_validates_shape_and_tool_registration(self) -> None:
+        self.assertIn("record type", memory.remember_profile_record("secret", "x", "y"))
+        self.assertIn("requires", memory.remember_profile_record("goal", "", "Ship it"))
+        names = {spec.get("name") for spec in get_tool_specs()}
+        self.assertIn("remember_profile_record", names)
+        result = execute_tool("remember_profile_record", {
+            "record_type": "routine", "name": "Morning", "detail": "Checks the briefing.",
+        })
+        self.assertIn("Remembered", result)
+        self.assertEqual(memory.list_facts()[0]["key"], "routine.morning")
+
+    def test_unkeyed_contradiction_detection_is_advisory_and_category_scoped(self) -> None:
+        memory.remember_fact("preference", "Nick prefers blue ambient lighting.")
+        memory.remember_fact("location", "Nick lives in Herriman Utah.")
+        before = json.loads(memory._MEMORY_FILE.read_text(encoding="utf-8"))
+        candidates = memory.find_contradiction_candidates(
+            "preference", "Nick prefers red ambient lighting.",
+        )
+        self.assertEqual(len(candidates), 1)
+        self.assertIn("blue", candidates[0]["content"])
+        after = json.loads(memory._MEMORY_FILE.read_text(encoding="utf-8"))
+        self.assertEqual(before, after)
+
+    def test_keyed_exact_and_unrelated_facts_are_not_contradiction_candidates(self) -> None:
+        memory.remember_fact("preference", "Nick prefers blue lighting.", key="preference.lighting")
+        memory.remember_fact("preference", "Nick likes chemistry labs.")
+        self.assertEqual(
+            memory.find_contradiction_candidates("preference", "Nick prefers red lighting."),
+            [],
+        )
+        names = {spec.get("name") for spec in get_tool_specs()}
+        self.assertIn("find_memory_contradictions", names)
+
+    def test_confidence_reinforcement_decay_clamps_and_audits(self) -> None:
+        memory.remember_fact("general", "A tentative fact.", confidence=0.5)
+        fact_id = memory.list_facts()[0]["id"]
+        self.assertIn("0.50 → 0.70", memory.adjust_fact_confidence(fact_id, "reinforce", 0.2))
+        self.assertIn("0.70 → 0.00", memory.adjust_fact_confidence(fact_id, "decay", 1.0))
+        fact = memory.list_facts()[0]
+        self.assertEqual(fact["confidence"], 0.0)
+        self.assertIn("last_reinforced_at", fact)
+        self.assertIn("last_decayed_at", fact)
+        self.assertIn("minimum", memory.adjust_fact_confidence(fact_id, "decay"))
+
+    def test_confidence_adjustment_validates_and_tool_is_registered(self) -> None:
+        self.assertIn("signal", memory.adjust_fact_confidence("id", "boost"))
+        self.assertIn("amount", memory.adjust_fact_confidence("id", "decay", 0))
+        self.assertIn("No fact", memory.adjust_fact_confidence("missing", "decay"))
+        names = {spec.get("name") for spec in get_tool_specs()}
+        self.assertIn("adjust_fact_confidence", names)
 
 
 if __name__ == "__main__":

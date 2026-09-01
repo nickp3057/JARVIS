@@ -31,6 +31,24 @@ def _is_device_control(command: str) -> bool:
     )
 
 
+def _is_home_status(command: str) -> bool:
+    """Recognize common read-only state questions before on/off commands."""
+    question = command.startswith((
+        "is ", "are ", "what ", "what's ", "which ", "show ", "tell me ",
+    ))
+    home_words = (
+        "light", "lamp", "switch", "plug", "outlet", "fan", "thermostat",
+        "temperature", "speaker", "media", "sensor", "lock", "blind", "shade",
+    )
+    state_words = (
+        " on", " off", "running", "active", "open", "closed", "locked",
+        "unlocked", "playing", "paused", "status", "state",
+    )
+    return question and any(word in command for word in home_words) and any(
+        word in command for word in state_words
+    )
+
+
 _RULES: tuple[Rule, ...] = (
     (_contains_any("exit", "quit", "bye"), "exit"),
     (_contains_any("time"), "time"),
@@ -39,6 +57,7 @@ _RULES: tuple[Rule, ...] = (
     (_contains_all("list", "switches"), "list_switches"),
     (_contains_all("list", "fans"), "list_fans"),
     (_contains_all("list", "devices"), "list_devices"),
+    (_is_home_status, "home_status"),
     (_is_device_control, "device_control"),
 )
 

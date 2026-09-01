@@ -7,6 +7,7 @@ are read live from ``.env`` and authentication cookies are reused per process.
 from __future__ import annotations
 
 import os
+import re
 from typing import Any
 
 import requests
@@ -95,6 +96,32 @@ def _request(
         return True, response.json()
     except ValueError:
         return True, response.text
+
+
+def _post(
+    path: str,
+    *,
+    data: dict[str, Any],
+    _retry_auth: bool = True,
+) -> tuple[bool, str]:
+    session, error = _session()
+    if session is None:
+        return False, error
+    url, _, _ = _config()
+    try:
+        response = session.post(
+            f"{url}/api/v2{path}", data=data, timeout=_TIMEOUT_SECONDS,
+        )
+    except requests.RequestException as exc:
+        return False, f"Could not reach qBittorrent: {exc}"
+    if response.status_code == 403:
+        global _session_cache
+        _session_cache = None
+        if _retry_auth:
+            return _post(path, data=data, _retry_auth=False)
+    if response.status_code not in {200, 204}:
+        return False, f"qBittorrent error {response.status_code}: {response.text[:250]}"
+    return True, "Command accepted by qBittorrent."
 
 
 def test_connection() -> str:
@@ -207,3 +234,74 @@ def download_status(scope: str = "downloading") -> str:
     if len(payload) > 20:
         lines.append(f"Plus {len(payload) - 20} more.")
     return "\n".join(lines)
+
+
+def torrent_inventory(limit: int = 20) -> str:
+    """List exact torrent hashes for subsequent confirm-gated operations."""
+    limit = max(1, min(50, int(limit or 20)))
+    ok, payload = torrent_info("all")
+    if not ok:
+        return str(payload)
+    if not isinstance(payload, list):
+        return "qBittorrent returned an unexpected torrent list."
+    if not payload:
+        return "No torrents found."
+    return "Torrents (use the exact hash for an operation):\n" + "\n".join(
+        f"- {item.get('hash', '')}: {item.get('name', 'Unknown')} — {item.get('state', 'unknown')}"
+        for item in payload[:limit]
+    )
+
+
+_TORRENT_ACTIONS = {
+    "pause": ("/torrents/pause", {}),
+    "resume": ("/torrents/resume", {}),
+    "recheck": ("/torrents/recheck", {}),
+    "priority_top": ("/torrents/topPrio", {}),
+    "priority_bottom": ("/torrents/bottomPrio", {}),
+    "priority_increase": ("/torrents/increasePrio", {}),
+    "priority_decrease": ("/torrents/decreasePrio", {}),
+}
+_TORRENT_HASH_RE = re.compile(r"^[a-f0-9]{40}$", re.IGNORECASE)
+
+
+def manage_torrent(
+    action: str,
+    torrent_hash: str,
+    *,
+    confirmed: bool = False,
+    delete_files: bool = False,
+) -> str:
+    """Perform one exact, live-verified, explicitly confirmed torrent operation."""
+    action = (action or "").strip().lower()
+    torrent_hash = (torrent_hash or "").strip().lower()
+    if action not in {*_TORRENT_ACTIONS, "delete"}:
+        return "Unsupported torrent action."
+    if not _TORRENT_HASH_RE.fullmatch(torrent_hash):
+        return "A full 40-character torrent hash is required. List torrents first."
+    if not confirmed:
+        return f"Confirmation required before {action.replace('_', ' ')} on torrent {torrent_hash}."
+
+    ok, payload = torrent_info("all")
+    if not ok:
+        return str(payload)
+    if not isinstance(payload, list):
+        return "qBittorrent returned an unexpected torrent list."
+    torrent = next(
+        (item for item in payload if str(item.get("hash") or "").lower() == torrent_hash), None,
+    )
+    if torrent is None:
+        return "That exact torrent hash is not in the current qBittorrent list."
+
+    if action == "delete":
+        path = "/torrents/delete"
+        extra = {"deleteFiles": "true" if delete_files else "false"}
+    else:
+        path, extra = _TORRENT_ACTIONS[action]
+    ok, message = _post(path, data={"hashes": torrent_hash, **extra})
+    if not ok:
+        return message
+    file_note = " and its downloaded files" if action == "delete" and delete_files else ""
+    return (
+        f"{action.replace('_', ' ').title()} accepted for "
+        f"{torrent.get('name', torrent_hash)}{file_note}."
+    )

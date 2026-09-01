@@ -29,8 +29,10 @@ Current responsibilities:
 - Sanitize Anthropic response blocks at the agent boundary before replaying
   them into a multi-round tool conversation; SDK-only parsed fields must never
   leak into Messages API input payloads.
-- Compose situational briefings (time, weather, running timers) via
-  `compose_briefing` / `launch_briefing`.
+- Compose situational briefings (time, weather, agenda, reminders, and timers)
+  via `compose_briefing` / `launch_briefing`. The launch method is a
+  once-per-runtime claim shared by text, headless voice, and GUI front ends;
+  the GUI performs potentially network-backed composition off its UI thread.
 - Stream replies fragment-by-fragment (`respond_streaming`) for streaming TTS.
 - Pipeline streamed replies into sentence-level TTS in text, GUI chat, GUI
   voice, and standalone headless voice when `STREAMING_TTS=true`.
@@ -42,12 +44,58 @@ Current responsibilities:
 - Mirror structured profile facts to managed Obsidian Markdown and locally
   retrieve size-bounded excerpts only from explicitly authorized folders, with
   note-path provenance and JSON remaining authoritative if storage is offline.
+- Expose stable fact IDs for inspection and targeted correction. Contradicted
+  facts can be updated in place with a bounded revision trail rather than
+  accumulating incompatible duplicates. Optional semantic keys make this
+  automatic for evolving attributes, while confidence and source labels retain
+  basic provenance; legacy facts remain migration-free.
+- Stage inferred memory as bounded persistent proposals, requiring exact-ID
+  approval before durable writes. Typed profile records use stable keys;
+  unkeyed contradiction detection is advisory; confidence changes are explicit
+  and timestamped. Optional local abstractive summaries always retain the
+  extractive digest as fallback.
+- Expose bounded Radarr/Sonarr history, missing, and upcoming views. Mutating
+  qBittorrent operations require an exact live hash plus explicit confirmation;
+  deleting downloaded files is separately explicit.
 - Accept explicit, authenticated companion debug reports as a separate durable
   diagnostic store. Reports retain bounded transcript/app context and a focused
   response, but are never promoted automatically into personality memory or
   treated as executable instructions.
 - Atomically switch and answer named sessions for remote clients through
   `respond_in_session` / `respond_streaming_in_session`.
+- Maintain a bounded extractive digest alongside each SQLite session and expose
+  explicit topic-ranked retrieval. Digests are never injected across sessions
+  automatically, preserving companion isolation; deletion and history clearing
+  remove them transactionally with their owning session.
+- Route unknown conversation to an optional OpenAI-compatible local model when
+  Claude is unavailable. Deterministic offline intents take precedence, the
+  local adapter has no tools, history is bounded, and every transport/schema
+  failure falls through to the keyword router. Backend labels remain visible to
+  every front end through the runtime. Optional semantic classification accepts
+  only exact structured output from a read-only intent allowlist, then delegates
+  execution to deterministic handlers. Read-only Home Assistant state questions
+  are filtered by domain, state, and friendly-name tokens and return bounded
+  natural-language results; common forms also route without either model. A
+  failure cooldown prevents cascading classifier/conversation timeouts while the
+  endpoint is unavailable.
+- Permit one tightly bounded state-changing local route: high-confidence on/off
+  for lights, switches/plugs, and fans. The generated target must overlap the
+  original request and resolve uniquely through the existing Home Assistant
+  matcher. Sensitive physical domains, broad services, scenes, scripts,
+  automations, media, and administrative actions never enter this path.
+- Permit explicit 0–100 percent brightness changes through the same
+  high-confidence, token-overlap, unique-light matching boundary. Zero maps to
+  off; malformed, ambiguous, unrelated, or out-of-range requests perform no
+  action.
+- Permit named light colors from a small fixed allowlist only when the color
+  and a specific non-generic target token both occur in the original request.
+  Resolve exactly one light; unsupported colors, generic targets, ambiguity,
+  low confidence, or Home Assistant failure perform no broader fallback call.
+- Permit explicit thermostat setpoints only when the local classifier supplies
+  a named thermostat, unit, conservative residential value, confidence above
+  the configured boundary, and a specific target token copied from the request.
+  Resolve exactly one climate entity, read its live unit, convert as needed,
+  and fail closed when the unit or state payload cannot be verified.
 
 Near-term responsibilities:
 
@@ -57,11 +105,13 @@ Near-term responsibilities:
   system health.
 - Store task state for multi-step work.
 - Decide when to interrupt, notify quietly, or stay silent.
-- Grow the Obsidian baseline into indexed episodic and semantic memory,
-  contradiction handling, and user-facing inspect/edit controls, with the
-  Optiplex as the live store and the NAS as synchronized storage.
-- Route small offline tasks to an optional local model, and add a governed
-  patch/test/approve/rollback workflow for self-modification.
+- Grow the Obsidian baseline into indexed episodic and semantic memory, with the
+  Optiplex as the live store and the NAS as synchronized storage. Stable-ID
+  inspection, revision-backed correction, keyed contradiction upserts, basic
+  provenance, and isolated extractive session digests are present.
+- Expand the initial tool-free local fallback into governed tool calling,
+  memory extraction and summarization. Also add a
+  governed patch/test/approve/rollback workflow for self-modification.
 
 ## Target Layers
 
@@ -96,8 +146,12 @@ Near-term responsibilities:
      a stable personality.
    - The iOS companion retains an offline device cache while the server/runtime
      owns synchronized sessions, conversation context, titles, and deletion.
-   - Long-running streamed tool turns reconcile with authoritative server
-     history so a client timeout cannot permanently hide a completed result.
+- Long-running streamed tool turns reconcile with authoritative server
+  history so a client timeout cannot permanently hide a completed result.
+- Companion reachability is independent from per-turn activity: an active chat
+  keeps a known-good connection online, while the transcript/Stop control owns
+  generation progress. Stream UI updates are batched and durable local history
+  is written at turn boundaries rather than for every received character.
 
 ## Companion API
 

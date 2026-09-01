@@ -247,7 +247,9 @@ struct ChatView: View {
 
     private func beginDebugReport(focusing messageID: UUID? = nil) {
         debugFocusMessageID = messageID
-        showingDebugReport = true
+        // Menus and context menus dismiss in the same update cycle. Present on
+        // the next cycle so the report sheet is not silently swallowed.
+        DispatchQueue.main.async { showingDebugReport = true }
     }
 
     private var emptyState: some View {
@@ -359,12 +361,16 @@ private struct DebugReportSheet: View {
                     Button(sentReportID == nil ? "Cancel" : "Done") { dismiss() }
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Send") { submit() }
+                    if isSending {
+                        ProgressView()
+                            .accessibilityLabel("Sending report")
+                    } else {
+                        Button("Send") { submit() }
                         .disabled(
-                            isSending
-                            || sentReportID != nil
+                            sentReportID != nil
                             || issue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                         )
+                    }
                 }
             }
             .interactiveDismissDisabled(isSending)

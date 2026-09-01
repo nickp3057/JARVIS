@@ -38,6 +38,7 @@ final class ChatViewModel: ObservableObject {
     private var inactiveSince: Date?
     private var lastSentText: String?
     private var inFlight: Task<Void, Never>?
+    private var connectionCheck: Task<Void, Never>?
 
     init(
         settings: AppSettings,
@@ -110,20 +111,27 @@ final class ChatViewModel: ObservableObject {
     }
 
     func refreshConnectionStatus() {
+        connectionCheck?.cancel()
         guard settings.isConfigured else {
             connectionState = .unconfigured
             return
         }
-        connectionState = .checking
-        Task { [weak self] in
+        // A refresh should not make a known-good connection look disconnected.
+        // `.checking` is only the initial/unconfigured state; chat activity has
+        // its own progress UI.
+        if connectionState != .online { connectionState = .checking }
+        connectionCheck = Task { [weak self] in
             guard let self else { return }
             do {
                 try await JarvisAPIClient.make(from: settings).checkHealth()
+                guard !Task.isCancelled else { return }
                 connectionState = .online
                 await synchronizeHistory()
             } catch {
+                guard !Task.isCancelled else { return }
                 connectionState = .offline(error.localizedDescription)
             }
+            connectionCheck = nil
         }
     }
 
@@ -277,30 +285,44 @@ final class ChatViewModel: ObservableObject {
         let cleanIssue = issue.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !cleanIssue.isEmpty else { throw JarvisAPIError.malformedResponse("Describe what went wrong.") }
         let formatter = ISO8601DateFormatter()
-        let transcript = messages.suffix(100).map { message in
-            DebugReportMessagePayload(
+        let transcript = messages.suffix(100).compactMap { message -> DebugReportMessagePayload? in
+            let content = message.text.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !content.isEmpty else { return nil }
+            return DebugReportMessagePayload(
                 id: message.id.uuidString,
                 role: message.role == .jarvis ? "assistant" : message.role.rawValue,
-                content: String(message.text.prefix(20_000)),
+                content: String(content.prefix(20_000)),
                 createdAt: formatter.string(from: message.date)
             )
+        }
+        guard !transcript.isEmpty else {
+            throw JarvisAPIError.malformedResponse("There are no completed messages to report.")
         }
         let device = UIDevice.current
         let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "unknown"
         let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "unknown"
-        return try await JarvisAPIClient.make(from: settings).submitDebugReport(
-            issue: cleanIssue,
-            messages: transcript,
-            sessionID: activeConversation?.serverSessionID,
-            conversationTitle: activeTitle,
-            focusMessageID: focusMessageID?.uuidString,
-            appContext: [
-                "app_version": "\(version) (\(build))",
-                "device": device.model,
-                "system": "\(device.systemName) \(device.systemVersion)",
-                "connection": connectionState.label,
-            ]
-        )
+        do {
+            let reportID = try await JarvisAPIClient.make(from: settings).submitDebugReport(
+                issue: cleanIssue,
+                messages: transcript,
+                sessionID: activeConversation?.serverSessionID,
+                conversationTitle: activeTitle,
+                focusMessageID: focusMessageID?.uuidString,
+                appContext: [
+                    "app_version": "\(version) (\(build))",
+                    "device": device.model,
+                    "system": "\(device.systemName) \(device.systemVersion)",
+                    "connection": connectionState.label,
+                ]
+            )
+            connectionState = .online
+            return reportID
+        } catch {
+            if case JarvisAPIError.transport = error {
+                connectionState = .offline(error.localizedDescription)
+            }
+            throw error
+        }
     }
 
     func stopGenerating() {
@@ -316,7 +338,6 @@ final class ChatViewModel: ObservableObject {
     private func request(_ text: String) {
         lastSentText = text
         isAwaitingReply = true
-        connectionState = .checking
         let responseID = UUID()
         append(ChatMessage(id: responseID, role: .jarvis, text: ""))
         let serverSessionID = activeConversation?.serverSessionID
@@ -472,7 +493,9 @@ final class ChatViewModel: ObservableObject {
         guard let index = messages.firstIndex(where: { $0.id == id }) else { return }
         let current = messages[index]
         messages[index] = ChatMessage(id: current.id, role: .jarvis, text: current.text + chunk, date: current.date)
-        persist()
+        // Persist once when the turn completes. Rewriting the entire archive
+        // for every streamed character causes visible typing and scrolling
+        // stalls on longer conversations.
     }
 
     private func replaceMessage(_ id: UUID, text: String) {

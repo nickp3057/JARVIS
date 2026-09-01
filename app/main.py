@@ -139,7 +139,7 @@ def run_voice_mode(runtime: JarvisRuntime) -> int:
 
     print("=" * 60)
     print("  Pearson Stark JARVIS LAB Assistant - Voice Mode (headless)")
-    print("  Brain: Claude (online)")
+    print(f"  Brain: {runtime.brain_label}")
     print("=" * 60)
 
     try:

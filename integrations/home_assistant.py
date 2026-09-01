@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import os
 import json
+import math
 import re
 import threading
 from typing import Any
@@ -172,6 +173,91 @@ def list_entities(domain: str | None = None) -> tuple[bool, list[str] | str]:
 
     entities.sort()
     return True, entities
+
+
+_STATUS_DOMAINS = {
+    "light", "switch", "fan", "climate", "media_player", "binary_sensor",
+    "person", "device_tracker", "lock", "cover",
+}
+_STATUS_DOMAIN_WORDS = {
+    "light": {"light", "lights", "lamp", "lamps", "led", "leds"},
+    "switch": {"switch", "switches", "plug", "plugs", "outlet", "outlets"},
+    "fan": {"fan", "fans"},
+    "climate": {"climate", "thermostat", "thermostats", "temperature"},
+    "media_player": {"media", "speaker", "speakers", "tv", "television"},
+    "binary_sensor": {"sensor", "sensors"},
+    "person": {"person", "people"},
+    "device_tracker": {"tracker", "trackers"},
+    "lock": {"lock", "locks"},
+    "cover": {"cover", "covers", "blind", "blinds", "shade", "shades"},
+}
+_STATUS_STATE_WORDS = {
+    "on", "off", "open", "closed", "locked", "unlocked", "playing", "paused",
+    "idle", "home", "not_home", "unavailable",
+}
+_STATUS_STOP_WORDS = {
+    "what", "which", "show", "tell", "give", "list", "are", "is", "the", "a",
+    "an", "my", "me", "all", "device", "devices", "currently", "right", "now",
+    "status", "state", "running", "active",
+}
+
+
+def describe_home_status(query: str = "") -> str:
+    """Describe a bounded, read-only slice of live Home Assistant state."""
+    success, result = get_states()
+    if not success:
+        return str(result)
+    if not isinstance(result, list):
+        return "Unexpected Home Assistant states response."
+
+    normalized = _normalize_text(query)
+    query_words = set(normalized.split())
+    domains = {
+        domain for domain, words in _STATUS_DOMAIN_WORDS.items()
+        if query_words.intersection(words)
+    }
+    desired_states = query_words.intersection(_STATUS_STATE_WORDS)
+    if "running" in query_words or "active" in query_words:
+        desired_states.add("on")
+    name_words = query_words - _STATUS_STOP_WORDS - _STATUS_STATE_WORDS
+    for words in _STATUS_DOMAIN_WORDS.values():
+        name_words -= words
+
+    matches: list[tuple[str, str, str]] = []
+    for entity in result:
+        if not isinstance(entity, dict):
+            continue
+        entity_id = str(entity.get("entity_id") or "")
+        if "." not in entity_id:
+            continue
+        domain = entity_id.split(".", 1)[0]
+        if domain not in _STATUS_DOMAINS or (domains and domain not in domains):
+            continue
+        state = str(entity.get("state") or "unknown").lower()
+        if desired_states and state not in desired_states:
+            continue
+        attributes = entity.get("attributes")
+        attributes = attributes if isinstance(attributes, dict) else {}
+        friendly = str(attributes.get("friendly_name") or _friendly_name_from_entity(entity_id))
+        searchable = set(_normalize_text(f"{friendly} {entity_id}").split())
+        if name_words and not name_words.issubset(searchable):
+            continue
+        detail = state.replace("_", " ")
+        if domain == "climate":
+            temperature = attributes.get("current_temperature")
+            unit = attributes.get("temperature_unit") or "°"
+            if temperature is not None:
+                detail = f"{detail}, {temperature}{unit}"
+        matches.append((friendly, detail, entity_id))
+
+    matches.sort(key=lambda item: item[0].lower())
+    if not matches:
+        return "No matching Home Assistant entities found."
+    shown = matches[:30]
+    lines = [f"{name} is {state}." for name, state, _ in shown]
+    if len(matches) > len(shown):
+        lines.append(f"And {len(matches) - len(shown)} more matched.")
+    return " ".join(lines)
 
 
 def call_service(
@@ -467,6 +553,91 @@ def handle_device_command(command: str) -> str:
 
     domain = entity_or_message.split(".", 1)[0]
     success, message = call_service(domain, action, entity_or_message)
+    return message if success else f"Command failed. {message}"
+
+
+def set_light_brightness(target: str, brightness_pct: int) -> str:
+    """Set one uniquely matched light to a validated percentage."""
+    target = _normalize_text(target)
+    if not target:
+        return "I need the name of the light."
+    if isinstance(brightness_pct, bool) or not isinstance(brightness_pct, int):
+        return "Brightness must be a whole percentage from 0 to 100."
+    if not 0 <= brightness_pct <= 100:
+        return "Brightness must be between 0 and 100 percent."
+
+    success, entity_or_message = _find_best_entity(target, ["light"])
+    if not success:
+        return entity_or_message
+    service = "turn_off" if brightness_pct == 0 else "turn_on"
+    data = {} if brightness_pct == 0 else {"brightness_pct": brightness_pct}
+    success, message = call_service("light", service, entity_or_message, data)
+    return message if success else f"Command failed. {message}"
+
+
+_LIGHT_COLORS = {
+    "blue", "cyan", "green", "magenta", "orange", "pink", "purple", "red",
+    "white", "yellow",
+}
+
+
+def set_light_color(target: str, color: str) -> str:
+    """Set one uniquely matched light to a small, explicit named-color allowlist."""
+    target = _normalize_text(target)
+    color = _normalize_text(color)
+    if not target:
+        return "I need the name of the light."
+    if color not in _LIGHT_COLORS:
+        return "That color is not in the supported safe color list."
+    success, entity_or_message = _find_best_entity(target, ["light"])
+    if not success:
+        return entity_or_message
+    success, message = call_service(
+        "light", "turn_on", entity_or_message, {"color_name": color},
+    )
+    return message if success else f"Command failed. {message}"
+
+
+def set_climate_temperature(target: str, temperature: float, unit: str) -> str:
+    """Set one thermostat within conservative residential temperature bounds."""
+    target = _normalize_text(target)
+    unit = str(unit or "").strip().upper().replace("°", "")
+    if not target:
+        return "I need the name of the thermostat."
+    if isinstance(temperature, bool) or not isinstance(temperature, (int, float)):
+        return "Temperature must be a number."
+    temperature = float(temperature)
+    if not math.isfinite(temperature) or unit not in {"F", "C"}:
+        return "Temperature must include a valid Fahrenheit or Celsius unit."
+    limits = (45.0, 90.0) if unit == "F" else (7.0, 32.0)
+    if not limits[0] <= temperature <= limits[1]:
+        return f"Temperature must be between {limits[0]:g} and {limits[1]:g} degrees {unit}."
+
+    success, entity_or_message = _find_best_entity(target, ["climate"])
+    if not success:
+        return entity_or_message
+    success, states = get_states()
+    if not success:
+        return str(states)
+    if not isinstance(states, list):
+        return "Unexpected Home Assistant states response."
+    entity = next(
+        (item for item in states if isinstance(item, dict) and item.get("entity_id") == entity_or_message),
+        None,
+    )
+    attributes = entity.get("attributes", {}) if isinstance(entity, dict) else {}
+    configured_unit = str(attributes.get("temperature_unit") or "").upper().replace("°", "")
+    if configured_unit not in {"F", "C"}:
+        return "I could not determine that thermostat's temperature unit safely."
+    converted = temperature
+    if unit == "F" and configured_unit == "C":
+        converted = (temperature - 32) * 5 / 9
+    elif unit == "C" and configured_unit == "F":
+        converted = temperature * 9 / 5 + 32
+    converted = round(converted, 1)
+    success, message = call_service(
+        "climate", "set_temperature", entity_or_message, {"temperature": converted},
+    )
     return message if success else f"Command failed. {message}"
 
 

@@ -9,6 +9,7 @@ matches and get an explicit yes from Nick before ever calling ``add_movie``.
 
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from integrations import servarr_common as servarr
@@ -139,4 +140,60 @@ def add_movie(
     return (
         f"Added {movie.get('title', 'the movie')}{f' ({year})' if year else ''} to Radarr "
         f"on the {profile_detail} profile. Search is underway, sir."
+    )
+
+
+def history(limit: int = 10) -> str:
+    """Return recent Radarr activity without changing the library."""
+    limit = max(1, min(50, int(limit or 10)))
+    ok, payload = servarr.request(_SERVICE, "GET", "/api/v3/history", params={
+        "page": 1, "pageSize": limit, "sortKey": "date", "sortDirection": "descending",
+    })
+    if not ok:
+        return str(payload)
+    records = payload.get("records", []) if isinstance(payload, dict) else []
+    if not records:
+        return "No recent Radarr history."
+    lines = []
+    for item in records[:limit]:
+        movie = item.get("movie") if isinstance(item.get("movie"), dict) else {}
+        title = movie.get("title") or item.get("sourceTitle") or "Unknown movie"
+        event = str(item.get("eventType") or "activity").replace("_", " ")
+        lines.append(f"{title}: {event} — {item.get('date', 'date unknown')}")
+    return "Recent Radarr history:\n" + "\n".join(lines)
+
+
+def missing(limit: int = 10) -> str:
+    """Return monitored movies currently missing files."""
+    limit = max(1, min(50, int(limit or 10)))
+    ok, payload = servarr.request(_SERVICE, "GET", "/api/v3/wanted/missing", params={
+        "page": 1, "pageSize": limit, "sortKey": "releaseDate", "sortDirection": "descending",
+    })
+    if not ok:
+        return str(payload)
+    records = payload.get("records", []) if isinstance(payload, dict) else []
+    if not records:
+        return "No monitored movies are missing."
+    return "Missing movies:\n" + "\n".join(
+        f"{item.get('title', 'Unknown')} ({item.get('year', 'year unknown')})"
+        for item in records[:limit]
+    )
+
+
+def upcoming(days: int = 14) -> str:
+    """Return the bounded upcoming Radarr calendar."""
+    days = max(1, min(90, int(days or 14)))
+    start = datetime.now(timezone.utc)
+    end = start + timedelta(days=days)
+    ok, payload = servarr.request(_SERVICE, "GET", "/api/v3/calendar", params={
+        "start": start.date().isoformat(), "end": end.date().isoformat(), "unmonitored": "false",
+    })
+    if not ok:
+        return str(payload)
+    records = payload if isinstance(payload, list) else []
+    if not records:
+        return f"No monitored movie releases in the next {days} days."
+    return "Upcoming movies:\n" + "\n".join(
+        f"{item.get('title', 'Unknown')}: {item.get('digitalRelease') or item.get('physicalRelease') or item.get('inCinemas') or 'date unknown'}"
+        for item in records[:30]
     )

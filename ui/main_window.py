@@ -28,8 +28,9 @@ The orb is driven by:
 from __future__ import annotations
 
 import os
+import threading
 
-from PyQt6.QtCore import Qt, QTimer
+from PyQt6.QtCore import Qt, QTimer, pyqtSignal
 from PyQt6.QtWidgets import (
     QFrame,
     QGridLayout,
@@ -112,6 +113,8 @@ QPushButton#mode:hover { border-color: rgba(120, 230, 255, 200); }
 class JarvisMainWindow(QMainWindow):
     """The full JARVIS UI window."""
 
+    launch_briefing_ready = pyqtSignal(str)
+
     def __init__(self, runtime: JarvisRuntime) -> None:
         super().__init__()
         self._runtime = runtime
@@ -119,6 +122,7 @@ class JarvisMainWindow(QMainWindow):
         self._voice_active = False
         self._mode_lbl: QLabel | None = None
         self._telemetry_values: dict[str, QLabel] = {}
+        self.launch_briefing_ready.connect(self._on_launch_briefing_ready)
 
         self.setWindowTitle("Pearson Stark JARVIS")
         self.resize(1440, 860)
@@ -276,6 +280,9 @@ class JarvisMainWindow(QMainWindow):
             if not self._runtime.brain_online:
                 self._chat.append_system("Brain offline - check ANTHROPIC_API_KEY in .env.")
                 self._orb.set_state(OrbState.ALERT)
+            else:
+                self._chat.speak_line("Pearson Stark JARVIS online. Standing by, sir.")
+                self._start_launch_briefing()
             self._booted = True
 
     def _telemetry_cell(self, label: str, value: str, *, key: str) -> QFrame:
@@ -376,15 +383,21 @@ class JarvisMainWindow(QMainWindow):
         self._refresh_hud()
         if not online:
             return
-        line = "Pearson Stark JARVIS online. All systems nominal, sir."
-        try:
-            briefing = self._runtime.launch_briefing()
-        except Exception:  # noqa: BLE001
-            briefing = ""
-        if briefing:
-            line = f"{line} {briefing}"
         # Speak via the chat widget so orb SPEAKING/IDLE stays in sync.
-        self._chat.speak_line(line)
+        self._chat.speak_line("Pearson Stark JARVIS online. All systems nominal, sir.")
+        self._start_launch_briefing()
+
+    def _start_launch_briefing(self) -> None:
+        """Compose optional network-backed briefing details off the UI thread."""
+        def _compose() -> None:
+            briefing = self._runtime.launch_briefing()
+            if briefing:
+                self.launch_briefing_ready.emit(briefing)
+
+        threading.Thread(target=_compose, name="jarvis-launch-briefing", daemon=True).start()
+
+    def _on_launch_briefing_ready(self, briefing: str) -> None:
+        self._chat.speak_line(briefing)
 
     # --- Mode handling -----------------------------------------------------
 

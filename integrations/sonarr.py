@@ -9,6 +9,7 @@ only) unless Nick asks for something else.
 from __future__ import annotations
 
 import os
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from integrations import servarr_common as servarr
@@ -192,3 +193,70 @@ def add_series(
         f"Added {series.get('title', 'the show')}{f' ({year})' if year else ''} to Sonarr "
         f"on the {profile_detail} profile, monitoring {monitor_phrase}. Search is underway, sir."
     )
+
+
+def history(limit: int = 10) -> str:
+    """Return recent Sonarr activity without changing the library."""
+    limit = max(1, min(50, int(limit or 10)))
+    ok, payload = servarr.request(_SERVICE, "GET", "/api/v3/history", params={
+        "page": 1, "pageSize": limit, "sortKey": "date", "sortDirection": "descending",
+    })
+    if not ok:
+        return str(payload)
+    records = payload.get("records", []) if isinstance(payload, dict) else []
+    if not records:
+        return "No recent Sonarr history."
+    lines = []
+    for item in records[:limit]:
+        series = item.get("series") if isinstance(item.get("series"), dict) else {}
+        episode = item.get("episode") if isinstance(item.get("episode"), dict) else {}
+        title = series.get("title") or item.get("sourceTitle") or "Unknown series"
+        number = f" S{int(episode.get('seasonNumber', 0)):02d}E{int(episode.get('episodeNumber', 0)):02d}" if episode else ""
+        event = str(item.get("eventType") or "activity").replace("_", " ")
+        lines.append(f"{title}{number}: {event} — {item.get('date', 'date unknown')}")
+    return "Recent Sonarr history:\n" + "\n".join(lines)
+
+
+def missing(limit: int = 10) -> str:
+    """Return monitored episodes currently missing files."""
+    limit = max(1, min(50, int(limit or 10)))
+    ok, payload = servarr.request(_SERVICE, "GET", "/api/v3/wanted/missing", params={
+        "page": 1, "pageSize": limit, "sortKey": "airDateUtc", "sortDirection": "descending",
+    })
+    if not ok:
+        return str(payload)
+    records = payload.get("records", []) if isinstance(payload, dict) else []
+    if not records:
+        return "No monitored episodes are missing."
+    lines = []
+    for item in records[:limit]:
+        series = item.get("series") if isinstance(item.get("series"), dict) else {}
+        lines.append(
+            f"{series.get('title', 'Unknown')} S{int(item.get('seasonNumber', 0)):02d}"
+            f"E{int(item.get('episodeNumber', 0)):02d}: {item.get('title', 'Untitled')}"
+        )
+    return "Missing episodes:\n" + "\n".join(lines)
+
+
+def upcoming(days: int = 14) -> str:
+    """Return the bounded upcoming Sonarr calendar."""
+    days = max(1, min(90, int(days or 14)))
+    start = datetime.now(timezone.utc)
+    end = start + timedelta(days=days)
+    ok, payload = servarr.request(_SERVICE, "GET", "/api/v3/calendar", params={
+        "start": start.isoformat(), "end": end.isoformat(), "unmonitored": "false",
+    })
+    if not ok:
+        return str(payload)
+    records = payload if isinstance(payload, list) else []
+    if not records:
+        return f"No monitored episodes air in the next {days} days."
+    lines = []
+    for item in records[:30]:
+        series = item.get("series") if isinstance(item.get("series"), dict) else {}
+        lines.append(
+            f"{series.get('title', 'Unknown')} S{int(item.get('seasonNumber', 0)):02d}"
+            f"E{int(item.get('episodeNumber', 0)):02d}: {item.get('title', 'Untitled')} — "
+            f"{item.get('airDateUtc') or item.get('airDate') or 'date unknown'}"
+        )
+    return "Upcoming episodes:\n" + "\n".join(lines)

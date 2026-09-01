@@ -118,6 +118,7 @@ class JarvisRuntime:
         self._calendar_alert_keys: set[str] = set()
         self._next_event_id = 1
         self._next_task_id = 1
+        self._launch_briefing_claimed = False
         self._stop_monitors = threading.Event()
         self._home_monitor_started = False
         self._home_monitor_failed = False
@@ -154,7 +155,7 @@ class JarvisRuntime:
 
     @property
     def brain_label(self) -> str:
-        return "Claude (online)" if self.brain_online else "Keyword router (fallback)"
+        return self.agent.brain_label
 
     @property
     def last_used_tools(self) -> bool:
@@ -270,15 +271,23 @@ class JarvisRuntime:
         return text
 
     def launch_briefing(self) -> str:
-        """Return a launch briefing when BRIEFING_ON_LAUNCH is enabled, else ''."""
+        """Claim and compose the optional once-per-runtime launch briefing."""
         enabled = os.getenv("BRIEFING_ON_LAUNCH", "false").strip().lower() in (
             "1", "true", "yes", "on",
         )
         if not enabled:
             return ""
+        with self._lock:
+            if self._launch_briefing_claimed:
+                return ""
+            self._launch_briefing_claimed = True
         try:
             return self.compose_briefing()
         except Exception:  # noqa: BLE001
+            # A transient weather/calendar failure should not permanently
+            # consume the launch briefing if another front end can retry.
+            with self._lock:
+                self._launch_briefing_claimed = False
             log.exception("Launch briefing failed")
             return ""
 

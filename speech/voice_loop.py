@@ -255,6 +255,9 @@ def run_voice_loop(runtime: JarvisRuntime, *, greet: bool = True) -> int:
 
     if greet:
         _say(GREETING)
+        briefing = runtime.launch_briefing()
+        if briefing:
+            _say(briefing)
 
     print("(Voice mode active - say 'hey jarvis' or end a sentence with 'jarvis'.)")
 

@@ -10,6 +10,8 @@ Database: memory/history.db
 from __future__ import annotations
 
 import sqlite3
+import os
+import re
 import uuid
 from datetime import datetime
 from pathlib import Path
@@ -23,6 +25,8 @@ _DB_PATH = Path(__file__).resolve().parent.parent / "memory" / "history.db"
 
 # Keep at most this many user+assistant pairs per session before pruning.
 MAX_STORED_TURNS = 200
+MAX_SESSION_SUMMARY_CHARS = 1_600
+_SUMMARY_WORD_RE = re.compile(r"[a-z0-9][a-z0-9_'’-]*", re.IGNORECASE)
 
 
 # ---------------------------------------------------------------------------
@@ -61,7 +65,9 @@ def _ensure_schema(conn: sqlite3.Connection) -> None:
             session_id  TEXT PRIMARY KEY,
             created_at  TEXT DEFAULT (datetime('now')),
             updated_at  TEXT DEFAULT (datetime('now')),
-            title       TEXT
+            title       TEXT,
+            summary     TEXT,
+            summarized_at TEXT
         )
         """
     )
@@ -71,6 +77,10 @@ def _ensure_schema(conn: sqlite3.Connection) -> None:
         conn.execute("UPDATE sessions SET updated_at = created_at WHERE updated_at IS NULL")
     if "title" not in session_cols:
         conn.execute("ALTER TABLE sessions ADD COLUMN title TEXT")
+    if "summary" not in session_cols:
+        conn.execute("ALTER TABLE sessions ADD COLUMN summary TEXT")
+    if "summarized_at" not in session_cols:
+        conn.execute("ALTER TABLE sessions ADD COLUMN summarized_at TEXT")
     conn.commit()
 
 
@@ -91,6 +101,49 @@ def _prune(conn: sqlite3.Connection, session_id: str) -> None:
         (session_id, session_id, keep),
     )
     conn.commit()
+
+
+def _refresh_session_summary(conn: sqlite3.Connection, session_id: str) -> None:
+    """Maintain a bounded extractive digest without another model/API call."""
+    rows = conn.execute(
+        """
+        SELECT role, content
+        FROM conversation
+        WHERE session_id = ?
+        ORDER BY id DESC
+        LIMIT 10
+        """,
+        (session_id,),
+    ).fetchall()
+    if not rows:
+        return
+    lines: list[str] = []
+    for row in reversed(rows):
+        content = " ".join(str(row["content"] or "").split())
+        if not content:
+            continue
+        label = "Nick" if row["role"] == "user" else "JARVIS"
+        lines.append(f"{label}: {content[:280]}")
+    summary = "\n".join(lines)[-MAX_SESSION_SUMMARY_CHARS:]
+    if os.getenv("LOCAL_MODEL_SUMMARIES", "false").strip().lower() in {"1", "true", "yes", "on"}:
+        try:
+            from brain.local_model import generate_summary
+
+            messages = [
+                {"role": str(row["role"]), "content": str(row["content"] or "")}
+                for row in reversed(rows)
+            ]
+            summary = generate_summary(messages) or summary
+        except Exception:  # noqa: BLE001 - persistence must keep deterministic fallback
+            log.exception("Local session summarization failed; retaining extractive digest.")
+    conn.execute(
+        """
+        UPDATE sessions
+        SET summary = ?, summarized_at = datetime('now')
+        WHERE session_id = ?
+        """,
+        (summary, session_id),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -127,6 +180,8 @@ def list_sessions(limit: int = 30) -> list[dict[str, Any]]:
                     s.created_at,
                     COALESCE(s.updated_at, s.created_at) AS updated_at,
                     s.title,
+                    s.summary,
+                    s.summarized_at,
                     COUNT(c.id) / 2            AS turn_count,
                     (
                         SELECT first.content
@@ -138,7 +193,7 @@ def list_sessions(limit: int = 30) -> list[dict[str, Any]]:
                 FROM sessions s
                 LEFT JOIN conversation c ON c.session_id = s.session_id
                 GROUP BY s.session_id
-                ORDER BY COALESCE(s.updated_at, s.created_at) DESC
+                ORDER BY COALESCE(s.updated_at, s.created_at) DESC, s.rowid DESC
                 LIMIT ?
                 """,
                 (limit,),
@@ -221,6 +276,7 @@ def append_turn(user_text: str, assistant_text: str, session_id: str = "default"
                 "UPDATE sessions SET updated_at = datetime('now') WHERE session_id = ?",
                 (session_id,),
             )
+            _refresh_session_summary(conn, session_id)
             conn.commit()
             _prune(conn, session_id)
     except Exception:  # noqa: BLE001
@@ -302,3 +358,49 @@ def history_stats() -> str:
     except Exception:  # noqa: BLE001
         log.exception("Failed to query history stats.")
         return "Couldn't read history stats."
+
+
+def search_session_summaries(query: str = "", limit: int = 5) -> list[dict[str, Any]]:
+    """Return bounded recent/relevant session digests for deliberate recall."""
+    query_tokens = {token.lower() for token in _SUMMARY_WORD_RE.findall(query or "")}
+    limit = max(1, min(20, int(limit or 5)))
+    try:
+        with _connect() as conn:
+            _ensure_schema(conn)
+            rows = conn.execute(
+                """
+                SELECT session_id, created_at, updated_at, title, summary, summarized_at
+                FROM sessions
+                WHERE summary IS NOT NULL AND summary != ''
+                ORDER BY COALESCE(updated_at, created_at) DESC, rowid DESC
+                LIMIT 200
+                """
+            ).fetchall()
+        results: list[tuple[int, int, dict[str, Any]]] = []
+        for recency, row in enumerate(rows):
+            item = dict(row)
+            haystack = f"{item.get('title') or ''} {item.get('summary') or ''}".lower()
+            score = sum(haystack.count(token) for token in query_tokens)
+            if query_tokens and score <= 0:
+                continue
+            results.append((score, -recency, item))
+        results.sort(key=lambda item: (-item[0], -item[1]))
+        return [item[2] for item in results[:limit]]
+    except Exception:  # noqa: BLE001
+        log.exception("Failed to search session summaries.")
+        return []
+
+
+def describe_session_summaries(query: str = "", limit: int = 5) -> str:
+    """Format session digests with IDs and timestamps for agent/tool use."""
+    summaries = search_session_summaries(query, limit)
+    if not summaries:
+        return "No prior session summaries matched."
+    sections = []
+    for item in summaries:
+        heading = item.get("title") or f"Session {str(item.get('session_id', ''))[:8]}"
+        sections.append(
+            f"{heading} [{item.get('session_id')}, updated {item.get('updated_at')}]:\n"
+            f"{item.get('summary', '')}"
+        )
+    return "\n\n".join(sections)

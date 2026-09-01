@@ -9,6 +9,7 @@ from unittest.mock import Mock, patch
 import requests
 
 from integrations import qbittorrent as qbit
+from brain.tools import execute_tool, get_tool_specs
 
 
 class QBittorrentTests(unittest.TestCase):
@@ -196,6 +197,65 @@ class QBittorrentTests(unittest.TestCase):
         self.assertEqual(qbit._duration("bad"), "ETA unknown")
         self.assertEqual(qbit._bytes(1024**3), "1.0 GB")
         self.assertEqual(qbit._bytes("bad"), "unknown")
+
+    def test_inventory_exposes_exact_hashes_for_review(self) -> None:
+        torrent_hash = "a" * 40
+        with patch.object(qbit, "torrent_info", return_value=(True, [{
+            "hash": torrent_hash, "name": "Ubuntu", "state": "pausedDL",
+        }])):
+            result = qbit.torrent_inventory()
+        self.assertIn(torrent_hash, result)
+        self.assertIn("Ubuntu", result)
+
+    def test_torrent_operation_requires_confirmation_and_live_exact_hash(self) -> None:
+        torrent_hash = "b" * 40
+        self.assertIn("Confirmation required", qbit.manage_torrent("pause", torrent_hash))
+        self.assertIn("40-character", qbit.manage_torrent("pause", "short", confirmed=True))
+        with patch.object(qbit, "torrent_info", return_value=(True, [])), patch.object(
+            qbit, "_post",
+        ) as post:
+            self.assertIn("not in the current", qbit.manage_torrent("pause", torrent_hash, confirmed=True))
+        post.assert_not_called()
+
+    def test_confirmed_torrent_controls_use_exact_endpoint_and_payload(self) -> None:
+        torrent_hash = "c" * 40
+        live = [{"hash": torrent_hash, "name": "Linux ISO"}]
+        cases = (
+            ("pause", "/torrents/pause", {}),
+            ("resume", "/torrents/resume", {}),
+            ("recheck", "/torrents/recheck", {}),
+            ("priority_top", "/torrents/topPrio", {}),
+            ("delete", "/torrents/delete", {"deleteFiles": "false"}),
+        )
+        for action, endpoint, extra in cases:
+            with self.subTest(action=action), patch.object(
+                qbit, "torrent_info", return_value=(True, live),
+            ), patch.object(qbit, "_post", return_value=(True, "ok")) as post:
+                result = qbit.manage_torrent(action, torrent_hash, confirmed=True)
+            self.assertIn("accepted", result.lower())
+            post.assert_called_once_with(endpoint, data={"hashes": torrent_hash, **extra})
+
+    def test_delete_files_requires_separate_explicit_flag(self) -> None:
+        torrent_hash = "d" * 40
+        live = [{"hash": torrent_hash, "name": "Disposable"}]
+        with patch.object(qbit, "torrent_info", return_value=(True, live)), patch.object(
+            qbit, "_post", return_value=(True, "ok"),
+        ) as post:
+            result = qbit.manage_torrent(
+                "delete", torrent_hash, confirmed=True, delete_files=True,
+            )
+        post.assert_called_once_with(
+            "/torrents/delete", data={"hashes": torrent_hash, "deleteFiles": "true"},
+        )
+        self.assertIn("downloaded files", result)
+
+    def test_torrent_tools_are_registered_and_gate_mutations(self) -> None:
+        names = {item.get("name") for item in get_tool_specs()}
+        self.assertTrue({"torrent_inventory", "manage_torrent"}.issubset(names))
+        result = execute_tool("manage_torrent", {
+            "action": "resume", "torrent_hash": "e" * 40, "confirmed": False,
+        })
+        self.assertIn("Confirmation required", result)
 
 
 if __name__ == "__main__":

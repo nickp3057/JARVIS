@@ -74,10 +74,14 @@ Use **⋯ → Send to AI to debug** to submit the current conversation, or
 long-press a particular JARVIS response to focus the report on it. Failed-turn
 notices also show a visible debug button. A review sheet requires a description
 of what went wrong and explains exactly what will be included before anything
-is uploaded. The authenticated report contains at most 100 current-conversation
+is uploaded, shows progress while sending, and confirms the saved report ID.
+Presentation is deferred until menus finish dismissing so the sheet opens
+reliably. The authenticated report contains at most 100 current-conversation
 messages plus app version, device type, OS version, connection state, and the
 selected response ID. It never contains the API token or server address. JARVIS
 Core stores reports separately from personality memory for later inspection.
+If Core predates `/debug-reports`, the app explicitly asks for a server update
+instead of leaving the action looking inert.
 
 ## Local chat history
 
@@ -90,7 +94,13 @@ When the app remains inactive or closed for at least five minutes, returning to
 it starts a clean conversation automatically. The previous conversation stays
 in History. Short app switches keep the current chat open. Drafts are saved per
 conversation. Replies stream into the JARVIS bubble as they arrive; the send
-button becomes Stop while generation is active.
+button becomes Stop while generation is active. Stream fragments are delivered
+to SwiftUI in short batches, and the archive is persisted at turn boundaries,
+so long histories do not trigger a full JSON rewrite for every character.
+
+The connection banner reports server reachability only. Sending a chat no
+longer changes a known-good connection to “Connecting…”; the typing indicator
+and Stop button communicate per-turn activity independently.
 
 For rolling upgrades, the app retries without a cached session when the server
 returns 404, then falls back from `/chat/stream` to the legacy `/chat` endpoint
