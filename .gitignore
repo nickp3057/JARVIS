@@ -9,3 +9,4 @@ jarvis_output.wav
 .env.*
 *.bak
 memory/*.db
+memory/obsidian/

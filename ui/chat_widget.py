@@ -12,6 +12,7 @@ The widget emits ``user_sent``, ``jarvis_replied``, and ``speak_started`` /
 from __future__ import annotations
 
 from html import escape
+import os
 
 from PyQt6.QtCore import QObject, QThread, pyqtSignal
 from PyQt6.QtGui import QTextCursor
@@ -25,7 +26,7 @@ from PyQt6.QtWidgets import (
 )
 
 from brain.runtime import JarvisRuntime
-from speech.tts import speak
+from speech.tts import _split_ready_sentences, speak
 
 
 # --- Workers ----------------------------------------------------------------
@@ -35,6 +36,7 @@ class _AgentWorker(QObject):
 
     finished = pyqtSignal(str, str)  # (user_text, reply)
     failed = pyqtSignal(str, str)    # (user_text, error)
+    fragment = pyqtSignal(str)
 
     def __init__(self, runtime: JarvisRuntime, text: str) -> None:
         super().__init__()
@@ -43,7 +45,16 @@ class _AgentWorker(QObject):
 
     def run(self) -> None:
         try:
-            reply = self._runtime.respond(self._text)
+            if os.getenv("STREAMING_TTS", "false").strip().lower() in (
+                "1", "true", "yes", "on",
+            ):
+                chunks: list[str] = []
+                for chunk in self._runtime.respond_streaming(self._text):
+                    chunks.append(chunk)
+                    self.fragment.emit(chunk)
+                reply = "".join(chunks)
+            else:
+                reply = self._runtime.respond(self._text)
         except Exception as exc:  # noqa: BLE001
             self.failed.emit(self._text, str(exc))
             return
@@ -91,6 +102,10 @@ class ChatWidget(QWidget):
         self._agent_worker: _AgentWorker | None = None
         self._speak_thread: QThread | None = None
         self._speak_worker: _SpeakWorker | None = None
+        self._stream_buffer = ""
+        self._speech_queue: list[str] = []
+        self._agent_stream_done = True
+        self._speech_completion_emitted = True
 
         self._build()
 
@@ -109,7 +124,11 @@ class ChatWidget(QWidget):
             return
         self.append_jarvis(text)
         if self._speak_replies and not self._muted:
-            self._dispatch_to_speak(text)
+            self._speech_completion_emitted = False
+            if self._agent_thread is None:
+                self._agent_stream_done = True
+            self._speech_queue.append(text)
+            self._start_next_speech()
 
     def append_system(self, text: str) -> None:
         text = text.strip()
@@ -271,10 +290,15 @@ class ChatWidget(QWidget):
         self._dispatch_to_agent(text)
 
     def _dispatch_to_agent(self, text: str) -> None:
+        self._stream_buffer = ""
+        self._speech_queue.clear()
+        self._agent_stream_done = False
+        self._speech_completion_emitted = False
         self._agent_thread = QThread(self)
         self._agent_worker = _AgentWorker(self._runtime, text)
         self._agent_worker.moveToThread(self._agent_thread)
         self._agent_thread.started.connect(self._agent_worker.run)
+        self._agent_worker.fragment.connect(self._on_agent_fragment)
         self._agent_worker.finished.connect(self._on_agent_finished)
         self._agent_worker.failed.connect(self._on_agent_failed)
         self._agent_worker.finished.connect(self._agent_thread.quit)
@@ -282,20 +306,39 @@ class ChatWidget(QWidget):
         self._agent_thread.finished.connect(self._cleanup_agent_thread)
         self._agent_thread.start()
 
+    def _on_agent_fragment(self, fragment: str) -> None:
+        if not self._speak_replies or self._muted:
+            return
+        self._stream_buffer += fragment
+        ready, self._stream_buffer = _split_ready_sentences(self._stream_buffer)
+        self._speech_queue.extend(ready)
+        self._start_next_speech()
+
     def _on_agent_finished(self, _user_text: str, reply: str) -> None:
+        self._agent_stream_done = True
         self.append_jarvis(reply)
         self.jarvis_replied.emit(reply)
         # Re-enable input immediately; don't make the user wait for TTS.
         self.set_input_enabled(True)
         if self._speak_replies and not self._muted and reply.strip():
-            self._dispatch_to_speak(reply)
+            tail = self._stream_buffer.strip()
+            self._stream_buffer = ""
+            if tail:
+                self._speech_queue.append(tail)
+            # No fragments means the non-streaming path was used.
+            if not self._speech_queue and self._speak_thread is None:
+                self._speech_queue.append(reply)
+            self._start_next_speech()
         else:
             # No TTS will fire; tell the main window so it can reset the orb.
+            self._speech_completion_emitted = True
             self.speak_finished.emit()
 
     def _on_agent_failed(self, _user_text: str, error: str) -> None:
+        self._agent_stream_done = True
         self.append_system(f"Agent error: {error}")
         self.set_input_enabled(True)
+        self._speech_completion_emitted = True
         self.speak_finished.emit()
 
     def _cleanup_agent_thread(self) -> None:
@@ -309,29 +352,18 @@ class ChatWidget(QWidget):
     # --- Speak (off-thread, doesn't block the UI / orb) ----------------
 
     def _dispatch_to_speak(self, text: str) -> None:
-        # If something else was already speaking (rare), just let it finish
-        # and queue up by serial replacement: cancel old worker first.
-        if self._speak_thread is not None:
-            try:
-                self._speak_thread.quit()
-                self._speak_thread.wait(200)
-            except Exception:  # noqa: BLE001
-                pass
-            self._cleanup_speak_thread()
-
         self._speak_thread = QThread(self)
         self._speak_worker = _SpeakWorker(text)
         self._speak_worker.moveToThread(self._speak_thread)
         self._speak_thread.started.connect(self._speak_worker.run)
-        self._speak_worker.finished.connect(self._on_speak_finished)
         self._speak_worker.finished.connect(self._speak_thread.quit)
         self._speak_thread.finished.connect(self._cleanup_speak_thread)
         self.speak_started.emit()
         self._speak_thread.start()
 
-    def _on_speak_finished(self) -> None:
-        self.speak_finished.emit()
-        # Input was already re-enabled when the agent replied; nothing to do.
+    def _start_next_speech(self) -> None:
+        if self._speak_thread is None and self._speech_queue:
+            self._dispatch_to_speak(self._speech_queue.pop(0))
 
     def _cleanup_speak_thread(self) -> None:
         if self._speak_worker is not None:
@@ -340,3 +372,12 @@ class ChatWidget(QWidget):
         if self._speak_thread is not None:
             self._speak_thread.deleteLater()
             self._speak_thread = None
+        self._start_next_speech()
+        if (
+            self._agent_stream_done
+            and not self._speech_queue
+            and self._speak_thread is None
+            and not self._speech_completion_emitted
+        ):
+            self._speech_completion_emitted = True
+            self.speak_finished.emit()

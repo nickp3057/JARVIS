@@ -17,12 +17,25 @@ Current responsibilities:
 - Provide status snapshots for the UI.
 - Expose timers and due reminders for proactive announcement.
 - Maintain a runtime event inbox for observations and proactive notices.
-- Run the first background monitor for Home Assistant state changes.
+- Maintain a reconnecting Home Assistant WebSocket subscription for live state
+  changes, with REST polling available as a fallback transport.
+- Monitor qBittorrent for completions and new errors while exposing live
+  qBittorrent and Radarr/Sonarr queue status on demand.
 - Keep structured home and weather snapshots for cockpit panels.
 - Track whether the last turn used tools.
 - Compose situational briefings (time, weather, running timers) via
   `compose_briefing` / `launch_briefing`.
 - Stream replies fragment-by-fragment (`respond_streaming`) for streaming TTS.
+- Pipeline streamed replies into sentence-level TTS in text, GUI chat, GUI
+  voice, and standalone headless voice when `STREAMING_TTS=true`.
+- Discover and safely call the connected Home Assistant instance's live service
+  catalogue, with confirmation gates and blocked administrative domains.
+- Stage Home Assistant automation changes locally, validate and diff them,
+  require exact-draft approval, detect concurrent edits, preserve backups, and
+  verify both application and rollback.
+- Mirror structured profile facts to managed Obsidian Markdown and locally
+  retrieve size-bounded excerpts only from explicitly authorized folders, with
+  note-path provenance and JSON remaining authoritative if storage is offline.
 - Atomically switch and answer named sessions for remote clients through
   `respond_in_session` / `respond_streaming_in_session`.
 
@@ -34,6 +47,11 @@ Near-term responsibilities:
   system health.
 - Store task state for multi-step work.
 - Decide when to interrupt, notify quietly, or stay silent.
+- Grow the Obsidian baseline into indexed episodic and semantic memory,
+  contradiction handling, and user-facing inspect/edit controls, with the
+  Optiplex as the live store and the NAS as synchronized storage.
+- Route small offline tasks to an optional local model, and add a governed
+  patch/test/approve/rollback workflow for self-modification.
 
 ## Target Layers
 
@@ -59,6 +77,8 @@ Near-term responsibilities:
    - World-changing tools that are hard to undo (e.g. adding to the media
      library) are split into a read-only lookup tool and a confirm-gated
      write tool; the write never fires without explicit user confirmation.
+   - Home Assistant automation changes follow a stricter draft/diff/approve/
+     apply/verify workflow with optimistic concurrency and rollback records.
 
 5. Presence
    - GUI cockpit, orb state, voice pacing, interruption, proactive notices, and
@@ -87,8 +107,26 @@ runtime knows, the more JARVIS feels like one mind instead of several scripts.
 
 - `HOME_MONITOR_ENABLED`: true/false, defaults to true.
 - `HOME_MONITOR_INTERVAL_S`: polling interval in seconds, defaults to 20.
+- `HOME_MONITOR_TRANSPORT`: `websocket` (default) or `polling`/`rest` fallback.
+- `HOME_MONITOR_RECONNECT_S`: WebSocket reconnect delay, defaults to 5 seconds.
 - `HOME_MONITOR_DOMAINS`: comma-separated domains, defaults to
-  `light,switch,fan,media_player`.
+  `light,switch,fan,media_player,binary_sensor,person,device_tracker,lock,cover,climate`.
 - `WEATHER_MONITOR_ENABLED`: true/false, defaults to true.
 - `WEATHER_MONITOR_INTERVAL_S`: weather refresh interval in seconds, defaults
   to 1800.
+- `QBITTORRENT_MONITOR_ENABLED`: true/false, defaults to true when qBittorrent
+  credentials are configured.
+- `QBITTORRENT_MONITOR_INTERVAL_S`: download polling interval, defaults to 30.
+- `QBITTORRENT_ANNOUNCE_COMPLETIONS`: speak completed downloads, defaults true.
+
+## Memory Retrieval Settings
+
+- `MEMORY_MAX_FACTS`: legacy cap for the full profile rendering, defaults to 60.
+- `MEMORY_RELEVANT_FACTS`: maximum relevant/recent profile facts injected into
+  a normal turn, defaults to 12.
+- `OBSIDIAN_VAULT_PATH`: Obsidian vault root; defaults to `memory/obsidian`.
+- `OBSIDIAN_INDEX_FOLDERS`: comma-separated, vault-relative folder allowlist;
+  defaults to the managed `Jarvis Memory` folder.
+- `OBSIDIAN_MAX_RESULTS` / `OBSIDIAN_MAX_CHARS`: per-turn retrieval caps,
+  defaulting to four excerpts and 4,000 characters.
+- `OBSIDIAN_MAX_FILE_BYTES`: per-note indexing limit, defaults to 1 MB.

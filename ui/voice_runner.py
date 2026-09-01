@@ -14,6 +14,7 @@ goes straight back to listening.
 from __future__ import annotations
 
 import os
+import queue
 import re
 import threading
 import time
@@ -27,7 +28,7 @@ from jarvis_logger import get_logger
 from speech.audio import MicStream, record_until_silence, rms
 from speech.chime import play_chime
 from speech.stt import Transcriber
-from speech.tts import speak
+from speech.tts import speak, speak_stream
 from speech.wake import WAKE_THRESHOLD, WakeDetector
 
 log = get_logger(__name__)
@@ -155,8 +156,11 @@ class VoiceRunner(QThread):
                         if _is_exit_phrase(text):
                             self._speak_interruptible(stream, "Shutting down. See you, sir.")
                             break
-                        reply = self._agent_respond(text)
-                        interrupted = self._respond_and_speak(stream, reply)
+                        if self._streaming_enabled():
+                            interrupted = self._stream_response_and_speak(stream, text)
+                        else:
+                            reply = self._agent_respond(text)
+                            interrupted = self._respond_and_speak(stream, reply)
                     else:
                         # Wake word only - prompt and fall into follow-up window.
                         self._runtime.mark_no_tools_used()
@@ -195,8 +199,11 @@ class VoiceRunner(QThread):
                             self._speak_interruptible(stream, "Shutting down. See you, sir.")
                             self._stop_requested = True
                             break
-                        reply = self._agent_respond(follow_text)
-                        follow_interrupted = self._respond_and_speak(stream, reply)
+                        if self._streaming_enabled():
+                            follow_interrupted = self._stream_response_and_speak(stream, follow_text)
+                        else:
+                            reply = self._agent_respond(follow_text)
+                            follow_interrupted = self._respond_and_speak(stream, reply)
                         followup_timeout = (
                             FOLLOWUP_CONVERSATIONAL_S
                             if (follow_interrupted or not self._runtime.last_used_tools)
@@ -284,9 +291,67 @@ class VoiceRunner(QThread):
             log.exception("Agent failed mid-conversation")
             return "Something went wrong, sir."
 
+    @staticmethod
+    def _streaming_enabled() -> bool:
+        return os.getenv("STREAMING_TTS", "false").strip().lower() in (
+            "1", "true", "yes", "on",
+        )
+
+    def _stream_response_and_speak(self, stream: MicStream, text: str) -> bool:
+        """Generate and speak concurrently, then publish one complete transcript."""
+        fragments: queue.Queue[str | None] = queue.Queue()
+        reply_parts: list[str] = []
+
+        def _produce() -> None:
+            try:
+                for fragment in self._runtime.respond_streaming(text):
+                    reply_parts.append(fragment)
+                    fragments.put(fragment)
+            except Exception:  # noqa: BLE001
+                log.exception("Streaming agent failed mid-conversation")
+                fallback = "Something went wrong, sir."
+                reply_parts.append(fallback)
+                fragments.put(fallback)
+            finally:
+                fragments.put(None)
+
+        producer = threading.Thread(target=_produce, daemon=True)
+        producer.start()
+
+        def _chunks():
+            while True:
+                fragment = fragments.get()
+                if fragment is None:
+                    return
+                yield fragment
+
+        if self._muted:
+            for _ in _chunks():
+                pass
+            interrupted = False
+        else:
+            interrupted = self._speak_chunks_interruptible(stream, _chunks())
+        producer.join()
+
+        reply = "".join(reply_parts).strip()
+        if reply:
+            self.jarvis_replied.emit(reply)
+        self.state_idle.emit()
+        return interrupted
+
     def _speak_interruptible(self, stream: MicStream, text: str) -> bool:
         if not text or not text.strip():
             return False
+
+        return self._speak_chunks_interruptible(stream, iter((text,)), streaming=False)
+
+    def _speak_chunks_interruptible(
+        self,
+        stream: MicStream,
+        chunks,
+        *,
+        streaming: bool = True,
+    ) -> bool:
 
         interrupt = threading.Event()
         watcher_stop = threading.Event()
@@ -334,7 +399,10 @@ class VoiceRunner(QThread):
         watcher = threading.Thread(target=_watch, daemon=True)
         watcher.start()
         try:
-            speak(text, interrupt_event=interrupt, on_envelope=_on_envelope)
+            if streaming:
+                speak_stream(chunks, interrupt_event=interrupt, on_envelope=_on_envelope)
+            else:
+                speak(next(chunks), interrupt_event=interrupt, on_envelope=_on_envelope)
         finally:
             watcher_stop.set()
             watcher.join(timeout=0.3)

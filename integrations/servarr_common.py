@@ -151,6 +151,109 @@ def test_connection(service: str) -> str:
     return f"Connected to {service.title()}{f' (version {version})' if version else ''}, sir."
 
 
+def get_queue(service: str, page_size: int = 50) -> tuple[bool, Any]:
+    """Return the current Radarr/Sonarr activity queue."""
+    params: dict[str, Any] = {
+        "page": 1,
+        "pageSize": max(1, min(200, int(page_size))),
+        "sortKey": "timeleft",
+        "sortDirection": "ascending",
+    }
+    if service == "radarr":
+        params["includeUnknownMovieItems"] = "true"
+        params["includeMovie"] = "true"
+    elif service == "sonarr":
+        params["includeUnknownSeriesItems"] = "true"
+        params["includeSeries"] = "true"
+        params["includeEpisode"] = "true"
+    return request(service, "GET", "/api/v3/queue", params=params)
+
+
+def get_health(service: str) -> tuple[bool, Any]:
+    """Return active health warnings from a Servarr service."""
+    return request(service, "GET", "/api/v3/health")
+
+
+def _format_bytes(value: Any) -> str:
+    try:
+        size = float(value or 0)
+    except (TypeError, ValueError):
+        return "unknown"
+    for unit in ("B", "KB", "MB", "GB", "TB"):
+        if abs(size) < 1024 or unit == "TB":
+            return f"{size:.0f} {unit}" if unit in {"B", "KB"} else f"{size:.1f} {unit}"
+        size /= 1024
+    return "unknown"
+
+
+def _queue_title(service: str, record: dict[str, Any]) -> str:
+    if service == "radarr":
+        return str((record.get("movie") or {}).get("title") or record.get("title") or "Unknown movie")
+    series = str((record.get("series") or {}).get("title") or "Unknown series")
+    episode = str((record.get("episode") or {}).get("title") or "").strip()
+    return f"{series} — {episode}" if episode else series
+
+
+def queue_status(service: str | None = None) -> str:
+    """Render current Radarr/Sonarr queues with progress, ETA, and warnings."""
+    requested = (service or "").strip().lower()
+    services = [requested] if requested in {"radarr", "sonarr"} else ["radarr", "sonarr"]
+    lines: list[str] = []
+    for current in services:
+        if not is_configured(current):
+            lines.append(f"{current.title()} is not configured.")
+            continue
+        ok, payload = get_queue(current)
+        if not ok:
+            lines.append(str(payload))
+            continue
+        records = payload.get("records", []) if isinstance(payload, dict) else []
+        if not records:
+            lines.append(f"{current.title()} queue is clear.")
+            continue
+        lines.append(f"{current.title()} queue: {len(records)} item{'s' if len(records) != 1 else ''}.")
+        for record in records[:20]:
+            size = float(record.get("size", 0) or 0)
+            left = float(record.get("sizeleft", 0) or 0)
+            progress = round((1 - left / size) * 100, 1) if size > 0 else 0.0
+            status = str(record.get("trackedDownloadStatus") or record.get("status") or "unknown")
+            eta = str(record.get("timeleft") or "ETA unknown")
+            message = str(record.get("errorMessage") or "").strip()
+            detail = f" — {message}" if message else ""
+            lines.append(
+                f"{_queue_title(current, record)}: {progress}% — {_format_bytes(left)} left — "
+                f"{eta} — {status}{detail}"
+            )
+        if len(records) > 20:
+            lines.append(f"Plus {len(records) - 20} more in {current.title()}.")
+    return "\n".join(lines)
+
+
+def health_status(service: str | None = None) -> str:
+    """Render current Radarr/Sonarr health warnings."""
+    requested = (service or "").strip().lower()
+    services = [requested] if requested in {"radarr", "sonarr"} else ["radarr", "sonarr"]
+    lines: list[str] = []
+    for current in services:
+        if not is_configured(current):
+            lines.append(f"{current.title()} is not configured.")
+            continue
+        ok, payload = get_health(current)
+        if not ok:
+            lines.append(str(payload))
+            continue
+        warnings = payload if isinstance(payload, list) else []
+        if not warnings:
+            lines.append(f"{current.title()} reports no health warnings.")
+            continue
+        lines.append(f"{current.title()} health warnings:")
+        for warning in warnings[:20]:
+            lines.append(
+                f"{warning.get('type', 'warning')}: {warning.get('message', 'No detail')}"
+            )
+    return "\n".join(lines)
+
+
 # --- Fuzzy helpers ------------------------------------------------------
 
 def _normalize(text: str) -> str:

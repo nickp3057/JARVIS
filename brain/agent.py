@@ -176,7 +176,8 @@ class JarvisAgent:
 
     def _run_tool_loop(self) -> str:
         """Call Claude, execute any tools it wants, repeat until done."""
-        system = build_system_prompt(render_memory_block())
+        latest_user_text = str(self._history[-1].get("content", "")) if self._history else ""
+        system = build_system_prompt(render_memory_block(latest_user_text))
         messages: list[dict[str, Any]] = list(self._history)
         used_tools_this_turn = False
 
@@ -228,7 +229,8 @@ class JarvisAgent:
         Returns (via ``return value`` in the generator) the full concatenated
         text so the caller can persist it to history.
         """
-        system = build_system_prompt(render_memory_block())
+        latest_user_text = str(self._history[-1].get("content", "")) if self._history else ""
+        system = build_system_prompt(render_memory_block(latest_user_text))
         messages: list[dict[str, Any]] = list(self._history)
         used_tools_this_turn = False
         text_parts: list[str] = []

@@ -19,6 +19,7 @@ deliberately, playback is killed and we go straight to listening.
 from __future__ import annotations
 
 import os
+import queue
 import re
 import threading
 import time
@@ -30,7 +31,7 @@ from jarvis_logger import get_logger
 from speech.audio import MicStream, record_until_silence, rms
 from speech.chime import play_chime
 from speech.stt import Transcriber
-from speech.tts import speak
+from speech.tts import speak, speak_stream
 from speech.wake import WAKE_THRESHOLD, WakeDetector
 
 log = get_logger(__name__)
@@ -92,6 +93,12 @@ def _say(message: str) -> None:
     speak(message)
 
 
+def _streaming_enabled() -> bool:
+    return os.getenv("STREAMING_TTS", "false").strip().lower() in (
+        "1", "true", "yes", "on",
+    )
+
+
 def _capture_utterance(
     stream: MicStream,
     preroll: np.ndarray | None = None,
@@ -131,6 +138,11 @@ def _speak_interruptible(stream: MicStream, text: str) -> bool:
         return False
 
     print(f"Jarvis: {text}")
+    return _speak_stream_interruptible(stream, iter((text,)), streaming=False)
+
+
+def _speak_stream_interruptible(stream: MicStream, chunks, *, streaming: bool = True) -> bool:
+    """Speak text fragments while preserving headless mic interruption."""
     interrupt = threading.Event()
     watcher_stop = threading.Event()
 
@@ -152,12 +164,58 @@ def _speak_interruptible(stream: MicStream, text: str) -> bool:
     watcher = threading.Thread(target=_watch, daemon=True)
     watcher.start()
     try:
-        speak(text, interrupt_event=interrupt)
+        if streaming:
+            speak_stream(chunks, interrupt_event=interrupt)
+        else:
+            speak(next(chunks), interrupt_event=interrupt)
     finally:
         watcher_stop.set()
         watcher.join(timeout=0.3)
 
     return interrupt.is_set()
+
+
+def _stream_response_interruptible(
+    runtime: JarvisRuntime,
+    stream: MicStream,
+    user_text: str,
+) -> tuple[str, bool]:
+    """Generate and speak concurrently, returning the complete persisted reply."""
+    fragments: queue.Queue[str | None] = queue.Queue()
+    reply_parts: list[str] = []
+
+    def _produce() -> None:
+        print("Jarvis: ", end="", flush=True)
+        try:
+            for fragment in runtime.respond_streaming(user_text):
+                reply_parts.append(fragment)
+                print(fragment, end="", flush=True)
+                fragments.put(fragment)
+        except Exception:  # noqa: BLE001
+            log.exception("Agent respond_streaming() failed")
+            fallback = "Something went wrong, sir."
+            reply_parts.append(fallback)
+            print(fallback, end="", flush=True)
+            fragments.put(fallback)
+        finally:
+            print()
+            fragments.put(None)
+
+    producer = threading.Thread(target=_produce, daemon=True)
+    producer.start()
+
+    def _chunks():
+        while True:
+            fragment = fragments.get()
+            if fragment is None:
+                return
+            yield fragment
+
+    interrupted = _speak_stream_interruptible(stream, _chunks())
+    # Always finish consuming the model stream so history and tool-use state
+    # are finalized even when the user interrupts audio playback.
+    producer.join()
+    return "".join(reply_parts).strip(), interrupted
 
 
 def _wait_for_wake_with_timers(
@@ -240,13 +298,17 @@ def run_voice_loop(runtime: JarvisRuntime, *, greet: bool = True) -> int:
                     _speak_interruptible(stream, GOODBYE)
                     return 0
                 t0 = time.perf_counter()
-                try:
-                    reply = runtime.respond(text)
-                except Exception:  # noqa: BLE001
-                    log.exception("Agent respond() failed")
-                    reply = "Something went wrong, sir."
-                _log_stage("3. Claude (tool loop)", time.perf_counter() - t0)
-                interrupted = _speak_interruptible(stream, reply)
+                if _streaming_enabled() and runtime.brain_online:
+                    _, interrupted = _stream_response_interruptible(runtime, stream, text)
+                    _log_stage("3. Claude + streamed TTS", time.perf_counter() - t0)
+                else:
+                    try:
+                        reply = runtime.respond(text)
+                    except Exception:  # noqa: BLE001
+                        log.exception("Agent respond() failed")
+                        reply = "Something went wrong, sir."
+                    _log_stage("3. Claude (tool loop)", time.perf_counter() - t0)
+                    interrupted = _speak_interruptible(stream, reply)
             else:
                 # Wake word only - no command stripped out.  Prompt briefly
                 # then fall into the follow-up window so the user can speak.
@@ -298,14 +360,19 @@ def run_voice_loop(runtime: JarvisRuntime, *, greet: bool = True) -> int:
                     return 0
 
                 t0 = time.perf_counter()
-                try:
-                    reply = runtime.respond(follow_text)
-                except Exception:  # noqa: BLE001
-                    log.exception("Agent respond() failed")
-                    reply = "Something went wrong, sir."
-                _log_stage("3. Claude (tool loop)", time.perf_counter() - t0)
-
-                follow_interrupted = _speak_interruptible(stream, reply)
+                if _streaming_enabled() and runtime.brain_online:
+                    _, follow_interrupted = _stream_response_interruptible(
+                        runtime, stream, follow_text,
+                    )
+                    _log_stage("3. Claude + streamed TTS", time.perf_counter() - t0)
+                else:
+                    try:
+                        reply = runtime.respond(follow_text)
+                    except Exception:  # noqa: BLE001
+                        log.exception("Agent respond() failed")
+                        reply = "Something went wrong, sir."
+                    _log_stage("3. Claude (tool loop)", time.perf_counter() - t0)
+                    follow_interrupted = _speak_interruptible(stream, reply)
                 followup_timeout = (
                     FOLLOWUP_CONVERSATIONAL_S
                     if (follow_interrupted or not runtime.last_used_tools)

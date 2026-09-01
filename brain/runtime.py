@@ -23,7 +23,7 @@ from brain.memory import list_facts
 from brain.timers import Timer, active_timers, pop_expired
 from brain.reminders import active_reminders, pop_due_reminders as _pop_due_reminders
 from brain.weather import WeatherSnapshot, get_weather_snapshot
-from integrations.home_assistant import get_states
+from integrations.home_assistant import get_states, listen_state_changes
 from jarvis_logger import get_logger
 
 log = get_logger(__name__)
@@ -123,6 +123,8 @@ class JarvisRuntime:
         self._home_monitor_failed = False
         self._weather_monitor_started = False
         self._weather_monitor_failed = False
+        self._download_monitor_started = False
+        self._download_monitor_failed = False
         self._home_snapshot = HomeSnapshot(
             online=False,
             updated_at=None,
@@ -167,7 +169,7 @@ class JarvisRuntime:
         home_enabled = os.getenv("HOME_MONITOR_ENABLED", "true").strip().lower()
         if home_enabled in ("1", "true", "yes", "on") and not self._home_monitor_started:
             self._home_monitor_started = True
-            threading.Thread(target=self._home_monitor_loop, daemon=True).start()
+            threading.Thread(target=self._home_monitor_entry, daemon=True).start()
 
         weather_enabled = os.getenv("WEATHER_MONITOR_ENABLED", "true").strip().lower()
         if weather_enabled in ("1", "true", "yes", "on") and not self._weather_monitor_started:
@@ -184,6 +186,17 @@ class JarvisRuntime:
             if configured:
                 self._calendar_monitor_started = True
                 threading.Thread(target=self._calendar_monitor_loop, daemon=True).start()
+
+        download_enabled = os.getenv("QBITTORRENT_MONITOR_ENABLED", "true").strip().lower()
+        if download_enabled in ("1", "true", "yes", "on") and not self._download_monitor_started:
+            try:
+                from integrations.qbittorrent import is_configured
+                configured = is_configured()
+            except Exception:  # noqa: BLE001
+                configured = False
+            if configured:
+                self._download_monitor_started = True
+                threading.Thread(target=self._download_monitor_loop, daemon=True).start()
 
     def stop_monitors(self) -> None:
         """Ask background monitors to stop."""
@@ -445,7 +458,10 @@ class JarvisRuntime:
         interval = float(os.getenv("HOME_MONITOR_INTERVAL_S", "20.0"))
         watched_domains = {
             domain.strip()
-            for domain in os.getenv("HOME_MONITOR_DOMAINS", "light,switch,fan,media_player").split(",")
+            for domain in os.getenv(
+                "HOME_MONITOR_DOMAINS",
+                "light,switch,fan,media_player,binary_sensor,person,device_tracker,lock,cover,climate",
+            ).split(",")
             if domain.strip()
         }
         previous: dict[str, str] | None = None
@@ -518,6 +534,126 @@ class JarvisRuntime:
             previous = current
             if self._stop_monitors.wait(interval):
                 break
+
+    def _home_monitor_entry(self) -> None:
+        transport = os.getenv("HOME_MONITOR_TRANSPORT", "websocket").strip().lower()
+        if transport in ("poll", "polling", "rest"):
+            self._home_monitor_loop()
+            return
+        self._home_websocket_monitor_loop()
+
+    def _home_websocket_monitor_loop(self) -> None:
+        """Maintain a live HA state subscription, reconnecting after outages."""
+        retry_s = float(os.getenv("HOME_MONITOR_RECONNECT_S", "5.0"))
+        watched_domains = {
+            domain.strip()
+            for domain in os.getenv(
+                "HOME_MONITOR_DOMAINS",
+                "light,switch,fan,media_player,binary_sensor,person,device_tracker,lock,cover,climate",
+            ).split(",")
+            if domain.strip()
+        }
+        entities: dict[str, dict[str, Any]] = {}
+        ever_connected = False
+
+        while not self._stop_monitors.is_set():
+            success, payload = get_states()
+            if not success:
+                self._set_home_monitor_offline(str(payload))
+                if self._stop_monitors.wait(retry_s):
+                    break
+                continue
+
+            entities = {
+                str(entity.get("entity_id")): entity
+                for entity in payload
+                if str(entity.get("entity_id", "")).split(".", 1)[0] in watched_domains
+            }
+            self._update_home_snapshot_from_entities(entities)
+
+            def _connected() -> None:
+                nonlocal ever_connected
+                was_offline = self._home_monitor_failed
+                self._home_monitor_failed = False
+                if not ever_connected or was_offline:
+                    self.record_event(
+                        kind="monitor",
+                        source="home",
+                        title="Home live monitor online",
+                        detail=f"Watching {len(entities)} entities via WebSocket",
+                    )
+                ever_connected = True
+
+            def _changed(data: dict[str, Any]) -> None:
+                entity_id = str(data.get("entity_id", ""))
+                if not entity_id or entity_id.split(".", 1)[0] not in watched_domains:
+                    return
+                old_entity = data.get("old_state") or entities.get(entity_id) or {}
+                new_entity = data.get("new_state")
+                old_state = str(old_entity.get("state", "unknown"))
+                if new_entity is None:
+                    entities.pop(entity_id, None)
+                    self._update_home_snapshot_from_entities(entities)
+                    return
+                entities[entity_id] = new_entity
+                new_state = str(new_entity.get("state", "unknown"))
+                self._update_home_snapshot_from_entities(entities)
+                if old_state == new_state or not self._should_record_home_change(
+                    entity_id, old_state, new_state,
+                ):
+                    return
+                self.record_event(
+                    kind="home",
+                    source="home",
+                    title=_friendly_entity_name(entity_id),
+                    detail=f"{old_state} -> {new_state}",
+                )
+
+            try:
+                listen_state_changes(
+                    self._stop_monitors,
+                    _changed,
+                    on_connected=_connected,
+                )
+            except Exception as exc:  # noqa: BLE001
+                if self._stop_monitors.is_set():
+                    break
+                log.warning("Home Assistant live monitor disconnected: %s", exc)
+                self._set_home_monitor_offline(str(exc))
+                if self._stop_monitors.wait(retry_s):
+                    break
+
+    def _update_home_snapshot_from_entities(
+        self,
+        entities: dict[str, dict[str, Any]],
+    ) -> None:
+        entities_by_domain: dict[str, list[dict[str, Any]]] = {}
+        for entity_id, entity in entities.items():
+            domain = entity_id.split(".", 1)[0]
+            entities_by_domain.setdefault(domain, []).append(entity)
+        snapshot = _build_home_snapshot(entities_by_domain)
+        with self._lock:
+            self._home_snapshot = snapshot
+        self._evaluate_home_proactive_rules(snapshot)
+
+    def _set_home_monitor_offline(self, error: str) -> None:
+        with self._lock:
+            previous = self._home_snapshot
+            self._home_snapshot = HomeSnapshot(
+                online=False,
+                updated_at=time.time(),
+                entity_count=previous.entity_count,
+                domains=previous.domains,
+                error=error,
+            )
+        if not self._home_monitor_failed:
+            self._home_monitor_failed = True
+            self.record_event(
+                kind="monitor",
+                source="home",
+                title="Home live monitor offline",
+                detail=error,
+            )
 
     def _should_record_home_change(self, entity_id: str, old_state: str, state: str) -> bool:
         noisy_states = {"unknown", "unavailable", "none", ""}
@@ -631,6 +767,80 @@ class JarvisRuntime:
                     )
                 previous_temp = snapshot.temperature_f
 
+            if self._stop_monitors.wait(interval):
+                break
+
+    def _download_monitor_loop(self) -> None:
+        """Watch qBittorrent for completions and download errors."""
+        from integrations.qbittorrent import download_snapshot
+
+        interval = float(os.getenv("QBITTORRENT_MONITOR_INTERVAL_S", "30.0"))
+        announce_completions = os.getenv(
+            "QBITTORRENT_ANNOUNCE_COMPLETIONS", "true",
+        ).strip().lower() in ("1", "true", "yes", "on")
+        previous: dict[str, dict[str, Any]] | None = None
+
+        while not self._stop_monitors.is_set():
+            success, result = download_snapshot()
+            if not success:
+                if not self._download_monitor_failed:
+                    self._download_monitor_failed = True
+                    self.record_event(
+                        kind="monitor",
+                        source="downloads",
+                        title="Download monitor offline",
+                        detail=str(result),
+                    )
+                if self._stop_monitors.wait(interval):
+                    break
+                continue
+
+            current = {
+                str(item.get("hash", "")): item
+                for item in result
+                if item.get("hash")
+            }
+            if previous is None or self._download_monitor_failed:
+                self.record_event(
+                    kind="monitor",
+                    source="downloads",
+                    title="Download monitor online",
+                    detail=f"Watching {len(current)} torrents",
+                )
+            self._download_monitor_failed = False
+
+            if previous is not None:
+                for torrent_hash, item in current.items():
+                    old = previous.get(torrent_hash)
+                    if old is None:
+                        continue
+                    old_progress = float(old.get("progress", 0) or 0)
+                    progress = float(item.get("progress", 0) or 0)
+                    name = str(item.get("name", "Download"))
+                    if old_progress < 1 <= progress:
+                        if announce_completions:
+                            self.announce(
+                                f"Download complete: {name}",
+                                source="downloads",
+                                title="Download complete",
+                            )
+                        else:
+                            self.record_event(
+                                kind="download",
+                                source="downloads",
+                                title="Download complete",
+                                detail=name,
+                            )
+                    state = str(item.get("state", "")).lower()
+                    old_state = str(old.get("state", "")).lower()
+                    if "error" in state and "error" not in old_state:
+                        self.record_event(
+                            kind="alert",
+                            source="downloads",
+                            title="Download error",
+                            detail=name,
+                        )
+            previous = current
             if self._stop_monitors.wait(interval):
                 break
 

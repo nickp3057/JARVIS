@@ -24,7 +24,7 @@ The character never breaks. It calls Nick "sir", uses dry British wit, answers i
 | Home control | Home Assistant REST API |
 | Media library | Radarr + Sonarr v3 REST API (movie / TV requests) |
 | Music | Spotify Web API via spotipy (Premium required) |
-| Memory | SQLite (conversation history) + JSON (profile facts) |
+| Memory | SQLite history + JSON facts + selective Obsidian Markdown retrieval |
 | Settings | `.env` file, hot-reloaded at runtime |
 
 ---
@@ -40,10 +40,12 @@ Pearson-Stark-Jarvis/
 ├── brain/
 │   ├── agent.py             JarvisAgent: session management, tool loop, history
 │   ├── apps.py              Windows app launcher (open/close/focus via PowerShell)
+│   ├── automation_workshop.py Staged HA automation drafts, diffs, apply + rollback
 │   ├── clipboard_tool.py    Read/write clipboard via PowerShell Get/Set-Clipboard
 │   ├── history.py           SQLite conversation history with session support
 │   ├── intents.py           Keyword intent router (fallback if brain offline)
 │   ├── memory.py            JSON long-term memory (profile.json) — remember_fact/forget_fact
+│   ├── knowledge_vault.py   Authorized Obsidian search + managed profile mirror
 │   ├── briefing.py          Spoken situational briefing (time, weather, agenda, timers)
 │   ├── personality.py       System prompt builder (humor%, address, tool descriptions)
 │   ├── reminders.py         Persistent reminders & to-dos (timed + open list)
@@ -58,6 +60,7 @@ Pearson-Stark-Jarvis/
 ├── integrations/
 │   ├── home_assistant.py    HA REST API: control_device / list_entities
 │   ├── google_calendar.py   Read-only Google Calendar: agenda / next event / alerts
+│   ├── qbittorrent.py       Live torrent progress, speed, ETA + completion monitor
 │   ├── servarr_common.py    Shared Radarr/Sonarr HTTP client + quality/root-folder
 │   │                        resolver + NL quality-phrase fuzzy matching
 │   ├── radarr.py            find_movie (lookup) / add_movie (confirm-gated)
@@ -154,10 +157,27 @@ RMS envelope from ElevenLabs audio drives the orb in real time using a monotonic
 - `list_devices(domain?)` — list HA entities, including scene/script/automation
   domains when requested
 - `test_home_assistant` — ping HA
+- `list_home_services(domain?)` — discover the live service/action catalogue
+  advertised by the connected HA instance
+- `call_home_service(domain, service, entity_id?, service_data?, confirmed?)` —
+  generalized control for brightness, color, climate, media players, vacuums,
+  and other discovered capabilities. Sensitive physical actions are
+  confirm-gated; administrative/code-execution domains are blocked.
+- `list_automations` / `inspect_automation(identifier)` — inventory and read
+  complete configurations for HA automations managed by the HA editor
+- `draft_automation(operation, identifier?, config?)` — locally validate and
+  stage a create/update/delete with a reviewable diff; never changes HA
+- `apply_automation_draft(draft_id, confirmed)` — apply an explicitly approved
+  draft, detect concurrent edits, verify it, and automatically attempt rollback
+  if verification fails
+- `rollback_automation_change(change_id, confirmed)` — restore the persisted
+  pre-change configuration after explicit approval
 
 ### Memory & History
 - `remember_fact(category, content)` — save to profile.json
 - `forget_fact(fact_id)` — remove from profile.json
+- `search_memory(query)` — search authorized Obsidian folders and return
+  bounded excerpts with their note paths
 - `clear_conversation` — wipe history.db
 - `conversation_history_stats` — turn/session count
 
@@ -193,10 +213,22 @@ RMS envelope from ElevenLabs audio drives the orb in real time using a monotonic
   `firstSeason`, `pilot`, `latestSeason`, `none`, or natural phrasing.
 - `list_quality_profiles(service?)` — the profile names defined in Radarr /
   Sonarr, for when a quality phrase doesn't match.
+- `media_queue(service?)` — live Radarr/Sonarr activity with movie/show/episode,
+  progress, size remaining, ETA, tracked status, and error detail
+- `media_health(service?)` — current download-client, indexer, disk, and other
+  Servarr health warnings
 - **Always confirm first**: the agent must surface the match and get an
   explicit yes before calling `add_*`; never auto-adds on ambiguous results.
   Quality-phrase → profile-name mapping lives in `.env`
   (`RADARR_QUALITY_MAP` / `SONARR_QUALITY_MAP`), not in code.
+
+### qBittorrent
+- `download_status(scope?)` — live global transfer speed plus torrent progress,
+  ETA, state, and errors; supports downloading/all/completed/seeding/stalled/etc.
+- Expired qBittorrent WebUI sessions automatically reauthenticate once before
+  reporting failure.
+- `test_qbittorrent` — verify WebUI authentication and report the version
+- Runtime monitor records errors and can announce newly completed downloads.
 
 ### Computer Control *(new)*
 - `open_app(name)` — opens any app by natural name (Chrome, Cursor, Discord, etc.)
@@ -250,6 +282,10 @@ SPOTIFY_PREFERRED_DEVICE=JARVIS  # device name substring
 HOME_ASSISTANT_URL=http://homeassistant.local:8123
 HOME_ASSISTANT_TOKEN=...
 # Legacy HA_URL / HA_TOKEN names are also accepted during migration.
+HOME_MONITOR_ENABLED=true
+HOME_MONITOR_TRANSPORT=websocket  # use polling/rest only as a fallback
+HOME_MONITOR_RECONNECT_S=5
+HOME_MONITOR_DOMAINS=light,switch,fan,media_player,binary_sensor,person,device_tracker,lock,cover,climate
 
 # Radarr / Sonarr (optional — movie & TV requests)
 RADARR_URL=http://localhost:7878
@@ -267,6 +303,14 @@ SONARR_MONITOR_STRATEGY=future
 # NL phrase => quality-profile name (exact name from the app); ';'-separated
 RADARR_QUALITY_MAP=4k efficient => UHD Bluray + WEB; 1080p => HD-1080p; 4k => Ultra-HD
 SONARR_QUALITY_MAP=1080p => HD-1080p; 4k => Ultra-HD
+
+# qBittorrent WebUI (optional, read-only integration)
+QBITTORRENT_URL=http://localhost:8080
+QBITTORRENT_USERNAME=
+QBITTORRENT_PASSWORD=
+QBITTORRENT_MONITOR_ENABLED=true
+QBITTORRENT_MONITOR_INTERVAL_S=30
+QBITTORRENT_ANNOUNCE_COMPLETIONS=true
 
 # Tunable at runtime via JARVIS voice commands
 HUMOR_PERCENT=30           # 0-100
@@ -287,8 +331,14 @@ WHISPER_MODEL=small.en
 
 # Feature flags / tuning (all optional, sensible defaults)
 BRIEFING_ON_LAUNCH=false    # speak a briefing at startup
-STREAMING_TTS=false         # opt-in sentence-streamed TTS (text mode)
+STREAMING_TTS=false         # opt-in sentence-streamed TTS in every interactive mode
 MEMORY_MAX_FACTS=60         # cap facts injected into the prompt (0 = no cap)
+MEMORY_RELEVANT_FACTS=12    # query-matched/recent profile facts per turn
+OBSIDIAN_VAULT_PATH=        # optional vault root; defaults to memory/obsidian
+OBSIDIAN_INDEX_FOLDERS=Jarvis Memory  # comma-separated folders JARVIS may read
+OBSIDIAN_MAX_RESULTS=4      # maximum note excerpts retrieved per turn
+OBSIDIAN_MAX_CHARS=4000     # hard cap on retrieved note text per turn
+OBSIDIAN_MAX_FILE_BYTES=1000000 # skip unusually large Markdown files
 VISION_MODEL=claude-sonnet-4-6
 VISION_ALL_MONITORS=true    # capture the whole virtual desktop
 WEB_SEARCH_MAX_USES=5       # max web_search calls per turn
@@ -342,6 +392,31 @@ CALENDAR_ALERT_LEAD_MIN=10  # warn this many minutes before a meeting
 
 ## Recently Shipped
 
+- **Streaming standalone voice mode** (`speech/voice_loop.py`) — headless
+  `--voice` now pipelines `respond_streaming` into sentence-level TTS when
+  `STREAMING_TTS=true`, while retaining mic interruption and blocking fallback.
+  An interrupted reply still drains the model stream so persisted history and
+  tool-aware follow-up timing remain correct.
+- **Download and media-pipeline awareness** (`integrations/qbittorrent.py`,
+  `integrations/servarr_common.py`) — JARVIS can report qBittorrent's live
+  speeds, progress, ETA, stalled/error state, and seeding status, then correlate
+  operational context through Radarr/Sonarr queues and health warnings. A
+  runtime monitor notices new download errors and optionally announces
+  completions. qBittorrent access is read-only in this phase.
+- **Home Assistant automation workshop** (`brain/automation_workshop.py`) —
+  JARVIS can inventory and inspect editor-managed automations, validate entity
+  and service references, draft creates/updates/deletes, show a diff, and wait
+  for explicit approval of the exact draft ID. Apply detects concurrent edits,
+  verifies HA's saved configuration, preserves a local backup, and attempts a
+  verified rollback on failure. Rollbacks are also separately confirm-gated.
+  Drafts and change records persist in `memory/automation_workshop.json`.
+- **Live + generalized Home Assistant integration**
+  (`integrations/home_assistant.py`) — the runtime now subscribes to HA's
+  WebSocket `state_changed` feed with automatic reconnect instead of waiting
+  for the polling interval. JARVIS can discover the instance's live service
+  catalogue and call capabilities beyond on/off. Locks, alarms, covers,
+  buttons, notifications, and similarly sensitive actions require explicit
+  confirmation; administrative and code-execution services are excluded.
 - **Reliable Home Assistant off commands + actions**
   (`integrations/home_assistant.py`) — explicit `turn off` / `switch off` and a
   trailing `off` now win over location language such as "the light on my desk."
@@ -398,19 +473,36 @@ CALENDAR_ALERT_LEAD_MIN=10  # warn this many minutes before a meeting
   desktop (all monitors) by default; set `VISION_ALL_MONITORS=false` for primary
   only. Vision model is configurable via `VISION_MODEL`.
 - **Streaming TTS (opt-in)** — `STREAMING_TTS=true` streams Claude's reply and
-  speaks it sentence-by-sentence via `speak_stream`, cutting perceived latency.
-  Default off; GUI/voice still use the proven blocking path until adopted there.
+  speaks it sentence-by-sentence, cutting perceived latency. Text mode, GUI
+  chat, GUI voice, and standalone headless voice all support the streaming path.
 - **Scalable memory** — `render_memory_block` caps injected facts at
   `MEMORY_MAX_FACTS` (default 60) so the system prompt doesn't bloat as memory
   grows; older facts stay on disk.
+- **Obsidian memory vault baseline** — durable JSON facts are mirrored into a
+  human-readable managed Markdown profile. JARVIS locally searches only the
+  comma-separated folders authorized by `OBSIDIAN_INDEX_FOLDERS`, retrieves a
+  bounded set of relevant excerpts with source paths, and injects those instead
+  of uploading the whole vault. A disconnected vault never prevents JSON facts
+  from being saved.
 
 ## What's Not Done Yet (Roadmap)
 
-- **Home Assistant** — Govee LAN device integration (Nick's lights aren't in HA yet)
 - **Briefing in GUI/voice** — wire the launch briefing into the GUI greeting and
   voice loop (currently text mode + on-demand tool).
-- **Streaming in GUI/voice** — adopt `respond_streaming` + `speak_stream` in the
-  voice runner and chat widget once validated against live audio.
+- **Evolving structured memory** — expand the shipped Obsidian retrieval and
+  profile mirror into people, preferences, routines, projects, goals, session
+  summaries, corrections, confidence, contradiction handling, edit controls,
+  and an indexed store suitable for very large vaults. Keep the live database
+  on the Optiplex and synchronize or back up the vault to the NAS.
+- **Local model routing** — optionally run a small tool-capable model on the
+  Optiplex for offline intent routing, entity matching, memory extraction, and
+  summarization while retaining Claude for complex reasoning and planning.
+- **Governed self-modification** — allow JARVIS to propose source/configuration
+  changes through patches, tests, approval, activation, and automatic rollback;
+  never permit unrestricted silent code rewriting.
+- **Media operations phase two** — add confirm-gated qBittorrent pause/resume,
+  recheck, priority and deletion controls plus Radarr/Sonarr history, missing
+  items, manual search, retry, and upcoming-release views.
 - **Email awareness** — read unread email summaries
 - **Ambient music control** — detect silence and auto-dim volume
 - **Double-clap wake** — alternative to voice wake word (from reference script)
@@ -443,7 +535,7 @@ python create_shortcut.py
 - Goes by "sir" (default address, Nick can change it mid-conversation)
 - Based in Herriman, Utah
 - Uses Cursor (VS Code fork) as his IDE
-- Has a Govee smart lighting setup (HA integration pending)
+- Has a working Govee smart lighting setup through Home Assistant
 - Spotify Premium user
 - Wants JARVIS to be proactive — update settings, remember things, and evolve itself without being asked
 - Movie-accurate JARVIS aesthetic: cyan (#00d9ff) holographic HUD on near-black,

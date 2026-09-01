@@ -61,6 +61,14 @@ def _save(data: dict[str, Any]) -> bool:
         with tmp_path.open("w", encoding="utf-8") as handle:
             json.dump(data, handle, indent=2, ensure_ascii=False)
         tmp_path.replace(_MEMORY_FILE)
+        try:
+            from brain.knowledge_vault import sync_profile_note
+
+            sync_profile_note(data["facts"])
+        except Exception as exc:  # noqa: BLE001
+            # The JSON store remains authoritative; a disconnected NAS or bad
+            # vault path must never make remembering fail.
+            log.warning("Could not synchronize Obsidian memory mirror: %s", exc)
         return True
     except OSError as exc:
         log.error("Could not write memory file: %s", exc)
@@ -122,7 +130,7 @@ def list_facts() -> list[dict[str, Any]]:
     return _load()["facts"]
 
 
-def render_memory_block() -> str:
+def render_memory_block(query: str = "") -> str:
     """Return a human-readable text block for injection into the system prompt.
 
     To keep the system prompt from bloating as memory grows, only the most
@@ -131,8 +139,13 @@ def render_memory_block() -> str:
     still searchable - they're just not all force-fed into every prompt.
     """
     facts = list_facts()
-    if not facts:
-        return ""
+    if facts:
+        try:
+            from brain.knowledge_vault import ensure_profile_note
+
+            ensure_profile_note(facts)
+        except Exception as exc:  # noqa: BLE001
+            log.warning("Could not initialize Obsidian memory mirror: %s", exc)
 
     try:
         max_facts = int(os.getenv("MEMORY_MAX_FACTS", "60") or 60)
@@ -145,6 +158,35 @@ def render_memory_block() -> str:
         # Facts are appended in chronological order, so the tail is newest.
         facts = facts[-max_facts:]
         truncated = True
+
+    # During real turns, prefer a small relevant subset plus the newest facts.
+    # Calling without a query preserves the full diagnostic/UI representation.
+    if query and facts:
+        from brain.knowledge_vault import _tokens
+
+        query_tokens = set(_tokens(query))
+        try:
+            relevant_limit = max(1, min(30, int(os.getenv("MEMORY_RELEVANT_FACTS", "12"))))
+        except (TypeError, ValueError):
+            relevant_limit = 12
+        scored: list[tuple[int, int, dict[str, Any]]] = []
+        for index, fact in enumerate(facts):
+            fact_tokens = set(_tokens(f"{fact.get('category', '')} {fact.get('content', '')}"))
+            scored.append((len(query_tokens & fact_tokens), index, fact))
+        relevant = [item for item in scored if item[0] > 0]
+        relevant.sort(key=lambda item: (-item[0], -item[1]))
+        selected = relevant[:relevant_limit]
+        # Keep a tiny recency safety net for durable preferences that use
+        # different wording than the current request.
+        selected_ids = {item[2].get("id") for item in selected}
+        for index, fact in reversed(list(enumerate(facts))):
+            if len(selected) >= relevant_limit or fact.get("id") in selected_ids:
+                continue
+            selected.append((0, index, fact))
+            selected_ids.add(fact.get("id"))
+            if sum(1 for item in selected if item[0] == 0) >= 3:
+                break
+        facts = [item[2] for item in sorted(selected, key=lambda item: item[1])]
 
     by_category: dict[str, list[dict[str, Any]]] = {}
     for fact in facts:
@@ -165,4 +207,13 @@ def render_memory_block() -> str:
             f"\n\n(Showing the {max_facts} most recent of {total} "
             f"remembered facts.)"
         )
+    if query:
+        try:
+            from brain.knowledge_vault import render_vault_context
+
+            vault_block = render_vault_context(query)
+            if vault_block:
+                block = f"{block}\n\n{vault_block}" if block else vault_block
+        except Exception as exc:  # noqa: BLE001
+            log.warning("Could not retrieve Obsidian context: %s", exc)
     return block

@@ -9,7 +9,11 @@ can handle failures without try/except at every call site.
 from __future__ import annotations
 
 import os
+import json
+import re
+import threading
 from typing import Any
+from urllib.parse import urlparse, urlunparse
 
 import requests
 from dotenv import load_dotenv
@@ -97,10 +101,66 @@ def get_states() -> tuple[bool, Any]:
     return _request("GET", "/api/states")
 
 
+def get_services() -> tuple[bool, Any]:
+    """Return Home Assistant's live service/action catalogue."""
+    return _request("GET", "/api/services")
+
+
+def list_automations() -> tuple[bool, list[dict[str, Any]] | str]:
+    """List automation entities with the stable IDs used by HA's editor API."""
+    success, result = get_states()
+    if not success:
+        return False, str(result)
+    if not isinstance(result, list):
+        return False, "Unexpected Home Assistant states response."
+    automations: list[dict[str, Any]] = []
+    for entity in result:
+        entity_id = str(entity.get("entity_id", ""))
+        if not entity_id.startswith("automation."):
+            continue
+        attributes = entity.get("attributes", {})
+        automations.append({
+            "entity_id": entity_id,
+            "id": str(attributes.get("id", "")),
+            "alias": str(attributes.get("friendly_name", entity_id)),
+            "state": str(entity.get("state", "unknown")),
+            "last_triggered": attributes.get("last_triggered"),
+        })
+    automations.sort(key=lambda item: item["alias"].lower())
+    return True, automations
+
+
+def get_automation_config(automation_id: str) -> tuple[bool, Any]:
+    automation_id = (automation_id or "").strip()
+    if not automation_id:
+        return False, "Missing automation id."
+    return _request("GET", f"/api/config/automation/config/{automation_id}")
+
+
+def save_automation_config(automation_id: str, config: dict[str, Any]) -> tuple[bool, Any]:
+    automation_id = (automation_id or "").strip()
+    if not automation_id:
+        return False, "Missing automation id."
+    return _request(
+        "POST",
+        f"/api/config/automation/config/{automation_id}",
+        json=config,
+    )
+
+
+def delete_automation_config(automation_id: str) -> tuple[bool, Any]:
+    automation_id = (automation_id or "").strip()
+    if not automation_id:
+        return False, "Missing automation id."
+    return _request("DELETE", f"/api/config/automation/config/{automation_id}")
+
+
 def list_entities(domain: str | None = None) -> tuple[bool, list[str] | str]:
     success, result = get_states()
     if not success:
         return False, str(result)
+    if not isinstance(result, list):
+        return False, "Unexpected Home Assistant states response."
 
     entities: list[str] = []
     for entity in result:
@@ -114,16 +174,190 @@ def list_entities(domain: str | None = None) -> tuple[bool, list[str] | str]:
     return True, entities
 
 
-def call_service(domain: str, service: str, entity_id: str) -> tuple[bool, str]:
+def call_service(
+    domain: str,
+    service: str,
+    entity_id: str | None = None,
+    service_data: dict[str, Any] | None = None,
+) -> tuple[bool, str]:
+    payload = dict(service_data or {})
+    if entity_id:
+        payload["entity_id"] = entity_id
     success, payload = _request(
         "POST",
         f"/api/services/{domain}/{service}",
-        json={"entity_id": entity_id},
+        json=payload,
     )
     if success:
         pretty_service = service.replace("_", " ").title()
-        return True, f"{pretty_service} command sent to {entity_id}."
+        target = f" to {entity_id}" if entity_id else ""
+        return True, f"{pretty_service} command sent{target}."
     return False, str(payload)
+
+
+def list_services(domain: str | None = None) -> tuple[bool, list[str] | str]:
+    """Return discoverable ``domain.service`` names, optionally filtered."""
+    success, result = get_services()
+    if not success:
+        return False, str(result)
+    if not isinstance(result, list):
+        return False, "Unexpected Home Assistant services response."
+
+    requested = (domain or "").strip().lower()
+    names: list[str] = []
+    for item in result:
+        item_domain = str(item.get("domain", "")).strip().lower()
+        if not item_domain or (requested and item_domain != requested):
+            continue
+        services = item.get("services", {})
+        if not isinstance(services, dict):
+            continue
+        names.extend(f"{item_domain}.{name}" for name in services)
+    names.sort()
+    return True, names
+
+
+def describe_services(domain: str | None = None) -> tuple[bool, list[str] | str]:
+    """Return service names plus the fields advertised by Home Assistant."""
+    success, result = get_services()
+    if not success:
+        return False, str(result)
+    if not isinstance(result, list):
+        return False, "Unexpected Home Assistant services response."
+
+    requested = (domain or "").strip().lower()
+    descriptions: list[str] = []
+    for item in result:
+        item_domain = str(item.get("domain", "")).strip().lower()
+        if not item_domain or (requested and item_domain != requested):
+            continue
+        services = item.get("services", {})
+        if not isinstance(services, dict):
+            continue
+        for name, spec in services.items():
+            spec = spec if isinstance(spec, dict) else {}
+            fields = spec.get("fields", {})
+            field_names = sorted(fields) if isinstance(fields, dict) else []
+            field_text = f"; fields: {', '.join(field_names)}" if field_names else ""
+            descriptions.append(f"{item_domain}.{name}{field_text}")
+    descriptions.sort()
+    return True, descriptions
+
+
+_IDENTIFIER = re.compile(r"^[a-z0-9_]+$")
+_ENTITY_ID = re.compile(r"^[a-z0-9_]+\.[a-z0-9_]+$")
+_BLOCKED_DOMAINS = {"hassio", "shell_command", "python_script", "update"}
+_BLOCKED_CALLS = {
+    ("homeassistant", "restart"),
+    ("homeassistant", "stop"),
+    ("homeassistant", "reload_all"),
+}
+_CONFIRM_DOMAINS = {"alarm_control_panel", "button", "cover", "lock", "notify"}
+_CONFIRM_TERMS = ("disarm", "open", "press", "unlock")
+
+
+def service_requires_confirmation(domain: str, service: str) -> bool:
+    domain = domain.strip().lower()
+    service = service.strip().lower()
+    return domain in _CONFIRM_DOMAINS or any(term in service for term in _CONFIRM_TERMS)
+
+
+def call_discovered_service(
+    domain: str,
+    service: str,
+    *,
+    entity_id: str | None = None,
+    service_data: dict[str, Any] | None = None,
+    confirmed: bool = False,
+) -> str:
+    """Safely call a discovered HA service with guardrails around risky actions."""
+    domain = (domain or "").strip().lower()
+    service = (service or "").strip().lower()
+    entity_id = (entity_id or "").strip().lower() or None
+    if not _IDENTIFIER.fullmatch(domain) or not _IDENTIFIER.fullmatch(service):
+        return "Invalid Home Assistant domain or service name."
+    if entity_id and not _ENTITY_ID.fullmatch(entity_id):
+        return "Invalid Home Assistant entity id."
+    if domain in _BLOCKED_DOMAINS or (domain, service) in _BLOCKED_CALLS:
+        return "That administrative Home Assistant action is blocked from general service control."
+    if service_data is not None and not isinstance(service_data, dict):
+        return "Home Assistant service data must be an object."
+    if service_requires_confirmation(domain, service) and not confirmed:
+        target = f" for {entity_id}" if entity_id else ""
+        return (
+            f"Confirmation required before calling {domain}.{service}{target}. "
+            "Ask Nick to explicitly confirm the exact action."
+        )
+
+    success, available = list_services(domain)
+    if not success:
+        return f"Could not discover Home Assistant services: {available}"
+    full_name = f"{domain}.{service}"
+    if full_name not in available:
+        return f"Home Assistant does not advertise the service {full_name}."
+
+    success, message = call_service(domain, service, entity_id, service_data)
+    return message if success else f"Command failed. {message}"
+
+
+def _websocket_url(base_url: str) -> str:
+    parsed = urlparse(base_url)
+    scheme = "wss" if parsed.scheme == "https" else "ws"
+    path = f"{parsed.path.rstrip('/')}/api/websocket"
+    return urlunparse((scheme, parsed.netloc, path, "", "", ""))
+
+
+def listen_state_changes(
+    stop_event: threading.Event,
+    on_change,
+    *,
+    on_connected=None,
+) -> None:
+    """Subscribe to HA ``state_changed`` events until stopped or disconnected."""
+    base_url, token = _config()
+    if not base_url or not token:
+        raise RuntimeError("Home Assistant is not configured yet.")
+
+    try:
+        import websocket
+    except ImportError as exc:
+        raise RuntimeError("websocket-client is required for live Home Assistant events.") from exc
+
+    ws = websocket.create_connection(_websocket_url(base_url), timeout=5)
+    try:
+        hello = json.loads(ws.recv())
+        if hello.get("type") != "auth_required":
+            raise RuntimeError("Unexpected Home Assistant WebSocket greeting.")
+        ws.send(json.dumps({"type": "auth", "access_token": token}))
+        auth = json.loads(ws.recv())
+        if auth.get("type") != "auth_ok":
+            raise RuntimeError(f"Home Assistant WebSocket authentication failed: {auth.get('message', '')}")
+
+        subscription_id = 1
+        ws.send(json.dumps({
+            "id": subscription_id,
+            "type": "subscribe_events",
+            "event_type": "state_changed",
+        }))
+        subscribed = json.loads(ws.recv())
+        if not subscribed.get("success"):
+            raise RuntimeError("Home Assistant rejected the state event subscription.")
+        if on_connected is not None:
+            on_connected()
+
+        ws.settimeout(1)
+        while not stop_event.is_set():
+            try:
+                message = json.loads(ws.recv())
+            except websocket.WebSocketTimeoutException:
+                continue
+            if message.get("type") != "event" or message.get("id") != subscription_id:
+                continue
+            event = message.get("event", {})
+            data = event.get("data", {})
+            on_change(data)
+    finally:
+        ws.close()
 
 
 # --- Fuzzy device command matching ------------------------------------------

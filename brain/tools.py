@@ -17,9 +17,17 @@ from datetime import datetime
 from typing import Any, Callable
 
 from brain.apps import close_app, focus_app, list_open_apps, open_app
+from brain.automation_workshop import (
+    apply_automation_draft,
+    draft_automation,
+    inspect_automation,
+    inventory_automations,
+    rollback_automation_change,
+)
 from brain.clipboard_tool import read_clipboard, write_clipboard
 from brain.history import clear_history, history_stats
 from brain.memory import forget_fact, remember_fact
+from brain.knowledge_vault import describe_search
 from brain.timers import cancel_timer, dismiss_timer, list_timers, pause_timer, resume_timer, set_timer
 from brain.reminders import add_reminder, complete_reminder, delete_reminder, list_reminders
 from brain.reminders import _format_due as _format_reminder_due
@@ -27,11 +35,14 @@ from brain.settings import get_setting, list_settings, update_setting
 from brain.vision import describe_screen
 from brain.weather import get_weather
 from integrations import radarr as radarr
+from integrations import qbittorrent as qbittorrent
 from integrations import servarr_common as servarr
 from integrations import sonarr as sonarr
 from integrations import spotify as spotify
 from integrations.home_assistant import (
     activate_home_action,
+    call_discovered_service,
+    describe_services,
     handle_device_command,
     list_entities,
     test_connection,
@@ -85,12 +96,69 @@ def _tool_activate_home_action(args: dict[str, Any]) -> str:
     return activate_home_action(args.get("kind", ""), args.get("name", ""))
 
 
+def _tool_list_home_services(args: dict[str, Any]) -> str:
+    domain = args.get("domain")
+    success, result = describe_services(domain)
+    if not success:
+        return f"Tool error: {result}"
+    if not result:
+        return f"No Home Assistant services found for {domain or 'any domain'}."
+    return ", ".join(result)  # type: ignore[arg-type]
+
+
+def _tool_call_home_service(args: dict[str, Any]) -> str:
+    return call_discovered_service(
+        args.get("domain", ""),
+        args.get("service", ""),
+        entity_id=args.get("entity_id"),
+        service_data=args.get("service_data"),
+        confirmed=bool(args.get("confirmed", False)),
+    )
+
+
+def _tool_list_automations(_: dict[str, Any]) -> str:
+    return inventory_automations()
+
+
+def _tool_inspect_automation(args: dict[str, Any]) -> str:
+    return inspect_automation(args.get("identifier", ""))
+
+
+def _tool_draft_automation(args: dict[str, Any]) -> str:
+    return draft_automation(
+        args.get("operation", ""),
+        identifier=args.get("identifier"),
+        config=args.get("config"),
+    )
+
+
+def _tool_apply_automation_draft(args: dict[str, Any]) -> str:
+    return apply_automation_draft(
+        args.get("draft_id", ""),
+        confirmed=bool(args.get("confirmed", False)),
+    )
+
+
+def _tool_rollback_automation_change(args: dict[str, Any]) -> str:
+    return rollback_automation_change(
+        args.get("change_id", ""),
+        confirmed=bool(args.get("confirmed", False)),
+    )
+
+
 def _tool_remember_fact(args: dict[str, Any]) -> str:
     return remember_fact(args.get("category", "general"), args.get("content", ""))
 
 
 def _tool_forget_fact(args: dict[str, Any]) -> str:
     return forget_fact(args.get("fact_id", ""))
+
+
+def _tool_search_memory(args: dict[str, Any]) -> str:
+    query = str(args.get("query", "")).strip()
+    if not query:
+        return "Tool error: missing 'query'."
+    return describe_search(query)
 
 
 def _tool_get_weather(args: dict[str, Any]) -> str:
@@ -291,6 +359,22 @@ def _tool_list_quality_profiles(args: dict[str, Any]) -> str:
     return " ".join(lines)
 
 
+def _tool_download_status(args: dict[str, Any]) -> str:
+    return qbittorrent.download_status(args.get("scope", "downloading"))
+
+
+def _tool_test_qbittorrent(_: dict[str, Any]) -> str:
+    return qbittorrent.test_connection()
+
+
+def _tool_media_queue(args: dict[str, Any]) -> str:
+    return servarr.queue_status(args.get("service"))
+
+
+def _tool_media_health(args: dict[str, Any]) -> str:
+    return servarr.health_status(args.get("service"))
+
+
 def _tool_todays_agenda(_: dict[str, Any]) -> str:
     from integrations.google_calendar import todays_agenda
     return todays_agenda()
@@ -365,6 +449,120 @@ _CUSTOM_TOOLS: list[dict[str, Any]] = [
         },
     },
     {
+        "name": "list_home_services",
+        "description": (
+            "Discover the live Home Assistant service/action catalogue. Use "
+            "this when a request needs more than basic on/off control, then "
+            "choose an advertised domain.service name."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "domain": {
+                    "type": "string",
+                    "description": "Optional domain filter, such as light, climate, media_player, or vacuum.",
+                },
+            },
+        },
+    },
+    {
+        "name": "call_home_service",
+        "description": (
+            "Call a service discovered with list_home_services. Use this for "
+            "brightness, color, thermostat, media-player, vacuum, and other "
+            "Home Assistant capabilities beyond basic on/off. Administrative "
+            "services are blocked. Locks, alarms, covers, buttons, notifications, "
+            "and actions containing unlock/disarm/open/press require Nick's "
+            "explicit confirmation of the exact action before confirmed=true."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "domain": {"type": "string", "description": "Service domain, e.g. light or climate."},
+                "service": {"type": "string", "description": "Advertised service name, e.g. turn_on or set_temperature."},
+                "entity_id": {"type": "string", "description": "Optional exact target entity id."},
+                "service_data": {
+                    "type": "object",
+                    "description": "Optional service fields such as brightness_pct, rgb_color, or temperature.",
+                },
+                "confirmed": {
+                    "type": "boolean",
+                    "description": "True only after Nick explicitly confirms a guarded action. False by default.",
+                },
+            },
+            "required": ["domain", "service"],
+        },
+    },
+    {
+        "name": "list_automations",
+        "description": "List Home Assistant automations with their names, IDs, entity IDs, and enabled states.",
+        "input_schema": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "inspect_automation",
+        "description": (
+            "Read the complete current configuration of one Home Assistant automation "
+            "by exact ID, entity ID, or unambiguous name."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "identifier": {"type": "string", "description": "Automation ID, entity ID, or name."},
+            },
+            "required": ["identifier"],
+        },
+    },
+    {
+        "name": "draft_automation",
+        "description": (
+            "Stage and validate a Home Assistant automation create, update, or delete. "
+            "This only creates a local draft and returns a diff; it does not change the "
+            "house. For update/delete, inspect the automation first and pass its name or "
+            "ID. For create/update, provide the complete configuration object. After "
+            "drafting, explain the behavior and diff, then wait for Nick's explicit approval."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "operation": {"type": "string", "enum": ["create", "update", "delete"]},
+                "identifier": {"type": "string", "description": "Required for update/delete."},
+                "config": {"type": "object", "description": "Complete proposed automation config for create/update."},
+            },
+            "required": ["operation"],
+        },
+    },
+    {
+        "name": "apply_automation_draft",
+        "description": (
+            "Apply one previously reviewed automation draft. ONLY call after Nick explicitly "
+            "approves that exact draft ID in a later message. The tool checks for concurrent "
+            "changes, verifies the result, and automatically attempts rollback on failure."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "draft_id": {"type": "string"},
+                "confirmed": {"type": "boolean", "description": "Must be true after explicit approval."},
+            },
+            "required": ["draft_id", "confirmed"],
+        },
+    },
+    {
+        "name": "rollback_automation_change",
+        "description": (
+            "Restore the backup from an applied automation change. ONLY call after Nick "
+            "explicitly confirms rollback of that exact change ID."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "change_id": {"type": "string"},
+                "confirmed": {"type": "boolean", "description": "Must be true after explicit approval."},
+            },
+            "required": ["change_id", "confirmed"],
+        },
+    },
+    {
         "name": "remember_fact",
         "description": (
             "Save a durable fact about Nick to long-term memory. Use this any "
@@ -388,6 +586,18 @@ _CUSTOM_TOOLS: list[dict[str, Any]] = [
             "type": "object",
             "properties": {"fact_id": {"type": "string", "description": "The 8-character id."}},
             "required": ["fact_id"],
+        },
+    },
+    {
+        "name": "search_memory",
+        "description": (
+            "Search Nick's explicitly authorized Obsidian Markdown notes. Use when he asks "
+            "you to recall details that may live in his notes. Results include source paths."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {"query": {"type": "string"}},
+            "required": ["query"],
         },
     },
     {
@@ -824,6 +1034,52 @@ _CUSTOM_TOOLS: list[dict[str, Any]] = [
             },
         },
     },
+    {
+        "name": "download_status",
+        "description": (
+            "Get live qBittorrent transfer speeds and torrent progress, ETA, state, "
+            "and remaining downloads. Use when Nick asks what is downloading, how "
+            "long something has left, whether a torrent is stalled, or current speed."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "scope": {
+                    "type": "string",
+                    "enum": ["downloading", "all", "completed", "seeding", "stalled", "errored", "active", "inactive"],
+                    "description": "Defaults to downloading/incomplete torrents.",
+                },
+            },
+        },
+    },
+    {
+        "name": "test_qbittorrent",
+        "description": "Test qBittorrent WebUI connectivity and report its version.",
+        "input_schema": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "media_queue",
+        "description": (
+            "Show Radarr and Sonarr activity queues with title, progress, remaining "
+            "size, ETA, tracked status, and download errors."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "service": {"type": "string", "enum": ["radarr", "sonarr"]},
+            },
+        },
+    },
+    {
+        "name": "media_health",
+        "description": "Show current Radarr and Sonarr health warnings.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "service": {"type": "string", "enum": ["radarr", "sonarr"]},
+            },
+        },
+    },
 ]
 
 
@@ -835,8 +1091,16 @@ _DISPATCH: dict[str, Callable[[dict[str, Any]], str]] = {
     "list_devices": _tool_list_devices,
     "test_home_assistant": _tool_test_home_assistant,
     "activate_home_action": _tool_activate_home_action,
+    "list_home_services": _tool_list_home_services,
+    "call_home_service": _tool_call_home_service,
+    "list_automations": _tool_list_automations,
+    "inspect_automation": _tool_inspect_automation,
+    "draft_automation": _tool_draft_automation,
+    "apply_automation_draft": _tool_apply_automation_draft,
+    "rollback_automation_change": _tool_rollback_automation_change,
     "remember_fact": _tool_remember_fact,
     "forget_fact": _tool_forget_fact,
+    "search_memory": _tool_search_memory,
     "clear_conversation": _tool_clear_conversation,
     "conversation_history_stats": _tool_conversation_stats,
     "get_weather": _tool_get_weather,
@@ -877,6 +1141,10 @@ _DISPATCH: dict[str, Callable[[dict[str, Any]], str]] = {
     "find_series": _tool_find_series,
     "add_series": _tool_add_series,
     "list_quality_profiles": _tool_list_quality_profiles,
+    "download_status": _tool_download_status,
+    "test_qbittorrent": _tool_test_qbittorrent,
+    "media_queue": _tool_media_queue,
+    "media_health": _tool_media_health,
 }
 
 

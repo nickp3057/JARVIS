@@ -54,7 +54,7 @@ features are already partially or substantially present.
 | Radarr/Sonarr requests | **Working baseline through chat** | Status/progress views, queue visibility, richer error handling, and app-native controls |
 | Proactive home/system alerts | **Early partial** | Durable rules, outage grace windows, system/NAS/site monitors, push delivery, acknowledgement and deduplication |
 | Local Llama | **Not implemented** | Define its role, select runtime/model after hardware inventory, add provider routing and quality/fallback policy |
-| Long-term intelligence | **Basic facts only** | Searchable episodic memory, summaries, embeddings/retrieval, Obsidian ingestion, provenance, corrections, privacy controls |
+| Long-term intelligence | **Obsidian retrieval baseline** | Add searchable episodic summaries, semantic embeddings, contradiction handling, corrections, and privacy/edit controls |
 
 ## What exists today
 

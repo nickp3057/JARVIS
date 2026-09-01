@@ -222,6 +222,12 @@ healthy -> suspected -> confirmed -> notified -> acknowledged -> recovered
 **Goal:** JARVIS accurately recalls relevant older information and shows where
 it came from.
 
+**Baseline shipped:** authorized Obsidian folder search, local lexical
+retrieval, bounded per-turn excerpts with note-path provenance, query-aware
+profile fact selection, and a managed Markdown mirror of structured facts.
+Semantic embeddings, session summaries, contradiction handling, and memory
+management UI remain below.
+
 ### Work
 
 - Generate compact session summaries and notable-event records.
