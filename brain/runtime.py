@@ -17,6 +17,7 @@ from threading import RLock
 import threading
 from typing import Any, Iterator
 
+from brain import memory_extractor
 from brain.agent import JarvisAgent
 from brain.history import load_session_messages, session_exists
 from brain.memory import list_facts
@@ -140,6 +141,7 @@ class JarvisRuntime:
             error="Waiting for weather monitor",
         )
         self.agent = agent or JarvisAgent()
+        memory_extractor.add_listener(self._on_memory_change)
         log.info("Runtime online. brain=%s", self.brain_label)
         self.record_event(
             kind="system",
@@ -202,6 +204,12 @@ class JarvisRuntime:
     def stop_monitors(self) -> None:
         """Ask background monitors to stop."""
         self._stop_monitors.set()
+        memory_extractor.remove_listener(self._on_memory_change)
+        memory_extractor.stop()
+
+    def _on_memory_change(self, title: str, detail: str) -> None:
+        """Surface background memory writes in the event inbox."""
+        self.record_event(kind="memory", source="memory", title=title, detail=detail)
 
     def respond(self, user_input: str) -> str:
         """Run one conversational turn through the best available brain."""

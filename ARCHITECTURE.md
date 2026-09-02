@@ -66,6 +66,14 @@ Current responsibilities:
   diagnostic store. Reports retain bounded transcript/app context and a focused
   response, but are never promoted automatically into personality memory or
   treated as executable instructions.
+- Learn continuously without being asked: every finished turn is queued to a
+  background memory worker that records a habit signal, runs one cheap
+  structured extraction against existing memories, writes confident facts
+  (revising superseded ones), stages low-confidence inferences as proposals,
+  and journals notable outcomes into the vault's daily note. The runtime
+  subscribes to memory changes and surfaces them as ``memory`` inbox events.
+  A derived habits digest (peak times, most-used capabilities, frequent
+  targets) is injected into the dynamic prompt block once enough turns exist.
 - Atomically switch and answer named sessions for remote clients through
   `respond_in_session` / `respond_streaming_in_session`.
 - Maintain a bounded extractive digest alongside each SQLite session and expose
@@ -124,9 +132,10 @@ Near-term responsibilities:
   Optiplex as the live store and the NAS as synchronized storage. Stable-ID
   inspection, revision-backed correction, keyed contradiction upserts, basic
   provenance, and isolated extractive session digests are present.
-- Expand the initial tool-free local fallback into governed tool calling,
-  memory extraction and summarization. Also add a
-  governed patch/test/approve/rollback workflow for self-modification.
+- Expand the initial tool-free local fallback into governed tool calling and
+  summarization; memory extraction could also move to the local model to
+  make background learning free. Also add a governed
+  patch/test/approve/rollback workflow for self-modification.
 
 ## Target Layers
 
@@ -226,6 +235,18 @@ runtime knows, the more JARVIS feels like one mind instead of several scripts.
   credentials are configured.
 - `QBITTORRENT_MONITOR_INTERVAL_S`: download polling interval, defaults to 30.
 - `QBITTORRENT_ANNOUNCE_COMPLETIONS`: speak completed downloads, defaults true.
+
+## Memory Learning Settings
+- `MEMORY_AUTO_EXTRACT`: true/false, defaults to true. Background post-turn
+  fact extraction.
+- `MEMORY_EXTRACT_MODEL`: model for extraction, defaults to Haiku 4.5.
+- `MEMORY_AUTO_CONFIDENCE`: 0–1, defaults to 0.75. Facts at or above it are
+  written directly; below it they become reviewable proposals.
+- `MEMORY_EXTRACT_MIN_CHARS`: skip extraction for shorter user turns, default 12.
+- `HABITS_MIN_TURNS`: turns logged before the habits digest is injected, default 10.
+- `OBSIDIAN_JOURNAL_FOLDER` / `OBSIDIAN_NOTES_FOLDER`: vault-relative folders
+  for daily journal notes and titled captures; paths outside the vault fall
+  back to the defaults.
 
 ## Memory Retrieval Settings
 

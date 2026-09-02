@@ -26,11 +26,13 @@ from typing import Any, Iterator
 
 from dotenv import load_dotenv
 
+from brain import memory_extractor
+from brain.habits import render_habits_block
 from brain.history import append_turn, load_history, load_session_messages, start_new_session
 from brain.intents import routed_offline_reply
 from brain.local_model import is_configured as local_model_configured
 from brain.memory import render_memory_block
-from brain.personality import build_memory_section, build_persona_prompt
+from brain.personality import build_habits_section, build_memory_section, build_persona_prompt
 from brain.tools import execute_tool, get_tool_specs
 from jarvis_logger import get_logger
 
@@ -119,6 +121,8 @@ class JarvisAgent:
         # this turn. Voice runner reads this to decide follow-up window length.
         self.last_used_tools: bool = False
         self._recent_tool_context: dict[str, str] = {}
+        # Tools executed during the most recent turn, for background learning.
+        self._last_turn_tools: list[tuple[str, dict[str, Any]]] = []
 
     # --- Public ----------------------------------------------------------
 
@@ -156,6 +160,7 @@ class JarvisAgent:
                 ))
                 self._trim_history()
                 append_turn(user_input, reply, session_id=self._session_id)
+                self._after_turn(user_input, reply)
                 yield reply
                 return
 
@@ -173,6 +178,7 @@ class JarvisAgent:
             self._history.append({"role": "assistant", "content": full})
             self._trim_history()
             append_turn(user_input, full, session_id=self._session_id)
+            self._after_turn(user_input, full)
 
     def start_session(self) -> str:
         """Start a fresh conversation session and clear in-memory context."""
@@ -193,6 +199,7 @@ class JarvisAgent:
             ))
             self._trim_history()
             append_turn(user_input, reply, session_id=self._session_id)
+            self._after_turn(user_input, reply)
             return reply
 
         self._history.append({"role": "user", "content": user_input})
@@ -210,6 +217,7 @@ class JarvisAgent:
         self._trim_history()
         # Persist this turn so history survives restarts.
         append_turn(user_input, reply, session_id=self._session_id)
+        self._after_turn(user_input, reply)
         return reply
 
     def switch_session(self, session_id: str) -> None:
@@ -233,6 +241,7 @@ class JarvisAgent:
         messages: list[dict[str, Any]] = list(self._history)
         used_tools_this_turn = False
         tool_context: list[dict[str, Any]] = []
+        self._last_turn_tools = []
 
         for _ in range(_MAX_TOOL_TURNS):
             response = self._client.messages.create(  # type: ignore[union-attr]
@@ -292,6 +301,7 @@ class JarvisAgent:
         used_tools_this_turn = False
         text_parts: list[str] = []
         tool_context: list[dict[str, Any]] = []
+        self._last_turn_tools = []
 
         for _ in range(_MAX_TOOL_TURNS):
             with self._client.messages.stream(  # type: ignore[union-attr]
@@ -361,6 +371,7 @@ class JarvisAgent:
             }
         ]
         dynamic = build_memory_section(render_memory_block(latest_user_text))
+        dynamic += build_habits_section(render_habits_block())
         context = self._recent_tool_context.get(self._session_id)
         if context:
             dynamic += (
@@ -374,5 +385,19 @@ class JarvisAgent:
         return blocks
 
     def _save_tool_context(self, entries: list[dict[str, Any]]) -> None:
+        self._last_turn_tools = [(str(e["tool"]), dict(e["input"])) for e in entries]
         if entries:
             self._recent_tool_context[self._session_id] = json.dumps(entries, ensure_ascii=False)[:6000]
+
+    def _after_turn(self, user_input: str, reply: str) -> None:
+        """Hand the finished turn to background learning (habits + memory).
+
+        Runs on a worker thread so a slow extraction never delays the reply;
+        the offline paths still record habit signals with no model call.
+        """
+        try:
+            memory_extractor.observe_turn(self._client, user_input, reply, self._last_turn_tools)
+        except Exception:  # noqa: BLE001
+            log.exception("Could not queue turn for background learning")
+        finally:
+            self._last_turn_tools = []

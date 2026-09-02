@@ -43,7 +43,8 @@ from brain.memory_proposals import (
     reject_memory_proposal,
 )
 from brain.history import describe_session_summaries
-from brain.knowledge_vault import describe_search
+from brain.habits import describe_habits
+from brain.knowledge_vault import capture_note, describe_search
 from brain.timers import cancel_timer, dismiss_timer, list_timers, pause_timer, resume_timer, set_timer
 from brain.reminders import add_reminder, complete_reminder, delete_reminder, list_reminders
 from brain.reminders import _format_due as _format_reminder_due
@@ -247,6 +248,17 @@ def _tool_search_memory(args: dict[str, Any]) -> str:
     if not query:
         return "Tool error: missing 'query'."
     return describe_search(query)
+
+
+def _tool_capture_note(args: dict[str, Any]) -> str:
+    text = str(args.get("text", "")).strip()
+    if not text:
+        return "Tool error: missing 'text'."
+    return capture_note(text, str(args.get("title", "") or ""))
+
+
+def _tool_observed_habits(args: dict[str, Any]) -> str:
+    return describe_habits()
 
 
 def _tool_search_session_summaries(args: dict[str, Any]) -> str:
@@ -910,6 +922,32 @@ _CUSTOM_TOOLS: list[dict[str, Any]] = [
         },
     },
     {
+        "name": "capture_note",
+        "description": (
+            "Write something down for Nick in his Obsidian vault. Use when he says "
+            "'note this', 'write that down', 'add to my list', or dictates something to "
+            "keep. Without a title it goes into today's journal; with a title it creates "
+            "or appends a note by that name. This is for notes, not profile facts - "
+            "durable facts about Nick still use remember_fact."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "text": {"type": "string", "description": "The note content, cleaned up but faithful."},
+                "title": {"type": "string", "description": "Optional note title for a standalone note."},
+            },
+            "required": ["text"],
+        },
+    },
+    {
+        "name": "observed_habits",
+        "description": (
+            "Describe the usage patterns JARVIS has noticed about Nick: when he talks, "
+            "what he asks for most. Use when he asks what you've noticed or learned about him."
+        ),
+        "input_schema": {"type": "object", "properties": {}},
+    },
+    {
         "name": "search_session_summaries",
         "description": (
             "Deliberately search compact summaries of prior conversation sessions. Use "
@@ -1519,6 +1557,8 @@ _DISPATCH: dict[str, Callable[[dict[str, Any]], str]] = {
     "apply_memory_proposal": _tool_apply_memory_proposal,
     "reject_memory_proposal": _tool_reject_memory_proposal,
     "search_memory": _tool_search_memory,
+    "capture_note": _tool_capture_note,
+    "observed_habits": _tool_observed_habits,
     "search_session_summaries": _tool_search_session_summaries,
     "list_debug_reports": _tool_list_debug_reports,
     "inspect_debug_report": _tool_inspect_debug_report,

@@ -231,3 +231,131 @@ def describe_search(query: str) -> str:
     return "\n\n".join(
         f"Source: {item['source']}\n{item['excerpt']}" for item in results
     )
+
+
+# --- Writing: quick capture and the daily journal ---------------------------
+
+_NOTE_NAME_RE = re.compile(r"[^A-Za-z0-9 _\-]+")
+
+
+def _vault_folder(env_name: str, default: str) -> Path:
+    """Resolve a vault-relative folder setting, refusing paths outside the vault."""
+    root = vault_path()
+    configured = (os.getenv(env_name, "") or "").strip() or default
+    candidate = (root / configured)
+    try:
+        candidate.resolve().relative_to(root.resolve())
+    except ValueError:
+        log.warning("%s points outside the vault; using %s", env_name, default)
+        candidate = root / default
+    return candidate
+
+
+def journal_folder() -> Path:
+    return _vault_folder("OBSIDIAN_JOURNAL_FOLDER", "Jarvis Memory/Journal")
+
+
+def notes_folder() -> Path:
+    return _vault_folder("OBSIDIAN_NOTES_FOLDER", "Jarvis Memory/Notes")
+
+
+def _daily_note_path(moment: datetime) -> Path:
+    return journal_folder() / f"{moment.strftime('%Y-%m-%d')}.md"
+
+
+def _new_daily_note(moment: datetime) -> str:
+    return (
+        "---\n"
+        "jarvis_managed: true\n"
+        f"date: {moment.strftime('%Y-%m-%d')}\n"
+        "---\n\n"
+        f"# {moment.strftime('%A, %B')} {moment.day}, {moment.year}\n"
+    )
+
+
+def _append_under_heading(text: str, heading: str, line: str) -> str:
+    """Append ``line`` at the end of the ``heading`` section, creating it if needed."""
+    lines = text.rstrip("\n").split("\n") if text.strip() else []
+    try:
+        start = next(index for index, item in enumerate(lines) if item.strip() == heading)
+    except StopIteration:
+        if lines:
+            lines.append("")
+        lines.extend((heading, "", line))
+        return "\n".join(lines) + "\n"
+    end = len(lines)
+    for index in range(start + 1, len(lines)):
+        if lines[index].startswith("## "):
+            end = index
+            break
+    # Insert after the last non-blank line of the section so entries stay
+    # contiguous, keeping one blank line before any following heading.
+    insert_at = end
+    while insert_at > start + 1 and not lines[insert_at - 1].strip():
+        insert_at -= 1
+    lines.insert(insert_at, line)
+    if insert_at + 1 < len(lines) and lines[insert_at + 1].startswith("## "):
+        lines.insert(insert_at + 1, "")
+    return "\n".join(lines) + "\n"
+
+
+def append_journal_entry(
+    text: str,
+    *,
+    section: str = "Notes",
+    at: datetime | None = None,
+) -> Path:
+    """Append one timestamped line to today's journal note under ``section``.
+
+    ``section`` is a level-two heading name such as ``Notes`` (things Nick asked
+    to capture) or ``Log`` (what JARVIS did for him). Returns the note path.
+    """
+    moment = at or datetime.now().astimezone()
+    text = " ".join((text or "").split())
+    if not text:
+        raise ValueError("empty journal entry")
+    path = _daily_note_path(moment)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    existing = path.read_text(encoding="utf-8") if path.exists() else _new_daily_note(moment)
+    entry = f"- {moment.strftime('%H:%M')} — {text}"
+    updated = _append_under_heading(existing, f"## {section}", entry)
+    temporary = path.with_suffix(".md.tmp")
+    temporary.write_text(updated, encoding="utf-8")
+    temporary.replace(path)
+    return path
+
+
+def capture_note(text: str, title: str = "") -> str:
+    """Save something Nick said to keep. Titled notes get their own file."""
+    text = (text or "").strip()
+    if not text:
+        return "Refused: nothing to capture."
+    title = " ".join(_NOTE_NAME_RE.sub(" ", title or "").split())[:80]
+    moment = datetime.now().astimezone()
+    try:
+        if not title:
+            path = append_journal_entry(text, section="Notes", at=moment)
+            relative = path.relative_to(vault_path()).as_posix()
+            return f"Captured in today's journal ({relative})."
+        folder = notes_folder()
+        folder.mkdir(parents=True, exist_ok=True)
+        path = folder / f"{title}.md"
+        if path.exists():
+            body = path.read_text(encoding="utf-8").rstrip("\n")
+            body += f"\n\n{moment.strftime('%Y-%m-%d %H:%M')}\n{text}\n"
+            action = "Added to"
+        else:
+            body = (
+                "---\njarvis_managed: true\n"
+                f"created: {moment.isoformat(timespec='minutes')}\n---\n\n"
+                f"# {title}\n\n{text}\n"
+            )
+            action = "Created"
+        temporary = path.with_suffix(".md.tmp")
+        temporary.write_text(body, encoding="utf-8")
+        temporary.replace(path)
+        relative = path.relative_to(vault_path()).as_posix()
+        return f"{action} note {relative}."
+    except OSError as exc:
+        log.error("Could not write to the vault: %s", exc)
+        return f"Could not write to the vault: {exc}"

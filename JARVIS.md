@@ -47,7 +47,10 @@ Pearson-Stark-Jarvis/
 │   ├── history.py           SQLite conversation history with session support
 │   ├── intents.py           Keyword intent router (fallback if brain offline)
 │   ├── memory.py            JSON long-term memory, correction history, inspection
-│   ├── knowledge_vault.py   Authorized Obsidian search + managed profile mirror
+│   ├── memory_extractor.py  Background post-turn learning: auto-saves facts, journals
+│   ├── memory_proposals.py  Reviewable staging for low-confidence inferred facts
+│   ├── habits.py            Usage-pattern log + derived "what you've noticed" digest
+│   ├── knowledge_vault.py   Authorized Obsidian search, profile mirror, capture + journal
 │   ├── local_model.py       Optional OpenAI-compatible conversational fallback
 │   ├── briefing.py          Spoken situational briefing (time, weather, agenda, timers)
 │   ├── personality.py       System prompt builder (humor%, address, tool descriptions)
@@ -89,7 +92,10 @@ Pearson-Stark-Jarvis/
 │
 ├── memory/
 │   ├── history.db           SQLite conversation history (auto-created)
-│   └── profile.json         Long-term memory facts (auto-created)
+│   ├── profile.json         Long-term memory facts (auto-created)
+│   ├── habits.json          Bounded per-turn usage log for habit learning
+│   ├── memory_proposals.json Low-confidence facts awaiting approval
+│   └── obsidian/            Default vault: Jarvis Memory/{Profile.md,Journal/,Notes/}
 │
 ├── ios/
 │   └── JarvisCompanion/     Xcode project for the iOS companion app
@@ -198,6 +204,11 @@ RMS envelope from ElevenLabs audio drives the orb in real time using a monotonic
 - `forget_fact(fact_id)` — remove from profile.json
 - `search_memory(query)` — search authorized Obsidian folders and return
   bounded excerpts with their note paths
+- `capture_note(text, title?)` — "note this" / "write that down": appends to
+  today's journal note in the vault, or creates/appends a titled note under
+  the notes folder. Notes, not profile facts.
+- `observed_habits` — the derived usage digest (when Nick talks, what he asks
+  for most). Answers "what have you noticed about me?"
 - `list_debug_reports` / `inspect_debug_report(report_id)` — review explicit
   companion-app feedback with the reported response, surrounding chat,
   frustration/correction follow-ups, and non-secret app context
@@ -298,6 +309,10 @@ RMS envelope from ElevenLabs audio drives the orb in real time using a monotonic
 
 **RMS envelope**: `tts.py` computes a per-frame RMS envelope from the ElevenLabs WAV before playback. `voice_runner.py` drives the orb's `rms_level` using a monotonic clock thread so audio and visual stay in sync.
 
+**Automatic memory** (`brain/memory_extractor.py`): after every completed turn the agent hands the exchange to a single background worker thread. The worker logs a habit signal, then makes one cheap forced-tool Haiku call that compares the exchange against existing memories and returns zero or more facts (`explicit` vs `inferred`, with confidence and an optional stable key or `supersedes_id`) plus an optional one-line `episode`. Facts at or above `MEMORY_AUTO_CONFIDENCE` are written with `remember_fact` / `update_fact` (source `auto:explicit` / `auto:inferred`); lower ones are staged in `memory_proposals.py` for approval. The episode is appended under `## Log` in today's vault journal note. The runtime subscribes and records a `memory` event ("Memory updated") so the cockpit shows it. Extraction failures are logged and never affect the reply.
+
+**Habits** (`brain/habits.py`): no model involved. Each turn appends `{time, hour, weekday, [tool, target]}` to a bounded JSON log (meta/memory tools excluded; targets come from the tool's natural argument such as `play_music.query`). `render_habits_block()` derives a few plain observations (peak period, weekday/weekend skew, most-used capabilities, frequent targets with their usual time of day) once `HABITS_MIN_TURNS` are logged, cached behind the file mtime, and the agent injects it as a "What you've noticed" section in the dynamic (uncached) prompt block.
+
 **Vision**: `brain/vision.py` uses `QScreen.grabWindow(0)` (PyQt6, no extra deps) to capture the screen, encodes to PNG/base64, then makes a separate Claude API call with the image. Falls back to a PowerShell `System.Drawing` capture in headless mode.
 
 ---
@@ -377,6 +392,13 @@ OBSIDIAN_INDEX_FOLDERS=Jarvis Memory  # comma-separated folders JARVIS may read
 OBSIDIAN_MAX_RESULTS=4      # maximum note excerpts retrieved per turn
 OBSIDIAN_MAX_CHARS=4000     # hard cap on retrieved note text per turn
 OBSIDIAN_MAX_FILE_BYTES=1000000 # skip unusually large Markdown files
+OBSIDIAN_JOURNAL_FOLDER=Jarvis Memory/Journal  # vault-relative daily-note folder
+OBSIDIAN_NOTES_FOLDER=Jarvis Memory/Notes      # vault-relative folder for titled captures
+MEMORY_AUTO_EXTRACT=true    # background post-turn fact extraction (ChatGPT-style memory)
+MEMORY_EXTRACT_MODEL=claude-haiku-4-5-20251001 # cheap model used for extraction
+MEMORY_AUTO_CONFIDENCE=0.75 # facts at/above this write directly; below -> proposals
+MEMORY_EXTRACT_MIN_CHARS=12 # skip extraction for very short user turns ("yes")
+HABITS_MIN_TURNS=10         # turns logged before the habits digest is injected
 VISION_MODEL=claude-sonnet-4-6
 VISION_ALL_MONITORS=true    # capture the whole virtual desktop
 WEB_SEARCH_MAX_USES=5       # max web_search calls per turn
@@ -444,6 +466,19 @@ CALENDAR_ALERT_LEAD_MIN=10  # warn this many minutes before a meeting
 
 ## Recently Shipped
 
+- **Automatic memory + habits + vault capture** (`brain/memory_extractor.py`,
+  `brain/habits.py`, `brain/knowledge_vault.py`) — JARVIS now learns the way
+  ChatGPT/Claude memory does: a background worker reviews every exchange
+  after the reply and saves durable facts on its own (revising superseded
+  ones in place, staging low-confidence guesses as proposals), while a
+  no-model habit log turns usage into a "What you've noticed" prompt digest.
+  New tools: `capture_note` (journal / titled notes in the vault) and
+  `observed_habits`. The extractor also writes a one-line daily `## Log`
+  entry to the vault when a turn accomplished something. Settings:
+  `MEMORY_AUTO_EXTRACT`, `MEMORY_EXTRACT_MODEL`, `MEMORY_AUTO_CONFIDENCE`,
+  `MEMORY_EXTRACT_MIN_CHARS`, `HABITS_MIN_TURNS`, `OBSIDIAN_JOURNAL_FOLDER`,
+  `OBSIDIAN_NOTES_FOLDER`. Tests: `tests/test_memory_extractor.py`,
+  `tests/test_habits.py`, `tests/test_note_capture.py`.
 - **iOS Hub screen** (`ios/JarvisCompanion`) — a tab bar now pairs Chat with a
   Hub dashboard rendering the seven server endpoints: per-service up/latency
   rows, live torrent transfers with progress/speed/ETA and per-torrent
@@ -703,10 +738,12 @@ in value order:
 
 ### Feature roadmap
 
-- **Evolving structured memory** — expand the shipped typed/proposal/
-  contradiction/confidence/summary baseline into an indexed store
-  suitable for very large vaults. Keep the live database on the Optiplex and
-  synchronize or back up the vault to the NAS.
+- **Evolving structured memory** — automatic extraction and habit learning
+  are shipped; the remaining step is an indexed (embedding) store once
+  keyword retrieval over the vault starts returning noise. Keep the live
+  database on the Optiplex and synchronize or back up the vault to the NAS.
+  Also worth doing: point `OBSIDIAN_VAULT_PATH` / `OBSIDIAN_INDEX_FOLDERS` at
+  Nick's real vault so retrieval covers his own notes, not just JARVIS's.
 - **Local model routing phase two** — extend the shipped tool-free
   conversational fallback and bounded home on/off/brightness/color/climate
   router with broader governed tool calling while retaining Claude for complex
