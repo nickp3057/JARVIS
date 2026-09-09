@@ -10,6 +10,9 @@ struct SettingsView: View {
     var body: some View {
         NavigationStack {
             Form {
+                if let error = settings.tokenStorageError {
+                    Section { Label(error, systemImage: "exclamationmark.triangle").foregroundStyle(JarvisTheme.amber) }
+                }
                 Section {
                     TextField("http://100.x.y.z:8000", text: $settings.baseURLString)
                         .textContentType(.URL)
@@ -67,7 +70,9 @@ struct SettingsView: View {
                     Text("Every request — chat and the Hub — goes to this address.")
                 }
             }
-            .navigationTitle("Settings")
+            .scrollContentBackground(.hidden)
+            .background(JarvisTheme.background)
+            .navigationTitle("Connection")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {

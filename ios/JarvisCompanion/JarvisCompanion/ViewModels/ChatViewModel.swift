@@ -30,26 +30,37 @@ final class ChatViewModel: ObservableObject {
     @Published private(set) var isAwaitingReply = false
     @Published private(set) var connectionState: ConnectionState = .unconfigured
     @Published var draft = ""
+    @Published var historyError: String?
 
     private let settings: AppSettings
+    private let makeClient: () throws -> JarvisAPIClient
     private let store: ChatStore
     private let inactivityLimit: TimeInterval
     private var activeConversationID: UUID
     private var inactiveSince: Date?
     private var lastSentText: String?
     private var inFlight: Task<Void, Never>?
+    private var generation: UUID?
+    private var pendingEdits: [HistoryEdit] = []
+    private var flushingEdits = false
+    private var deletedSessionIDs: Set<String> = []
+    private var draftSave: Task<Void, Never>?
     private var connectionCheck: Task<Void, Never>?
 
     init(
         settings: AppSettings,
         store: ChatStore = JSONFileChatStore(),
         inactivityLimit: TimeInterval = 5 * 60,
-        now: Date = Date()
+        now: Date = Date(),
+        clientFactory: (() throws -> JarvisAPIClient)? = nil
     ) {
         self.settings = settings
+        self.makeClient = clientFactory ?? { try JarvisAPIClient.make(from: settings) }
         self.store = store
         self.inactivityLimit = inactivityLimit
         let archive = store.load()
+        pendingEdits = archive.pendingEdits ?? []
+        deletedSessionIDs = Set(pendingEdits.filter { $0.title == nil }.map(\.sessionID))
         conversations = archive.conversations
         activeConversationID = archive.activeConversationID
         inactiveSince = archive.inactiveSince
@@ -64,6 +75,10 @@ final class ChatViewModel: ObservableObject {
         } else {
             self.inactiveSince = nil
             persist()
+        }
+        if messages.last?.role == .jarvis, messages.last?.text.isEmpty == true {
+            messages.removeLast()
+            append(ChatMessage(role: .error, text: "The connection ended before a reply arrived. Retry to recover this turn."))
         }
         recoverRetryState()
     }
@@ -94,7 +109,7 @@ final class ChatViewModel: ObservableObject {
     }
 
     func appBecameInactive(at date: Date = Date()) {
-        inactiveSince = date
+        if inactiveSince == nil { inactiveSince = date }
         persist()
     }
 
@@ -123,7 +138,7 @@ final class ChatViewModel: ObservableObject {
         connectionCheck = Task { [weak self] in
             guard let self else { return }
             do {
-                try await JarvisAPIClient.make(from: settings).checkHealth()
+                try await makeClient().checkHealth()
                 guard !Task.isCancelled else { return }
                 connectionState = .online
                 await synchronizeHistory()
@@ -137,10 +152,16 @@ final class ChatViewModel: ObservableObject {
 
     private func synchronizeHistory() async {
         do {
-            let client = try JarvisAPIClient.make(from: settings)
+            let client = try makeClient()
+            await flushHistoryEdits()
             let remoteSessions = try await client.sessions()
+            guard !Task.isCancelled else { return }
             for remote in remoteSessions {
+                if pendingEdits.contains(where: { $0.sessionID == remote.sessionID && $0.title == nil }) { continue }
                 let remoteMessages = try await client.messages(for: remote.sessionID)
+                guard !Task.isCancelled else { return }
+                if deletedSessionIDs.contains(remote.sessionID) { continue }
+                let existing = conversations.first(where: { $0.serverSessionID == remote.sessionID })
                 let converted = remoteMessages.compactMap { item -> ChatMessage? in
                     let role: ChatMessage.Role
                     switch item.role {
@@ -148,21 +169,31 @@ final class ChatViewModel: ObservableObject {
                     case "assistant": role = .jarvis
                     default: return nil
                     }
-                    return ChatMessage(role: role, text: item.content, date: parseServerDate(item.createdAt))
+                    let previous = existing?.messages.first(where: {
+                        (item.id != nil && $0.serverID == item.id)
+                            || (item.requestID != nil && $0.requestID == item.requestID && $0.role == role)
+                    })
+                    return ChatMessage(id: previous?.id ?? UUID(), role: role, text: item.content,
+                                       date: parseServerDate(item.createdAt), serverID: item.id, requestID: item.requestID)
                 }
                 guard !converted.isEmpty else { continue }
 
                 if let index = conversations.firstIndex(where: { $0.serverSessionID == remote.sessionID }) {
-                    // The server is authoritative for completed user/assistant turns;
-                    // retain a trailing local error so retry remains available.
-                    let trailingError = conversations[index].messages.last.flatMap {
-                        $0.role == .error ? $0 : nil
+                    // Never replace a live stream or an unresolved local turn.
+                    if conversations[index].id == activeConversationID && isAwaitingReply { continue }
+                    let local = conversations[index].messages
+                    if let pendingUser = local.last(where: { $0.role == .user }),
+                       let requestID = pendingUser.requestID,
+                       !converted.contains(where: { $0.requestID == requestID && $0.role == .jarvis }) {
+                        continue
                     }
-                    conversations[index].messages = converted + (trailingError.map { [$0] } ?? [])
-                    if let title = remote.title, !title.isEmpty { conversations[index].customTitle = title }
+                    conversations[index].messages = converted
+                    if !pendingEdits.contains(where: { $0.sessionID == remote.sessionID }),
+                       let title = remote.title, !title.isEmpty { conversations[index].customTitle = title }
                     conversations[index].updatedAt = converted.last?.date ?? conversations[index].updatedAt
                     if conversations[index].id == activeConversationID {
                         messages = conversations[index].messages
+                        recoverRetryState()
                     }
                 } else {
                     conversations.append(ChatConversation(
@@ -223,7 +254,7 @@ final class ChatViewModel: ObservableObject {
         let serverID = conversations[index].serverSessionID
         persist()
         guard let serverID else { return }
-        Task { try? await JarvisAPIClient.make(from: settings).renameSession(serverID, title: clean) }
+        queueHistoryEdit(sessionID: serverID, title: String(clean.prefix(120)))
     }
 
     func deleteConversation(_ id: UUID) {
@@ -248,7 +279,8 @@ final class ChatViewModel: ObservableObject {
         }
         persist()
         guard let serverID else { return }
-        Task { try? await JarvisAPIClient.make(from: settings).deleteSession(serverID) }
+        deletedSessionIDs.insert(serverID)
+        queueHistoryEdit(sessionID: serverID, title: nil)
     }
 
     func clearTranscript() {
@@ -258,11 +290,42 @@ final class ChatViewModel: ObservableObject {
     }
 
     func draftChanged() {
-        if draft.contains("\n") {
-            draft = draft.replacingOccurrences(of: "\n", with: "")
-            send()
-        } else {
-            persist()
+        draftSave?.cancel()
+        draftSave = Task { [weak self] in
+            do { try await Task.sleep(for: .milliseconds(350)) } catch { return }
+            self?.persist()
+        }
+    }
+
+    private func queueHistoryEdit(sessionID: String, title: String?) {
+        pendingEdits.removeAll { $0.sessionID == sessionID }
+        pendingEdits.append(HistoryEdit(sessionID: sessionID, title: title))
+        persist()
+        Task { await flushHistoryEdits() }
+    }
+
+    private func flushHistoryEdits() async {
+        guard !flushingEdits else { return }
+        flushingEdits = true
+        defer { flushingEdits = false }
+        do {
+            let client = try makeClient()
+            while let edit = pendingEdits.first {
+                do {
+                    if let title = edit.title {
+                        try await client.renameSession(edit.sessionID, title: title)
+                    } else {
+                        try await client.deleteSession(edit.sessionID)
+                    }
+                } catch JarvisAPIError.server(let status, _) where status == 404 && edit.title == nil {
+                    // Already absent on Core is a successful deletion.
+                }
+                pendingEdits.removeAll { $0.id == edit.id }
+                persist()
+            }
+            historyError = nil
+        } catch {
+            historyError = "History changes are saved on this device and will retry when you reconnect. " + error.localizedDescription
         }
     }
 
@@ -270,7 +333,8 @@ final class ChatViewModel: ObservableObject {
         let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty, !isAwaitingReply else { return }
         draft = ""
-        append(ChatMessage(role: .user, text: text))
+        let requestID = UUID().uuidString
+        append(ChatMessage(role: .user, text: text, requestID: requestID))
         request(text)
     }
 
@@ -302,7 +366,7 @@ final class ChatViewModel: ObservableObject {
         let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "unknown"
         let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "unknown"
         do {
-            let reportID = try await JarvisAPIClient.make(from: settings).submitDebugReport(
+            let reportID = try await makeClient().submitDebugReport(
                 issue: cleanIssue,
                 messages: transcript,
                 sessionID: activeConversation?.serverSessionID,
@@ -326,103 +390,91 @@ final class ChatViewModel: ObservableObject {
     }
 
     func stopGenerating() {
+        guard isAwaitingReply else { return }
+        generation = nil
         inFlight?.cancel()
         inFlight = nil
         isAwaitingReply = false
-        if messages.last?.role == .jarvis, messages.last?.text.isEmpty == true {
-            messages.removeLast()
-        }
-        persist()
+        if messages.last?.role == .jarvis { messages.removeLast() }
+        append(ChatMessage(role: .error, text: "Stopped receiving. JARVIS may still finish this turn; reconnect or retry to recover its result."))
+        recoverRetryState()
     }
 
     private func request(_ text: String) {
         lastSentText = text
         isAwaitingReply = true
+        let turn = UUID()
+        generation = turn
+        let conversationID = activeConversationID
+        let requestID = messages.last(where: { $0.role == .user })?.requestID ?? UUID().uuidString
+        if let index = messages.lastIndex(where: { $0.role == .user }), messages[index].requestID == nil {
+            let message = messages[index]
+            messages[index] = ChatMessage(id: message.id, role: .user, text: message.text,
+                                          date: message.date, serverID: message.serverID, requestID: requestID)
+        }
         let responseID = UUID()
-        append(ChatMessage(id: responseID, role: .jarvis, text: ""))
-        let serverSessionID = activeConversation?.serverSessionID
+        append(ChatMessage(id: responseID, role: .jarvis, text: "", requestID: requestID))
+        var sessionID = activeConversation?.serverSessionID
 
         inFlight = Task { [weak self] in
             guard let self else { return }
+            let isCurrent = { self.generation == turn && self.activeConversationID == conversationID && !Task.isCancelled }
             var recoveryClient: JarvisAPIClient?
             do {
-                let client = try JarvisAPIClient.make(from: settings)
+                let client = try makeClient()
                 recoveryClient = client
+                if sessionID == nil {
+                    sessionID = try await client.createSession()
+                    guard isCurrent() else { return }
+                    setServerSessionID(sessionID)
+                }
                 do {
-                    _ = try await streamReply(
-                        client: client,
-                        text: text,
-                        sessionID: serverSessionID,
-                        responseID: responseID
-                    )
+                    _ = try await client.stream(message: text, sessionID: sessionID, requestID: requestID,
+                        onSession: { [weak self] id in
+                            guard isCurrent() else { return }
+                            self?.setServerSessionID(id)
+                        }, onChunk: { [weak self] chunk in
+                            guard isCurrent() else { return }
+                            self?.appendChunk(chunk, to: responseID)
+                        })
                 } catch JarvisAPIError.server(let status, _) where status == 404 {
-                    // A restarted server may no longer know a cached session.
-                    // Retry once without it; if streaming itself is the missing
-                    // route, transparently fall back to the legacy /chat API.
-                    setServerSessionID(nil)
-                    do {
-                        _ = try await streamReply(
-                            client: client,
-                            text: text,
-                            sessionID: nil,
-                            responseID: responseID
-                        )
-                    } catch JarvisAPIError.server(let retryStatus, _) where retryStatus == 404 {
-                        let legacy = try await client.send(message: text, sessionID: nil)
-                        replaceMessage(
-                            responseID,
-                            text: legacy.reply.trimmingCharacters(in: .whitespacesAndNewlines)
-                        )
-                        setServerSessionID(legacy.sessionID)
-                    }
+                    guard isCurrent() else { return }
+                    // Preserve the same session and request on legacy Core.
+                    let reply = try await client.send(message: text, sessionID: sessionID, requestID: requestID)
+                    guard isCurrent() else { return }
+                    replaceMessage(responseID, text: reply.reply)
                 }
-                guard !Task.isCancelled else { return }
-                // Core owns the authoritative completed transcript. This also
-                // repairs a stream that ended with a temporary fallback while
-                // the server successfully persisted the real answer.
-                if let sessionID = activeConversation?.serverSessionID {
-                    _ = await reconcileCompletedTurn(
-                        client: client,
-                        sessionID: sessionID,
-                        userText: text,
-                        responseID: responseID,
-                        attempts: 2
-                    )
+                guard isCurrent() else { return }
+                if let sessionID {
+                    _ = await reconcileCompletedTurn(client: client, sessionID: sessionID,
+                        requestID: requestID, responseID: responseID, attempts: 2)
                 }
+                guard isCurrent() else { return }
                 if messages.last?.id == responseID, messages.last?.text.isEmpty == true {
-                    replaceMessage(responseID, text: "(no reply)")
+                    throw JarvisAPIError.malformedResponse("No completed reply was received.")
                 }
                 connectionState = .online
-            } catch is CancellationError {
-                return
             } catch {
-                guard !Task.isCancelled else { return }
-                let recovered: Bool
-                if let recoveryClient,
-                   let sessionID = activeConversation?.serverSessionID {
-                    recovered = await reconcileCompletedTurn(
-                        client: recoveryClient,
-                        sessionID: sessionID,
-                        userText: text,
-                        responseID: responseID,
-                        attempts: 12
-                    )
-                } else {
-                    recovered = false
+                guard isCurrent() else { return }
+                var recovered = false
+                if let client = recoveryClient, let sessionID {
+                    recovered = await reconcileCompletedTurn(client: client, sessionID: sessionID,
+                        requestID: requestID, responseID: responseID, attempts: 12)
                 }
+                guard isCurrent() else { return }
                 if recovered {
                     connectionState = .online
                 } else {
                     if messages.last?.id == responseID { messages.removeLast() }
                     append(ChatMessage(role: .error, text: error.localizedDescription))
-                    if case JarvisAPIError.server = error {
-                        connectionState = .online
-                    } else {
+                    if case JarvisAPIError.transport = error {
                         connectionState = .offline(error.localizedDescription)
                     }
                 }
             }
+            guard isCurrent() else { return }
             isAwaitingReply = false
+            generation = nil
             inFlight = nil
             persist()
         }
@@ -432,28 +484,10 @@ final class ChatViewModel: ObservableObject {
         conversations.first(where: { $0.id == activeConversationID })
     }
 
-    private func streamReply(
-        client: JarvisAPIClient,
-        text: String,
-        sessionID: String?,
-        responseID: UUID
-    ) async throws -> String? {
-        try await client.stream(
-            message: text,
-            sessionID: sessionID,
-            onSession: { [weak self] id in self?.setServerSessionID(id) }
-        ) { [weak self] chunk in
-            self?.appendChunk(chunk, to: responseID)
-        }
-    }
-
-    /// Fetch the server-owned transcript after a stream ends or disconnects.
-    /// A matching user turn must be followed by an assistant turn, preventing
-    /// an older answer from being mistaken for recovery of the current request.
     private func reconcileCompletedTurn(
         client: JarvisAPIClient,
         sessionID: String,
-        userText: String,
+        requestID: String,
         responseID: UUID,
         attempts: Int
     ) async -> Bool {
@@ -461,8 +495,9 @@ final class ChatViewModel: ObservableObject {
             guard !Task.isCancelled else { return false }
             do {
                 let remote = try await client.messages(for: sessionID)
+                guard !Task.isCancelled else { return false }
                 if let userIndex = remote.lastIndex(where: {
-                    $0.role == "user" && $0.content == userText
+                    $0.role == "user" && $0.requestID == requestID
                 }) {
                     let replyIndex = remote.index(after: userIndex)
                     if replyIndex < remote.endIndex, remote[replyIndex].role == "assistant" {
@@ -492,7 +527,7 @@ final class ChatViewModel: ObservableObject {
     private func appendChunk(_ chunk: String, to id: UUID) {
         guard let index = messages.firstIndex(where: { $0.id == id }) else { return }
         let current = messages[index]
-        messages[index] = ChatMessage(id: current.id, role: .jarvis, text: current.text + chunk, date: current.date)
+        messages[index] = ChatMessage(id: current.id, role: .jarvis, text: current.text + chunk, date: current.date, serverID: current.serverID, requestID: current.requestID)
         // Persist once when the turn completes. Rewriting the entire archive
         // for every streamed character causes visible typing and scrolling
         // stalls on longer conversations.
@@ -501,7 +536,7 @@ final class ChatViewModel: ObservableObject {
     private func replaceMessage(_ id: UUID, text: String) {
         guard let index = messages.firstIndex(where: { $0.id == id }) else { return }
         let current = messages[index]
-        messages[index] = ChatMessage(id: id, role: current.role, text: text, date: current.date)
+        messages[index] = ChatMessage(id: id, role: current.role, text: text, date: current.date, serverID: current.serverID, requestID: current.requestID)
         persist()
     }
 
@@ -528,7 +563,8 @@ final class ChatViewModel: ObservableObject {
         store.save(ChatArchive(
             conversations: conversations,
             activeConversationID: activeConversationID,
-            inactiveSince: inactiveSince
+            inactiveSince: inactiveSince,
+            pendingEdits: pendingEdits
         ))
     }
 }

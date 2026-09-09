@@ -34,6 +34,9 @@ struct TorrentTransfer: Decodable, Identifiable {
     let hash: String?
 
     var id: String { hash ?? name }
+    var isPaused: Bool {
+        state.lowercased().hasPrefix("paused") || state.lowercased().hasPrefix("stopped")
+    }
 
     enum CodingKeys: String, CodingKey {
         case name, progress, state, eta, size, hash
@@ -62,9 +65,11 @@ struct MediaQueueItem: Decodable, Identifiable {
     let status: String
     let errorMessage: String
 
-    var id: String { title + timeLeft }
+    let queueID: String?
+    var id: String { queueID ?? title }
 
     enum CodingKeys: String, CodingKey {
+        case queueID = "id"
         case title, progress, size, status
         case sizeLeft = "size_left"
         case timeLeft = "time_left"

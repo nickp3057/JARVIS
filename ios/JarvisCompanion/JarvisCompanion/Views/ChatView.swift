@@ -24,15 +24,23 @@ struct ChatView: View {
         NavigationStack {
             VStack(spacing: 0) {
                 connectionBanner
+                if let error = model.historyError {
+                    Label(error, systemImage: "arrow.triangle.2.circlepath")
+                        .font(.caption).foregroundStyle(JarvisTheme.amber)
+                        .padding(.horizontal, 20).padding(.vertical, 8)
+                }
                 if model.messages.isEmpty && !model.isAwaitingReply {
                     emptyState
                 } else {
                     transcript
                 }
-                Divider()
+                Rectangle().fill(JarvisTheme.border).frame(height: 1)
                 composer
             }
-            .navigationTitle("Jarvis")
+            .background(JarvisTheme.background)
+            .navigationTitle("JARVIS")
+            .toolbarBackground(JarvisTheme.background, for: .navigationBar)
+            .toolbarBackground(.visible, for: .navigationBar)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
@@ -117,7 +125,8 @@ struct ChatView: View {
 
     private var connectionBanner: some View {
         Button {
-            if case .offline = model.connectionState { model.refreshConnectionStatus() }
+            if model.connectionState == .unconfigured { showingSettings = true }
+            else { model.refreshConnectionStatus() }
         } label: {
             HStack(spacing: 6) {
                 Image(systemName: model.connectionState.symbol)
@@ -126,11 +135,11 @@ struct ChatView: View {
                     Text("· \(detail)").lineLimit(1)
                 }
             }
-            .font(.caption)
-            .foregroundStyle(model.connectionState == .online ? Color.green : Color.secondary)
+            .font(.caption.monospaced())
+            .foregroundStyle(model.connectionState == .online ? JarvisTheme.cyan : JarvisTheme.amber)
             .frame(maxWidth: .infinity)
-            .padding(.vertical, 5)
-            .background(Color(.secondarySystemBackground))
+            .padding(.vertical, 9)
+            .background(JarvisTheme.panel.opacity(0.6))
         }
         .buttonStyle(.plain)
     }
@@ -151,7 +160,9 @@ struct ChatView: View {
                 }
             }
             .searchable(text: $historySearch, prompt: "Search conversations")
-            .navigationTitle("Chat history")
+            .scrollContentBackground(.hidden)
+            .background(JarvisTheme.background)
+            .navigationTitle("Conversations")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -205,7 +216,7 @@ struct ChatView: View {
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(spacing: 12) {
-                    ForEach(model.messages) { message in
+                    ForEach(model.messages.filter { !($0.role == .jarvis && $0.text.isEmpty) }) { message in
                         MessageBubble(
                             message: message,
                             onRetry: retryAction(for: message),
@@ -214,7 +225,7 @@ struct ChatView: View {
                         .id(message.id)
                     }
 
-                    if model.isAwaitingReply {
+                    if model.isAwaitingReply && model.messages.last?.text.isEmpty == true {
                         TypingIndicator()
                     }
 
@@ -253,29 +264,55 @@ struct ChatView: View {
     }
 
     private var emptyState: some View {
-        VStack(spacing: 8) {
-            Image(systemName: settings.isConfigured ? "bubble.left.and.bubble.right" : "gearshape")
-                .font(.largeTitle)
-                .foregroundStyle(.secondary)
-
-            Text(settings.isConfigured ? "No messages yet" : "Set up your server")
-                .font(.headline)
-
-            Text(settings.isConfigured
-                 ? "Say something to JARVIS."
-                 : "Add your JARVIS server address and API token in Settings to get started.")
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
-
-            if !settings.isConfigured {
-                Button("Open Settings") { showingSettings = true }
-                    .buttonStyle(.borderedProminent)
-                    .padding(.top, 4)
+        ScrollView {
+            VStack(spacing: 22) {
+                JarvisCoreMark(size: 140).padding(.top, 32)
+                VStack(spacing: 10) {
+                    Text("AT YOUR SERVICE")
+                        .font(.caption.monospaced().weight(.semibold))
+                        .tracking(3).foregroundStyle(JarvisTheme.cyan)
+                    Text(settings.isConfigured ? "What’s on your mind, sir?" : "Let’s get connected.")
+                        .font(.title2.weight(.semibold))
+                        .multilineTextAlignment(.center)
+                    Text(settings.isConfigured
+                         ? "Your home, your plans, a little perspective."
+                         : "Connect to JARVIS Core to bring your assistant along.")
+                        .font(.subheadline).foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                }
+                if settings.isConfigured {
+                    VStack(spacing: 10) {
+                        suggestion("Bring me up to speed", symbol: "sun.horizon", prompt: "Give me a briefing.")
+                        suggestion("Check on the house", symbol: "house", prompt: "What’s the status of my home?")
+                        suggestion("What’s downloading?", symbol: "arrow.down.circle", prompt: "Show my download status.")
+                    }
+                    .padding(.top, 8)
+                } else {
+                    Button("Connect to JARVIS", systemImage: "network") { showingSettings = true }
+                        .buttonStyle(.borderedProminent).foregroundStyle(JarvisTheme.background)
+                }
             }
+            .padding(24)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .padding(.horizontal, 24)
+    }
+
+    private func suggestion(_ title: String, symbol: String, prompt: String) -> some View {
+        Button {
+            model.draft = prompt
+            composerFocused = true
+        } label: {
+            HStack(spacing: 14) {
+                Image(systemName: symbol).foregroundStyle(JarvisTheme.cyan).frame(width: 22)
+                Text(title).font(.subheadline).foregroundStyle(.primary)
+                Spacer()
+                Image(systemName: "arrow.up.left").font(.caption).foregroundStyle(.secondary)
+            }
+            .padding(16)
+            .background(JarvisTheme.panel, in: .rect(cornerRadius: 16))
+            .overlay(RoundedRectangle(cornerRadius: 16).strokeBorder(JarvisTheme.border))
+        }
+        .buttonStyle(.plain)
     }
 
     private var composer: some View {
@@ -285,9 +322,10 @@ struct ChatView: View {
                 .textFieldStyle(.plain)
                 .padding(.horizontal, 14)
                 .padding(.vertical, 9)
-                .background(Color(.secondarySystemBackground), in: .rect(cornerRadius: 20))
+                .background(JarvisTheme.panel, in: .rect(cornerRadius: 20))
+                .overlay(RoundedRectangle(cornerRadius: 20).strokeBorder(JarvisTheme.border))
                 .focused($composerFocused)
-                .submitLabel(.send)
+                .submitLabel(.return)
                 .onChange(of: model.draft) { model.draftChanged() }
 
             Button(action: model.isAwaitingReply ? model.stopGenerating : model.send) {
@@ -300,7 +338,7 @@ struct ChatView: View {
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
-        .background(.bar)
+        .background(JarvisTheme.background)
     }
 
     private func scrollToBottom(_ proxy: ScrollViewProxy) {

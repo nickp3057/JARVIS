@@ -86,12 +86,15 @@ struct ServerSession: Decodable {
 }
 
 struct ServerMessage: Decodable {
+    let id: Int?
+    let requestID: String?
     let role: String
     let content: String
     let createdAt: String?
 
     enum CodingKeys: String, CodingKey {
-        case role, content
+        case id, role, content
+        case requestID = "request_id"
         case createdAt = "created_at"
     }
 }
@@ -122,17 +125,19 @@ struct JarvisAPIClient {
     /// One session for the whole app. A `URLSession` retains itself until it is
     /// invalidated, so building one per request would leak; the per-request
     /// timeout is set on the `URLRequest` instead.
-    private static let session: URLSession = {
+    private static let sharedSession: URLSession = {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.waitsForConnectivity = false
         return URLSession(configuration: configuration)
     }()
 
+    private let session: URLSession
     private let baseURL: URL
     private let token: String
     private let timeout: TimeInterval
 
-    init(baseURL: URL, token: String, timeout: TimeInterval = JarvisAPIClient.defaultTimeout) {
+    init(baseURL: URL, token: String, timeout: TimeInterval = JarvisAPIClient.defaultTimeout, session: URLSession? = nil) {
+        self.session = session ?? Self.sharedSession
         self.baseURL = baseURL
         self.token = token
         self.timeout = timeout
@@ -154,9 +159,11 @@ struct JarvisAPIClient {
     private struct ChatRequest: Encodable {
         let message: String
         let sessionID: String?
+        let requestID: String?
 
         enum CodingKeys: String, CodingKey {
             case message
+            case requestID = "request_id"
             case sessionID = "session_id"
         }
     }
@@ -213,16 +220,16 @@ struct JarvisAPIClient {
         }
     }
 
-    func send(message: String, sessionID: String?) async throws -> (reply: String, sessionID: String?) {
+    func send(message: String, sessionID: String?, requestID: String? = nil) async throws -> (reply: String, sessionID: String?) {
         var request = request(path: "chat", method: "POST")
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.httpBody = try JSONEncoder().encode(ChatRequest(message: message, sessionID: sessionID))
+        request.httpBody = try JSONEncoder().encode(ChatRequest(message: message, sessionID: sessionID, requestID: requestID))
 
         let data: Data
         let response: URLResponse
         do {
-            (data, response) = try await Self.session.data(for: request)
+            (data, response) = try await session.data(for: request)
         } catch let error as URLError {
             throw JarvisAPIError.transport(error)
         }
@@ -240,6 +247,7 @@ struct JarvisAPIClient {
     func stream(
         message: String,
         sessionID: String?,
+        requestID: String? = nil,
         onSession: @escaping @MainActor (String) -> Void,
         onChunk: @escaping @MainActor (String) -> Void
     ) async throws -> String? {
@@ -249,10 +257,10 @@ struct JarvisAPIClient {
         request.timeoutInterval = max(timeout, Self.streamingTimeout)
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue("text/plain", forHTTPHeaderField: "Accept")
-        request.httpBody = try JSONEncoder().encode(ChatRequest(message: message, sessionID: sessionID))
+        request.httpBody = try JSONEncoder().encode(ChatRequest(message: message, sessionID: sessionID, requestID: requestID))
 
         do {
-            let (bytes, response) = try await Self.session.bytes(for: request)
+            let (bytes, response) = try await session.bytes(for: request)
             let http = try validate(response)
             if let boundSessionID = http.value(forHTTPHeaderField: "X-Jarvis-Session-ID") {
                 await onSession(boundSessionID)
@@ -282,28 +290,35 @@ struct JarvisAPIClient {
 
     func checkHealth() async throws {
         let request = request(path: "health")
-        let (data, response) = try await Self.session.data(for: request)
+        let (data, response) = try await session.data(for: request)
         _ = try validate(response, data: data)
+    }
+
+    func createSession() async throws -> String {
+        struct Created: Decodable {
+            let session_id: String
+        }
+        return try await postJSON(Created.self, path: "sessions", body: [String: String]()).session_id
     }
 
     func renameSession(_ sessionID: String, title: String) async throws {
         var request = request(path: "sessions/\(sessionID)", method: "PATCH")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try JSONSerialization.data(withJSONObject: ["title": title])
-        let (data, response) = try await Self.session.data(for: request)
+        let (data, response) = try await session.data(for: request)
         _ = try validate(response, data: data)
     }
 
     func deleteSession(_ sessionID: String) async throws {
         let request = request(path: "sessions/\(sessionID)", method: "DELETE")
-        let (data, response) = try await Self.session.data(for: request)
+        let (data, response) = try await session.data(for: request)
         _ = try validate(response, data: data)
     }
 
     func sessions() async throws -> [ServerSession] {
         struct Envelope: Decodable { let sessions: [ServerSession] }
         let request = request(path: "sessions")
-        let (data, response) = try await Self.session.data(for: request)
+        let (data, response) = try await session.data(for: request)
         _ = try validate(response, data: data)
         return try JSONDecoder().decode(Envelope.self, from: data).sessions
     }
@@ -311,7 +326,7 @@ struct JarvisAPIClient {
     func messages(for sessionID: String) async throws -> [ServerMessage] {
         struct Envelope: Decodable { let messages: [ServerMessage] }
         let request = request(path: "sessions/\(sessionID)")
-        let (data, response) = try await Self.session.data(for: request)
+        let (data, response) = try await session.data(for: request)
         _ = try validate(response, data: data)
         return try JSONDecoder().decode(Envelope.self, from: data).messages
     }
@@ -326,7 +341,7 @@ struct JarvisAPIClient {
         let data: Data
         let response: URLResponse
         do {
-            (data, response) = try await Self.session.data(for: request)
+            (data, response) = try await session.data(for: request)
         } catch let error as URLError {
             throw JarvisAPIError.transport(error)
         }
@@ -346,7 +361,7 @@ struct JarvisAPIClient {
         let data: Data
         let response: URLResponse
         do {
-            (data, response) = try await Self.session.data(for: request)
+            (data, response) = try await session.data(for: request)
         } catch let error as URLError {
             throw JarvisAPIError.transport(error)
         }
@@ -438,7 +453,7 @@ struct JarvisAPIClient {
         let data: Data
         let response: URLResponse
         do {
-            (data, response) = try await Self.session.data(for: request)
+            (data, response) = try await session.data(for: request)
         } catch let error as URLError {
             throw JarvisAPIError.transport(error)
         }

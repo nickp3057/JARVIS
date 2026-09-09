@@ -28,6 +28,9 @@
       selectedLauncherIdentifier = "Xcode.DebuggerFoundation.Launcher.LLDB"
       shouldUseLaunchSchemeArgsEnv = "YES">
       <Testables>
+         <TestableReference skipped="NO">
+            <BuildableReference BuildableIdentifier="primary" BlueprintIdentifier="AA0000000000000000000003" BuildableName="JarvisCompanionTests.xctest" BlueprintName="JarvisCompanionTests" ReferencedContainer="container:JarvisCompanion.xcodeproj"/>
+         </TestableReference>
       </Testables>
    </TestAction>
    <LaunchAction

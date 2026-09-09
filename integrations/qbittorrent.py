@@ -200,7 +200,7 @@ def download_snapshot() -> tuple[bool, list[dict[str, Any]] | str]:
 # States that count as "active or queued" for the companion dashboard.
 _TRANSFER_STATES = {
     "downloading", "metaDL", "forcedDL", "allocating", "checkingDL",
-    "stalledDL", "queuedDL", "queuedUP",
+    "stalledDL", "queuedDL", "queuedUP", "pausedDL", "pausedUP", "stoppedDL", "stoppedUP",
 }
 
 

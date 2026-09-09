@@ -188,6 +188,24 @@ The bearer token comes from `JARVIS_API_TOKEN`. The API is a transport adapter,
 not a second brain: it must route conversation through `JarvisRuntime` and use
 `brain.history` for persisted session metadata.
 
+Companion turns optionally carry a `request_id`. The runtime claims it in
+SQLite under its conversation lock, sets a per-worker request context, and
+persists the receipt's answer atomically with the transcript pair. Reusing a
+completed ID returns the stored answer; changed input/session IDs or an
+unfinished receipt cannot execute tools again. History responses expose stable
+message `id` and `request_id` fields for exact reconciliation. Receipt lifetime
+follows session deletion/history clearing. Older callers may omit the ID.
+
+Stream generators are consumed entirely on a single worker thread. An async
+queue bridges bytes to HTTP, so an RLock is never resumed on another pool
+thread. Client cancellation detaches delivery; the worker finishes the turn
+and history persistence. Companion Stop therefore stops reception, not server
+actions. Session deletion uses the runtime lock to wait for an active turn.
+
+The companion preserves unfinished local turns during synchronization and
+binds stream callbacks to the originating conversation/generation. Rename and
+delete operations use a durable local retry queue with visible failures.
+
 `POST /debug-reports` is the deliberate exception to conversation routing: it
 stores user-approved diagnostic evidence without asking a model to analyze it
 at submission time. Later review still happens through the normal runtime and

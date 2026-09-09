@@ -1,8 +1,8 @@
 # Jarvis Companion (iOS)
 
-A native SwiftUI chat client for JARVIS Core. It sends text to the server's
-`/chat` endpoint, shows what comes back, and keeps device-local conversation
-history.
+A native SwiftUI companion for JARVIS Core, with synchronized Chat and a
+Control room dashboard. Navy panels, cyan accents, and amber activity share
+the desktop cockpit aesthetic; text scales with Dynamic Type.
 
 Requires iOS 17+ and Xcode 16 or newer.
 
@@ -44,8 +44,7 @@ This is a **thin client** — deliberately so. JARVIS Core owns the personality,
 conversation context and history, the memory tier, and all 45+ tools (Home Assistant,
 Spotify, Radarr/Sonarr, timers, and the rest). The app knows none of that. It
 sends one string and renders one string back; if a turn involved six server-side
-tool calls, the app is none the wiser, which is exactly why the request timeout
-is a generous 30s. The layering is: `JarvisAPIClient` (the only type that knows
+tool calls, the app is none the wiser, with a three-minute streaming timeout (30 seconds for ordinary API requests). The layering is: `JarvisAPIClient` (the only type that knows
 the wire format) → `ChatViewModel` (owns the transcript and the single in-flight
 request) → `ChatView`/`SettingsView` (dumb rendering). Persistence sits behind
 the `ChatStore` protocol with a plain JSON-file implementation. It is an offline
@@ -102,10 +101,10 @@ The connection banner reports server reachability only. Sending a chat no
 longer changes a known-good connection to “Connecting…”; the typing indicator
 and Stop button communicate per-turn activity independently.
 
-For rolling upgrades, the app retries without a cached session when the server
-returns 404, then falls back from `/chat/stream` to the legacy `/chat` endpoint
-when streaming is not deployed yet. An HTTP route error does not mark the
-otherwise reachable server offline.
+For rolling upgrades, a missing `/chat/stream` route falls back to `/chat`
+with the same session and request ID. A missing session is surfaced as an
+error rather than silently starting unrelated context. Old servers can still
+answer, but exact-ID recovery/replay protection requires the updated Core.
 
 Streaming turns use a three-minute timeout because local tool chains can be
 silent while Radarr, Sonarr, Home Assistant, or another service works. After a
@@ -163,5 +162,45 @@ The phone must be **connected to your tailnet** for the app to reach the server 
 the Tailscale app installed, logged into the same account, and its VPN toggle on.
 There is no fallback to a LAN address.
 
-Not implemented, by design: push notifications, device dashboards, and voice
-input.
+Not implemented: push notifications and voice input.
+
+## Control room
+
+The Hub tab shows service health, transfers, media queues/recent additions,
+allowlisted home toggles, and service links. It refreshes while visible and
+foregrounded and supports pull-to-refresh. Paused/stopped torrents stay visible
+so Resume remains available. Service failures retain stale data with an error.
+
+## Reliable turns and history
+
+New turns create a server session before sending tool-capable requests, then
+carry a UUID saved with the local user message. Core stores that request ID
+with the completed transcript and a durable receipt. Recovery matches the ID,
+never the text; retrying a completed request returns its original answer.
+An interrupted server receipt refuses automatic re-execution because a tool
+may already have acted. Start a new request only after checking its outcome.
+
+Stop ends phone reception; it does not undo or cancel server-side actions.
+Core finishes the turn on one worker and saves the result for reconciliation.
+Switching conversations cannot let old callbacks modify the new chat.
+History refresh preserves unfinished local messages and stable server IDs.
+
+Rename/delete edits are queued on the device, survive restarts, and retry on
+reconnection. Failures appear in Chat instead of silently reverting edits.
+Multiline paste remains an unsent draft; use the Send button when ready.
+Starter prompts also populate the composer without submitting anything.
+
+## Validation
+
+The shared Xcode scheme includes `JarvisCompanionTests`, using an isolated
+Keychain namespace, an in-memory archive, and mocked network responses. Run
+Product → Test with a compatible installed iOS Simulator runtime. Server
+regressions run with:
+
+```bash
+.venv/bin/python -m unittest tests.test_companion_reliability tests.test_server tests.test_status_hub tests.test_qbittorrent tests.test_session_summaries -v
+```
+
+When the installed SDK has no matching simulator runtime, type-check the app
+and test sources against the device SDK; this does not replace visual or
+on-device validation.

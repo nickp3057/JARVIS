@@ -3,9 +3,8 @@ import os
 
 /// Local persistence for the transcript.
 ///
-/// Deliberately a protocol with one dumb JSON-file implementation. Server-side
-/// history sync is planned for a later session and will slot in behind this
-/// same two-method API, so nothing above this layer should assume a file.
+/// Deliberately a protocol with one dumb JSON-file implementation. Server history is authoritative for completed turns; this archive retains
+/// offline conversations, drafts, and pending rename/delete edits.
 protocol ChatStore {
     func load() -> ChatArchive
     func save(_ archive: ChatArchive)

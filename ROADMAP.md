@@ -123,6 +123,15 @@ almost immediately.
 
 **Goal:** the companion becomes useful before opening chat.
 
+**Shipped baseline:** Chat and a styled Control room tab now cover service
+health, active/paused torrents with pause/resume, Radarr/Sonarr queues and recent
+additions, allowlisted home toggles, and browser links. Foreground polling
+refreshes transfers, services, home entities, and media. Companion reliability
+includes exact request recovery, replay protection for completed turns,
+conversation-safe cancellation/sync, durable offline history edits, multiline
+drafts, and an iOS regression-test target. The broader Now surfaces below,
+push updates, and durable offline Hub snapshots remain future work.
+
 ### Core API work
 
 - Add a versioned capabilities endpoint.

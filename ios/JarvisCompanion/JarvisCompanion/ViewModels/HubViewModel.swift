@@ -37,18 +37,20 @@ final class HubViewModel: ObservableObject {
     @Published var actionError: String?
 
     private let settings: AppSettings
+    private let makeClient: () throws -> JarvisAPIClient
     private var pollTask: Task<Void, Never>?
 
     /// Matches the server's TTL cache — polling faster just returns the same
     /// cached payload.
     private let pollInterval: Duration = .seconds(5)
 
-    init(settings: AppSettings) {
+    init(settings: AppSettings, clientFactory: (() throws -> JarvisAPIClient)? = nil) {
         self.settings = settings
+        self.makeClient = clientFactory ?? { try JarvisAPIClient.make(from: settings) }
     }
 
     private func client() throws -> JarvisAPIClient {
-        try JarvisAPIClient.make(from: settings)
+        try makeClient()
     }
 
     // MARK: - Loading
@@ -101,10 +103,12 @@ final class HubViewModel: ObservableObject {
         defer { self[keyPath: keyPath].isLoading = false }
         do {
             let value = try await fetch(client())
+            guard !Task.isCancelled else { return }
             self[keyPath: keyPath].value = value
             self[keyPath: keyPath].serverError = serverError(value)
             self[keyPath: keyPath].loadError = nil
         } catch {
+            guard !Task.isCancelled else { return }
             self[keyPath: keyPath].loadError = error.localizedDescription
         }
     }
@@ -120,10 +124,12 @@ final class HubViewModel: ObservableObject {
         defer { self[keyPath: keyPath].isLoading = false }
         do {
             let raw = try await fetch(client())
+            guard !Task.isCancelled else { return }
             self[keyPath: keyPath].value = transform(raw)
             self[keyPath: keyPath].serverError = serverError(raw)
             self[keyPath: keyPath].loadError = nil
         } catch {
+            guard !Task.isCancelled else { return }
             self[keyPath: keyPath].loadError = error.localizedDescription
         }
     }
@@ -139,8 +145,11 @@ final class HubViewModel: ObservableObject {
             while !Task.isCancelled {
                 try? await Task.sleep(for: self?.pollInterval ?? .seconds(5))
                 guard !Task.isCancelled, let self else { return }
-                await self.refreshTorrents()
-                await self.refreshServices()
+                async let torrents: Void = self.refreshTorrents()
+                async let services: Void = self.refreshServices()
+                async let entities: Void = self.refreshEntities()
+                async let media: Void = self.refreshMedia()
+                _ = await (torrents, services, entities, media)
             }
         }
     }
@@ -155,6 +164,7 @@ final class HubViewModel: ObservableObject {
     /// Optimistically flip an entity, then reconcile with the state the
     /// server reports back. Any failure reverts the toggle and surfaces why.
     func toggle(_ entity: HomeEntity, to turnOn: Bool) {
+        guard pendingEntityStates[entity.entityID] == nil else { return }
         pendingEntityStates[entity.entityID] = turnOn
         Task {
             defer { pendingEntityStates[entity.entityID] = nil }
@@ -187,7 +197,7 @@ final class HubViewModel: ObservableObject {
     }
 
     func torrentAction(_ torrent: TorrentTransfer, action: String) {
-        guard let hash = torrent.hash else { return }
+        guard let hash = torrent.hash, !busyTorrents.contains(hash) else { return }
         busyTorrents.insert(hash)
         Task {
             defer { busyTorrents.remove(hash) }

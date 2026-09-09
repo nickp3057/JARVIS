@@ -479,6 +479,22 @@ CALENDAR_ALERT_LEAD_MIN=10  # warn this many minutes before a meeting
   `MEMORY_EXTRACT_MIN_CHARS`, `HABITS_MIN_TURNS`, `OBSIDIAN_JOURNAL_FOLDER`,
   `OBSIDIAN_NOTES_FOLDER`. Tests: `tests/test_memory_extractor.py`,
   `tests/test_habits.py`, `tests/test_note_capture.py`.
+- **Companion reliability and visual refresh (1.17 / build 19)** — shared
+  navy/cyan cockpit styling, an illustrated Core mark, draft-only starter
+  prompts, timestamped message cards, amber activity, and consistent Chat/Hub
+  surfaces. Multiline paste stays in the composer; draft saves are debounced.
+  History sync preserves active/unresolved turns and stable server message IDs.
+  Every new companion turn carries a durable request UUID; exact-ID recovery
+  cannot confuse repeated text, and completed retries reuse the stored answer
+  without repeating tools. Interrupted receipts fail closed. Streams finish on
+  one worker thread even after a client disconnects; Stop stops reception, not
+  already-running server actions. Session deletion is serialized with turns.
+  Offline rename/delete edits persist for retry with visible errors. Paused and
+  stopped torrents remain visible and resumable; media rows retain queue IDs.
+  Home/media refresh alongside transfers/services while the Hub is visible.
+  Keychain updates preserve the old value on failure and report storage errors.
+  Regression coverage: `tests/test_companion_reliability.py` and the shared
+  Xcode scheme's `JarvisCompanionTests` target.
 - **iOS Hub screen** (`ios/JarvisCompanion`) — a tab bar now pairs Chat with a
   Hub dashboard rendering the seven server endpoints: per-service up/latency
   rows, live torrent transfers with progress/speed/ETA and per-torrent
@@ -487,7 +503,7 @@ CALENDAR_ALERT_LEAD_MIN=10  # warn this many minutes before a meeting
   queues with collapsible recent additions, allowlisted quick-action toggles
   (optimistic, reconciled from the POST response, reverted with an alert on
   failure), and browser links. Pull-to-refresh everywhere; torrents and
-  services auto-poll every 5s (matching the server TTL) only while the Hub is
+  services, home entities, and media auto-poll every 5s (matching the server TTL) only while the Hub is
   visible and foregrounded. Every section loads and fails independently — a
   dead service shows an inline error while the rest render. Settings now
   fills in port 8000 for plain-http addresses typed without a port and shows

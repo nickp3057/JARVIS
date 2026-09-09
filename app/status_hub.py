@@ -127,6 +127,7 @@ def _servarr_section(service: str) -> dict[str, Any]:
             left = float(record.get("sizeleft", 0) or 0)
             section["queue"].append(
                 {
+                    "id": str(record.get("id") or record.get("downloadId") or _queue_title(service, record)),
                     "title": _queue_title(service, record),
                     "progress": round(1 - left / size, 4) if size > 0 else 0.0,
                     "size": int(size),

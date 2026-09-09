@@ -2,16 +2,16 @@
 
 from __future__ import annotations
 
+import asyncio
+import threading
 import hmac
 import os
-from collections.abc import Iterator
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Response, status
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from brain.history import (
-    delete_session,
     list_sessions,
     load_session_messages,
     rename_session,
@@ -44,6 +44,7 @@ def authorize(authorization: str | None = Header(default=None)) -> None:
 class ChatRequest(BaseModel):
     message: str = Field(min_length=1, max_length=20_000)
     session_id: str | None = None
+    request_id: str | None = Field(default=None, min_length=1, max_length=100)
 
 
 class ChatResponse(BaseModel):
@@ -106,7 +107,7 @@ def rename(session_id: str, body: RenameRequest, _: None = Depends(authorize)) -
 
 @app.delete("/sessions/{session_id}", status_code=status.HTTP_204_NO_CONTENT)
 def remove(session_id: str, _: None = Depends(authorize)) -> Response:
-    if not delete_session(session_id):
+    if not runtime().delete_companion_session(session_id):
         raise HTTPException(status_code=404, detail="Session not found")
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
@@ -122,7 +123,11 @@ def _resolve_session(request: ChatRequest) -> str:
 @app.post("/chat", response_model=ChatResponse)
 def chat(request: ChatRequest, _: None = Depends(authorize)) -> ChatResponse:
     session_id = _resolve_session(request)
-    reply = runtime().respond_in_session(session_id, request.message.strip())
+    try:
+        kwargs = {"request_id": request.request_id} if request.request_id else {}
+        reply = runtime().respond_in_session(session_id, request.message.strip(), **kwargs)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     return ChatResponse(reply=reply, session_id=session_id)
 
 
@@ -130,9 +135,42 @@ def chat(request: ChatRequest, _: None = Depends(authorize)) -> ChatResponse:
 def chat_stream(request: ChatRequest, _: None = Depends(authorize)) -> StreamingResponse:
     session_id = _resolve_session(request)
 
-    def chunks() -> Iterator[bytes]:
-        for fragment in runtime().respond_streaming_in_session(session_id, request.message.strip()):
-            yield fragment.encode()
+    async def chunks():
+        # A synchronous StreamingResponse can resume a generator on different
+        # pool threads. Keep the runtime's RLock/context on one worker, and
+        # finish persistence even when the phone stops reading or disconnects.
+        loop = asyncio.get_running_loop()
+        queue: asyncio.Queue = asyncio.Queue()
+        disconnected = threading.Event()
+
+        def publish(value):
+            if not disconnected.is_set():
+                try:
+                    loop.call_soon_threadsafe(queue.put_nowait, value)
+                except RuntimeError:
+                    pass  # Application shutdown; worker still finishes history.
+
+        def produce():
+            try:
+                kwargs = {"request_id": request.request_id} if request.request_id else {}
+                for fragment in runtime().respond_streaming_in_session(session_id, request.message.strip(), **kwargs):
+                    publish(fragment.encode())
+            except Exception as exc:
+                publish(exc)
+            finally:
+                publish(None)
+
+        threading.Thread(target=produce, name="companion-turn", daemon=True).start()
+        try:
+            while True:
+                item = await queue.get()
+                if item is None:
+                    break
+                if isinstance(item, Exception):
+                    raise item
+                yield item
+        finally:
+            disconnected.set()
 
     return StreamingResponse(
         chunks(),

@@ -7,17 +7,27 @@ struct HubView: View {
     @EnvironmentObject private var settings: AppSettings
     @ObservedObject var model: HubViewModel
     @Environment(\.scenePhase) private var scenePhase
+    @State private var isVisible = false
 
     var body: some View {
         NavigationStack {
             List {
-                servicesSection
-                torrentsSection
-                mediaSection
-                quickActionsSection
-                linksSection
+                CockpitHeader(eyebrow: "JARVIS / HOME BASE", title: "Your world, at a glance.",
+                              subtitle: "A quiet eye on the things that keep life running.")
+                    .listRowBackground(Color.clear)
+                    .listRowSeparator(.hidden)
+                servicesSection.listRowBackground(JarvisTheme.panel)
+                torrentsSection.listRowBackground(JarvisTheme.panel)
+                mediaSection.listRowBackground(JarvisTheme.panel)
+                quickActionsSection.listRowBackground(JarvisTheme.panel)
+                linksSection.listRowBackground(JarvisTheme.panel)
             }
-            .navigationTitle("Hub")
+            .listStyle(.insetGrouped)
+            .scrollContentBackground(.hidden)
+            .background(JarvisTheme.background)
+            .navigationTitle("Control room")
+            .toolbarBackground(JarvisTheme.background, for: .navigationBar)
+            .toolbarBackground(.visible, for: .navigationBar)
             .navigationBarTitleDisplayMode(.inline)
             .refreshable { await model.refreshAll() }
             .overlay {
@@ -42,13 +52,16 @@ struct HubView: View {
             }
         }
         .task {
+            isVisible = true
             await model.refreshAll()
+            guard !Task.isCancelled, isVisible, scenePhase == .active else { return }
             model.startPolling()
         }
-        .onDisappear { model.stopPolling() }
+        .onDisappear { isVisible = false; model.stopPolling() }
         .onChange(of: scenePhase) { _, phase in
             switch phase {
-            case .active: model.startPolling()
+            case .active:
+                if isVisible { model.startPolling() }
             case .inactive, .background: model.stopPolling()
             @unknown default: break
             }
@@ -97,7 +110,7 @@ struct HubView: View {
             }
             if let status = model.torrents.value {
                 if status.torrents.isEmpty && status.error.isEmpty {
-                    Text("Nothing downloading.")
+                    Text("All clear. No active or paused downloads.")
                         .foregroundStyle(.secondary)
                 }
                 ForEach(status.torrents) { torrent in
@@ -127,7 +140,7 @@ struct HubView: View {
                     .lineLimit(1)
                 Spacer()
                 if let hash = torrent.hash {
-                    let paused = torrent.state.lowercased().hasPrefix("paused")
+                    let paused = torrent.isPaused
                     Button {
                         model.torrentAction(torrent, action: paused ? "resume" : "pause")
                     } label: {
@@ -141,14 +154,15 @@ struct HubView: View {
             }
             ProgressView(value: min(max(torrent.progress, 0), 1))
             HStack {
-                Text("\(Int(torrent.progress * 100))% · \(Self.rate(torrent.dlSpeed))")
+                Text("\(Int(min(max(torrent.progress, 0), 1) * 100))% · \(torrent.isPaused ? "Paused" : Self.rate(torrent.dlSpeed))")
                 Spacer()
                 Text(Self.eta(torrent.eta))
             }
             .font(.caption.monospacedDigit())
             .foregroundStyle(.secondary)
+            .accessibilityElement(children: .combine)
         }
-        .padding(.vertical, 2)
+        .padding(.vertical, 8)
     }
 
     // MARK: - Media

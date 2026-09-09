@@ -15,6 +15,9 @@ class FakeRuntime:
     brain_online = True
     brain_label = "Test brain"
 
+    def delete_companion_session(self, session_id):
+        return history.delete_session(session_id)
+
     def start_session(self) -> str:
         return history.start_new_session()
 

@@ -20,18 +20,26 @@ final class AppSettings: ObservableObject {
     }
 
     @Published var apiToken: String {
-        didSet { keychain.save(apiToken) }
+        didSet {
+            tokenStorageError = keychain.save(apiToken) ? nil : "Could not save the token securely. Please try again before closing the app."
+        }
     }
+
+    @Published private(set) var tokenStorageError: String?
 
     init(defaults: UserDefaults = .standard, keychain: KeychainTokenStore = KeychainTokenStore()) {
         self.defaults = defaults
         self.keychain = keychain
         baseURLString = defaults.string(forKey: Key.baseURL) ?? ""
         let legacyToken = defaults.string(forKey: Key.apiToken) ?? ""
-        apiToken = keychain.load() ?? legacyToken
+        let storedToken = keychain.load()
+        apiToken = storedToken ?? legacyToken
         if !legacyToken.isEmpty {
-            keychain.save(legacyToken)
-            defaults.removeObject(forKey: Key.apiToken)
+            if storedToken != nil || keychain.save(legacyToken) {
+                defaults.removeObject(forKey: Key.apiToken)
+            } else {
+                tokenStorageError = "Could not migrate the token to Keychain. It will retry next launch."
+            }
         }
     }
 
@@ -73,7 +81,11 @@ final class AppSettings: ObservableObject {
 }
 
 final class KeychainTokenStore {
-    private let service = "com.nickolaspearson.JarvisCompanion"
+    private let service: String
+
+    init(service: String = "com.nickolaspearson.JarvisCompanion") {
+        self.service = service
+    }
     private let account = "jarvis-api-token"
 
     func load() -> String? {
@@ -86,13 +98,20 @@ final class KeychainTokenStore {
         return String(data: data, encoding: .utf8)
     }
 
-    func save(_ token: String) {
-        SecItemDelete(baseQuery as CFDictionary)
-        guard !token.isEmpty else { return }
-        var query = baseQuery
-        query[kSecValueData as String] = Data(token.utf8)
-        query[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
-        SecItemAdd(query as CFDictionary, nil)
+    @discardableResult
+    func save(_ token: String) -> Bool {
+        if token.isEmpty {
+            let status = SecItemDelete(baseQuery as CFDictionary)
+            return status == errSecSuccess || status == errSecItemNotFound
+        }
+        let attributes: [String: Any] = [
+            kSecValueData as String: Data(token.utf8),
+            kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly,
+        ]
+        let status = SecItemUpdate(baseQuery as CFDictionary, attributes as CFDictionary)
+        if status == errSecSuccess { return true }
+        guard status == errSecItemNotFound else { return false }
+        return SecItemAdd(baseQuery.merging(attributes) { _, new in new } as CFDictionary, nil) == errSecSuccess
     }
 
     private var baseQuery: [String: Any] {

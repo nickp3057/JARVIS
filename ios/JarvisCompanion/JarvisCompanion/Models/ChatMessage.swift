@@ -17,17 +17,20 @@ struct ChatMessage: Identifiable, Codable, Equatable {
     let role: Role
     let text: String
     let date: Date
+    let serverID: Int?
+    let requestID: String?
 
-    init(id: UUID = UUID(), role: Role, text: String, date: Date = Date()) {
+    init(id: UUID = UUID(), role: Role, text: String, date: Date = Date(), serverID: Int? = nil, requestID: String? = nil) {
         self.id = id
         self.role = role
         self.text = text
         self.date = date
+        self.serverID = serverID
+        self.requestID = requestID
     }
 }
 
-/// One device-local conversation. The server does not know about these yet;
-/// they provide app scrollback until server-side sessions are available.
+/// Offline cache of a server-owned conversation, including its local draft.
 struct ChatConversation: Identifiable, Codable, Equatable {
     let id: UUID
     let createdAt: Date
@@ -69,6 +72,7 @@ struct ChatArchive: Codable, Equatable {
     var conversations: [ChatConversation]
     var activeConversationID: UUID
     var inactiveSince: Date?
+    var pendingEdits: [HistoryEdit]? = nil
 
     static func empty(now: Date = Date()) -> ChatArchive {
         let conversation = ChatConversation(createdAt: now, updatedAt: now)
@@ -78,4 +82,11 @@ struct ChatArchive: Codable, Equatable {
             inactiveSince: nil
         )
     }
+}
+
+struct HistoryEdit: Codable, Equatable, Identifiable {
+    var id: UUID = UUID()
+    let sessionID: String
+    /// Nil means delete; otherwise rename to this title.
+    let title: String?
 }

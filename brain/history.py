@@ -9,6 +9,8 @@ Database: memory/history.db
 
 from __future__ import annotations
 
+from contextvars import ContextVar
+from threading import Lock
 import sqlite3
 import os
 import re
@@ -20,6 +22,8 @@ from typing import Any
 from jarvis_logger import get_logger
 
 log = get_logger(__name__)
+
+request_context: ContextVar[str | None] = ContextVar("companion_request", default=None)
 
 _DB_PATH = Path(__file__).resolve().parent.parent / "memory" / "history.db"
 
@@ -44,9 +48,15 @@ def _connect() -> sqlite3.Connection:
 # PRAGMA scans); run it once per database path instead of on every query.
 # Keyed by path so tests that repoint _DB_PATH still initialize fresh files.
 _schema_ready_paths: set[str] = set()
+_schema_lock = Lock()
 
 
 def _ensure_schema(conn: sqlite3.Connection) -> None:
+    with _schema_lock:
+        _initialize_schema(conn)
+
+
+def _initialize_schema(conn: sqlite3.Connection) -> None:
     """Create tables and migrate older schemas in place (once per DB path)."""
     if str(_DB_PATH) in _schema_ready_paths:
         return
@@ -67,6 +77,12 @@ def _ensure_schema(conn: sqlite3.Connection) -> None:
         conn.execute(
             "ALTER TABLE conversation ADD COLUMN session_id TEXT NOT NULL DEFAULT 'legacy'"
         )
+    if "request_id" not in cols:
+        conn.execute("ALTER TABLE conversation ADD COLUMN request_id TEXT")
+    conn.execute("""CREATE TABLE IF NOT EXISTS companion_requests (
+        request_id TEXT PRIMARY KEY, session_id TEXT NOT NULL,
+        message TEXT NOT NULL, reply TEXT
+    )""")
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS sessions (
@@ -222,7 +238,7 @@ def load_session_messages(
             _ensure_schema(conn)
             rows = conn.execute(
                 """
-                SELECT role, content, created_at
+                SELECT id, role, content, created_at, request_id
                 FROM conversation
                 WHERE session_id = ?
                 ORDER BY id ASC
@@ -231,7 +247,7 @@ def load_session_messages(
             ).fetchall()
         if include_timestamps:
             return [
-                {"role": r["role"], "content": r["content"], "created_at": r["created_at"]}
+                {"id": r["id"], "role": r["role"], "content": r["content"], "created_at": r["created_at"], "request_id": r["request_id"]}
                 for r in rows
             ]
         return [{"role": r["role"], "content": r["content"]} for r in rows]
@@ -278,13 +294,17 @@ def append_turn(user_text: str, assistant_text: str, session_id: str = "default"
         with _connect() as conn:
             _ensure_schema(conn)
             conn.executemany(
-                "INSERT INTO conversation (session_id, role, content) VALUES (?, ?, ?)",
-                [(session_id, "user", user_text), (session_id, "assistant", assistant_text)],
+                "INSERT INTO conversation (session_id, role, content, request_id) VALUES (?, ?, ?, ?)",
+                [(session_id, "user", user_text, request_context.get()),
+                 (session_id, "assistant", assistant_text, request_context.get())],
             )
             conn.execute(
                 "UPDATE sessions SET updated_at = datetime('now') WHERE session_id = ?",
                 (session_id,),
             )
+            if request_context.get():
+                conn.execute("UPDATE companion_requests SET reply = ? WHERE request_id = ?",
+                             (assistant_text, request_context.get()))
             _refresh_session_summary(conn, session_id)
             conn.commit()
             _prune(conn, session_id)
@@ -329,6 +349,7 @@ def delete_session(session_id: str) -> bool:
     try:
         with _connect() as conn:
             _ensure_schema(conn)
+            conn.execute("DELETE FROM companion_requests WHERE session_id = ?", (session_id,))
             conn.execute("DELETE FROM conversation WHERE session_id = ?", (session_id,))
             cursor = conn.execute("DELETE FROM sessions WHERE session_id = ?", (session_id,))
             conn.commit()
@@ -343,6 +364,7 @@ def clear_history() -> str:
     try:
         with _connect() as conn:
             _ensure_schema(conn)
+            conn.execute("DELETE FROM companion_requests")
             conn.execute("DELETE FROM conversation")
             conn.execute("DELETE FROM sessions")
             conn.commit()
@@ -413,3 +435,19 @@ def describe_session_summaries(query: str = "", limit: int = 5) -> str:
             f"{item.get('summary', '')}"
         )
     return "\n\n".join(sections)
+
+
+def begin_companion_request(request_id: str, session_id: str, message: str) -> str | None:
+    """Claim once under the runtime lock; never replay an uncertain tool turn."""
+    with _connect() as conn:
+        _ensure_schema(conn)
+        row = conn.execute("SELECT * FROM companion_requests WHERE request_id = ?", (request_id,)).fetchone()
+        if row:
+            if row["session_id"] != session_id or row["message"] != message:
+                raise ValueError("Request ID belongs to a different turn")
+            if row["reply"] is None:
+                raise ValueError("This turn was interrupted. Check its outcome before sending a new request.")
+            return str(row["reply"])
+        conn.execute("INSERT INTO companion_requests (request_id, session_id, message) VALUES (?, ?, ?)",
+                     (request_id, session_id, message))
+        return None

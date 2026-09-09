@@ -18,5 +18,9 @@ struct RootView: View {
                     Label("Hub", systemImage: "gauge.with.dots.needle.50percent")
                 }
         }
+        .tint(JarvisTheme.cyan)
+        .preferredColorScheme(.dark)
+        .toolbarBackground(JarvisTheme.background, for: .tabBar)
+        .toolbarBackground(.visible, for: .tabBar)
     }
 }
