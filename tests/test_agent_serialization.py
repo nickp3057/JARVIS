@@ -1,6 +1,6 @@
 import unittest
 
-from brain.agent import _serialize_content_block
+from brain.agent import _serialize_content_block, _stream_round_separator
 
 
 class FakeBlock:
@@ -13,6 +13,11 @@ class FakeBlock:
 
 
 class AgentContentSerializationTests(unittest.TestCase):
+    def test_streamed_tool_rounds_do_not_run_sentences_together(self) -> None:
+        self.assertEqual(_stream_round_separator(["Done."], "Here is the result.", True), " ")
+        self.assertEqual(_stream_round_separator(["Done. "], "Here is the result.", True), "")
+        self.assertEqual(_stream_round_separator(["Done."], " next delta", False), "")
+
     def test_strips_sdk_parsed_output_from_text_block(self) -> None:
         block = FakeBlock({
             "type": "text",

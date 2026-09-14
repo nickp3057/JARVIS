@@ -23,12 +23,17 @@ from __future__ import annotations
 
 import os
 import re
+import shutil
 import time
 from threading import Lock
 from typing import Any, Callable
 
 import requests
 
+from brain.reminders import active_reminders
+from brain.timers import active_timers
+from integrations.google_calendar import is_configured as calendar_configured
+from integrations.google_calendar import academic_events_from, upcoming_events
 from integrations.home_assistant import _config as _ha_config
 from integrations.home_assistant import call_discovered_service, get_states
 from integrations.qbittorrent import _config as _qbt_config
@@ -49,6 +54,8 @@ _TORRENTS_TTL_S = 5.0
 _SERVICES_TTL_S = 5.0
 _ENTITIES_TTL_S = 5.0
 _MEDIA_TTL_S = 15.0
+_NOW_TTL_S = 5.0
+_STORAGE_TTL_S = 30.0
 
 # Strip an API path suffix if one leaked into a base URL (e.g. ".../api/v2").
 _API_SUFFIX_RE = re.compile(r"/api(/v\d+)?/?$", re.IGNORECASE)
@@ -82,6 +89,114 @@ def invalidate(key: str) -> None:
     """Drop one cached entry so the next read reflects a just-made change."""
     with _cache_lock:
         _cache.pop(key, None)
+
+
+# --- Now snapshot ----------------------------------------------------------
+
+def now_status() -> dict[str, Any]:
+    """Coherent read-only snapshot for the companion's at-a-glance surface."""
+    return _cached("now", _NOW_TTL_S, _now_uncached)
+
+
+def _now_uncached() -> dict[str, Any]:
+    timers = []
+    for timer in active_timers():
+        timers.append({
+            "id": timer.id,
+            "label": timer.message,
+            "state": "alarming" if timer.alarming else ("paused" if timer.paused else "running"),
+            "remaining_seconds": int(timer.remaining_seconds()),
+            "expires_at": timer.expires_at,
+        })
+
+    reminders = []
+    now = time.time()
+    for reminder in active_reminders():
+        reminders.append({
+            "id": reminder.id,
+            "text": reminder.text,
+            "due_at": reminder.due_at,
+            "is_due": reminder.due_at is not None and reminder.due_at <= now,
+        })
+
+    next_event = None
+    academic_events = []
+    calendar_error = ""
+    if not calendar_configured():
+        calendar_error = "Calendar is not configured."
+    else:
+        events = _cached("calendar-events", 300.0, lambda: upcoming_events(
+            max_results=2500, hours_ahead=60 * 24, allow_interactive=False
+        ))
+        if events is None:
+            calendar_error = "Calendar could not be reached."
+        elif events:
+            event = events[0]
+            start = event.get("start")
+            next_event = {
+                "id": str(event.get("id") or "next-event"),
+                "title": str(event.get("summary") or "Untitled event"),
+                "start_at": start.timestamp() if start is not None else None,
+                "all_day": bool(event.get("all_day", False)),
+                "location": str(event.get("location") or ""),
+            }
+            for academic in academic_events_from(events):
+                start = academic.get("start")
+                academic_events.append({
+                    "id": str(academic.get("id") or academic.get("summary") or "academic-event"),
+                    "title": str(academic.get("summary") or "Untitled assessment"),
+                    "start_at": start.timestamp() if start is not None else None,
+                    "all_day": bool(academic.get("all_day", False)),
+                    "location": str(academic.get("location") or ""),
+                    "days_left": int(academic.get("days_left", 0)),
+                })
+
+    return {
+        "generated_at": now,
+        "timers": timers,
+        "reminders": reminders,
+        "next_event": next_event,
+        "calendar_error": calendar_error,
+        "academic_events": academic_events,
+    }
+
+
+# --- Media storage ---------------------------------------------------------
+
+def media_storage_status() -> dict[str, Any]:
+    """Disk usage for the one configured media filesystem, never all drives."""
+    return _cached("media-storage", _STORAGE_TTL_S, _media_storage_uncached)
+
+
+def _media_storage_uncached() -> dict[str, Any]:
+    path = (
+        os.getenv("MEDIA_STORAGE_PATH", "").strip()
+        or os.getenv("RADARR_ROOT_FOLDER", "").strip()
+        or os.getenv("SONARR_ROOT_FOLDER", "").strip()
+    )
+    label = os.getenv("MEDIA_STORAGE_LABEL", "Media storage").strip() or "Media storage"
+    empty = {
+        "label": label,
+        "total_bytes": 0,
+        "used_bytes": 0,
+        "free_bytes": 0,
+        "used_fraction": 0.0,
+    }
+    if not path:
+        return {"error": "Media storage path is not configured.", **empty}
+    try:
+        usage = shutil.disk_usage(os.path.expanduser(path))
+    except OSError as exc:
+        log.warning("Media storage check failed for %s: %s", path, exc)
+        return {"error": "Media storage is not mounted or reachable.", **empty}
+    return {
+        "error": "",
+        "label": label,
+        "total_bytes": usage.total,
+        "used_bytes": usage.used,
+        "free_bytes": usage.free,
+        "used_fraction": round(usage.used / usage.total, 4) if usage.total else 0.0,
+    }
 
 
 # --- Torrents --------------------------------------------------------------

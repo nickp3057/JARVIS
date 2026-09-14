@@ -536,6 +536,37 @@ def _tool_next_event(_: dict[str, Any]) -> str:
     return next_event_spoken()
 
 
+def _tool_watch_price(args: dict[str, Any]) -> str:
+    from brain.price_watch import add_price_watch
+    item = add_price_watch(args.get("url", ""), args.get("label", ""), args.get("target_price"))
+    if item.last_price is None:
+        return f"I'm watching {item.label}, sir, but I could not read its current price yet: {item.last_error}"
+    target = "" if item.target_price is None else f" with a target of {item.target_price:,.2f}"
+    currency = f"{item.currency} " if item.currency else ""
+    return f"I'm watching {item.label} at {currency}{item.last_price:,.2f}{target}, sir."
+
+
+def _tool_list_price_watches(_: dict[str, Any]) -> str:
+    from brain.price_watch import describe_price_watches
+    return describe_price_watches()
+
+
+def _tool_remove_price_watch(args: dict[str, Any]) -> str:
+    from brain.price_watch import remove_price_watch
+    watch_id = str(args.get("watch_id") or "").strip()
+    return (
+        f"Removed price watch {watch_id}, sir."
+        if remove_price_watch(watch_id)
+        else f"I couldn't find price watch {watch_id}, sir."
+    )
+
+
+def _tool_check_prices(_: dict[str, Any]) -> str:
+    from brain.price_watch import check_price_watches, describe_price_watches
+    check_price_watches()
+    return describe_price_watches()
+
+
 # --- Anthropic tool schemas -------------------------------------------------
 
 _CUSTOM_TOOLS: list[dict[str, Any]] = [
@@ -1321,6 +1352,42 @@ _CUSTOM_TOOLS: list[dict[str, Any]] = [
         "description": "Get Nick's next upcoming calendar event and when it starts.",
         "input_schema": {"type": "object", "properties": {}},
     },
+    # --- Guarded public-page price watching -----------------------------
+    {
+        "name": "watch_price",
+        "description": (
+            "Watch the price on a public product URL without a shopping API key. "
+            "Use only when Nick supplies the exact URL. Local/private URLs are blocked."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "url": {"type": "string", "description": "Exact public product page URL."},
+                "label": {"type": "string", "description": "Short human-friendly product name."},
+                "target_price": {"type": "number", "minimum": 0, "description": "Optional notify-at price."},
+            },
+            "required": ["url"],
+        },
+    },
+    {
+        "name": "list_price_watches",
+        "description": "List current product price watches, latest prices, targets, and IDs.",
+        "input_schema": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "check_prices",
+        "description": "Refresh every saved price watch now and report the latest readings.",
+        "input_schema": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "remove_price_watch",
+        "description": "Stop watching a product price by the ID returned by list_price_watches.",
+        "input_schema": {
+            "type": "object",
+            "properties": {"watch_id": {"type": "string"}},
+            "required": ["watch_id"],
+        },
+    },
     # --- Media library (Radarr / Sonarr) ---------------------------------
     {
         "name": "find_movie",
@@ -1597,6 +1664,10 @@ _DISPATCH: dict[str, Callable[[dict[str, Any]], str]] = {
     "delete_reminder": _tool_delete_reminder,
     "todays_agenda": _tool_todays_agenda,
     "next_event": _tool_next_event,
+    "watch_price": _tool_watch_price,
+    "list_price_watches": _tool_list_price_watches,
+    "check_prices": _tool_check_prices,
+    "remove_price_watch": _tool_remove_price_watch,
     "find_movie": _tool_find_movie,
     "add_movie": _tool_add_movie,
     "find_series": _tool_find_series,

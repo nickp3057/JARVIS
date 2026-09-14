@@ -10,6 +10,18 @@ private final class MemoryStore: ChatStore {
     func save(_ archive: ChatArchive) { self.archive = archive }
 }
 
+private final class MemoryTokenStore: TokenStoring {
+    var token: String?
+    func load() -> String? { token }
+    func save(_ token: String) -> Bool { self.token = token; return true }
+}
+
+@MainActor
+private final class RecordingStudyScheduler: AcademicNotificationScheduling {
+    var calls = 0
+    func sync(events: [AcademicEvent], enabled: Bool, hour: Int) async { calls += 1 }
+}
+
 private final class MockProtocol: URLProtocol {
     static var handler: ((URLRequest) -> (Int, String, TimeInterval))!
     private var delivery: DispatchWorkItem?
@@ -41,17 +53,16 @@ final class CompanionTests: XCTestCase {
     override func setUp() async throws {
         suite = "JarvisCompanionTests.\(UUID())"
         defaults = UserDefaults(suiteName: suite)!
-        settings = AppSettings(defaults: defaults, keychain: KeychainTokenStore(service: suite))
+        settings = AppSettings(defaults: defaults, keychain: MemoryTokenStore())
         settings.apiToken = "test"
         settings.baseURLString = "http://localhost:8000"
-        // Both transport and Keychain namespace are isolated from the real app.
+        // Transport and token storage never touch the real app or require signing.
         let config = URLSessionConfiguration.ephemeral
         config.protocolClasses = [MockProtocol.self]
         session = URLSession(configuration: config)
     }
 
     override func tearDown() async throws {
-        KeychainTokenStore(service: suite).save("")
         session.invalidateAndCancel()
         defaults.removePersistentDomain(forName: suite)
     }
@@ -175,6 +186,8 @@ final class CompanionTests: XCTestCase {
     func testVisualSnapshots() async throws {
         MockProtocol.handler = { request in
             switch request.url!.path {
+            case "/health": return (200, "{}", 0)
+            case "/sessions": return (200, "{\"sessions\":[]}", 0)
             case "/api/status/services": return (200, """
                 {"services":[{"name":"Home Assistant","up":true,"latency_ms":12,"error":""},
                 {"name":"Plex","up":true,"latency_ms":8,"error":""},
@@ -185,8 +198,20 @@ final class CompanionTests: XCTestCase {
                 {"name":"Ubuntu 26.04 LTS","hash":"abc","state":"downloading","progress":0.68,"dl_speed":8388608,"up_speed":0,"eta":180,"size":4000000000},
                 {"name":"Debian installation image","hash":"def","state":"stoppedDL","progress":0.32,"dl_speed":0,"up_speed":0,"eta":0,"size":2000000000}]}
                 """, 0)
+            case "/api/now": return (200, """
+                {"generated_at":\(Date().timeIntervalSince1970),"timers":[
+                {"id":"tea","label":"Tea","state":"running","remaining_seconds":245,"expires_at":\(Date().timeIntervalSince1970 + 245)}],
+                "reminders":[{"id":"r1","text":"Call Mum","due_at":null,"is_due":false}],
+                "next_event":{"id":"e1","title":"Design review","start_at":1789362000,"all_day":false,"location":"Studio"},
+                "calendar_error":"","academic_events":[
+                {"id":"quiz-1","title":"Biology quiz","start_at":1789531200,"all_day":true,"location":"","days_left":2}]}
+                """, 0)
             case "/api/status/media": return (200, """
                 {"radarr":{"error":"","queue":[],"recent":[]},"sonarr":{"error":"","queue":[],"recent":[]}}
+                """, 0)
+            case "/api/status/storage": return (200, """
+                {"error":"","label":"Video vault","total_bytes":12000000000000,
+                "used_bytes":7500000000000,"free_bytes":4500000000000,"used_fraction":0.625}
                 """, 0)
             case "/api/home/entities": return (200, """
                 {"error":"","entities":[{"entity_id":"light.office","friendly_name":"Office lights","domain":"light","state":"on"}]}
@@ -195,6 +220,8 @@ final class CompanionTests: XCTestCase {
             }
         }
         let empty = model()
+        empty.refreshConnectionStatus()
+        try await waitUntil({ empty.connectionState == .online })
         await snapshot(ChatView(model: empty), name: "Chat — ready")
         let conversation = ChatConversation(messages: [
             ChatMessage(role: .user, text: "Bring me up to speed."),
@@ -203,11 +230,19 @@ final class CompanionTests: XCTestCase {
             ChatMessage(role: .jarvis, text: "Ubuntu is at 68%, with about three minutes left. The Debian image is paused."),
         ])
         let chat = model(store: MemoryStore(ChatArchive(conversations: [conversation], activeConversationID: conversation.id)))
+        chat.refreshConnectionStatus()
+        try await waitUntil({ chat.connectionState == .online })
         await snapshot(ChatView(model: chat), name: "Chat — conversation")
         let client = JarvisAPIClient(baseURL: URL(string: "http://localhost:8000")!, token: "test", session: session)
         let hub = HubViewModel(settings: settings, clientFactory: { client })
         await hub.refreshAll()
         await snapshot(HubView(model: hub), name: "Control room")
+        await snapshot(HubView(model: hub, initialFocus: .media), name: "Hub — media")
+        await snapshot(HubView(model: hub, initialFocus: .home), name: "Hub — home")
+        await snapshot(SettingsView(embedded: true), name: "Settings")
+        await snapshot(SettingsView(embedded: true).dynamicTypeSize(.accessibility2), name: "Settings — large text")
+        await snapshot(HubView(model: hub).dynamicTypeSize(.accessibility2), name: "Hub — large text")
+        await snapshot(RootView(chat: chat, hub: hub), name: "App — navigation")
         hub.stopPolling()
     }
 
@@ -243,5 +278,86 @@ final class CompanionTests: XCTestCase {
                 """
             XCTAssertTrue(try JSONDecoder().decode(TorrentTransfer.self, from: Data(json.utf8)).isPaused)
         }
+    }
+
+    func testNowSnapshotSurvivesRelaunchAsStaleData() async throws {
+        MockProtocol.handler = { request in
+            if request.url!.path == "/api/now" {
+                return (200, """
+                    {"generated_at":1789358400,"timers":[],"reminders":[
+                    {"id":"r1","text":"Call Mum","due_at":null,"is_due":false}],
+                    "next_event":null,"calendar_error":""}
+                    """, 0)
+            }
+            return (200, "{}", 0)
+        }
+        let client = JarvisAPIClient(baseURL: URL(string: "http://localhost:8000")!, token: "test", session: session)
+        let first = HubViewModel(settings: settings, clientFactory: { client }, snapshotDefaults: defaults)
+        await first.refreshNow()
+        XCTAssertFalse(first.nowSnapshotIsStale)
+        XCTAssertEqual(first.now.value?.reminders.first?.text, "Call Mum")
+
+        let relaunched = HubViewModel(settings: settings, clientFactory: { client }, snapshotDefaults: defaults)
+        XCTAssertTrue(relaunched.nowSnapshotIsStale)
+        XCTAssertEqual(relaunched.now.value?.reminders.first?.text, "Call Mum")
+    }
+
+    func testAcademicCountdownCopy() {
+        XCTAssertEqual(AcademicNotificationScheduler.body(title: "Biology quiz", daysLeft: 0),
+                       "Biology quiz is today.")
+        XCTAssertEqual(AcademicNotificationScheduler.body(title: "Biology quiz", daysLeft: 1),
+                       "Biology quiz is tomorrow.")
+        XCTAssertEqual(AcademicNotificationScheduler.body(title: "Biology quiz", daysLeft: 4),
+                       "Biology quiz is in 4 days.")
+    }
+
+    func testStudyBriefGroupsEventsAndExcludesFinishedTimedAssessments() {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+        let now = calendar.date(from: DateComponents(year: 2026, month: 9, day: 14, hour: 8))!
+        let events = [
+            AcademicEvent(id: "1", title: "Biology quiz", startAt: now.addingTimeInterval(86400).timeIntervalSince1970,
+                          allDay: true, location: "", daysLeft: 1),
+            AcademicEvent(id: "2", title: "Math exam", startAt: now.addingTimeInterval(172800).timeIntervalSince1970,
+                          allDay: true, location: "", daysLeft: 2),
+            AcademicEvent(id: "3", title: "Finished exam", startAt: now.addingTimeInterval(-3600).timeIntervalSince1970,
+                          allDay: false, location: "", daysLeft: 0),
+        ]
+        let briefs = AcademicNotificationScheduler.briefs(events: events, now: now, calendar: calendar, hour: 9)
+        XCTAssertEqual(briefs.count, 3)
+        XCTAssertEqual(briefs.first?.body, "Biology quiz is tomorrow.\nMath exam is in 2 days.")
+        XCTAssertFalse(briefs.contains { $0.body.contains("Finished") })
+        XCTAssertEqual(Set(briefs.map(\.id)).count, briefs.count)
+    }
+
+    func testCalendarOutageAndOlderCoreDoNotClearScheduledBriefs() async {
+        let scheduler = RecordingStudyScheduler()
+        let client = JarvisAPIClient(baseURL: URL(string: "http://localhost:8000")!, token: "test", session: session)
+        let hub = HubViewModel(settings: settings, clientFactory: { client }, snapshotDefaults: defaults,
+                               academicNotifications: scheduler)
+        MockProtocol.handler = { _ in (200, """
+            {"generated_at":1000,"timers":[],"reminders":[],"next_event":null,
+             "calendar_error":"Calendar unavailable","academic_events":[]}
+            """, 0) }
+        await hub.refreshNow()
+        XCTAssertEqual(scheduler.calls, 0)
+        MockProtocol.handler = { _ in (200, """
+            {"generated_at":1000,"timers":[],"reminders":[],"next_event":null,"calendar_error":""}
+            """, 0) }
+        await hub.refreshNow()
+        XCTAssertEqual(scheduler.calls, 0)
+    }
+
+    func testNowCacheIsIsolatedByConnection() async {
+        MockProtocol.handler = { _ in (200, """
+            {"generated_at":1000,"timers":[],"reminders":[],"next_event":null,"calendar_error":""}
+            """, 0) }
+        let client = JarvisAPIClient(baseURL: URL(string: "http://localhost:8000")!, token: "test", session: session)
+        let first = HubViewModel(settings: settings, clientFactory: { client }, snapshotDefaults: defaults)
+        await first.refreshNow()
+        XCTAssertNotNil(first.now.value)
+        settings.baseURLString = "http://different-server:8000"
+        let other = HubViewModel(settings: settings, clientFactory: { client }, snapshotDefaults: defaults)
+        XCTAssertNil(other.now.value)
     }
 }

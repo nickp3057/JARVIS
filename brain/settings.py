@@ -146,6 +146,34 @@ SETTINGS_SCHEMA: dict[str, dict[str, Any]] = {
         "type": "bool",
         "description": "Whether Claude can use the web search tool.",
     },
+
+    # --- Price watching ---
+    "PRICE_WATCH_MONITOR_ENABLED": {
+        "type": "bool",
+        "description": "Whether JARVIS periodically checks saved public product URLs.",
+    },
+    "PRICE_WATCH_INTERVAL_S": {
+        "type": "float",
+        "min": 300.0,
+        "max": 604800.0,
+        "description": "Seconds between automatic price checks (minimum five minutes).",
+    },
+    "PRICE_WATCH_DROP_PERCENT": {
+        "type": "float",
+        "min": 0.1,
+        "max": 100.0,
+        "description": "Price decrease percentage that triggers an alert.",
+    },
+
+    # --- Companion media storage ---
+    "MEDIA_STORAGE_PATH": {
+        "type": "string",
+        "description": "Mounted path containing video files for the companion storage card.",
+    },
+    "MEDIA_STORAGE_LABEL": {
+        "type": "string",
+        "description": "Friendly label for the media drive in the companion Hub.",
+    },
 }
 
 

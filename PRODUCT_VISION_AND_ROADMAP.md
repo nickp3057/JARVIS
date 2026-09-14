@@ -50,7 +50,7 @@ features are already partially or substantially present.
 | Remote text/app chat | **Working baseline** | Production-grade remote deployment, TLS/VPN guidance, background reliability, and richer API capabilities |
 | Smart-home control | **Partial** | Correct configuration docs, onboard all devices into HA, support more services than on/off, safer entity resolution, areas/scenes/automations |
 | HA/timer latency | **Partial** | Fast deterministic command path, event-driven HA updates, measurements, concurrency, and remote push |
-| Phone dashboard | **Not started beyond chat** | Dashboard data API and native screens/widgets/live activities |
+| Phone dashboard | **Working baseline** | Broader Now data, offline snapshots, live events, widgets, and Live Activities |
 | Radarr/Sonarr requests | **Working baseline through chat** | Status/progress views, queue visibility, richer error handling, and app-native controls |
 | Proactive home/system alerts | **Early partial** | Durable rules, outage grace windows, system/NAS/site monitors, push delivery, acknowledgement and deduplication |
 | Local Llama | **Not implemented** | Define its role, select runtime/model after hardware inventory, add provider routing and quality/fallback policy |
@@ -112,6 +112,8 @@ features are already partially or substantially present.
 - Reminders/to-dos persist and timed reminders are announced when due.
 - Google Calendar is read-only, with today's agenda, next-event lookup, and a
   lead-time monitor.
+- Quiz/test/exam titles are now surfaced with days remaining, and the iPhone
+  schedules local daily countdown notifications for the final two weeks.
 - There is no separate alarm-clock model, recurring alarm scheduling, snooze,
   phone Live Activity, or remote timer/alarm API.
 - Due announcements depend on a running desktop/server runtime. There is no
@@ -126,15 +128,33 @@ features are already partially or substantially present.
 - The SwiftUI app provides chat, streaming replies, Stop, retry, conversation
   history/search/rename/delete, local drafts, connection state, and server
   history synchronization.
+- A styled Control Room shows service health, transfers, Radarr/Sonarr status,
+  allowlisted home controls, and service links, while native dictation fills a
+  reviewable Chat draft without auto-sending.
+- Its first coherent Now snapshot adds active/alarming timers, reminders, and
+  the next calendar event, including academic assessment countdowns. The last
+  successful snapshot survives relaunch and
+  is visibly marked stale until Core refreshes it.
 - The API token is stored in the iOS Keychain. The server address is in
   `UserDefaults`.
 - The iOS README is designed around LAN or Tailscale access, which is a sensible
   personal-assistant deployment shape.
-- The app currently has one main product surface: chat. It has no Home,
-  Timers, Automations, Media, Events, or System Health dashboard.
-- The server offers no dashboard snapshot endpoint, live event stream, device
-  command endpoint, timer/reminder CRUD endpoints, media status endpoints, or
-  push-notification registration.
+- The app now has first-class Chat and Control Room surfaces. It still has no
+  typed Timers, Automations, Events, or complete Now experience.
+- The server offers authenticated dashboard status and guarded home/torrent
+  quick actions plus a versioned capabilities contract. It still lacks a live
+  event stream, timer/reminder CRUD, a coherent offline snapshot, and push
+  registration.
+- The Control Room reports free, used, and total capacity for one explicitly
+  configured media filesystem; an unset or unmounted path degrades visibly.
+- The companion now has Chat, Hub, and Settings tabs. Today/Media/Home filters
+  keep the Hub focused, and Settings includes connection testing and a daily
+  study-brief time. Chat supports inline Markdown and fenced code, follows
+  streaming replies while allowing older-message reading, and safely cancels
+  dictation when context changes. Calendar failures preserve pending briefs.
+- A guarded, durable public-page watcher can read structured product metadata
+  without a shopping API key and alert on targets/drops. It intentionally does
+  not yet execute JavaScript-heavy storefronts in a headless browser.
 
 ### Media library
 

@@ -99,6 +99,8 @@ final class ChatViewModel: ObservableObject {
         conversations.first(where: { $0.id == activeConversationID })?.title ?? "New chat"
     }
 
+    var conversationID: UUID { activeConversationID }
+
     func filteredConversations(matching query: String) -> [ChatConversation] {
         let needle = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !needle.isEmpty else { return visibleConversations }

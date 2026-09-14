@@ -41,12 +41,83 @@ class StatusHubEndpointTests(unittest.TestCase):
     def test_all_dashboard_endpoints_require_auth(self) -> None:
         for path in (
             "/api/status/torrents",
+            "/api/now",
             "/api/status/media",
+            "/api/status/storage",
             "/api/status/services",
             "/api/links",
             "/api/home/entities",
         ):
             self.assertEqual(self.client.get(path).status_code, 401, path)
+
+    def test_now_snapshot_has_timers_reminders_and_next_event(self) -> None:
+        timer = type("Timer", (), {
+            "id": "abc123", "message": "Tea", "alarming": False,
+            "paused": False, "expires_at": 2_000.0,
+            "remaining_seconds": lambda self: 90.0,
+        })()
+        reminder = type("Reminder", (), {
+            "id": "r123", "text": "Call Mum", "due_at": 1_500.0,
+        })()
+        event = {
+            "id": "event-1", "summary": "Dentist", "start": None,
+            "all_day": False, "location": "Main Street",
+        }
+        with patch.object(status_hub, "active_timers", return_value=[timer]), \
+             patch.object(status_hub, "active_reminders", return_value=[reminder]), \
+             patch.object(status_hub, "calendar_configured", return_value=True), \
+             patch.object(status_hub, "upcoming_events", return_value=[event]), \
+             patch.object(status_hub.time, "time", return_value=1_600.0):
+            body = self.client.get("/api/now", headers=self.headers).json()
+        self.assertEqual(body["timers"][0]["state"], "running")
+        self.assertEqual(body["timers"][0]["remaining_seconds"], 90)
+        self.assertTrue(body["reminders"][0]["is_due"])
+        self.assertEqual(body["next_event"]["title"], "Dentist")
+        self.assertEqual(body["generated_at"], 1_600.0)
+        self.assertEqual(body["academic_events"], [])
+
+    def test_now_snapshot_includes_academic_countdowns(self) -> None:
+        from datetime import datetime, timedelta
+        start = datetime.now().astimezone() + timedelta(days=3)
+        events = [{
+            "id": "quiz-1", "summary": "Biology Quiz", "start": start,
+            "all_day": True, "location": "",
+        }]
+        with patch.object(status_hub, "active_timers", return_value=[]), \
+             patch.object(status_hub, "active_reminders", return_value=[]), \
+             patch.object(status_hub, "calendar_configured", return_value=True), \
+             patch.object(status_hub, "upcoming_events", return_value=events):
+            body = self.client.get("/api/now", headers=self.headers).json()
+        self.assertEqual(body["academic_events"][0]["title"], "Biology Quiz")
+        self.assertEqual(body["academic_events"][0]["days_left"], 3)
+
+    def test_media_storage_reports_only_configured_filesystem(self) -> None:
+        usage = type("Usage", (), {"total": 1_000, "used": 750, "free": 250})()
+        with patch.dict(os.environ, {"MEDIA_STORAGE_PATH": "/media/video", "MEDIA_STORAGE_LABEL": "Movies"}), \
+             patch.object(status_hub.shutil, "disk_usage", return_value=usage) as disk_usage:
+            body = self.client.get("/api/status/storage", headers=self.headers).json()
+        disk_usage.assert_called_once_with("/media/video")
+        self.assertEqual(body["label"], "Movies")
+        self.assertEqual(body["free_bytes"], 250)
+        self.assertEqual(body["used_fraction"], 0.75)
+
+    def test_now_refresh_reuses_calendar_without_interactive_consent(self) -> None:
+        with patch.object(status_hub, "active_timers", return_value=[]), \
+             patch.object(status_hub, "active_reminders", return_value=[]), \
+             patch.object(status_hub, "calendar_configured", return_value=True), \
+             patch.object(status_hub, "upcoming_events", return_value=[]) as calendar:
+            status_hub.now_status()
+            status_hub.invalidate("now")
+            status_hub.now_status()
+        calendar.assert_called_once_with(max_results=2500, hours_ahead=1440, allow_interactive=False)
+
+    def test_media_storage_unconfigured_degrades_cleanly(self) -> None:
+        with patch.dict(os.environ, {
+            "MEDIA_STORAGE_PATH": "", "RADARR_ROOT_FOLDER": "", "SONARR_ROOT_FOLDER": "",
+        }):
+            body = self.client.get("/api/status/storage", headers=self.headers).json()
+        self.assertIn("not configured", body["error"])
+        self.assertEqual(body["free_bytes"], 0)
 
     def test_torrents_degrade_to_200_with_error_when_unreachable(self) -> None:
         with patch.object(status_hub, "list_transfers", return_value=(False, "down")):

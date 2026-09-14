@@ -129,15 +129,27 @@ additions, allowlisted home toggles, and browser links. Foreground polling
 refreshes transfers, services, home entities, and media. Companion reliability
 includes exact request recovery, replay protection for completed turns,
 conversation-safe cancellation/sync, durable offline history edits, multiline
-drafts, and an iOS regression-test target. The broader Now surfaces below,
-push updates, and durable offline Hub snapshots remain future work.
+drafts, and an iOS regression-test target. A cockpit visual revamp adds compact
+overview telemetry and native dictation into reviewable drafts. The first
+versioned capabilities contract is also shipped. Academic countdowns with
+phone-local daily notifications and configured media-drive capacity are now in
+the Hub. Remote push updates and durable offline caches for the remaining Hub
+sections remain future work.
+
+The 1.19 experience pass adds Today/Media/Home focus views, a Settings tab with
+connection testing and study preferences, formatted chat/code, considerate
+streaming scroll, and daily grouped study briefs. It also fixes schedule loss
+on calendar outages, isolates Now caches by connection, suppresses overlapping
+Hub reads, and reduces media/storage/calendar polling load.
 
 ### Core API work
 
-- Add a versioned capabilities endpoint.
+- [x] Add a versioned capabilities endpoint.
 - Add typed read APIs for:
-  - active/alarming timers;
-  - reminders and next calendar event;
+  - [x] active/alarming timers;
+  - [x] reminders and next calendar event;
+  - [x] quiz/test/exam countdowns from Calendar;
+  - [x] configured media-drive free/used/total capacity;
   - favorite HA devices and summarized rooms;
   - current alerts and recent events;
   - Core and service health;
@@ -150,14 +162,16 @@ push updates, and durable offline Hub snapshots remain future work.
 ### iOS work
 
 - Add a **Now** screen showing:
-  - timers and alarms;
-  - reminders and next calendar event;
+  - [x] timers and alarms;
+  - [x] reminders and next calendar event;
+  - [x] upcoming assessments with days remaining and local daily notifications;
   - important alerts;
   - favorite home devices/scenes;
   - current media/download status;
   - Core and home health.
 - Keep the existing chat experience as a first-class tab.
-- Clearly label stale cached data when Core is unreachable.
+- [x] Clearly label the cached Now snapshot as stale when Core is unreachable;
+  extend durable snapshots to the remaining Hub sections later.
 - Add timer/reminder controls after the read-only dashboard is trustworthy.
 - Add Live Activities and widgets in a later pass.
 
@@ -197,6 +211,8 @@ healthy -> suspected -> confirmed -> notified -> acknowledged -> recovered
 - Internet and DNS health.
 - The exact 1337x/indexer dependency Nick relies on, once its health definition
   is clarified.
+- [x] Guarded, key-free public product-page price watching with durable targets
+  and runtime transition alerts; richer headless-browser support remains later.
 
 ### Notifications
 

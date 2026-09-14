@@ -15,11 +15,14 @@ struct MessageBubble: View {
             switch message.role {
             case .user:
                 row(alignment: .trailing) {
-                    bubble(background: JarvisTheme.cyan.opacity(0.14), foreground: .primary)
+                    bubble(isUser: true)
                 }
             case .jarvis:
                 row(alignment: .leading) {
-                    bubble(background: JarvisTheme.panel, foreground: .primary)
+                    HStack(alignment: .top, spacing: 8) {
+                        JarvisCoreMark(size: 30).padding(.top, 7)
+                        bubble(isUser: false)
+                    }
                 }
             case .error:
                 errorNotice
@@ -45,13 +48,13 @@ struct MessageBubble: View {
         @ViewBuilder content: () -> Content
     ) -> some View {
         HStack {
-            if alignment == .trailing { Spacer(minLength: 48) }
+            if alignment == .trailing { Spacer(minLength: 32) }
             content()
-            if alignment == .leading { Spacer(minLength: 48) }
+            if alignment == .leading { Spacer(minLength: 4) }
         }
     }
 
-    private func bubble(background: Color, foreground: Color) -> some View {
+    private func bubble(isUser: Bool) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
                 Text(message.role == .user ? "YOU" : "JARVIS")
@@ -60,15 +63,36 @@ struct MessageBubble: View {
                 Spacer(minLength: 12)
                 Text(message.date, style: .time).font(.caption2).foregroundStyle(.secondary)
             }
-            Text(message.text)
-                .textSelection(.enabled)
-                .lineSpacing(4)
+            if isUser {
+                Text(message.text).textSelection(.enabled).lineSpacing(4)
+            } else {
+                AssistantMessageText(text: message.text)
+            }
         }
-            .foregroundStyle(foreground)
+            .foregroundStyle(.primary)
             .padding(.horizontal, 14)
-            .padding(.vertical, 10)
-            .background(background, in: .rect(cornerRadius: 18))
-            .overlay(RoundedRectangle(cornerRadius: 18).strokeBorder(JarvisTheme.border))
+            .padding(.vertical, 11)
+            .background(
+                isUser
+                    ? LinearGradient(colors: [JarvisTheme.blue.opacity(0.24), JarvisTheme.cyan.opacity(0.12)], startPoint: .topLeading, endPoint: .bottomTrailing)
+                    : JarvisTheme.panelGradient,
+                in: UnevenRoundedRectangle(
+                    topLeadingRadius: 19,
+                    bottomLeadingRadius: isUser ? 19 : 5,
+                    bottomTrailingRadius: isUser ? 5 : 19,
+                    topTrailingRadius: 19
+                )
+            )
+            .overlay {
+                UnevenRoundedRectangle(
+                    topLeadingRadius: 19,
+                    bottomLeadingRadius: isUser ? 19 : 5,
+                    bottomTrailingRadius: isUser ? 5 : 19,
+                    topTrailingRadius: 19
+                )
+                .strokeBorder(JarvisTheme.border)
+            }
+            .shadow(color: .black.opacity(0.14), radius: 8, y: 4)
     }
 
     private var errorNotice: some View {
@@ -97,11 +121,47 @@ struct MessageBubble: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(12)
-        .background(JarvisTheme.panel, in: .rect(cornerRadius: 12))
+        .background(JarvisTheme.panelGradient, in: .rect(cornerRadius: 16))
         .overlay(
-            RoundedRectangle(cornerRadius: 12)
+            RoundedRectangle(cornerRadius: 16)
                 .strokeBorder(.orange.opacity(0.35), lineWidth: 1)
         )
+    }
+}
+
+/// Keep line breaks and inline Markdown readable; fenced code gets its own
+/// horizontal scrolling surface rather than stretching a message offscreen.
+struct AssistantMessageText: View {
+    let text: String
+    var body: some View {
+        let blocks = text.components(separatedBy: "```")
+        VStack(alignment: .leading, spacing: 12) {
+            ForEach(Array(blocks.enumerated()), id: \.offset) { index, block in
+                if index.isMultiple(of: 2) {
+                    if !block.isEmpty {
+                        Text((try? AttributedString(markdown: block,
+                            options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace))) ?? AttributedString(block))
+                            .lineSpacing(5).textSelection(.enabled)
+                    }
+                } else {
+                    let parts = block.split(separator: "\n", maxSplits: 1, omittingEmptySubsequences: false)
+                    let code = parts.count > 1 ? String(parts[1]).trimmingCharacters(in: .newlines) : block
+                    VStack(alignment: .leading, spacing: 10) {
+                        HStack {
+                            Text(parts.count > 1 && !parts[0].isEmpty ? String(parts[0]).uppercased() : "CODE")
+                                .font(.caption2.monospaced()).foregroundStyle(.secondary)
+                            Spacer()
+                            Button("Copy", systemImage: "doc.on.doc") { UIPasteboard.general.string = code }
+                                .font(.caption).accessibilityLabel("Copy code")
+                        }
+                        ScrollView(.horizontal) {
+                            Text(code).font(.system(.footnote, design: .monospaced)).textSelection(.enabled)
+                                .fixedSize(horizontal: true, vertical: false)
+                        }
+                    }.padding(12).background(.black.opacity(0.25), in: .rect(cornerRadius: 12))
+                }
+            }
+        }
     }
 }
 
@@ -129,7 +189,8 @@ struct TypingIndicator: View {
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 12)
-        .background(JarvisTheme.panel, in: .rect(cornerRadius: 18))
+        .background(JarvisTheme.panelGradient, in: .rect(cornerRadius: 18))
+        .overlay(RoundedRectangle(cornerRadius: 18).strokeBorder(JarvisTheme.border))
         .frame(maxWidth: .infinity, alignment: .leading)
         .onAppear { animating = !reduceMotion }
         .accessibilityLabel("JARVIS is replying")

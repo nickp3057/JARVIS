@@ -1,8 +1,9 @@
 # Jarvis Companion (iOS)
 
-A native SwiftUI companion for JARVIS Core, with synchronized Chat and a
-Control room dashboard. Navy panels, cyan accents, and amber activity share
-the desktop cockpit aesthetic; text scales with Dynamic Type.
+A native SwiftUI companion for JARVIS Core, with synchronized Chat, native
+dictation, and a Control Room dashboard. Layered navy telemetry, cyan glass
+panels, and amber activity share the desktop cockpit aesthetic; text scales
+with Dynamic Type.
 
 Requires iOS 17+ and Xcode 16 or newer.
 
@@ -38,6 +39,14 @@ The address is stored in `UserDefaults`; the token is stored in the iOS
 Keychain. Existing installations automatically migrate the legacy
 UserDefaults token and remove the insecure copy.
 
+## Navigation
+
+Chat, Hub, and Settings are peer tabs. The Hub offers Today, Media, and Home
+views so each screen stays focused. The briefing shortcut opens a draft in
+Chat for review, preserving any draft already there. Settings is also reachable
+from Chat and Hub and includes a connection test, secure token entry, study
+notification controls, and the current iOS notification permission status.
+
 ## Architecture
 
 This is a **thin client** — deliberately so. JARVIS Core owns the personality,
@@ -60,6 +69,7 @@ JarvisCompanion/
   Storage/AppSettings.swift    base URL + Keychain-backed token
   Networking/JarvisAPIClient.swift   health, sessions, chat + streaming
   ViewModels/ChatViewModel.swift     history sync, drafts, streaming, retry
+  ViewModels/VoiceInputController.swift  permission-gated native dictation
   Views/ChatView.swift         transcript, composer, empty state
   Views/MessageBubble.swift    bubbles + typing indicator
   Views/SettingsView.swift     server configuration
@@ -124,8 +134,9 @@ python -m app.main --server
 The server defaults to `0.0.0.0:8000`. `JARVIS_SERVER_HOST` and
 `JARVIS_SERVER_PORT` override the bind address. It exposes authenticated health,
 session CRUD/history, `/chat`, `/chat/stream`, and write-only `/debug-reports`
-endpoints. Each chat request carries a server session ID so New Chat genuinely
-starts clean context.
+endpoints. `GET /api/capabilities` reports the versioned chat, dashboard, and
+action contract for rolling upgrades. Each chat request carries a server
+session ID so New Chat genuinely starts clean context.
 
 ## Networking notes
 
@@ -162,14 +173,52 @@ The phone must be **connected to your tailnet** for the app to reach the server 
 the Tailscale app installed, logged into the same account, and its VPN toggle on.
 There is no fallback to a LAN address.
 
-Not implemented: push notifications and voice input.
+Remote push notifications are not implemented. Academic countdowns use local
+iOS notifications and therefore need no APNs server or notification API key.
+
+## Voice input
+
+Tap the microphone in the Chat composer to dictate into the current draft.
+Partial recognition appears live, and existing draft text is preserved. Tap
+the microphone again to stop, review or edit the text, then use Send normally;
+dictation never submits a turn on its own. The first use requests iOS Speech
+Recognition and Microphone permissions. Audio capture ends when dictation
+stops or Chat leaves the screen.
 
 ## Control room
 
-The Hub tab shows service health, transfers, media queues/recent additions,
-allowlisted home toggles, and service links. It refreshes while visible and
+The Hub tab opens with two compact telemetry tiles, followed by focused
+glass-panel cards. Today shows Now, media storage, a briefing shortcut, and
+service health; Media shows storage, transfers, queues, and service links;
+Home shows allowlisted toggles, service health, and links. It refreshes while visible and
 foregrounded and supports pull-to-refresh. Paused/stopped torrents stay visible
 so Resume remains available. Service failures retain stale data with an error.
+
+The Now card is backed by the typed `/api/now` snapshot and shows
+active/alarming timers, open reminders, the next calendar event, and upcoming
+calendar items whose titles contain quiz, test, exam, midterm, or final. Those
+assessments show days remaining and schedule one daily local study brief during
+the final 14 days through assessment day. Delivery defaults to 9 AM and can be
+changed or disabled in Settings. Multiple assessments are combined into one
+brief; unchanged notifications are retained, and calendar outages or older
+Core responses cannot erase the schedule. The first assessment refresh asks
+for iOS notification permission. Its last
+successful payload is cached in `UserDefaults` under a connection-specific key; after a relaunch or failed
+refresh the card says **Stale** and includes its update time instead of
+presenting cached information as live.
+
+Overlapping requests for the same section are suppressed. Transfers, services,
+home entities, and Now refresh every five seconds; media refreshes every third
+poll cycle and storage every sixth. The calendar feed itself is cached for five
+minutes in Core and never prompts for OAuth consent from dashboard polling.
+Returning to the foreground refreshes Now for notification reconciliation.
+Timers tick between refreshes; stale snapshots retain their last known value.
+
+The Media drive card uses `/api/status/storage` to show free, used, and total
+space for one server-mounted video filesystem. Set `MEDIA_STORAGE_PATH` and an
+optional `MEDIA_STORAGE_LABEL`; when the path is blank Core falls back to
+`RADARR_ROOT_FOLDER`, then `SONARR_ROOT_FOLDER`. No storage API key is needed,
+and an unavailable mount appears as an inline error rather than hiding the Hub.
 
 ## Reliable turns and history
 
@@ -190,10 +239,18 @@ reconnection. Failures appear in Chat instead of silently reverting edits.
 Multiline paste remains an unsent draft; use the Send button when ready.
 Starter prompts also populate the composer without submitting anything.
 
+Streaming replies follow the bottom of the transcript until you scroll up;
+the Latest button returns to the reply. Assistant text renders inline Markdown
+and gives fenced code blocks horizontal scrolling and a Copy action. Dictation
+stops when changing conversations or backgrounding, and late recognition
+callbacks cannot overwrite another draft. Controls provide larger touch areas,
+wider layouts have bounded reading widths, and motion honors Reduce Motion.
+
 ## Validation
 
-The shared Xcode scheme includes `JarvisCompanionTests`, using an isolated
-Keychain namespace, an in-memory archive, and mocked network responses. Run
+The shared Xcode scheme includes `JarvisCompanionTests`, using in-memory token
+storage and archives plus mocked network responses; unsigned simulator tests
+do not require Keychain entitlements. Production tokens remain Keychain-backed. Run
 Product → Test with a compatible installed iOS Simulator runtime. Server
 regressions run with:
 

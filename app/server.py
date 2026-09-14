@@ -24,6 +24,30 @@ from brain.runtime import JarvisRuntime
 app = FastAPI(title="JARVIS Core", version="1.0")
 _runtime: JarvisRuntime | None = None
 
+_COMPANION_API_VERSION = 1
+_COMPANION_CAPABILITIES: dict[str, object] = {
+    "chat": {
+        "streaming": True,
+        "request_receipts": True,
+        "server_history": True,
+        "debug_reports": True,
+    },
+    "dashboard": {
+        "now": True,
+        "academic_countdowns": True,
+        "media_storage": True,
+        "service_health": True,
+        "transfers": True,
+        "media": True,
+        "home_entities": True,
+        "service_links": True,
+    },
+    "actions": {
+        "home_on_off": True,
+        "torrent_pause_resume": True,
+    },
+}
+
 
 def runtime() -> JarvisRuntime:
     global _runtime
@@ -76,6 +100,15 @@ class DebugReportRequest(BaseModel):
 def health(_: None = Depends(authorize)) -> dict[str, object]:
     core = runtime()
     return {"status": "ok", "brain_online": core.brain_online, "brain": core.brain_label}
+
+
+@app.get("/api/capabilities")
+def capabilities(_: None = Depends(authorize)) -> dict[str, object]:
+    """Stable feature negotiation for rolling Core/companion upgrades."""
+    return {
+        "api_version": _COMPANION_API_VERSION,
+        "capabilities": _COMPANION_CAPABILITIES,
+    }
 
 
 @app.post("/sessions", status_code=status.HTTP_201_CREATED)
@@ -209,9 +242,19 @@ def status_torrents(_: None = Depends(authorize)) -> dict[str, object]:
     return status_hub.torrents_status()
 
 
+@app.get("/api/now")
+def now_status(_: None = Depends(authorize)) -> dict[str, object]:
+    return status_hub.now_status()
+
+
 @app.get("/api/status/media")
 def status_media(_: None = Depends(authorize)) -> dict[str, object]:
     return status_hub.media_status()
+
+
+@app.get("/api/status/storage")
+def status_storage(_: None = Depends(authorize)) -> dict[str, object]:
+    return status_hub.media_storage_status()
 
 
 @app.get("/api/status/services")

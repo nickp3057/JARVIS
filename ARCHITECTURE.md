@@ -170,6 +170,9 @@ Near-term responsibilities:
      a stable personality.
    - The iOS companion retains an offline device cache while the server/runtime
      owns synchronized sessions, conversation context, titles, and deletion.
+   - Companion dictation is a permission-gated input adapter only: recognized
+     speech populates a reviewable draft and never bypasses the ordinary send,
+     session, request-ID, or retry path.
 - Long-running streamed tool turns reconcile with authoritative server
   history so a client timeout cannot permanently hide a completed result.
 - Companion reachability is independent from per-turn activity: an active chat
@@ -187,6 +190,11 @@ the turn under the runtime lock so contexts cannot bleed into each other.
 The bearer token comes from `JARVIS_API_TOKEN`. The API is a transport adapter,
 not a second brain: it must route conversation through `JarvisRuntime` and use
 `brain.history` for persisted session metadata.
+
+`GET /api/capabilities` is the authenticated, versioned negotiation contract
+for rolling upgrades. Clients should use its grouped chat, dashboard, and
+action flags before assuming a newer Core route exists; the health endpoint
+remains a reachability check rather than a feature manifest.
 
 Companion turns optionally carry a `request_id`. The runtime claims it in
 SQLite under its conversation lock, sets a per-worker request context, and
@@ -212,13 +220,38 @@ at submission time. Later review still happens through the normal runtime and
 read-only debug-report tools.
 
 The dashboard endpoints (`/api/status/torrents`, `/api/status/media`,
-`/api/status/services`, `/api/links`, `/api/home/entities`) are a second
+`/api/status/storage`, `/api/status/services`, `/api/links`,
+`/api/home/entities`, `/api/now`) are a second
 non-conversational surface, aggregated in `app.status_hub` directly over the
 integration modules. They keep the thin-client principle: all service
 credentials and URLs stay server-side (read from the same `.env` values the
 integrations use), responses are TTL-cached in process so companion polling
 cannot hammer the NAS, and a down service degrades to a 200 with an `error`
 field — never a hard failure. These endpoints are not registered as LLM tools.
+
+`/api/now` is the first coherent, typed snapshot rather than a service-shaped
+feed. It combines runtime-owned timers and reminders with the next calendar
+event plus title-matched quiz/test/exam countdowns. The companion persists the
+last successful response, schedules those assessment countdowns locally on the
+phone (no push infrastructure), and explicitly marks it stale after relaunch
+or a failed refresh; cached state is never
+silently presented as live.
+
+The companion namespaces its Now cache by a hash of the resolved server and
+credential identity. Reads reject responses from a superseded connection and
+coalesce overlapping requests for each section. Fast sections poll every five
+seconds while visible; media polls every third cycle and storage every sixth.
+Calendar queries behind the Now snapshot have a five-minute cache and cannot
+start interactive OAuth from a dashboard request.
+
+The phone reconciles one local study brief per day with pending notifications,
+retaining unchanged requests. Only a successful academic-capable Calendar
+snapshot can replace the schedule; an outage or older Core response cannot
+clear it. The user controls delivery hour and enablement in Settings. Calendar
+changes reach the phone on refresh; remote push delivery remains future work.
+Chat, Hub, and Settings are peer destinations. Hub prompts only populate a
+reviewable draft; dictation callbacks are bound to one capture generation and
+invalidated on stop, backgrounding, or conversation changes.
 
 Two guarded quick-action routes extend that surface with bounded writes:
 `POST /api/home/control` (on/off only, and only for entities on the
@@ -253,6 +286,14 @@ runtime knows, the more JARVIS feels like one mind instead of several scripts.
   credentials are configured.
 - `QBITTORRENT_MONITOR_INTERVAL_S`: download polling interval, defaults to 30.
 - `QBITTORRENT_ANNOUNCE_COMPLETIONS`: speak completed downloads, defaults true.
+- `CALENDAR_MONITOR_ENABLED`: true/false, defaults to true when Calendar is configured.
+- `CALENDAR_MONITOR_INTERVAL_S`: calendar polling interval, defaults to 120 seconds.
+- `CALENDAR_ALERT_LEAD_MIN`: meeting warning lead time, defaults to 10 minutes.
+- `PRICE_WATCH_MONITOR_ENABLED`: true/false, defaults to true.
+- `PRICE_WATCH_INTERVAL_S`: saved public-page refresh interval, defaults to six hours
+  and is clamped to at least five minutes.
+- `PRICE_WATCH_DROP_PERCENT`: decrease threshold for a one-time transition alert,
+  defaults to 5 percent.
 
 ## Memory Learning Settings
 - `MEMORY_AUTO_EXTRACT`: true/false, defaults to true. Background post-turn

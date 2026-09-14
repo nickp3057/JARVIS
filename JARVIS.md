@@ -54,12 +54,13 @@ Pearson-Stark-Jarvis/
 │   ├── local_model.py       Optional OpenAI-compatible conversational fallback
 │   ├── briefing.py          Spoken situational briefing (time, weather, agenda, timers)
 │   ├── personality.py       System prompt builder (humor%, address, tool descriptions)
+│   ├── price_watch.py       Guarded public-page price checks + durable targets
 │   ├── reminders.py         Persistent reminders & to-dos (timed + open list)
 │   ├── router.py            Top-level request dispatcher
 │   ├── runtime.py           JarvisRuntime — wraps agent + status snapshot
 │   ├── settings.py          Whitelist-based .env editor (update_setting tool)
 │   ├── timers.py            Timer store: set/cancel/pause/resume/dismiss/alarming state
-│   ├── tools.py             All tool schemas + dispatch (35+ tools)
+│   ├── tools.py             All tool schemas + dispatch (45+ tools)
 │   ├── vision.py            Screenshot via PyQt6 + Claude vision API call
 │   └── weather.py           Open-Meteo weather lookup
 │
@@ -230,6 +231,11 @@ RMS envelope from ElevenLabs audio drives the orb in real time using a monotonic
 - `todays_agenda` — Google Calendar schedule for the rest of today
 - `next_event` — the next upcoming calendar event
 
+### Price Watching
+- `watch_price(url, label?, target_price?)` — monitor structured price metadata
+  on an exact public product URL; private/local destinations are rejected
+- `list_price_watches` / `check_prices` / `remove_price_watch(id)`
+
 ### Spotify
 - `play_music(query)` — natural-language play
 - `pause_music` / `resume_music` / `skip_track` / `previous_track`
@@ -373,6 +379,10 @@ ELEVENLABS_MODEL_ID=eleven_flash_v2_5
 DEFAULT_LOCATION=Herriman, Utah
 ANTHROPIC_MODEL=claude-haiku-4-5-20251001
 WEB_SEARCH_ENABLED=true
+PRICE_WATCH_MONITOR_ENABLED=true # periodically refresh saved product URLs
+PRICE_WATCH_INTERVAL_S=21600     # six hours; minimum five minutes
+PRICE_WATCH_DROP_PERCENT=5       # alert after this percentage decrease
+PRICE_WATCH_TIMEOUT_S=15
 
 # Voice tuning
 WAKE_THRESHOLD=0.5
@@ -422,6 +432,8 @@ JARVIS_SERVER_PORT=8000
 # Companion dashboard (read-only status hub endpoints)
 PLEX_URL=                   # Plex base URL for /api/links + /api/status/services
 HOME_DASHBOARD_ENTITIES=    # comma-separated HA entity_ids for /api/home/entities
+MEDIA_STORAGE_PATH=         # mounted filesystem containing the video library
+MEDIA_STORAGE_LABEL=Media storage # friendly Hub label; no key required
 
 # Google Calendar (optional, read-only)
 GOOGLE_CREDENTIALS_FILE=    # path to OAuth client-secret JSON (Desktop app)
@@ -466,6 +478,53 @@ CALENDAR_ALERT_LEAD_MIN=10  # warn this many minutes before a meeting
 
 ## Recently Shipped
 
+- **Companion experience overhaul (1.19 / build 21)** — Chat, Hub, and Settings
+  are now peer tabs. The Hub has Today, Media, and Home focus views, a compact
+  two-metric overview, an actionable setup screen, and a briefing shortcut
+  that opens an unsent Chat draft. Chat adds inline Markdown, scrollable code
+  blocks with Copy, a visible New Chat button, and streaming follow-scroll that
+  pauses while reading earlier messages with a Latest button to return.
+  Settings shares the cockpit styling and includes a real connection test,
+  study-alert toggle, delivery-hour picker, and iOS permission status.
+  Daily assessment notifications are now grouped into one brief per day;
+  unchanged requests are retained, and calendar failures or older Core replies
+  cannot erase the schedule. Now caches are scoped to connection identity;
+  overlapping Hub reads are suppressed and old-connection responses discarded.
+  Media/storage polling is slower than transfers, and calendar data is cached
+  for five minutes with interactive OAuth disabled in the dashboard. Dictation
+  rejects callbacks from stopped sessions and cancels on conversation changes
+  or backgrounding. Layouts are bounded on wider screens and support Reduce
+  Motion; live timers tick locally between Core refreshes.
+- **Companion cockpit revamp + dictation (1.18 / build 20)** — Chat and Hub now
+  share a layered navy telemetry field, raised cyan glass panels, clearer
+  connection/activity states, refined asymmetric messages, a more purposeful
+  composer, and a compact six-metric Hub overview. The Control Room uses
+  native cards instead of grouped-list chrome while retaining independent
+  endpoint loading, stale-data errors, polling, and guarded quick actions.
+  Permission-gated native dictation fills the current draft with live partial
+  recognition, preserves existing text, stops when Chat leaves, and never
+  auto-sends. Core now exposes authenticated `GET /api/capabilities` with a
+  versioned chat/dashboard/action feature contract for rolling upgrades.
+  The first Now surface adds a typed `/api/now` snapshot for active/alarming
+  timers, open reminders, and the next calendar event. The companion persists
+  the last good snapshot locally and labels it stale when Core is unreachable.
+  Streamed text from distinct model/tool rounds now receives a
+  boundary space when neither round supplies one, preventing persisted replies
+  such as `Done.Here is the result` without rewriting ordinary deltas.
+  The same release adds quiz/test/exam detection from the existing read-only
+  Google Calendar feed, a 60-day Hub countdown, and phone-local daily 9 AM
+  reminders during the final two weeks. These use iOS local notifications—no
+  push service or new API key. The Hub also reports free/used/total capacity
+  for exactly one configured media filesystem through `/api/status/storage`.
+  `MEDIA_STORAGE_PATH` can remain blank (with a clear unconfigured state), or
+  falls back to the existing Radarr/Sonarr root-folder setting.
+- **Guarded price watching** (`brain/price_watch.py`) — `watch_price`,
+  `list_price_watches`, `check_prices`, and `remove_price_watch` persist public
+  product URLs and inspect JSON-LD/product metadata without a shopping API.
+  The runtime checks them every six hours by default and announces target-price
+  or material-drop transitions once. Local/private destinations, credentialed
+  URLs, unsafe redirects, non-page responses, and pages above 2 MB are blocked;
+  JavaScript-only storefronts may report that no structured price was found.
 - **Automatic memory + habits + vault capture** (`brain/memory_extractor.py`,
   `brain/habits.py`, `brain/knowledge_vault.py`) — JARVIS now learns the way
   ChatGPT/Claude memory does: a background worker reviews every exchange
@@ -520,15 +579,18 @@ CALENDAR_ALERT_LEAD_MIN=10  # warn this many minutes before a meeting
   actions invalidate the matching status cache; refused or failed service
   calls return 200 with an `error` field.
 - **Companion dashboard endpoints** (`app/status_hub.py`, `app/server.py`) —
-  five bearer-auth'd, read-only JSON endpoints so the iOS app can render a
+  bearer-auth'd, read-only JSON endpoints so the iOS app can render a
   status hub without ever talking to the NAS services directly:
   `/api/status/torrents` (qBittorrent transfers + global rates),
   `/api/status/media` (Radarr/Sonarr queues + 5 most recent library
   additions each), `/api/status/services` (reachability + latency for Home
   Assistant, Plex, Sonarr, Radarr, qBittorrent), `/api/links` (web-UI links
   derived from the same `.env` base URLs the integrations read; unset
-  services are omitted), and `/api/home/entities` (state of the
-  `HOME_DASHBOARD_ENTITIES` allowlist — read-only, no control). A short
+  services are omitted), `/api/status/storage` (capacity of only the configured
+  media filesystem), and `/api/home/entities` (state of the
+  `HOME_DASHBOARD_ENTITIES` allowlist — read-only, no control). `/api/now`
+  returns timers, reminders, the next calendar event, and academic countdowns
+  as one typed snapshot. A short
   in-process TTL cache (5s torrents/services/entities, 15s media) absorbs
   app polling, and every endpoint returns 200 with an `error` field and
   empty data when a backing service is down. New `.env` vars: `PLEX_URL`

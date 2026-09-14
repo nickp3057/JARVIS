@@ -80,6 +80,19 @@ def _serialize_content_block(block: Any) -> dict[str, Any]:
     return result
 
 
+def _stream_round_separator(text_parts: list[str], delta: str, at_round_start: bool) -> str:
+    """Separate text emitted by distinct API rounds without rewriting deltas."""
+    if (
+        at_round_start
+        and text_parts
+        and delta
+        and not text_parts[-1][-1].isspace()
+        and not delta[0].isspace()
+    ):
+        return " "
+    return ""
+
+
 def _get_client() -> Any | None:
     if not ANTHROPIC_API_KEY:
         log.warning(
@@ -304,6 +317,7 @@ class JarvisAgent:
         self._last_turn_tools = []
 
         for _ in range(_MAX_TOOL_TURNS):
+            at_round_start = True
             with self._client.messages.stream(  # type: ignore[union-attr]
                 model=ANTHROPIC_MODEL,
                 max_tokens=_MAX_TOKENS,
@@ -313,6 +327,18 @@ class JarvisAgent:
             ) as stream:
                 for delta in stream.text_stream:
                     if delta:
+                        # Claude can emit a short sentence before a tool call,
+                        # then begin the post-tool answer without leading
+                        # whitespace. Those are separate API rounds, so direct
+                        # concatenation produced text such as ``Done.Here's``
+                        # in the companion and persisted history. Keep normal
+                        # deltas byte-for-byte intact, but separate distinct
+                        # model rounds when neither side supplied whitespace.
+                        separator = _stream_round_separator(text_parts, delta, at_round_start)
+                        if separator:
+                            text_parts.append(separator)
+                            yield separator
+                        at_round_start = False
                         text_parts.append(delta)
                         yield delta
                 final = stream.get_final_message()

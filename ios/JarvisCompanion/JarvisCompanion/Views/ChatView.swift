@@ -14,7 +14,13 @@ struct ChatView: View {
     @State private var deleteTarget: ChatConversation?
     @State private var showingDebugReport = false
     @State private var debugFocusMessageID: UUID?
+    @StateObject private var voiceInput = VoiceInputController()
     @FocusState private var composerFocused: Bool
+    @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var followReply = true
+    @State private var bottomVisible = true
+    @State private var transcriptHeight: CGFloat = 0
 
     /// Anchor for `scrollTo` — the transcript's own ids are message ids, and
     /// the typing indicator needs a target of its own.
@@ -37,8 +43,8 @@ struct ChatView: View {
                 Rectangle().fill(JarvisTheme.border).frame(height: 1)
                 composer
             }
-            .background(JarvisTheme.background)
-            .navigationTitle("JARVIS")
+            .background { JarvisBackdrop() }
+            .navigationTitle(model.messages.isEmpty ? "JARVIS" : model.activeTitle)
             .toolbarBackground(JarvisTheme.background, for: .navigationBar)
             .toolbarBackground(.visible, for: .navigationBar)
             .navigationBarTitleDisplayMode(.inline)
@@ -46,6 +52,12 @@ struct ChatView: View {
                 ToolbarItem(placement: .topBarLeading) {
                     Button("History", systemImage: "clock.arrow.circlepath") {
                         showingHistory = true
+                    }
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("New chat", systemImage: "square.and.pencil") {
+                        voiceInput.stop()
+                        model.startNewConversation()
                     }
                 }
                 ToolbarItem(placement: .topBarTrailing) {
@@ -120,6 +132,17 @@ struct ChatView: View {
             } message: {
                 Text("This deletes the conversation from this device and JARVIS Core.")
             }
+            .alert("Voice input", isPresented: Binding(
+                get: { voiceInput.errorMessage != nil },
+                set: { if !$0 { voiceInput.errorMessage = nil } }
+            )) {
+                Button("OK") { voiceInput.errorMessage = nil }
+            } message: {
+                Text(voiceInput.errorMessage ?? "")
+            }
+            .onDisappear { voiceInput.stop() }
+            .onChange(of: model.conversationID) { voiceInput.stop(); followReply = true }
+            .onChange(of: scenePhase) { _, phase in if phase != .active { voiceInput.stop() } }
         }
     }
 
@@ -128,20 +151,43 @@ struct ChatView: View {
             if model.connectionState == .unconfigured { showingSettings = true }
             else { model.refreshConnectionStatus() }
         } label: {
-            HStack(spacing: 6) {
-                Image(systemName: model.connectionState.symbol)
-                Text(model.connectionState.label)
-                if case .offline(let detail) = model.connectionState {
-                    Text("· \(detail)").lineLimit(1)
+            HStack(spacing: 10) {
+                ZStack {
+                    Circle().fill(connectionColor.opacity(0.13)).frame(width: 26, height: 26)
+                    Image(systemName: model.connectionState.symbol).font(.caption.weight(.semibold))
+                }
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(model.connectionState.label.uppercased())
+                        .font(.caption2.monospaced().weight(.semibold))
+                        .tracking(1)
+                    if case .offline(let detail) = model.connectionState {
+                        Text(detail).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+                    }
+                }
+                Spacer()
+                if model.isAwaitingReply {
+                    Text("Working on it").font(.caption).foregroundStyle(JarvisTheme.amber)
+                    ProgressView().tint(JarvisTheme.amber).controlSize(.small)
+                } else {
+                    Image(systemName: "chevron.right")
+                        .font(.caption2.weight(.semibold)).foregroundStyle(.tertiary)
                 }
             }
-            .font(.caption.monospaced())
-            .foregroundStyle(model.connectionState == .online ? JarvisTheme.cyan : JarvisTheme.amber)
-            .frame(maxWidth: .infinity)
+            .foregroundStyle(connectionColor)
+            .padding(.horizontal, 16)
             .padding(.vertical, 9)
-            .background(JarvisTheme.panel.opacity(0.6))
+            .background(JarvisTheme.panel.opacity(0.74))
+            .overlay(alignment: .bottom) { Rectangle().fill(JarvisTheme.border).frame(height: 0.5) }
         }
         .buttonStyle(.plain)
+    }
+
+    private var connectionColor: Color {
+        switch model.connectionState {
+        case .online: return JarvisTheme.success
+        case .checking: return JarvisTheme.amber
+        case .unconfigured, .offline: return JarvisTheme.amber
+        }
     }
 
     private var historySheet: some View {
@@ -153,6 +199,8 @@ struct ChatView: View {
                         systemImage: "bubble.left.and.bubble.right",
                         description: Text("Conversations saved on this device will appear here.")
                     )
+                } else if model.filteredConversations(matching: historySearch).isEmpty {
+                    ContentUnavailableView.search(text: historySearch)
                 } else {
                     List(model.filteredConversations(matching: historySearch)) { conversation in
                         conversationRow(conversation)
@@ -192,6 +240,7 @@ struct ChatView: View {
             .padding(.vertical, 4)
         }
         .buttonStyle(.plain)
+        .listRowBackground(JarvisTheme.panel.opacity(0.7))
         .swipeActions(edge: .trailing) {
             Button("Delete", systemImage: "trash", role: .destructive) {
                 deleteTarget = conversation
@@ -232,14 +281,48 @@ struct ChatView: View {
                     Color.clear
                         .frame(height: 1)
                         .id(bottomID)
+                        .background(GeometryReader { geometry in
+                            Color.clear.preference(key: TranscriptBottomPreference.self,
+                                value: geometry.frame(in: .named("transcript")).maxY)
+                        })
                 }
+                .frame(maxWidth: 760)
                 .padding(.horizontal, 16)
                 .padding(.vertical, 12)
+                .frame(maxWidth: .infinity)
+            }
+            .coordinateSpace(name: "transcript")
+            .background(GeometryReader { geometry in
+                Color.clear.onAppear { transcriptHeight = geometry.size.height }
+                    .onChange(of: geometry.size.height) { _, height in transcriptHeight = height }
+            })
+            .onPreferenceChange(TranscriptBottomPreference.self) { bottom in
+                bottomVisible = bottom <= transcriptHeight + 60
+                if bottomVisible { followReply = true }
+            }
+            .simultaneousGesture(DragGesture().onChanged { _ in followReply = false }
+                .onEnded { _ in followReply = bottomVisible })
+            .overlay(alignment: .bottomTrailing) {
+                if !followReply {
+                    Button { followReply = true; scrollToBottom(proxy) } label: {
+                        Label("Latest", systemImage: "arrow.down")
+                            .font(.caption.weight(.semibold)).padding(12)
+                            .background(JarvisTheme.panelRaised, in: .capsule)
+                            .overlay(Capsule().strokeBorder(JarvisTheme.border))
+                    }.padding(16)
+                }
             }
             .scrollDismissesKeyboard(.interactively)
             .defaultScrollAnchor(.bottom)
-            .onChange(of: model.messages.count) { scrollToBottom(proxy) }
-            .onChange(of: model.isAwaitingReply) { scrollToBottom(proxy) }
+            .onChange(of: model.messages.count) { if followReply { scrollToBottom(proxy) } }
+            .onChange(of: model.messages.last?.text) {
+                if followReply { proxy.scrollTo(bottomID, anchor: .bottom) }
+            }
+            .onChange(of: model.isAwaitingReply) { _, replying in
+                if replying { followReply = true }
+                if followReply { scrollToBottom(proxy) }
+            }
+            .onChange(of: composerFocused) { if followReply { scrollToBottom(proxy) } }
         }
     }
 
@@ -266,16 +349,16 @@ struct ChatView: View {
     private var emptyState: some View {
         ScrollView {
             VStack(spacing: 22) {
-                JarvisCoreMark(size: 140).padding(.top, 32)
+                JarvisCoreMark(size: 120).padding(.top, 14)
                 VStack(spacing: 10) {
                     Text("AT YOUR SERVICE")
                         .font(.caption.monospaced().weight(.semibold))
                         .tracking(3).foregroundStyle(JarvisTheme.cyan)
-                    Text(settings.isConfigured ? "What’s on your mind, sir?" : "Let’s get connected.")
-                        .font(.title2.weight(.semibold))
+                    Text(settings.isConfigured ? "A thought away, sir." : "Let’s get connected.")
+                        .font(.largeTitle.weight(.semibold)).tracking(-0.8)
                         .multilineTextAlignment(.center)
                     Text(settings.isConfigured
-                         ? "Your home, your plans, a little perspective."
+                         ? "One secure link to your home, plans, media, and memory."
                          : "Connect to JARVIS Core to bring your assistant along.")
                         .font(.subheadline).foregroundStyle(.secondary)
                         .multilineTextAlignment(.center)
@@ -292,7 +375,9 @@ struct ChatView: View {
                         .buttonStyle(.borderedProminent).foregroundStyle(JarvisTheme.background)
                 }
             }
+            .frame(maxWidth: 580)
             .padding(24)
+            .frame(maxWidth: .infinity)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
@@ -309,43 +394,91 @@ struct ChatView: View {
                 Image(systemName: "arrow.up.left").font(.caption).foregroundStyle(.secondary)
             }
             .padding(16)
-            .background(JarvisTheme.panel, in: .rect(cornerRadius: 16))
-            .overlay(RoundedRectangle(cornerRadius: 16).strokeBorder(JarvisTheme.border))
+            .background(JarvisTheme.panelGradient, in: .rect(cornerRadius: 18))
+            .overlay(RoundedRectangle(cornerRadius: 18).strokeBorder(JarvisTheme.border))
         }
-        .buttonStyle(.plain)
+        .buttonStyle(CockpitButtonStyle())
     }
 
     private var composer: some View {
-        HStack(alignment: .bottom, spacing: 10) {
-            TextField("Message JARVIS", text: $model.draft, axis: .vertical)
-                .lineLimit(1...5)
-                .textFieldStyle(.plain)
-                .padding(.horizontal, 14)
-                .padding(.vertical, 9)
-                .background(JarvisTheme.panel, in: .rect(cornerRadius: 20))
-                .overlay(RoundedRectangle(cornerRadius: 20).strokeBorder(JarvisTheme.border))
-                .focused($composerFocused)
-                .submitLabel(.return)
-                .onChange(of: model.draft) { model.draftChanged() }
-
-            Button(action: model.isAwaitingReply ? model.stopGenerating : model.send) {
-                Image(systemName: model.isAwaitingReply ? "stop.circle.fill" : "arrow.up.circle.fill")
-                    .font(.system(size: 30))
-                    .symbolRenderingMode(.hierarchical)
+        VStack(spacing: 7) {
+            if voiceInput.isListening {
+                HStack(spacing: 7) {
+                    Image(systemName: "waveform").symbolEffect(.variableColor.iterative, isActive: !reduceMotion)
+                    Text("LISTENING — TAP THE MIC WHEN YOU’RE DONE")
+                }
+                .font(.caption2.monospaced().weight(.semibold))
+                .foregroundStyle(JarvisTheme.amber)
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .disabled(!model.isAwaitingReply && !model.canSend)
-            .accessibilityLabel(model.isAwaitingReply ? "Stop generating" : "Send")
+            HStack(alignment: .bottom, spacing: 9) {
+                HStack(alignment: .bottom, spacing: 8) {
+                    TextField("Message JARVIS", text: $model.draft, axis: .vertical)
+                        .lineLimit(1...5)
+                        .textFieldStyle(.plain)
+                        .focused($composerFocused)
+                        .submitLabel(.return)
+                        .onChange(of: model.draft) { model.draftChanged() }
+
+                    Button {
+                        voiceInput.toggle(existingText: model.draft) { transcript in
+                            model.draft = transcript
+                            model.draftChanged()
+                        }
+                    } label: {
+                        Image(systemName: voiceInput.isListening ? "mic.fill" : "mic")
+                            .font(.system(size: 17, weight: .semibold))
+                            .foregroundStyle(voiceInput.isListening ? JarvisTheme.amber : JarvisTheme.cyan)
+                            .frame(width: 44, height: 44)
+                            .background((voiceInput.isListening ? JarvisTheme.amber : JarvisTheme.cyan).opacity(0.10), in: .circle)
+                    }
+                    .disabled(model.isAwaitingReply)
+                    .accessibilityLabel(voiceInput.isListening || voiceInput.isStarting ? "Stop dictation" : "Dictate message")
+                }
+                .padding(.leading, 14)
+                .padding(.trailing, 7)
+                .padding(.vertical, 7)
+                .background(JarvisTheme.panelGradient, in: .rect(cornerRadius: 22))
+                .overlay(RoundedRectangle(cornerRadius: 22).strokeBorder(
+                    voiceInput.isListening ? JarvisTheme.amber.opacity(0.55) : JarvisTheme.border
+                ))
+
+                Button {
+                    if model.isAwaitingReply {
+                        model.stopGenerating()
+                    } else {
+                        voiceInput.stop()
+                        model.send()
+                    }
+                } label: {
+                    Image(systemName: model.isAwaitingReply ? "stop.fill" : "arrow.up")
+                        .font(.system(size: 16, weight: .bold))
+                        .foregroundStyle(JarvisTheme.backgroundDeep)
+                        .frame(width: 46, height: 46)
+                        .background(model.isAwaitingReply ? JarvisTheme.amber : JarvisTheme.cyan, in: .circle)
+                        .shadow(color: (model.isAwaitingReply ? JarvisTheme.amber : JarvisTheme.cyan).opacity(0.24), radius: 8)
+                }
+                .disabled(!model.isAwaitingReply && !model.canSend)
+                .opacity(!model.isAwaitingReply && !model.canSend ? 0.45 : 1)
+                .accessibilityLabel(model.isAwaitingReply ? "Stop generating" : "Send")
+            }
         }
         .padding(.horizontal, 16)
-        .padding(.vertical, 10)
-        .background(JarvisTheme.background)
+        .padding(.top, 9)
+        .padding(.bottom, 10)
+        .background(.ultraThinMaterial)
     }
 
     private func scrollToBottom(_ proxy: ScrollViewProxy) {
-        withAnimation(.easeOut(duration: 0.25)) {
+        withAnimation(reduceMotion ? nil : .easeOut(duration: 0.2)) {
             proxy.scrollTo(bottomID, anchor: .bottom)
         }
     }
+}
+
+private struct TranscriptBottomPreference: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = nextValue() }
 }
 
 private struct DebugReportSheet: View {
@@ -392,6 +525,8 @@ private struct DebugReportSheet: View {
                     }
                 }
             }
+            .scrollContentBackground(.hidden)
+            .background { JarvisBackdrop() }
             .navigationTitle("Send to AI to debug")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {

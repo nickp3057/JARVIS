@@ -11,7 +11,10 @@ struct JarvisCompanionApp: App {
         let settings = AppSettings()
         _settings = StateObject(wrappedValue: settings)
         _chat = StateObject(wrappedValue: ChatViewModel(settings: settings))
-        _hub = StateObject(wrappedValue: HubViewModel(settings: settings))
+        _hub = StateObject(wrappedValue: HubViewModel(
+            settings: settings,
+            academicNotifications: AcademicNotificationScheduler()
+        ))
     }
 
     var body: some Scene {
@@ -22,6 +25,7 @@ struct JarvisCompanionApp: App {
                     switch phase {
                     case .active:
                         chat.appBecameActive()
+                        if settings.isConfigured { Task { await hub.refreshNow() } }
                     case .inactive, .background:
                         chat.appBecameInactive()
                     @unknown default:

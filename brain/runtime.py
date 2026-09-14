@@ -127,6 +127,8 @@ class JarvisRuntime:
         self._weather_monitor_failed = False
         self._download_monitor_started = False
         self._download_monitor_failed = False
+        self._price_monitor_started = False
+        self._price_monitor_failed = False
         self._home_snapshot = HomeSnapshot(
             online=False,
             updated_at=None,
@@ -200,6 +202,11 @@ class JarvisRuntime:
             if configured:
                 self._download_monitor_started = True
                 threading.Thread(target=self._download_monitor_loop, daemon=True).start()
+
+        price_enabled = os.getenv("PRICE_WATCH_MONITOR_ENABLED", "true").strip().lower()
+        if price_enabled in ("1", "true", "yes", "on") and not self._price_monitor_started:
+            self._price_monitor_started = True
+            threading.Thread(target=self._price_monitor_loop, daemon=True).start()
 
     def stop_monitors(self) -> None:
         """Ask background monitors to stop."""
@@ -759,6 +766,35 @@ class JarvisRuntime:
                     f"{event.get('summary', 'a meeting')} {when}",
                     source="calendar",
                     title="Upcoming meeting",
+                )
+            if self._stop_monitors.wait(interval):
+                break
+
+    def _price_monitor_loop(self) -> None:
+        """Periodically refresh explicitly saved public product pages."""
+        interval = max(300.0, float(os.getenv("PRICE_WATCH_INTERVAL_S", "21600") or 21600))
+        try:
+            from brain.price_watch import check_price_watches
+        except Exception:  # noqa: BLE001
+            self._price_monitor_failed = True
+            return
+
+        while not self._stop_monitors.is_set():
+            try:
+                notices = check_price_watches()
+                self._price_monitor_failed = False
+            except Exception:  # noqa: BLE001
+                log.exception("Price watch monitor failed")
+                self._price_monitor_failed = True
+                notices = []
+            for notice in notices:
+                currency = f"{notice.get('currency')} " if notice.get("currency") else ""
+                reason = "reached your target" if notice.get("reason") == "target" else "dropped"
+                self.announce(
+                    f"{notice.get('label', 'A watched item')} {reason} at "
+                    f"{currency}{float(notice.get('price', 0)):,.2f}",
+                    source="price-watch",
+                    title="Price alert",
                 )
             if self._stop_monitors.wait(interval):
                 break

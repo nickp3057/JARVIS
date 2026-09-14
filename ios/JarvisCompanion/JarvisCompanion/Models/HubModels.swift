@@ -6,6 +6,111 @@ import Foundation
 /// HTTP 200 with a non-empty `error` and empty collections, so these models
 /// treat `error` as a first-class field rather than a failure.
 
+struct NowStatus: Codable {
+    let generatedAt: Double
+    let timers: [NowTimer]
+    let reminders: [NowReminder]
+    let nextEvent: NowEvent?
+    let calendarError: String
+    let academicEvents: [AcademicEvent]
+    let supportsAcademicEvents: Bool
+
+    var generatedDate: Date { Date(timeIntervalSince1970: generatedAt) }
+
+    enum CodingKeys: String, CodingKey {
+        case timers, reminders
+        case generatedAt = "generated_at"
+        case nextEvent = "next_event"
+        case calendarError = "calendar_error"
+        case academicEvents = "academic_events"
+    }
+
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        generatedAt = try values.decode(Double.self, forKey: .generatedAt)
+        timers = try values.decode([NowTimer].self, forKey: .timers)
+        reminders = try values.decode([NowReminder].self, forKey: .reminders)
+        nextEvent = try values.decodeIfPresent(NowEvent.self, forKey: .nextEvent)
+        calendarError = try values.decodeIfPresent(String.self, forKey: .calendarError) ?? ""
+        supportsAcademicEvents = values.contains(.academicEvents)
+        academicEvents = try values.decodeIfPresent([AcademicEvent].self, forKey: .academicEvents) ?? []
+    }
+}
+
+struct NowTimer: Codable, Identifiable {
+    let id: String
+    let label: String
+    let state: String
+    let remainingSeconds: Int
+    let expiresAt: Double
+
+    enum CodingKeys: String, CodingKey {
+        case id, label, state
+        case remainingSeconds = "remaining_seconds"
+        case expiresAt = "expires_at"
+    }
+}
+
+struct NowReminder: Codable, Identifiable {
+    let id: String
+    let text: String
+    let dueAt: Double?
+    let isDue: Bool
+
+    enum CodingKeys: String, CodingKey {
+        case id, text
+        case dueAt = "due_at"
+        case isDue = "is_due"
+    }
+}
+
+struct NowEvent: Codable, Identifiable {
+    let id: String
+    let title: String
+    let startAt: Double?
+    let allDay: Bool
+    let location: String
+
+    enum CodingKeys: String, CodingKey {
+        case id, title, location
+        case startAt = "start_at"
+        case allDay = "all_day"
+    }
+}
+
+struct AcademicEvent: Codable, Identifiable {
+    let id: String
+    let title: String
+    let startAt: Double?
+    let allDay: Bool
+    let location: String
+    let daysLeft: Int
+
+    enum CodingKeys: String, CodingKey {
+        case id, title, location
+        case startAt = "start_at"
+        case allDay = "all_day"
+        case daysLeft = "days_left"
+    }
+}
+
+struct StorageStatus: Decodable {
+    let error: String
+    let label: String
+    let totalBytes: Int64
+    let usedBytes: Int64
+    let freeBytes: Int64
+    let usedFraction: Double
+
+    enum CodingKeys: String, CodingKey {
+        case error, label
+        case totalBytes = "total_bytes"
+        case usedBytes = "used_bytes"
+        case freeBytes = "free_bytes"
+        case usedFraction = "used_fraction"
+    }
+}
+
 struct TorrentsStatus: Decodable {
     let error: String
     let dlSpeed: Int

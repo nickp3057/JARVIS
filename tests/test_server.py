@@ -87,6 +87,17 @@ class ServerTests(unittest.TestCase):
             404,
         )
 
+    def test_capabilities_are_authenticated_and_versioned(self) -> None:
+        self.assertEqual(self.client.get("/api/capabilities").status_code, 401)
+        response = self.client.get("/api/capabilities", headers=self.headers)
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["api_version"], 1)
+        self.assertTrue(payload["capabilities"]["chat"]["streaming"])
+        self.assertTrue(payload["capabilities"]["actions"]["home_on_off"])
+        self.assertTrue(payload["capabilities"]["dashboard"]["academic_countdowns"])
+        self.assertTrue(payload["capabilities"]["dashboard"]["media_storage"])
+
     def test_stream_binds_and_persists_session(self) -> None:
         with self.client.stream(
             "POST", "/chat/stream", headers=self.headers, json={"message": "hello"}

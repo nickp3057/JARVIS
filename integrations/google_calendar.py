@@ -20,6 +20,7 @@ of raising.
 from __future__ import annotations
 
 import os
+import re
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
@@ -40,6 +41,11 @@ _DEFAULT_TOKEN = _PROJECT_ROOT / "memory" / "google_token.json"
 _service: Any | None = None
 _service_failed = False
 
+_ACADEMIC_EVENT_RE = re.compile(
+    r"\b(quiz(?:zes)?|test(?:s)?|exam(?:s)?|midterm(?:s)?|final(?:s)?)\b",
+    re.IGNORECASE,
+)
+
 
 def _calendar_id() -> str:
     return os.getenv("GOOGLE_CALENDAR_ID", "primary").strip() or "primary"
@@ -58,7 +64,7 @@ def is_configured() -> bool:
     return bool(_credentials_file()) or Path(_token_file()).exists()
 
 
-def _get_service() -> Any | None:
+def _get_service(*, allow_interactive: bool = True) -> Any | None:
     global _service, _service_failed
     if _service is not None:
         return _service
@@ -89,6 +95,10 @@ def _get_service() -> Any | None:
             except Exception:  # noqa: BLE001
                 creds = None
         if creds is None:
+            # Dashboard polling must never open a browser or block waiting for
+            # OAuth consent. Explicit calendar tools retain the setup flow.
+            if not allow_interactive:
+                return None
             cred_file = _credentials_file()
             if not cred_file or not Path(cred_file).exists():
                 log.warning("Google credentials file missing; calendar disabled.")
@@ -131,9 +141,10 @@ def _parse_dt(node: dict[str, Any]) -> datetime | None:
     return None
 
 
-def upcoming_events(max_results: int = 10, hours_ahead: float | None = None) -> list[dict[str, Any]] | None:
+def upcoming_events(max_results: int = 10, hours_ahead: float | None = None,
+                    *, allow_interactive: bool = True) -> list[dict[str, Any]] | None:
     """Return upcoming events, or None if the calendar can't be reached."""
-    svc = _get_service()
+    svc = _get_service(allow_interactive=allow_interactive)
     if svc is None:
         return None
     now = datetime.now(timezone.utc)
@@ -182,6 +193,36 @@ def upcoming_within(minutes: float) -> list[dict[str, Any]]:
                 item["minutes_until"] = int(round(delta_min))
                 soon.append(item)
     return soon
+
+
+def academic_events_from(
+    events: list[dict[str, Any]], now: datetime | None = None
+) -> list[dict[str, Any]]:
+    """Return quiz/test/exam events with a local-calendar-day countdown.
+
+    Calendar titles are intentionally the source of truth: this needs no
+    school-specific API, and it works with the read-only Google Calendar
+    connection JARVIS already uses.
+    """
+    today = (now or datetime.now().astimezone()).astimezone().date()
+    academic: list[dict[str, Any]] = []
+    for event in events:
+        start = event.get("start")
+        title = str(event.get("summary") or "")
+        if start is None or not _ACADEMIC_EVENT_RE.search(title):
+            continue
+        item = dict(event)
+        item["days_left"] = max(0, (start.astimezone().date() - today).days)
+        academic.append(item)
+    return academic
+
+
+def academic_deadlines(days_ahead: int = 60) -> list[dict[str, Any]] | None:
+    """Upcoming quizzes/tests/exams, or None when Calendar is unavailable."""
+    events = upcoming_events(max_results=100, hours_ahead=max(1, days_ahead) * 24)
+    if events is None:
+        return None
+    return academic_events_from(events)
 
 
 def _spoken_time(dt: datetime) -> str:

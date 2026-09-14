@@ -1,5 +1,6 @@
 import Foundation
 import Security
+import CryptoKit
 
 /// Where JARVIS Core lives and how to authenticate against it.
 ///
@@ -10,10 +11,12 @@ final class AppSettings: ObservableObject {
     private enum Key {
         static let baseURL = "jarvis.baseURL"
         static let apiToken = "jarvis.apiToken"
+        static let studyAlerts = "jarvis.studyAlerts"
+        static let studyHour = "jarvis.studyHour"
     }
 
     private let defaults: UserDefaults
-    private let keychain: KeychainTokenStore
+    private let keychain: any TokenStoring
 
     @Published var baseURLString: String {
         didSet { defaults.set(baseURLString, forKey: Key.baseURL) }
@@ -26,10 +29,24 @@ final class AppSettings: ObservableObject {
     }
 
     @Published private(set) var tokenStorageError: String?
+    @Published var studyAlertsEnabled: Bool {
+        didSet { defaults.set(studyAlertsEnabled, forKey: Key.studyAlerts) }
+    }
+    @Published var studyAlertHour: Int {
+        didSet { defaults.set(studyAlertHour, forKey: Key.studyHour) }
+    }
 
-    init(defaults: UserDefaults = .standard, keychain: KeychainTokenStore = KeychainTokenStore()) {
+    /// Namespace caches without persisting credentials in their keys.
+    var connectionIdentity: String {
+        SHA256.hash(data: Data("\(resolvedBaseURL?.absoluteString ?? "")|\(apiToken)".utf8))
+            .map { String(format: "%02x", $0) }.joined()
+    }
+
+    init(defaults: UserDefaults = .standard, keychain: any TokenStoring = KeychainTokenStore()) {
         self.defaults = defaults
         self.keychain = keychain
+        studyAlertsEnabled = defaults.object(forKey: Key.studyAlerts) as? Bool ?? true
+        studyAlertHour = min(23, max(0, defaults.object(forKey: Key.studyHour) as? Int ?? 9))
         baseURLString = defaults.string(forKey: Key.baseURL) ?? ""
         let legacyToken = defaults.string(forKey: Key.apiToken) ?? ""
         let storedToken = keychain.load()
@@ -80,7 +97,12 @@ final class AppSettings: ObservableObject {
     }
 }
 
-final class KeychainTokenStore {
+protocol TokenStoring {
+    func load() -> String?
+    @discardableResult func save(_ token: String) -> Bool
+}
+
+final class KeychainTokenStore: TokenStoring {
     private let service: String
 
     init(service: String = "com.nickolaspearson.JarvisCompanion") {
