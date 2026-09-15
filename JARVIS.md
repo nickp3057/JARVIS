@@ -465,7 +465,7 @@ STUDY_BRIEF_MODEL=          # composer model; falls back to MEMORY_EXTRACT_MODEL
 # Google Calendar (optional, read-only)
 GOOGLE_CREDENTIALS_FILE=    # path to OAuth client-secret JSON (Desktop app)
 GOOGLE_TOKEN_FILE=          # token cache; defaults to memory/google_token.json
-GOOGLE_CALENDAR_ID=primary
+GOOGLE_CALENDAR_ID=all      # every calendar on the account (default), or comma-separated ids
 CALENDAR_MONITOR_ENABLED=true
 CALENDAR_MONITOR_INTERVAL_S=120
 CALENDAR_ALERT_LEAD_MIN=10  # warn this many minutes before a meeting

@@ -8,8 +8,9 @@ Configuration (.env):
   from Google Cloud Console (Desktop app credentials).
 - GOOGLE_TOKEN_FILE       : where the cached auth token lives. Optional;
   defaults to memory/google_token.json.
-- GOOGLE_CALENDAR_ID      : which calendar to read. Optional; defaults to
-  'primary'.
+- GOOGLE_CALENDAR_ID      : which calendars to read. ``all`` (the default)
+  merges every calendar on the account (school, work, shared, holidays);
+  otherwise a comma-separated list of calendar ids, e.g. ``primary``.
 
 First run opens a browser once for consent and caches a token; subsequent runs
 refresh silently. Everything degrades gracefully: if the libraries aren't
@@ -51,8 +52,40 @@ def _academic_pattern() -> re.Pattern[str]:
     return keyword_pattern()
 
 
-def _calendar_id() -> str:
-    return os.getenv("GOOGLE_CALENDAR_ID", "primary").strip() or "primary"
+_calendar_list_cache: tuple[float, list[dict[str, str]]] | None = None
+_CALENDAR_LIST_TTL_S = 3600.0
+
+
+def _calendar_setting() -> str:
+    return os.getenv("GOOGLE_CALENDAR_ID", "all").strip() or "all"
+
+
+def _calendar_ids(svc: Any) -> list[dict[str, str]]:
+    """``[{"id", "name"}, ...]`` to query. ``all`` expands to every calendar
+    on the account (cached for an hour); anything else is a comma list."""
+    global _calendar_list_cache
+    setting = _calendar_setting()
+    if setting.lower() != "all":
+        return [{"id": part.strip(), "name": part.strip()} for part in setting.split(",") if part.strip()]
+    import time as _time
+
+    now = _time.monotonic()
+    if _calendar_list_cache and _calendar_list_cache[0] > now:
+        return list(_calendar_list_cache[1])
+    try:
+        resp = svc.calendarList().list(maxResults=250, showHidden=False).execute()
+    except Exception as exc:  # noqa: BLE001
+        log.warning("Calendar list lookup failed; using primary only: %s", exc)
+        return [{"id": "primary", "name": "primary"}]
+    calendars = [
+        {"id": str(item.get("id", "")), "name": str(item.get("summaryOverride") or item.get("summary") or item.get("id", ""))}
+        for item in resp.get("items", [])
+        if item.get("id") and not item.get("deleted") and not item.get("hidden")
+    ]
+    if not calendars:
+        calendars = [{"id": "primary", "name": "primary"}]
+    _calendar_list_cache = (now + _CALENDAR_LIST_TTL_S, calendars)
+    return list(calendars)
 
 
 def _credentials_file() -> str:
@@ -153,7 +186,6 @@ def upcoming_events(max_results: int = 10, hours_ahead: float | None = None,
         return None
     now = datetime.now(timezone.utc)
     params: dict[str, Any] = {
-        "calendarId": _calendar_id(),
         "timeMin": now.isoformat(),
         "singleEvents": True,
         "orderBy": "startTime",
@@ -161,24 +193,33 @@ def upcoming_events(max_results: int = 10, hours_ahead: float | None = None,
     }
     if hours_ahead:
         params["timeMax"] = (now + timedelta(hours=hours_ahead)).isoformat()
-    try:
-        resp = svc.events().list(**params).execute()
-    except Exception as exc:  # noqa: BLE001
-        log.warning("Calendar list failed: %s", exc)
-        return None
+
     out: list[dict[str, Any]] = []
-    for ev in resp.get("items", []):
-        start = ev.get("start", {})
-        out.append(
-            {
-                "id": ev.get("id", ""),
-                "summary": ev.get("summary", "(no title)"),
-                "start": _parse_dt(start),
-                "all_day": "date" in start,
-                "location": ev.get("location", ""),
-            }
-        )
-    return out
+    reached_any = False
+    for calendar in _calendar_ids(svc):
+        try:
+            resp = svc.events().list(calendarId=calendar["id"], **params).execute()
+        except Exception as exc:  # noqa: BLE001
+            log.warning("Calendar list failed for %s: %s", calendar["name"], exc)
+            continue
+        reached_any = True
+        for ev in resp.get("items", []):
+            start = ev.get("start", {})
+            out.append(
+                {
+                    "id": ev.get("id", ""),
+                    "summary": ev.get("summary", "(no title)"),
+                    "start": _parse_dt(start),
+                    "all_day": "date" in start,
+                    "location": ev.get("location", ""),
+                    "calendar": calendar["name"],
+                }
+            )
+    if not reached_any:
+        return None
+    # Merge across calendars in start order; unparseable starts sink to the end.
+    out.sort(key=lambda e: (e["start"] is None, e["start"] or datetime.max.replace(tzinfo=timezone.utc)))
+    return out[:max_results]
 
 
 def upcoming_within(minutes: float) -> list[dict[str, Any]]:
