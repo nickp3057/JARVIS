@@ -94,6 +94,28 @@ class SettingsAndKeywordTests(unittest.TestCase):
         self.assertEqual(titles, ["Lab 3"])
 
 
+class SameDayDedupeTests(unittest.TestCase):
+    PAIR = [
+        {"id": "a", "summary": "CS 3190 Quiz 2 (Lec 5-8)", "start": _local(2026, 9, 24), "all_day": True},
+        {"id": "b", "summary": "CS 3190  Quiz 2 (Lec 5-8)", "start": _local(2026, 9, 24, 10, 50), "all_day": False},
+        {"id": "c", "summary": "CS 3190 Quiz 2 (Lec 5-8)", "start": _local(2026, 9, 25, 10, 50), "all_day": False},
+    ]
+
+    def test_all_day_and_timed_copies_collapse_to_the_timed_one(self) -> None:
+        kept = study_brief.dedupe_same_day(self.PAIR)
+        self.assertEqual([e["id"] for e in kept], ["b", "c"])
+
+    def test_plan_lists_each_assessment_once(self) -> None:
+        with patch.dict(os.environ, dict(_DEFAULT_ENV)):
+            briefs = study_brief.plan_briefs(self.PAIR[:2], now=_local(2026, 9, 20, 8))
+        self.assertEqual(briefs[0]["items"], [{"title": "CS 3190  Quiz 2 (Lec 5-8)", "days_left": 4}])
+
+    def test_hub_countdown_lists_each_assessment_once(self) -> None:
+        with patch.dict(os.environ, dict(_DEFAULT_ENV)):
+            academic = academic_events_from(self.PAIR, now=_local(2026, 9, 20, 8))
+        self.assertEqual([e["id"] for e in academic], ["b", "c"])
+
+
 class PlanningTests(unittest.TestCase):
     def setUp(self) -> None:
         self.env = patch.dict(os.environ, dict(_DEFAULT_ENV))

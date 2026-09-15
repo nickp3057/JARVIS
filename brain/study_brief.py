@@ -80,6 +80,31 @@ def settings() -> dict[str, Any]:
 
 # --- Planning ---------------------------------------------------------------
 
+def dedupe_same_day(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Collapse events that share a title and a local calendar day.
+
+    School calendar exports commonly carry each assessment twice: an all-day
+    "due" entry and a timed class-slot entry. Keep one per title per day,
+    preferring the timed entry because it says when. Order is preserved.
+    """
+    best: dict[tuple[str, date], int] = {}
+    kept: list[dict[str, Any]] = []
+    for event in events:
+        start = _event_start(event)
+        title = " ".join(str(event.get("summary") or "").lower().split())
+        if start is None or not title:
+            kept.append(event)
+            continue
+        key = (title, start.date())
+        timed = not bool(event.get("all_day", False))
+        if key not in best:
+            best[key] = len(kept)
+            kept.append(event)
+        elif timed and bool(kept[best[key]].get("all_day", False)):
+            kept[best[key]] = event
+    return kept
+
+
 def _event_start(event: dict[str, Any]) -> datetime | None:
     start = event.get("start")
     if isinstance(start, datetime):
@@ -100,7 +125,7 @@ def plan_briefs(
     pattern = keyword_pattern()
 
     upcoming: list[tuple[str, datetime, bool]] = []
-    for event in events:
+    for event in dedupe_same_day(events):
         title = str(event.get("summary") or "").strip()
         start = _event_start(event)
         if not title or start is None or not pattern.search(title):

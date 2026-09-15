@@ -115,6 +115,18 @@ class MultiCalendarTests(unittest.TestCase):
             events = gc.upcoming_events(max_results=10)
         self.assertEqual(len(events), 2)
 
+    def test_same_event_on_two_calendars_is_reported_once(self) -> None:
+        events = {
+            "primary": [_ev("a", "CS 3190 Quiz 2", "2026-09-24T10:00:00-06:00"),
+                        _ev("b", "Different thing", "2026-09-24T10:00:00-06:00")],
+            "school@group.calendar.google.com": [_ev("c", "cs 3190  quiz 2", "2026-09-24T10:00:00-06:00")],
+        }
+        svc = _Service(CALENDARS, events)
+        with patch.object(gc, "_get_service", return_value=svc):
+            merged = gc.upcoming_events(max_results=10)
+        self.assertEqual(sorted(e["summary"] for e in merged), ["CS 3190 Quiz 2", "Different thing"])
+        self.assertEqual(next(e for e in merged if "Quiz" in e["summary"])["calendar"], "Nick")
+
     def test_max_results_applies_after_merge(self) -> None:
         svc = _Service(CALENDARS, EVENTS)
         with patch.object(gc, "_get_service", return_value=svc):

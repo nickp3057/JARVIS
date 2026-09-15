@@ -52,6 +52,12 @@ def _academic_pattern() -> re.Pattern[str]:
     return keyword_pattern()
 
 
+def _dedupe_same_day(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    from brain.study_brief import dedupe_same_day
+
+    return dedupe_same_day(events)
+
+
 _calendar_list_cache: tuple[float, list[dict[str, str]]] | None = None
 _CALENDAR_LIST_TTL_S = 3600.0
 
@@ -217,9 +223,24 @@ def upcoming_events(max_results: int = 10, hours_ahead: float | None = None,
             )
     if not reached_any:
         return None
+    # The same event often lives on two calendars (a class schedule imported
+    # into the primary calendar as well as the school one). Keep the first
+    # copy of each title + start; the calendars are queried in list order.
+    seen: set[tuple[str, str, bool]] = set()
+    unique: list[dict[str, Any]] = []
+    for event in out:
+        key = (
+            " ".join(str(event["summary"]).lower().split()),
+            event["start"].isoformat() if event["start"] else "",
+            bool(event["all_day"]),
+        )
+        if key in seen:
+            continue
+        seen.add(key)
+        unique.append(event)
     # Merge across calendars in start order; unparseable starts sink to the end.
-    out.sort(key=lambda e: (e["start"] is None, e["start"] or datetime.max.replace(tzinfo=timezone.utc)))
-    return out[:max_results]
+    unique.sort(key=lambda e: (e["start"] is None, e["start"] or datetime.max.replace(tzinfo=timezone.utc)))
+    return unique[:max_results]
 
 
 def upcoming_within(minutes: float) -> list[dict[str, Any]]:
@@ -252,7 +273,7 @@ def academic_events_from(
     today = (now or datetime.now().astimezone()).astimezone().date()
     pattern = _academic_pattern()
     academic: list[dict[str, Any]] = []
-    for event in events:
+    for event in _dedupe_same_day(events):
         start = event.get("start")
         title = str(event.get("summary") or "")
         if start is None or not pattern.search(title):
