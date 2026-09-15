@@ -43,6 +43,8 @@ from brain.memory_proposals import (
     reject_memory_proposal,
 )
 from brain.history import describe_session_summaries
+from brain import study_brief
+from brain.standing_orders import add_order, list_orders, remove_order
 from brain.habits import describe_habits
 from brain.knowledge_vault import capture_note, describe_search
 from brain.timers import cancel_timer, dismiss_timer, list_timers, pause_timer, resume_timer, set_timer
@@ -381,6 +383,30 @@ def _tool_conversation_stats(_: dict[str, Any]) -> str:
 
 def _tool_update_setting(args: dict[str, Any]) -> str:
     return update_setting(args.get("key", ""), args.get("value", ""))
+
+
+def _tool_add_standing_order(args: dict[str, Any]) -> str:
+    return add_order(args.get("text", ""))
+
+
+def _tool_list_standing_orders(_: dict[str, Any]) -> str:
+    return list_orders()
+
+
+def _tool_remove_standing_order(args: dict[str, Any]) -> str:
+    return remove_order(args.get("identifier", ""))
+
+
+def _tool_study_brief_preview(_: dict[str, Any]) -> str:
+    from integrations.google_calendar import is_configured, upcoming_events
+
+    if not is_configured():
+        return study_brief.spoken_preview(study_brief.compose([]), "The calendar is not connected, so there is nothing to draw from.")
+    window = study_brief.settings()["window_days"]
+    events = upcoming_events(max_results=500, hours_ahead=(window + 31) * 24, allow_interactive=False)
+    if events is None:
+        return study_brief.spoken_preview(study_brief.compose([]), "The calendar could not be reached just now.")
+    return study_brief.spoken_preview(study_brief.compose_cached(events))
 
 
 def _tool_get_setting(args: dict[str, Any]) -> str:
@@ -1267,12 +1293,53 @@ _CUSTOM_TOOLS: list[dict[str, Any]] = [
         },
     },
     {
+        "name": "add_standing_order",
+        "description": (
+            "Record a durable instruction from Nick about how you should behave "
+            "from now on ('stop opening with certainly', 'always give temperatures "
+            "in Celsius'). It is injected into every future prompt until removed. "
+            "Write it as one short imperative sentence. Use this whenever Nick "
+            "corrects your behaviour, so the change sticks."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {"text": {"type": "string", "description": "The directive, one sentence."}},
+            "required": ["text"],
+        },
+    },
+    {
+        "name": "list_standing_orders",
+        "description": "List the standing orders currently in force, with ids.",
+        "input_schema": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "remove_standing_order",
+        "description": "Drop a standing order by id or by a unique fragment of its wording.",
+        "input_schema": {
+            "type": "object",
+            "properties": {"identifier": {"type": "string"}},
+            "required": ["identifier"],
+        },
+    },
+    {
+        "name": "study_brief_preview",
+        "description": (
+            "Read back the daily study brief's current settings and what the next "
+            "brief will say, composed from Nick's calendar. Call it after changing "
+            "any STUDY_BRIEF_* setting, or when he asks what his study reminder "
+            "looks like."
+        ),
+        "input_schema": {"type": "object", "properties": {}},
+    },
+    {
         "name": "update_setting",
         "description": (
             "Change a runtime setting live, without a restart. Use for any "
             "'set X to Y' request and any time you infer a setting should "
             "change: ELEVENLABS_SPEED (0.7-1.2), HUMOR_PERCENT (0-100), "
-            "ADDRESS (what to call Nick), DEFAULT_LOCATION, etc. Don't ask "
+            "ADDRESS (what to call Nick), DEFAULT_LOCATION, the study brief's "
+            "STUDY_BRIEF_HOUR / STUDY_BRIEF_WINDOW_DAYS / STUDY_BRIEF_KEYWORDS / "
+            "STUDY_BRIEF_STYLE / STUDY_BRIEF_ENABLED, etc. Don't ask "
             "permission - just update and confirm in one sentence."
         ),
         "input_schema": {
@@ -1657,6 +1724,10 @@ _DISPATCH: dict[str, Callable[[dict[str, Any]], str]] = {
     "list_settings": _tool_list_settings,
     "get_setting": _tool_get_setting,
     "update_setting": _tool_update_setting,
+    "add_standing_order": _tool_add_standing_order,
+    "list_standing_orders": _tool_list_standing_orders,
+    "remove_standing_order": _tool_remove_standing_order,
+    "study_brief_preview": _tool_study_brief_preview,
     "morning_briefing": _tool_morning_briefing,
     "add_reminder": _tool_add_reminder,
     "list_reminders": _tool_list_reminders,

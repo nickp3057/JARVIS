@@ -174,6 +174,38 @@ SETTINGS_SCHEMA: dict[str, dict[str, Any]] = {
         "type": "string",
         "description": "Friendly label for the media drive in the companion Hub.",
     },
+
+    # --- Daily study brief (phone notification counting down to assessments) ---
+    "STUDY_BRIEF_ENABLED": {
+        "type": "bool",
+        "description": "Whether the daily study brief notification is sent at all.",
+    },
+    "STUDY_BRIEF_HOUR": {
+        "type": "int",
+        "min": 0,
+        "max": 23,
+        "description": "Hour of the day (0-23, local) the study brief fires. Default 9.",
+    },
+    "STUDY_BRIEF_WINDOW_DAYS": {
+        "type": "int",
+        "min": 1,
+        "max": 60,
+        "description": "How many days ahead an assessment starts appearing in the brief. Default 14.",
+    },
+    "STUDY_BRIEF_KEYWORDS": {
+        "type": "string",
+        "description": (
+            "Comma-separated calendar-title words that count as an assessment. "
+            "Default: quiz,test,exam,midterm,final."
+        ),
+    },
+    "STUDY_BRIEF_STYLE": {
+        "type": "string",
+        "description": (
+            "Free-form note on how the brief should read (tone, what to emphasise, "
+            "what to skip). Blank means JARVIS's default voice."
+        ),
+    },
 }
 
 

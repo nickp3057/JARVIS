@@ -30,6 +30,7 @@ from typing import Any, Callable
 
 import requests
 
+from brain import study_brief
 from brain.reminders import active_reminders
 from brain.timers import active_timers
 from integrations.google_calendar import is_configured as calendar_configured
@@ -126,9 +127,7 @@ def _now_uncached() -> dict[str, Any]:
     if not calendar_configured():
         calendar_error = "Calendar is not configured."
     else:
-        events = _cached("calendar-events", 300.0, lambda: upcoming_events(
-            max_results=2500, hours_ahead=60 * 24, allow_interactive=False
-        ))
+        events = _calendar_events()
         if events is None:
             calendar_error = "Calendar could not be reached."
         elif events:
@@ -160,6 +159,27 @@ def _now_uncached() -> dict[str, Any]:
         "calendar_error": calendar_error,
         "academic_events": academic_events,
     }
+
+
+def _calendar_events() -> list[dict[str, Any]] | None:
+    """Sixty days of calendar, shared by the Now snapshot and the study brief."""
+    return _cached("calendar-events", 300.0, lambda: upcoming_events(
+        max_results=2500, hours_ahead=60 * 24, allow_interactive=False
+    ))
+
+
+# --- Study brief -----------------------------------------------------------
+
+def study_brief_status() -> dict[str, Any]:
+    """Settings plus the composed briefs the phone should schedule as local
+    notifications. Composition is memoised in ``brain.study_brief``; here we
+    only add the calendar's availability."""
+    if not calendar_configured():
+        return {**study_brief.compose([]), "error": "Calendar is not configured."}
+    events = _calendar_events()
+    if events is None:
+        return {**study_brief.compose([]), "error": "Calendar could not be reached."}
+    return {**study_brief.compose_cached(events), "error": ""}
 
 
 # --- Media storage ---------------------------------------------------------

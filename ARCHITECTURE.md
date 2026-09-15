@@ -221,7 +221,7 @@ read-only debug-report tools.
 
 The dashboard endpoints (`/api/status/torrents`, `/api/status/media`,
 `/api/status/storage`, `/api/status/services`, `/api/links`,
-`/api/home/entities`, `/api/now`) are a second
+`/api/home/entities`, `/api/now`, `/api/study/brief`) are a second
 non-conversational surface, aggregated in `app.status_hub` directly over the
 integration modules. They keep the thin-client principle: all service
 credentials and URLs stay server-side (read from the same `.env` values the
@@ -318,3 +318,30 @@ runtime knows, the more JARVIS feels like one mind instead of several scripts.
 - `OBSIDIAN_MAX_RESULTS` / `OBSIDIAN_MAX_CHARS`: per-turn retrieval caps,
   defaulting to four excerpts and 4,000 characters.
 - `OBSIDIAN_MAX_FILE_BYTES`: per-note indexing limit, defaults to 1 MB.
+
+## Standing Orders
+
+`brain/standing_orders.py` is a fourth durable store beside history, profile
+facts, and habits: free-form directives from Nick about how JARVIS should
+behave ("stop saying certainly"). The model writes them through
+`add_standing_order` / `remove_standing_order`; `build_standing_orders_section`
+renders them into the *dynamic* system block each turn (never the cached
+persona block). The persona's hard rules require a behavioural correction to be
+persisted this way, or as a setting, rather than obeyed once.
+
+## Study Brief Settings
+
+All editable through `update_setting`, so Nick changes the brief by talking to
+JARVIS. `brain/study_brief.py` plans one brief per future morning that has an
+assessment inside the window and composes the next three bodies with the cheap
+extraction model (one call, memoised for six hours on settings + events +
+calendar day; template fallback). It is the second sanctioned out-of-turn model
+caller after `memory_extractor`.
+
+- `STUDY_BRIEF_ENABLED`: true/false, defaults to true.
+- `STUDY_BRIEF_HOUR`: local hour 0–23 the brief fires, defaults to 9.
+- `STUDY_BRIEF_WINDOW_DAYS`: 1–60 days of warning, defaults to 14.
+- `STUDY_BRIEF_KEYWORDS`: comma-separated calendar-title words counted as an
+  assessment (plurals tolerated); also drives the Hub's academic countdown.
+- `STUDY_BRIEF_STYLE`: free-form tone note handed to the composer.
+- `STUDY_BRIEF_MODEL`: composer model; falls back to `MEMORY_EXTRACT_MODEL`.

@@ -35,6 +35,7 @@ _COMPANION_CAPABILITIES: dict[str, object] = {
     "dashboard": {
         "now": True,
         "academic_countdowns": True,
+        "study_brief": True,
         "media_storage": True,
         "service_health": True,
         "transfers": True,
@@ -245,6 +246,11 @@ def status_torrents(_: None = Depends(authorize)) -> dict[str, object]:
 @app.get("/api/now")
 def now_status(_: None = Depends(authorize)) -> dict[str, object]:
     return status_hub.now_status()
+
+
+@app.get("/api/study/brief")
+def study_brief_status(_: None = Depends(authorize)) -> dict[str, object]:
+    return status_hub.study_brief_status()
 
 
 @app.get("/api/status/media")

@@ -32,7 +32,13 @@ from brain.history import append_turn, load_history, load_session_messages, star
 from brain.intents import routed_offline_reply
 from brain.local_model import is_configured as local_model_configured
 from brain.memory import render_memory_block
-from brain.personality import build_habits_section, build_memory_section, build_persona_prompt
+from brain import standing_orders
+from brain.personality import (
+    build_habits_section,
+    build_memory_section,
+    build_persona_prompt,
+    build_standing_orders_section,
+)
 from brain.tools import execute_tool, get_tool_specs
 from jarvis_logger import get_logger
 
@@ -396,7 +402,8 @@ class JarvisAgent:
                 "cache_control": {"type": "ephemeral"},
             }
         ]
-        dynamic = build_memory_section(render_memory_block(latest_user_text))
+        dynamic = build_standing_orders_section(standing_orders.render_block())
+        dynamic += build_memory_section(render_memory_block(latest_user_text))
         dynamic += build_habits_section(render_habits_block())
         context = self._recent_tool_context.get(self._session_id)
         if context:

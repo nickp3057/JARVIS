@@ -59,6 +59,8 @@ Pearson-Stark-Jarvis/
 │   ├── router.py            Top-level request dispatcher
 │   ├── runtime.py           JarvisRuntime — wraps agent + status snapshot
 │   ├── settings.py          Whitelist-based .env editor (update_setting tool)
+│   ├── standing_orders.py   Durable behavioural directives from Nick, injected every turn
+│   ├── study_brief.py       Daily quiz/exam countdown: settings, planning, JARVIS-composed text
 │   ├── timers.py            Timer store: set/cancel/pause/resume/dismiss/alarming state
 │   ├── tools.py             All tool schemas + dispatch (45+ tools)
 │   ├── vision.py            Screenshot via PyQt6 + Claude vision API call
@@ -299,9 +301,26 @@ RMS envelope from ElevenLabs audio drives the orb in real time using a monotonic
 - `look_at_screen(question?)` — screenshot via PyQt6 → Claude vision API → spoken answer
 
 ### Settings
-- `update_setting(key, value)` — live-edits `.env` (HUMOR_PERCENT, ADDRESS, ELEVENLABS_SPEED, etc.)
+- `update_setting(key, value)` — live-edits `.env` (HUMOR_PERCENT, ADDRESS,
+  ELEVENLABS_SPEED, the STUDY_BRIEF_* rules, etc.)
 - `get_setting(key)` / `list_settings`
 - `web_search` — Anthropic server tool (togglable via WEB_SEARCH_ENABLED)
+
+### Standing orders *(new)*
+- `add_standing_order(text)` — persist a behavioural directive from Nick
+  ("stop opening with certainly", "temperatures in Celsius"); it is injected
+  into every later prompt until removed, so a correction sticks
+- `list_standing_orders` / `remove_standing_order(identifier)` — by id or a
+  unique fragment of the wording. Stored in `memory/standing_orders.json`,
+  capped at 40 short lines. Persona rules tell JARVIS to record one whenever
+  Nick corrects his behaviour instead of complying once.
+
+### Study brief *(new)*
+- `study_brief_preview` — read back the daily study brief's settings and what
+  the next notification will say. The brief itself is served to the phone by
+  `/api/study/brief`; JARVIS composes the next three mornings' text in
+  character (template fallback if the model is unavailable). Changing any
+  `STUDY_BRIEF_*` setting recomposes on the next request.
 
 ---
 
@@ -435,6 +454,13 @@ HOME_DASHBOARD_ENTITIES=    # comma-separated HA entity_ids for /api/home/entiti
 MEDIA_STORAGE_PATH=         # local mount of the video library; leave blank to
                             # measure the NAS volume via Radarr/Sonarr diskspace
 MEDIA_STORAGE_LABEL=Media storage # friendly Hub label; no key required
+# Daily study brief (all voice-editable via update_setting)
+STUDY_BRIEF_ENABLED=true    # send the morning assessment countdown at all
+STUDY_BRIEF_HOUR=9          # local hour (0-23) the brief fires
+STUDY_BRIEF_WINDOW_DAYS=14  # days of warning before an assessment
+STUDY_BRIEF_KEYWORDS=quiz,test,exam,midterm,final # calendar-title words that count
+STUDY_BRIEF_STYLE=          # free-form tone/emphasis note for the composed text
+STUDY_BRIEF_MODEL=          # composer model; falls back to MEMORY_EXTRACT_MODEL
 
 # Google Calendar (optional, read-only)
 GOOGLE_CREDENTIALS_FILE=    # path to OAuth client-secret JSON (Desktop app)
@@ -479,6 +505,25 @@ CALENDAR_ALERT_LEAD_MIN=10  # warn this many minutes before a meeting
 
 ## Recently Shipped
 
+- **Standing orders and a JARVIS-owned study brief (1.22 / build 24)** —
+  `brain/standing_orders.py` gives Nick a durable way to change how JARVIS
+  behaves by just telling him: the model records a one-line directive with
+  `add_standing_order`, it rides in the dynamic system block on every turn,
+  and the persona's hard rules say a correction must be persisted rather than
+  obeyed once. `brain/study_brief.py` moves the daily quiz/exam countdown's
+  rules server-side as `STUDY_BRIEF_*` settings (hour, warning window,
+  keywords, on/off, style note), all editable through `update_setting`, and
+  composes the next three mornings' notification text in JARVIS's voice with
+  the cheap extraction model (template fallback). `/api/study/brief` serves
+  the schedule and text for the phone to register as local notifications;
+  `study_brief_preview` lets Nick hear what tomorrow's brief will say and
+  iterate on it. Calendar assessment detection now reads the same keyword
+  setting. The phone-side changes (ask for notification permission on toggle,
+  schedule from the server payload) are the next step.
+- **Media storage measured through Radarr** — with no local mount, the Hub's
+  storage card reads Radarr's (then Sonarr's) `/api/v3/diskspace` report and
+  shows the volume holding the root folder, so the NAS library is measured
+  without mounting it on the Optiplex.
 - **Companion experience overhaul (1.19 / build 21)** — Chat, Hub, and Settings
   are now peer tabs. The Hub has Today, Media, and Home focus views, a compact
   two-metric overview, an actionable setup screen, and a briefing shortcut

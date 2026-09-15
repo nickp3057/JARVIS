@@ -41,10 +41,14 @@ _DEFAULT_TOKEN = _PROJECT_ROOT / "memory" / "google_token.json"
 _service: Any | None = None
 _service_failed = False
 
-_ACADEMIC_EVENT_RE = re.compile(
-    r"\b(quiz(?:zes)?|test(?:s)?|exam(?:s)?|midterm(?:s)?|final(?:s)?)\b",
-    re.IGNORECASE,
-)
+
+def _academic_pattern() -> re.Pattern[str]:
+    """Assessment keywords come from STUDY_BRIEF_KEYWORDS so Nick can widen
+    or narrow them by talking to JARVIS; the default matches quiz/test/exam/
+    midterm/final with plurals."""
+    from brain.study_brief import keyword_pattern
+
+    return keyword_pattern()
 
 
 def _calendar_id() -> str:
@@ -205,11 +209,12 @@ def academic_events_from(
     connection JARVIS already uses.
     """
     today = (now or datetime.now().astimezone()).astimezone().date()
+    pattern = _academic_pattern()
     academic: list[dict[str, Any]] = []
     for event in events:
         start = event.get("start")
         title = str(event.get("summary") or "")
-        if start is None or not _ACADEMIC_EVENT_RE.search(title):
+        if start is None or not pattern.search(title):
             continue
         item = dict(event)
         item["days_left"] = max(0, (start.astimezone().date() - today).days)
