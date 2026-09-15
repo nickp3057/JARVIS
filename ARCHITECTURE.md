@@ -244,11 +244,15 @@ seconds while visible; media polls every third cycle and storage every sixth.
 Calendar queries behind the Now snapshot have a five-minute cache and cannot
 start interactive OAuth from a dashboard request.
 
-The phone reconciles one local study brief per day with pending notifications,
-retaining unchanged requests. Only a successful academic-capable Calendar
-snapshot can replace the schedule; an outage or older Core response cannot
-clear it. The user controls delivery hour and enablement in Settings. Calendar
-changes reach the phone on refresh; remote push delivery remains future work.
+The phone registers the briefs from `/api/study/brief` as one local
+notification per morning, retaining unchanged requests. Only a good payload
+(empty `error`) can replace the schedule; a calendar outage, a transport
+failure, or a pre-endpoint Core (which falls back to a phone-side template plan
+from the Now countdown list) cannot clear it. JARVIS owns the hour, warning
+window, keywords, and tone as `STUDY_BRIEF_*` settings; the phone keeps only an
+on/off delivery switch, which requests notification permission the moment it is
+enabled. Changes reach the phone on refresh; remote push delivery remains
+future work.
 Chat, Hub, and Settings are peer destinations. Hub prompts only populate a
 reviewable draft; dictation callbacks are bound to one capture generation and
 invalidated on stop, backgrounding, or conversation changes.

@@ -29,6 +29,8 @@ final class HubViewModel: ObservableObject {
     @Published var storage = Section<StorageStatus>()
     @Published var entities = Section<[HomeEntity]>()
     @Published var links = Section<[ServiceLink]>()
+    /// The study brief as JARVIS Core plans it; Settings shows the schedule.
+    @Published var studyBrief = Section<StudyBrief>()
 
     /// entity_id -> in-flight optimistic state, so a toggle feels instant and
     /// reverts visibly if the call fails.
@@ -107,9 +109,8 @@ final class HubViewModel: ObservableObject {
             if let data = try? JSONEncoder().encode(value) {
                 snapshotDefaults.set(data, forKey: nowSnapshotKey)
             }
-            if let academicNotifications, value.calendarError.isEmpty, value.supportsAcademicEvents {
-                await academicNotifications.sync(events: value.academicEvents,
-                    enabled: settings.studyAlertsEnabled, hour: settings.studyAlertHour)
+            if value.calendarError.isEmpty, value.supportsAcademicEvents {
+                await syncStudyBrief(fallbackEvents: value.academicEvents)
             }
         } catch {
             guard !Task.isCancelled, identity == settings.connectionIdentity else { return }
@@ -122,11 +123,46 @@ final class HubViewModel: ObservableObject {
         await load(\.services) { try await $0.servicesStatus().services }
     }
 
+    /// Pull the composed briefs from JARVIS Core and hand them to the
+    /// scheduler. A calendar outage (payload `error`) or a transport failure
+    /// leaves the existing queue alone; only a good payload reconciles it.
+    /// An older Core without the endpoint (404) falls back to planning on
+    /// the phone from the Hub's countdown list.
+    func syncStudyBrief(fallbackEvents: [AcademicEvent]) async {
+        guard let academicNotifications else { return }
+        guard settings.studyAlertsEnabled else {
+            await academicNotifications.sync(briefs: [], enabled: false)
+            return
+        }
+        let identity = connectionIdentity
+        do {
+            let payload = try await client().studyBrief()
+            guard !Task.isCancelled, identity == settings.connectionIdentity else { return }
+            studyBrief.value = payload
+            studyBrief.serverError = payload.error
+            studyBrief.loadError = nil
+            guard payload.error.isEmpty else { return }
+            await academicNotifications.sync(briefs: payload.briefs, enabled: payload.enabled)
+        } catch JarvisAPIError.server(let status, _) where status == 404 {
+            guard !Task.isCancelled, identity == settings.connectionIdentity else { return }
+            studyBrief.loadError = nil
+            let briefs = AcademicNotificationScheduler.briefs(
+                events: fallbackEvents, now: Date(), calendar: .autoupdatingCurrent, hour: settings.studyAlertHour)
+            await academicNotifications.sync(briefs: briefs, enabled: true)
+        } catch {
+            guard !Task.isCancelled, identity == settings.connectionIdentity else { return }
+            studyBrief.loadError = error.localizedDescription
+        }
+    }
+
+    /// The phone-side switch. Turning it on asks for notification permission
+    /// immediately, then re-syncs; turning it off clears the queue.
     func updateNotificationPreferences() async {
         guard let academicNotifications else { return }
         if !settings.studyAlertsEnabled {
-            await academicNotifications.sync(events: [], enabled: false, hour: settings.studyAlertHour)
+            await academicNotifications.sync(briefs: [], enabled: false)
         } else {
+            _ = await academicNotifications.requestPermission()
             await refreshNow()
         }
     }
@@ -135,7 +171,7 @@ final class HubViewModel: ObservableObject {
         guard connectionIdentity != settings.connectionIdentity else { return }
         connectionIdentity = settings.connectionIdentity
         now = Section(); services = Section(); torrents = Section(); media = Section()
-        storage = Section(); entities = Section(); links = Section()
+        storage = Section(); entities = Section(); links = Section(); studyBrief = Section()
         nowSnapshotIsStale = false
         if let data = snapshotDefaults.data(forKey: nowSnapshotKey),
            let cached = try? JSONDecoder().decode(NowStatus.self, from: data) {

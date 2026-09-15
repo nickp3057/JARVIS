@@ -380,6 +380,10 @@ struct JarvisAPIClient {
         try await getJSON(NowStatus.self, path: "api/now")
     }
 
+    func studyBrief() async throws -> StudyBrief {
+        try await getJSON(StudyBrief.self, path: "api/study/brief")
+    }
+
     func mediaStatus() async throws -> MediaStatus {
         try await getJSON(MediaStatus.self, path: "api/status/media")
     }

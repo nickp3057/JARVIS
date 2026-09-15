@@ -518,8 +518,14 @@ CALENDAR_ALERT_LEAD_MIN=10  # warn this many minutes before a meeting
   the schedule and text for the phone to register as local notifications;
   `study_brief_preview` lets Nick hear what tomorrow's brief will say and
   iterate on it. Calendar assessment detection now reads the same keyword
-  setting. The phone-side changes (ask for notification permission on toggle,
-  schedule from the server payload) are the next step.
+  setting. On the phone (1.23 / build 25) the Settings toggle now asks iOS for
+  notification permission the moment it is switched on (previously the prompt
+  waited for the first morning with an assessment, so the app never appeared
+  under iOS Notification settings), the local hour picker is gone in favour of
+  the schedule JARVIS reports, and the scheduler registers the server-composed
+  bodies as local notifications. A calendar outage or transport failure leaves
+  the queued briefs alone; an older Core without the endpoint falls back to the
+  phone-side template plan.
 - **Media storage measured through Radarr** — with no local mount, the Hub's
   storage card reads Radarr's (then Sonarr's) `/api/v3/diskspace` report and
   shows the volume holding the root folder, so the NAS library is measured

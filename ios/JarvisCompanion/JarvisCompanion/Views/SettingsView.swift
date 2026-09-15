@@ -7,11 +7,14 @@ struct SettingsView: View {
     @Environment(\.openURL) private var openURL
     @Environment(\.scenePhase) private var scenePhase
     var embedded = false
+    /// The schedule as JARVIS Core reports it (nil until the Hub has loaded).
+    var studyBrief: StudyBrief? = nil
     @State private var revealToken = false
     @State private var testing = false
     @State private var connectionResult: String?
     @State private var connectionSucceeded = false
     @State private var notificationStatus = "Checking permission…"
+    @State private var permissionUndetermined = false
 
     var body: some View {
         NavigationStack {
@@ -61,22 +64,38 @@ struct SettingsView: View {
                         }
                     }
                     CockpitPanel("Study brief", symbol: "graduationcap") {
-                        Toggle("Daily assessment reminders", isOn: $settings.studyAlertsEnabled).tint(JarvisTheme.cyan)
+                        Toggle("Deliver on this phone", isOn: $settings.studyAlertsEnabled).tint(JarvisTheme.cyan)
                         if settings.studyAlertsEnabled {
-                            Picker("Delivery time", selection: $settings.studyAlertHour) {
-                                ForEach(0..<24, id: \.self) { hour in
-                                    Text(Self.hourLabel(hour)).tag(hour)
+                            if let brief = studyBrief {
+                                Text(Self.scheduleSummary(brief)).font(.subheadline.weight(.medium))
+                                if !brief.error.isEmpty {
+                                    Text(brief.error).font(.caption).foregroundStyle(JarvisTheme.amber)
+                                } else if let next = brief.briefs.first {
+                                    Text("Next: \(next.fireDate.formatted(date: .abbreviated, time: .shortened))")
+                                        .font(.caption.monospacedDigit()).foregroundStyle(JarvisTheme.cyan)
+                                    Text(next.body).font(.caption).foregroundStyle(.secondary).lineLimit(4)
+                                } else {
+                                    Text(brief.enabled ? "Nothing on your calendar inside the warning window yet."
+                                                       : "JARVIS has the brief switched off.")
+                                        .font(.caption).foregroundStyle(.secondary)
                                 }
+                            } else {
+                                Text("Schedule arrives from JARVIS Core once the Hub loads.")
+                                    .font(.caption).foregroundStyle(.secondary)
                             }
-                            .tint(JarvisTheme.cyan)
-                            Text("One daily brief with the days left until your quizzes and exams. Refresh the Hub to pick up calendar changes.")
+                            Text("JARVIS writes this brief and owns its schedule. To change the hour, warning window, keywords, or tone, just tell him: “move my study brief to 7” or “be blunter in the morning brief.”")
                                 .font(.footnote).foregroundStyle(.secondary)
                             HStack {
                                 Text(notificationStatus).font(.caption).foregroundStyle(.secondary)
                                 Spacer()
-                                Button("Permissions") {
-                                    if let url = URL(string: UIApplication.openNotificationSettingsURLString) { openURL(url) }
-                                }.font(.caption.weight(.medium))
+                                if permissionUndetermined {
+                                    Button("Allow notifications") { Task { await requestPermissionNow() } }
+                                        .font(.caption.weight(.semibold)).foregroundStyle(JarvisTheme.cyan)
+                                } else {
+                                    Button("Permissions") {
+                                        if let url = URL(string: UIApplication.openNotificationSettingsURLString) { openURL(url) }
+                                    }.font(.caption.weight(.medium))
+                                }
                             }
                         }
                     }
@@ -129,12 +148,25 @@ struct SettingsView: View {
     }
 
     private func refreshPermission() async {
-        switch await UNUserNotificationCenter.current().notificationSettings().authorizationStatus {
+        let status = await UNUserNotificationCenter.current().notificationSettings().authorizationStatus
+        permissionUndetermined = status == .notDetermined
+        switch status {
         case .authorized, .provisional, .ephemeral: notificationStatus = "Notifications allowed"
         case .denied: notificationStatus = "Notifications disabled in iOS Settings"
-        case .notDetermined: notificationStatus = "Permission requested when assessments sync"
+        case .notDetermined: notificationStatus = "Notifications not yet allowed"
         @unknown default: notificationStatus = "Check iOS notification settings"
         }
+    }
+
+    private func requestPermissionNow() async {
+        _ = try? await UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge])
+        await refreshPermission()
+    }
+
+    static func scheduleSummary(_ brief: StudyBrief) -> String {
+        guard brief.enabled else { return "Switched off by JARVIS" }
+        let days = brief.windowDays == 1 ? "1-day" : "\(brief.windowDays)-day"
+        return "Daily at \(hourLabel(brief.hour)) · \(days) warning"
     }
 
     private static func hourLabel(_ hour: Int) -> String {

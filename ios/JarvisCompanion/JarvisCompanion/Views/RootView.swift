@@ -29,7 +29,7 @@ struct RootView: View {
                     Label("Hub", systemImage: "gauge.with.dots.needle.50percent")
                 }
                 .tag(1)
-            SettingsView(embedded: true)
+            SettingsView(embedded: true, studyBrief: hub.studyBrief.value)
                 .tabItem { Label("Settings", systemImage: "slider.horizontal.3") }
                 .tag(2)
         }
@@ -38,7 +38,6 @@ struct RootView: View {
         .toolbarBackground(JarvisTheme.background, for: .tabBar)
         .toolbarBackground(.visible, for: .tabBar)
         .onChange(of: settings.studyAlertsEnabled) { Task { await hub.updateNotificationPreferences() } }
-        .onChange(of: settings.studyAlertHour) { Task { await hub.updateNotificationPreferences() } }
         .onChange(of: selection) { _, tab in
             if tab == 0 { chat.refreshConnectionStatus() }
         }

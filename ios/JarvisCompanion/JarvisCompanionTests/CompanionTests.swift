@@ -19,7 +19,15 @@ private final class MemoryTokenStore: TokenStoring {
 @MainActor
 private final class RecordingStudyScheduler: AcademicNotificationScheduling {
     var calls = 0
-    func sync(events: [AcademicEvent], enabled: Bool, hour: Int) async { calls += 1 }
+    var permissionRequests = 0
+    var lastBriefs: [StudyBriefEntry] = []
+    var lastEnabled = true
+    func requestPermission() async -> Bool { permissionRequests += 1; return true }
+    func sync(briefs: [StudyBriefEntry], enabled: Bool) async {
+        calls += 1
+        lastBriefs = briefs
+        lastEnabled = enabled
+    }
 }
 
 private final class MockProtocol: URLProtocol {
@@ -328,6 +336,97 @@ final class CompanionTests: XCTestCase {
         XCTAssertEqual(briefs.first?.body, "Biology quiz is tomorrow.\nMath exam is in 2 days.")
         XCTAssertFalse(briefs.contains { $0.body.contains("Finished") })
         XCTAssertEqual(Set(briefs.map(\.id)).count, briefs.count)
+    }
+
+    func testStudyBriefSchedulesServerComposedBriefs() async {
+        let scheduler = RecordingStudyScheduler()
+        let client = JarvisAPIClient(baseURL: URL(string: "http://localhost:8000")!, token: "test", session: session)
+        let hub = HubViewModel(settings: settings, clientFactory: { client }, snapshotDefaults: defaults,
+                               academicNotifications: scheduler)
+        MockProtocol.handler = { request in
+            if request.url!.path.hasSuffix("/api/study/brief") {
+                return (200, """
+                    {"enabled":true,"hour":7,"window_days":21,"keywords":["quiz"],"style":"blunt",
+                     "generated_at":1000,"composed_by":"model","error":"",
+                     "briefs":[{"id":"2026-09-16","fire_at":1789596000,"body":"Quiz tomorrow, sir.",
+                                "items":[{"title":"Biology quiz","days_left":1}]},
+                               {"id":"2026-09-17","fire_at":1789682400,"body":"Quiz today.","items":[]}]}
+                    """, 0)
+            }
+            return (200, """
+                {"generated_at":1000,"timers":[],"reminders":[],"next_event":null,"calendar_error":"",
+                 "academic_events":[{"id":"1","title":"Biology quiz","start_at":1789682400,"all_day":true,
+                                     "location":"","days_left":2}]}
+                """, 0)
+        }
+        await hub.refreshNow()
+        XCTAssertEqual(scheduler.calls, 1)
+        XCTAssertTrue(scheduler.lastEnabled)
+        XCTAssertEqual(scheduler.lastBriefs.map(\.body), ["Quiz tomorrow, sir.", "Quiz today."])
+        XCTAssertEqual(scheduler.lastBriefs.first?.items, [StudyBriefItem(title: "Biology quiz", daysLeft: 1)])
+        XCTAssertEqual(hub.studyBrief.value?.hour, 7)
+        XCTAssertEqual(hub.studyBrief.value?.windowDays, 21)
+        XCTAssertTrue(SettingsView.scheduleSummary(hub.studyBrief.value!).hasSuffix("· 21-day warning"))
+    }
+
+    func testStudyBriefCalendarOutageInPayloadKeepsQueue() async {
+        let scheduler = RecordingStudyScheduler()
+        let client = JarvisAPIClient(baseURL: URL(string: "http://localhost:8000")!, token: "test", session: session)
+        let hub = HubViewModel(settings: settings, clientFactory: { client }, snapshotDefaults: defaults,
+                               academicNotifications: scheduler)
+        MockProtocol.handler = { request in
+            if request.url!.path.hasSuffix("/api/study/brief") {
+                return (200, """
+                    {"enabled":true,"hour":9,"window_days":14,"error":"Calendar could not be reached.","briefs":[]}
+                    """, 0)
+            }
+            return (200, """
+                {"generated_at":1000,"timers":[],"reminders":[],"next_event":null,"calendar_error":"","academic_events":[]}
+                """, 0)
+        }
+        await hub.refreshNow()
+        XCTAssertEqual(scheduler.calls, 0)
+        XCTAssertEqual(hub.studyBrief.serverError, "Calendar could not be reached.")
+    }
+
+    func testOlderCoreWithoutStudyBriefEndpointPlansLocally() async {
+        let scheduler = RecordingStudyScheduler()
+        let client = JarvisAPIClient(baseURL: URL(string: "http://localhost:8000")!, token: "test", session: session)
+        let hub = HubViewModel(settings: settings, clientFactory: { client }, snapshotDefaults: defaults,
+                               academicNotifications: scheduler)
+        let tomorrow = Calendar.current.startOfDay(for: Date()).addingTimeInterval(86400 + 43200)
+        MockProtocol.handler = { request in
+            if request.url!.path.hasSuffix("/api/study/brief") { return (404, "{\"detail\":\"Not Found\"}", 0) }
+            return (200, """
+                {"generated_at":1000,"timers":[],"reminders":[],"next_event":null,"calendar_error":"",
+                 "academic_events":[{"id":"1","title":"Biology quiz","start_at":\(tomorrow.timeIntervalSince1970),
+                                     "all_day":true,"location":"","days_left":1}]}
+                """, 0)
+        }
+        await hub.refreshNow()
+        XCTAssertEqual(scheduler.calls, 1)
+        XCTAssertFalse(scheduler.lastBriefs.isEmpty)
+        // "tomorrow" before the 9 AM fire hour, "today" after it: either proves the local plan ran.
+        XCTAssertTrue(scheduler.lastBriefs.contains { $0.body.contains("Biology quiz is") })
+        XCTAssertNil(hub.studyBrief.loadError)
+    }
+
+    func testTogglingStudyBriefRequestsPermissionOrClearsQueue() async {
+        let scheduler = RecordingStudyScheduler()
+        let client = JarvisAPIClient(baseURL: URL(string: "http://localhost:8000")!, token: "test", session: session)
+        let hub = HubViewModel(settings: settings, clientFactory: { client }, snapshotDefaults: defaults,
+                               academicNotifications: scheduler)
+        settings.studyAlertsEnabled = false
+        await hub.updateNotificationPreferences()
+        XCTAssertEqual(scheduler.calls, 1)
+        XCTAssertFalse(scheduler.lastEnabled)
+        XCTAssertTrue(scheduler.lastBriefs.isEmpty)
+        MockProtocol.handler = { _ in (200, """
+            {"generated_at":1000,"timers":[],"reminders":[],"next_event":null,"calendar_error":"Calendar unavailable","academic_events":[]}
+            """, 0) }
+        settings.studyAlertsEnabled = true
+        await hub.updateNotificationPreferences()
+        XCTAssertEqual(scheduler.permissionRequests, 1)
     }
 
     func testCalendarOutageAndOlderCoreDoNotClearScheduledBriefs() async {

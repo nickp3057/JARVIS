@@ -94,6 +94,83 @@ struct AcademicEvent: Codable, Identifiable {
     }
 }
 
+/// `/api/study/brief`: the daily assessment countdown as JARVIS Core plans
+/// and writes it. The phone registers `briefs` as local notifications; the
+/// rules (hour, window, keywords, tone) are settings Nick changes by talking
+/// to JARVIS, so the app only displays them.
+struct StudyBrief: Decodable {
+    let error: String
+    let enabled: Bool
+    let hour: Int
+    let windowDays: Int
+    let keywords: [String]
+    let style: String
+    let composedBy: String
+    let briefs: [StudyBriefEntry]
+
+    enum CodingKeys: String, CodingKey {
+        case error, enabled, hour, keywords, style, briefs
+        case windowDays = "window_days"
+        case composedBy = "composed_by"
+    }
+
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        error = try values.decodeIfPresent(String.self, forKey: .error) ?? ""
+        enabled = try values.decodeIfPresent(Bool.self, forKey: .enabled) ?? true
+        hour = try values.decodeIfPresent(Int.self, forKey: .hour) ?? 9
+        windowDays = try values.decodeIfPresent(Int.self, forKey: .windowDays) ?? 14
+        keywords = try values.decodeIfPresent([String].self, forKey: .keywords) ?? []
+        style = try values.decodeIfPresent(String.self, forKey: .style) ?? ""
+        composedBy = try values.decodeIfPresent(String.self, forKey: .composedBy) ?? ""
+        briefs = try values.decodeIfPresent([StudyBriefEntry].self, forKey: .briefs) ?? []
+    }
+}
+
+struct StudyBriefEntry: Decodable, Identifiable, Equatable {
+    let id: String
+    let fireAt: Double
+    let body: String
+    let items: [StudyBriefItem]
+
+    var fireDate: Date { Date(timeIntervalSince1970: fireAt) }
+
+    init(id: String, fireAt: Double, body: String, items: [StudyBriefItem]) {
+        self.id = id
+        self.fireAt = fireAt
+        self.body = body
+        self.items = items
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case id, body, items
+        case fireAt = "fire_at"
+    }
+
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        id = try values.decode(String.self, forKey: .id)
+        fireAt = try values.decode(Double.self, forKey: .fireAt)
+        body = try values.decodeIfPresent(String.self, forKey: .body) ?? ""
+        items = try values.decodeIfPresent([StudyBriefItem].self, forKey: .items) ?? []
+    }
+}
+
+struct StudyBriefItem: Decodable, Equatable {
+    let title: String
+    let daysLeft: Int
+
+    init(title: String, daysLeft: Int) {
+        self.title = title
+        self.daysLeft = daysLeft
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case title
+        case daysLeft = "days_left"
+    }
+}
+
 struct StorageStatus: Decodable {
     let error: String
     let label: String
