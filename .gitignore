@@ -13,3 +13,5 @@ memory/obsidian/
 memory/debug_reports.json
 !.env.example
 .DS_Store
+memory/google_credentials.json
+memory/google_token.json
