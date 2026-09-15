@@ -49,6 +49,13 @@ struct ChatView: View {
             .toolbarBackground(.visible, for: .navigationBar)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
+                ToolbarItemGroup(placement: .keyboard) {
+                    Spacer()
+                    Button("Done") { composerFocused = false }
+                        .font(.body.weight(.semibold))
+                        .foregroundStyle(JarvisTheme.cyan)
+                        .accessibilityHint("Hides the keyboard")
+                }
                 ToolbarItem(placement: .topBarLeading) {
                     Button("History", systemImage: "clock.arrow.circlepath") {
                         showingHistory = true

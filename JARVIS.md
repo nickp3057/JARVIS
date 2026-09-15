@@ -526,6 +526,9 @@ CALENDAR_ALERT_LEAD_MIN=10  # warn this many minutes before a meeting
   bodies as local notifications. A calendar outage or transport failure leaves
   the queued briefs alone; an older Core without the endpoint falls back to the
   phone-side template plan.
+  1.25 / build 27 adds a Done button above the keyboard in Chat, since the
+  multi-line composer's Return key inserts a newline and there was no other
+  way to dismiss the keyboard short of dragging the transcript.
 - **Media storage measured through Radarr** — with no local mount, the Hub's
   storage card reads Radarr's (then Sonarr's) `/api/v3/diskspace` report and
   shows the volume holding the root folder, so the NAS library is measured
