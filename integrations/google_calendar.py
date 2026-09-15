@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import os
 import re
+import threading
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
@@ -41,6 +42,14 @@ _DEFAULT_TOKEN = _PROJECT_ROOT / "memory" / "google_token.json"
 
 _service: Any | None = None
 _service_failed = False
+# googleapiclient/httplib2 are not thread-safe: the Now snapshot, the study
+# brief, the calendar monitor, and chat tools can all ask for events at once,
+# and concurrent calls through one service object fail with SSL record-layer
+# errors. Every API call goes through this lock.
+_api_lock = threading.Lock()
+# True when the last upcoming_events() call could not reach every calendar,
+# so callers can avoid caching a half-empty result for long.
+last_fetch_partial = False
 
 
 def _classify_academic(title: str) -> str | None:
@@ -79,7 +88,8 @@ def _calendar_ids(svc: Any) -> list[dict[str, str]]:
     if _calendar_list_cache and _calendar_list_cache[0] > now:
         return list(_calendar_list_cache[1])
     try:
-        resp = svc.calendarList().list(maxResults=250, showHidden=False).execute()
+        with _api_lock:
+            resp = svc.calendarList().list(maxResults=250, showHidden=False).execute()
     except Exception as exc:  # noqa: BLE001
         log.warning("Calendar list lookup failed; using primary only: %s", exc)
         return [{"id": "primary", "name": "primary"}]
@@ -200,13 +210,17 @@ def upcoming_events(max_results: int = 10, hours_ahead: float | None = None,
     if hours_ahead:
         params["timeMax"] = (now + timedelta(hours=hours_ahead)).isoformat()
 
+    global last_fetch_partial
     out: list[dict[str, Any]] = []
     reached_any = False
+    failed = 0
     for calendar in _calendar_ids(svc):
         try:
-            resp = svc.events().list(calendarId=calendar["id"], **params).execute()
+            with _api_lock:
+                resp = svc.events().list(calendarId=calendar["id"], **params).execute()
         except Exception as exc:  # noqa: BLE001
             log.warning("Calendar list failed for %s: %s", calendar["name"], exc)
+            failed += 1
             continue
         reached_any = True
         for ev in resp.get("items", []):
@@ -221,6 +235,7 @@ def upcoming_events(max_results: int = 10, hours_ahead: float | None = None,
                     "calendar": calendar["name"],
                 }
             )
+    last_fetch_partial = failed > 0
     if not reached_any:
         return None
     # The same event often lives on two calendars (a class schedule imported

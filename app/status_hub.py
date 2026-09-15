@@ -33,6 +33,7 @@ import requests
 from brain import study_brief
 from brain.reminders import active_reminders
 from brain.timers import active_timers
+from integrations import google_calendar
 from integrations.google_calendar import is_configured as calendar_configured
 from integrations.google_calendar import academic_events_from, upcoming_events
 from integrations.home_assistant import _config as _ha_config
@@ -162,11 +163,25 @@ def _now_uncached() -> dict[str, Any]:
     }
 
 
+_CALENDAR_TTL_S = 300.0
+_CALENDAR_PARTIAL_TTL_S = 30.0
+
+
 def _calendar_events() -> list[dict[str, Any]] | None:
-    """Sixty days of calendar, shared by the Now snapshot and the study brief."""
-    return _cached("calendar-events", 300.0, lambda: upcoming_events(
-        max_results=2500, hours_ahead=60 * 24, allow_interactive=False
-    ))
+    """Sixty days of calendar, shared by the Now snapshot and the study brief.
+
+    A fetch that missed some calendars is kept only briefly so the next poll
+    retries instead of showing a half-empty agenda for five minutes."""
+    now = time.monotonic()
+    with _cache_lock:
+        hit = _cache.get("calendar-events")
+        if hit and hit[0] > now:
+            return hit[1]
+    events = upcoming_events(max_results=2500, hours_ahead=60 * 24, allow_interactive=False)
+    ttl = _CALENDAR_PARTIAL_TTL_S if google_calendar.last_fetch_partial else _CALENDAR_TTL_S
+    with _cache_lock:
+        _cache["calendar-events"] = (time.monotonic() + ttl, events)
+    return events
 
 
 # --- Study brief -----------------------------------------------------------

@@ -127,6 +127,51 @@ class MultiCalendarTests(unittest.TestCase):
         self.assertEqual(sorted(e["summary"] for e in merged), ["CS 3190 Quiz 2", "Different thing"])
         self.assertEqual(next(e for e in merged if "Quiz" in e["summary"])["calendar"], "Nick")
 
+    def test_partial_fetch_is_flagged(self) -> None:
+        svc = _Service(CALENDARS, EVENTS, failing={"primary"})
+        with patch.object(gc, "_get_service", return_value=svc):
+            gc.upcoming_events(max_results=10)
+            self.assertTrue(gc.last_fetch_partial)
+            svc._events.failing = set()
+            gc.upcoming_events(max_results=10)
+            self.assertFalse(gc.last_fetch_partial)
+
+    def test_api_calls_are_serialised(self) -> None:
+        """Two threads fetching at once never overlap inside the client."""
+        import threading
+
+        inside = 0
+        overlap = False
+        gate = threading.Lock()
+
+        class _SlowExec(_Exec):
+            def execute(self):
+                nonlocal inside, overlap
+                with gate:
+                    inside += 1
+                    if inside > 1:
+                        overlap = True
+                import time
+                time.sleep(0.01)
+                with gate:
+                    inside -= 1
+                return super().execute()
+
+        class _SlowEvents(_Events):
+            def list(self, calendarId, **params):
+                return _SlowExec({"items": self.by_calendar.get(calendarId, [])})
+
+        svc = _Service(CALENDARS, EVENTS)
+        svc._events = _SlowEvents(EVENTS)
+        with patch.dict(os.environ, {"GOOGLE_CALENDAR_ID": "primary,school@group.calendar.google.com"}), \
+             patch.object(gc, "_get_service", return_value=svc):
+            threads = [threading.Thread(target=gc.upcoming_events, kwargs={"max_results": 10}) for _ in range(4)]
+            for t in threads:
+                t.start()
+            for t in threads:
+                t.join()
+        self.assertFalse(overlap)
+
     def test_max_results_applies_after_merge(self) -> None:
         svc = _Service(CALENDARS, EVENTS)
         with patch.object(gc, "_get_service", return_value=svc):

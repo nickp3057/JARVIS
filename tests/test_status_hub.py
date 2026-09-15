@@ -111,6 +111,19 @@ class StatusHubEndpointTests(unittest.TestCase):
             status_hub.now_status()
         calendar.assert_called_once_with(max_results=2500, hours_ahead=1440, allow_interactive=False)
 
+    def test_partial_calendar_fetch_is_cached_only_briefly(self) -> None:
+        import integrations.google_calendar as google_calendar
+
+        with patch.object(status_hub, "upcoming_events", return_value=[]) as calendar:
+            google_calendar.last_fetch_partial = True
+            try:
+                status_hub._calendar_events()
+            finally:
+                google_calendar.last_fetch_partial = False
+            with patch.object(status_hub.time, "monotonic", return_value=status_hub.time.monotonic() + 31):
+                status_hub._calendar_events()
+        self.assertEqual(calendar.call_count, 2)
+
     def test_media_storage_unconfigured_degrades_cleanly(self) -> None:
         with patch.dict(os.environ, {
             "MEDIA_STORAGE_PATH": "", "RADARR_ROOT_FOLDER": "", "SONARR_ROOT_FOLDER": "",
