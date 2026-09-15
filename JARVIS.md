@@ -432,7 +432,8 @@ JARVIS_SERVER_PORT=8000
 # Companion dashboard (read-only status hub endpoints)
 PLEX_URL=                   # Plex base URL for /api/links + /api/status/services
 HOME_DASHBOARD_ENTITIES=    # comma-separated HA entity_ids for /api/home/entities
-MEDIA_STORAGE_PATH=         # mounted filesystem containing the video library
+MEDIA_STORAGE_PATH=         # local mount of the video library; leave blank to
+                            # measure the NAS volume via Radarr/Sonarr diskspace
 MEDIA_STORAGE_LABEL=Media storage # friendly Hub label; no key required
 
 # Google Calendar (optional, read-only)
@@ -516,8 +517,11 @@ CALENDAR_ALERT_LEAD_MIN=10  # warn this many minutes before a meeting
   reminders during the final two weeks. These use iOS local notifications—no
   push service or new API key. The Hub also reports free/used/total capacity
   for exactly one configured media filesystem through `/api/status/storage`.
-  `MEDIA_STORAGE_PATH` can remain blank (with a clear unconfigured state), or
-  falls back to the existing Radarr/Sonarr root-folder setting.
+  `MEDIA_STORAGE_PATH` measures a filesystem mounted on the JARVIS host; when
+  it is blank the Hub asks Radarr (then Sonarr) for its `/api/v3/diskspace`
+  report and shows the mount holding the root folder, so a library on the
+  NAS is measured without mounting it on the Optiplex. Only when neither
+  source exists does the panel report an unconfigured state.
 - **Guarded price watching** (`brain/price_watch.py`) — `watch_price`,
   `list_price_watches`, `check_prices`, and `remove_price_watch` persist public
   product URLs and inspect JSON-LD/product metadata without a shopping API.

@@ -119,6 +119,63 @@ class StatusHubEndpointTests(unittest.TestCase):
         self.assertIn("not configured", body["error"])
         self.assertEqual(body["free_bytes"], 0)
 
+    _NAS_DISKS = [
+        {"path": "/", "freeSpace": 100, "totalSpace": 1_000},
+        {"path": "/config", "freeSpace": 100, "totalSpace": 1_000},
+        {"path": "/data", "freeSpace": 4_000, "totalSpace": 6_000},
+        {"path": "/movies", "freeSpace": 4_000, "totalSpace": 6_000},
+    ]
+
+    def test_media_storage_falls_back_to_radarr_disk_space(self) -> None:
+        """No local path: measure the NAS volume via Radarr, picking the mount
+        that holds the root folder rather than the container's root disk."""
+        with patch.dict(os.environ, {
+            "MEDIA_STORAGE_PATH": "", "RADARR_ROOT_FOLDER": "", "SONARR_ROOT_FOLDER": "",
+            "RADARR_URL": "http://nas:7878", "RADARR_API_KEY": "k",
+        }), \
+             patch.object(status_hub.shutil, "disk_usage") as disk_usage, \
+             patch.object(status_hub, "servarr_request", return_value=(True, self._NAS_DISKS)) as req, \
+             patch.object(status_hub, "get_root_folders", return_value=(True, [{"path": "/movies"}])):
+            body = self.client.get("/api/status/storage", headers=self.headers).json()
+        disk_usage.assert_not_called()
+        req.assert_called_once_with("radarr", "GET", "/api/v3/diskspace")
+        self.assertEqual(body["error"], "")
+        self.assertEqual(body["total_bytes"], 6_000)
+        self.assertEqual(body["free_bytes"], 4_000)
+        self.assertEqual(body["used_bytes"], 2_000)
+        self.assertEqual(body["used_fraction"], 0.3333)
+
+    def test_media_storage_root_folder_setting_selects_mount(self) -> None:
+        with patch.dict(os.environ, {
+            "MEDIA_STORAGE_PATH": "", "RADARR_ROOT_FOLDER": "/data/media/movies",
+            "RADARR_URL": "http://nas:7878", "RADARR_API_KEY": "k",
+        }), \
+             patch.object(status_hub, "servarr_request", return_value=(True, self._NAS_DISKS)), \
+             patch.object(status_hub, "get_root_folders") as root_folders:
+            body = self.client.get("/api/status/storage", headers=self.headers).json()
+        root_folders.assert_not_called()
+        self.assertEqual(body["total_bytes"], 6_000)
+
+    def test_media_storage_local_path_takes_precedence_over_radarr(self) -> None:
+        usage = type("Usage", (), {"total": 1_000, "used": 750, "free": 250})()
+        with patch.dict(os.environ, {
+            "MEDIA_STORAGE_PATH": "/mnt/nas", "RADARR_URL": "http://nas:7878", "RADARR_API_KEY": "k",
+        }), \
+             patch.object(status_hub.shutil, "disk_usage", return_value=usage), \
+             patch.object(status_hub, "servarr_request") as req:
+            body = self.client.get("/api/status/storage", headers=self.headers).json()
+        req.assert_not_called()
+        self.assertEqual(body["used_bytes"], 750)
+
+    def test_media_storage_radarr_unreachable_degrades_with_error(self) -> None:
+        with patch.dict(os.environ, {
+            "MEDIA_STORAGE_PATH": "", "RADARR_URL": "http://nas:7878", "RADARR_API_KEY": "k",
+        }), \
+             patch.object(status_hub, "servarr_request", return_value=(False, "Could not reach Radarr")):
+            body = self.client.get("/api/status/storage", headers=self.headers).json()
+        self.assertIn("could not be read from Radarr", body["error"])
+        self.assertEqual(body["total_bytes"], 0)
+
     def test_torrents_degrade_to_200_with_error_when_unreachable(self) -> None:
         with patch.object(status_hub, "list_transfers", return_value=(False, "down")):
             response = self.client.get("/api/status/torrents", headers=self.headers)

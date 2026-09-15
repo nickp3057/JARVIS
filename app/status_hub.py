@@ -42,6 +42,7 @@ from integrations.servarr_common import (
     _queue_title,
     _service_url,
     get_queue,
+    get_root_folders,
     is_configured as servarr_configured,
     request as servarr_request,
 )
@@ -164,16 +165,36 @@ def _now_uncached() -> dict[str, Any]:
 # --- Media storage ---------------------------------------------------------
 
 def media_storage_status() -> dict[str, Any]:
-    """Disk usage for the one configured media filesystem, never all drives."""
+    """Disk usage for the one media filesystem, never all drives.
+
+    Two sources, in priority order:
+
+    1. ``MEDIA_STORAGE_PATH`` — a filesystem mounted on the JARVIS host,
+       measured locally.
+    2. Radarr's (then Sonarr's) ``/api/v3/diskspace`` report, so a library
+       that lives on the NAS is measured without mounting anything on the
+       JARVIS host. The entry chosen is the mount that holds the service's
+       root folder (``RADARR_ROOT_FOLDER`` / ``SONARR_ROOT_FOLDER`` when set,
+       otherwise the service's first root folder).
+    """
     return _cached("media-storage", _STORAGE_TTL_S, _media_storage_uncached)
 
 
+def _storage_payload(label: str, total: int, free: int, used: int | None = None) -> dict[str, Any]:
+    if used is None:
+        used = max(total - free, 0)
+    return {
+        "error": "",
+        "label": label,
+        "total_bytes": total,
+        "used_bytes": used,
+        "free_bytes": free,
+        "used_fraction": round(used / total, 4) if total else 0.0,
+    }
+
+
 def _media_storage_uncached() -> dict[str, Any]:
-    path = (
-        os.getenv("MEDIA_STORAGE_PATH", "").strip()
-        or os.getenv("RADARR_ROOT_FOLDER", "").strip()
-        or os.getenv("SONARR_ROOT_FOLDER", "").strip()
-    )
+    path = os.getenv("MEDIA_STORAGE_PATH", "").strip()
     label = os.getenv("MEDIA_STORAGE_LABEL", "Media storage").strip() or "Media storage"
     empty = {
         "label": label,
@@ -182,21 +203,63 @@ def _media_storage_uncached() -> dict[str, Any]:
         "free_bytes": 0,
         "used_fraction": 0.0,
     }
-    if not path:
-        return {"error": "Media storage path is not configured.", **empty}
-    try:
-        usage = shutil.disk_usage(os.path.expanduser(path))
-    except OSError as exc:
-        log.warning("Media storage check failed for %s: %s", path, exc)
-        return {"error": "Media storage is not mounted or reachable.", **empty}
-    return {
-        "error": "",
-        "label": label,
-        "total_bytes": usage.total,
-        "used_bytes": usage.used,
-        "free_bytes": usage.free,
-        "used_fraction": round(usage.used / usage.total, 4) if usage.total else 0.0,
-    }
+    if path:
+        try:
+            usage = shutil.disk_usage(os.path.expanduser(path))
+        except OSError as exc:
+            log.warning("Media storage check failed for %s: %s", path, exc)
+            return {"error": "Media storage is not mounted or reachable.", **empty}
+        return _storage_payload(label, usage.total, usage.free, usage.used)
+
+    remote_error = ""
+    for service in ("radarr", "sonarr"):
+        if not servarr_configured(service):
+            continue
+        result = _servarr_disk_space(service)
+        if isinstance(result, str):
+            remote_error = remote_error or result
+            continue
+        total, free = result
+        return _storage_payload(label, total, free)
+
+    if remote_error:
+        return {"error": remote_error, **empty}
+    return {"error": "Media storage path is not configured.", **empty}
+
+
+def _servarr_disk_space(service: str) -> tuple[int, int] | str:
+    """``(total_bytes, free_bytes)`` for the mount holding ``service``'s
+    library, or an error string. Paths are as the service sees them (inside
+    its container, typically), which is exactly what its diskspace report
+    uses too."""
+    ok, disks = servarr_request(service, "GET", "/api/v3/diskspace")
+    if not ok:
+        return f"Media storage could not be read from {service.title()}."
+    if not isinstance(disks, list) or not disks:
+        return f"{service.title()} reported no disk space information."
+
+    root = os.getenv(f"{service.upper()}_ROOT_FOLDER", "").strip()
+    if not root:
+        ok, folders = get_root_folders(service)
+        if ok and isinstance(folders, list) and folders:
+            root = str(folders[0].get("path", "") or "")
+
+    best: dict[str, Any] | None = None
+    if root:
+        root_norm = root.rstrip("/") or "/"
+        for disk in disks:
+            mount = str(disk.get("path", "") or "").rstrip("/") or "/"
+            if mount == "/" or root_norm == mount or root_norm.startswith(mount + "/"):
+                if best is None or len(mount) > len(str(best.get("path", "")).rstrip("/") or "/"):
+                    best = disk
+    if best is None:
+        best = max(disks, key=lambda disk: int(disk.get("totalSpace", 0) or 0))
+
+    total = int(best.get("totalSpace", 0) or 0)
+    free = int(best.get("freeSpace", 0) or 0)
+    if total <= 0:
+        return f"{service.title()} reported an empty disk space entry."
+    return total, free
 
 
 # --- Torrents --------------------------------------------------------------
