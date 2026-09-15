@@ -149,6 +149,7 @@ def _now_uncached() -> dict[str, Any]:
                     "all_day": bool(academic.get("all_day", False)),
                     "location": str(academic.get("location") or ""),
                     "days_left": int(academic.get("days_left", 0)),
+                    "kind": str(academic.get("kind") or "assessment"),
                 })
 
     return {

@@ -62,7 +62,43 @@ class SettingsAndKeywordTests(unittest.TestCase):
         self.assertTrue(cfg["enabled"])
         self.assertEqual(cfg["hour"], 9)
         self.assertEqual(cfg["window_days"], 14)
-        self.assertEqual(cfg["keywords"], ["quiz", "test", "exam", "midterm", "final"])
+        self.assertEqual(cfg["keywords"], ["quiz", "test", "testlet", "exam", "midterm", "final"])
+        self.assertEqual(cfg["assignment_window_days"], 7)
+        self.assertIn("homework", cfg["assignment_keywords"])
+
+    def test_classify_assessments_assignments_and_noise(self) -> None:
+        self.assertEqual(study_brief.classify("CS 3550 Testlet 1"), "assessment")
+        self.assertEqual(study_brief.classify("CS 3505 Testlets"), "assessment")
+        self.assertEqual(study_brief.classify("Homework 4"), "assignment")
+        self.assertEqual(study_brief.classify("Lab 2 due"), "assignment")
+        self.assertEqual(study_brief.classify("Quiz 2 due"), "assessment")
+        self.assertIsNone(study_brief.classify("Buy Parking Permit"))
+        self.assertIsNone(study_brief.classify("Fall Break (No Classes)"))
+
+    def test_assignments_use_their_own_shorter_window(self) -> None:
+        events = [
+            {"summary": "Homework 3", "start": _local(2026, 9, 20), "all_day": True},
+            {"summary": "Homework 4", "start": _local(2026, 9, 27), "all_day": True},
+            {"summary": "CS 3550 Testlet 1", "start": _local(2026, 9, 27, 9, 10), "all_day": False},
+        ]
+        briefs = study_brief.plan_briefs(events, now=NOW)
+        first = briefs[0]["items"]
+        self.assertEqual(first, [
+            {"title": "Homework 3", "days_left": 5, "kind": "assignment"},
+            {"title": "CS 3550 Testlet 1", "days_left": 12, "kind": "assessment"},
+        ])
+        self.assertEqual(study_brief.template_body(first).split("\n")[0], "Homework 3 due in 5 days.")
+        with patch.dict(os.environ, {"STUDY_BRIEF_ASSIGNMENT_WINDOW_DAYS": "14"}):
+            wide = study_brief.plan_briefs(events, now=NOW)[0]["items"]
+        self.assertIn({"title": "Homework 4", "days_left": 12, "kind": "assignment"}, wide)
+
+    def test_hub_countdown_tags_kind(self) -> None:
+        events = [
+            {"summary": "Homework 3", "start": _local(2026, 9, 20), "all_day": True},
+            {"summary": "CS 3550 Testlet 1", "start": _local(2026, 9, 27, 9, 10), "all_day": False},
+        ]
+        kinds = [(e["summary"], e["kind"]) for e in academic_events_from(events, now=NOW)]
+        self.assertEqual(kinds, [("Homework 3", "assignment"), ("CS 3550 Testlet 1", "assessment")])
 
     def test_env_overrides_and_clamping(self) -> None:
         with patch.dict(os.environ, {
@@ -108,7 +144,7 @@ class SameDayDedupeTests(unittest.TestCase):
     def test_plan_lists_each_assessment_once(self) -> None:
         with patch.dict(os.environ, dict(_DEFAULT_ENV)):
             briefs = study_brief.plan_briefs(self.PAIR[:2], now=_local(2026, 9, 20, 8))
-        self.assertEqual(briefs[0]["items"], [{"title": "CS 3190  Quiz 2 (Lec 5-8)", "days_left": 4}])
+        self.assertEqual(briefs[0]["items"], [{"title": "CS 3190  Quiz 2 (Lec 5-8)", "days_left": 4, "kind": "assessment"}])
 
     def test_hub_countdown_lists_each_assessment_once(self) -> None:
         with patch.dict(os.environ, dict(_DEFAULT_ENV)):
@@ -128,11 +164,11 @@ class PlanningTests(unittest.TestCase):
         briefs = study_brief.plan_briefs(EVENTS, now=NOW)
         by_id = {b["id"]: b for b in briefs}
         self.assertEqual(briefs[0]["id"], "2026-09-15")
-        self.assertEqual(briefs[0]["items"], [{"title": "CS 3550 Quiz 2", "days_left": 2}])
-        self.assertEqual(by_id["2026-09-17"]["items"],
-                         [{"title": "CS 3550 Quiz 2", "days_left": 0}, {"title": "Midterm Exam", "days_left": 13}])
+        self.assertEqual(briefs[0]["items"], [{"title": "CS 3550 Quiz 2", "days_left": 2, "kind": "assessment"}])
+        self.assertEqual([(i["title"], i["days_left"]) for i in by_id["2026-09-17"]["items"]],
+                         [("CS 3550 Quiz 2", 0), ("Midterm Exam", 13)])
         self.assertNotIn("2026-09-18", {i["title"] for i in by_id["2026-09-18"]["items"]})
-        self.assertEqual(by_id["2026-09-30"]["items"], [{"title": "Midterm Exam", "days_left": 0}])
+        self.assertEqual(by_id["2026-09-30"]["items"], [{"title": "Midterm Exam", "days_left": 0, "kind": "assessment"}])
         self.assertEqual(briefs[-1]["id"], "2026-09-30")
         self.assertEqual(len(briefs), 16)
         self.assertEqual(datetime.fromtimestamp(briefs[0]["fire_at"]).hour, 9)
@@ -147,7 +183,7 @@ class PlanningTests(unittest.TestCase):
         self.assertEqual(ids, {"2026-09-15", "2026-09-16"})
 
     def test_template_body_caps_at_four_lines(self) -> None:
-        items = [{"title": f"Quiz {i}", "days_left": i} for i in range(6)]
+        items = [{"title": f"Quiz {i}", "days_left": i, "kind": "assessment"} for i in range(6)]
         body = study_brief.template_body(items)
         self.assertEqual(body.count("\n"), 4)
         self.assertIn("+2 more in your Hub.", body)
@@ -219,7 +255,8 @@ class CompositionTests(unittest.TestCase):
         payload = study_brief.compose(EVENTS, now=NOW, client=_FakeClient(fail=True))
         spoken = study_brief.spoken_preview(payload)
         self.assertIn("fires daily at 9 AM", spoken)
-        self.assertIn("14-day warning window", spoken)
+        self.assertIn("14-day warning for assessments", spoken)
+        self.assertIn("7-day warning for assignments", spoken)
         self.assertIn("CS 3550 Quiz 2 is in 2 days.", spoken)
         self.assertIn("could not be reached", study_brief.spoken_preview(payload, "Calendar could not be reached."))
 

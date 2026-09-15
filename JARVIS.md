@@ -458,7 +458,9 @@ MEDIA_STORAGE_LABEL=Media storage # friendly Hub label; no key required
 STUDY_BRIEF_ENABLED=true    # send the morning assessment countdown at all
 STUDY_BRIEF_HOUR=9          # local hour (0-23) the brief fires
 STUDY_BRIEF_WINDOW_DAYS=14  # days of warning before an assessment
-STUDY_BRIEF_KEYWORDS=quiz,test,exam,midterm,final # calendar-title words that count
+STUDY_BRIEF_KEYWORDS=quiz,test,testlet,exam,midterm,final # assessment title words
+STUDY_BRIEF_ASSIGNMENT_KEYWORDS=assignment,homework,hw,lab,project,paper,essay,due
+STUDY_BRIEF_ASSIGNMENT_WINDOW_DAYS=7 # days of warning for work due
 STUDY_BRIEF_STYLE=          # free-form tone/emphasis note for the composed text
 STUDY_BRIEF_MODEL=          # composer model; falls back to MEMORY_EXTRACT_MODEL
 
@@ -526,9 +528,12 @@ CALENDAR_ALERT_LEAD_MIN=10  # warn this many minutes before a meeting
   bodies as local notifications. A calendar outage or transport failure leaves
   the queued briefs alone; an older Core without the endpoint falls back to the
   phone-side template plan.
-  1.25 / build 27 adds a Done button above the keyboard in Chat, since the
-  multi-line composer's Return key inserts a newline and there was no other
-  way to dismiss the keyboard short of dragging the transcript.
+  1.26 / build 28 lets the Chat keyboard be dismissed: a hide-keyboard button
+  appears at the left of the composer while typing, and tapping the transcript
+  or empty state also dismisses it. (1.25 tried the system keyboard toolbar,
+  which on iOS 27 floats as a capsule over the send button.) The same release
+  adds testlets to the default assessment keywords and a second keyword set
+  for assignments due, with its own shorter warning window.
 - **Media storage measured through Radarr** — with no local mount, the Hub's
   storage card reads Radarr's (then Sonarr's) `/api/v3/diskspace` report and
   shows the volume holding the root folder, so the NAS library is measured

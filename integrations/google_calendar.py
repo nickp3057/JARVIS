@@ -43,13 +43,13 @@ _service: Any | None = None
 _service_failed = False
 
 
-def _academic_pattern() -> re.Pattern[str]:
-    """Assessment keywords come from STUDY_BRIEF_KEYWORDS so Nick can widen
-    or narrow them by talking to JARVIS; the default matches quiz/test/exam/
-    midterm/final with plurals."""
-    from brain.study_brief import keyword_pattern
+def _classify_academic(title: str) -> str | None:
+    """"assessment" (quiz/testlet/exam...), "assignment" (homework/lab/...)
+    or None, from the STUDY_BRIEF_* keyword settings so Nick can widen or
+    narrow them by talking to JARVIS."""
+    from brain.study_brief import classify
 
-    return keyword_pattern()
+    return classify(title)
 
 
 def _dedupe_same_day(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -264,28 +264,30 @@ def upcoming_within(minutes: float) -> list[dict[str, Any]]:
 def academic_events_from(
     events: list[dict[str, Any]], now: datetime | None = None
 ) -> list[dict[str, Any]]:
-    """Return quiz/test/exam events with a local-calendar-day countdown.
+    """Return assessment and assignment events with a local-day countdown
+    and a ``kind`` of "assessment" or "assignment".
 
     Calendar titles are intentionally the source of truth: this needs no
     school-specific API, and it works with the read-only Google Calendar
     connection JARVIS already uses.
     """
     today = (now or datetime.now().astimezone()).astimezone().date()
-    pattern = _academic_pattern()
     academic: list[dict[str, Any]] = []
     for event in _dedupe_same_day(events):
         start = event.get("start")
         title = str(event.get("summary") or "")
-        if start is None or not pattern.search(title):
+        kind = _classify_academic(title)
+        if start is None or kind is None:
             continue
         item = dict(event)
+        item["kind"] = kind
         item["days_left"] = max(0, (start.astimezone().date() - today).days)
         academic.append(item)
     return academic
 
 
 def academic_deadlines(days_ahead: int = 60) -> list[dict[str, Any]] | None:
-    """Upcoming quizzes/tests/exams, or None when Calendar is unavailable."""
+    """Upcoming assessments and assignments, or None when Calendar is unavailable."""
     events = upcoming_events(max_results=100, hours_ahead=max(1, days_ahead) * 24)
     if events is None:
         return None

@@ -346,6 +346,11 @@ caller after `memory_extractor`.
 - `STUDY_BRIEF_HOUR`: local hour 0–23 the brief fires, defaults to 9.
 - `STUDY_BRIEF_WINDOW_DAYS`: 1–60 days of warning, defaults to 14.
 - `STUDY_BRIEF_KEYWORDS`: comma-separated calendar-title words counted as an
-  assessment (plurals tolerated); also drives the Hub's academic countdown.
+  assessment (quiz, test, testlet, exam, midterm, final; plurals tolerated);
+  also drives the Hub's academic countdown.
+- `STUDY_BRIEF_ASSIGNMENT_KEYWORDS` / `STUDY_BRIEF_ASSIGNMENT_WINDOW_DAYS`:
+  words that mark work due (homework, lab, project...) and their own, shorter
+  warning window, default 7 days. Items carry a `kind` so the brief can say
+  "due" for assignments.
 - `STUDY_BRIEF_STYLE`: free-form tone note handed to the composer.
 - `STUDY_BRIEF_MODEL`: composer model; falls back to `MEMORY_EXTRACT_MODEL`.

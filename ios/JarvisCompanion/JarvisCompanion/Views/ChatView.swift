@@ -35,11 +35,15 @@ struct ChatView: View {
                         .font(.caption).foregroundStyle(JarvisTheme.amber)
                         .padding(.horizontal, 20).padding(.vertical, 8)
                 }
-                if model.messages.isEmpty && !model.isAwaitingReply {
-                    emptyState
-                } else {
-                    transcript
+                Group {
+                    if model.messages.isEmpty && !model.isAwaitingReply {
+                        emptyState
+                    } else {
+                        transcript
+                    }
                 }
+                .contentShape(Rectangle())
+                .onTapGesture { composerFocused = false }
                 Rectangle().fill(JarvisTheme.border).frame(height: 1)
                 composer
             }
@@ -49,13 +53,6 @@ struct ChatView: View {
             .toolbarBackground(.visible, for: .navigationBar)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItemGroup(placement: .keyboard) {
-                    Spacer()
-                    Button("Done") { composerFocused = false }
-                        .font(.body.weight(.semibold))
-                        .foregroundStyle(JarvisTheme.cyan)
-                        .accessibilityHint("Hides the keyboard")
-                }
                 ToolbarItem(placement: .topBarLeading) {
                     Button("History", systemImage: "clock.arrow.circlepath") {
                         showingHistory = true
@@ -419,6 +416,18 @@ struct ChatView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
             HStack(alignment: .bottom, spacing: 9) {
+                if composerFocused {
+                    Button { composerFocused = false } label: {
+                        Image(systemName: "keyboard.chevron.compact.down")
+                            .font(.system(size: 16, weight: .semibold))
+                            .foregroundStyle(JarvisTheme.cyan)
+                            .frame(width: 46, height: 46)
+                            .background(JarvisTheme.cyan.opacity(0.10), in: .circle)
+                    }
+                    .accessibilityLabel("Done")
+                    .accessibilityHint("Hides the keyboard")
+                    .transition(.scale.combined(with: .opacity))
+                }
                 HStack(alignment: .bottom, spacing: 8) {
                     TextField("Message JARVIS", text: $model.draft, axis: .vertical)
                         .lineLimit(1...5)
@@ -474,6 +483,7 @@ struct ChatView: View {
         .padding(.top, 9)
         .padding(.bottom, 10)
         .background(.ultraThinMaterial)
+        .animation(reduceMotion ? nil : .easeOut(duration: 0.18), value: composerFocused)
     }
 
     private func scrollToBottom(_ proxy: ScrollViewProxy) {

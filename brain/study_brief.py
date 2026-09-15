@@ -27,7 +27,9 @@ from jarvis_logger import get_logger
 
 log = get_logger(__name__)
 
-DEFAULT_KEYWORDS = "quiz,test,exam,midterm,final"
+DEFAULT_KEYWORDS = "quiz,test,testlet,exam,midterm,final"
+DEFAULT_ASSIGNMENT_KEYWORDS = "assignment,homework,hw,lab,project,paper,essay,due"
+DEFAULT_ASSIGNMENT_WINDOW_DAYS = 7
 DEFAULT_HOUR = 9
 DEFAULT_WINDOW_DAYS = 14
 _MAX_DAYS_AHEAD = 30       # briefs prepared for the phone to schedule
@@ -51,20 +53,48 @@ def _int_env(name: str, default: int, lo: int, hi: int) -> int:
     return max(lo, min(hi, value))
 
 
-def keywords() -> list[str]:
-    raw = os.getenv("STUDY_BRIEF_KEYWORDS", "") or DEFAULT_KEYWORDS
+def _keyword_list(env_name: str, default: str) -> list[str]:
+    raw = os.getenv(env_name, "") or default
     seen: list[str] = []
     for word in raw.split(","):
         cleaned = " ".join(word.split()).strip().lower()
         if cleaned and cleaned not in seen:
             seen.append(cleaned)
-    return seen or DEFAULT_KEYWORDS.split(",")
+    return seen or default.split(",")
+
+
+def keywords() -> list[str]:
+    """Calendar-title words that mark an assessment (quiz, testlet, exam...)."""
+    return _keyword_list("STUDY_BRIEF_KEYWORDS", DEFAULT_KEYWORDS)
+
+
+def assignment_keywords() -> list[str]:
+    """Calendar-title words that mark work due (homework, lab, project...)."""
+    return _keyword_list("STUDY_BRIEF_ASSIGNMENT_KEYWORDS", DEFAULT_ASSIGNMENT_KEYWORDS)
+
+
+def _pattern(words: list[str]) -> re.Pattern[str]:
+    parts = [re.escape(word) + r"(?:s|es|zes)?" for word in words]
+    return re.compile(r"\b(?:" + "|".join(parts) + r")\b", re.IGNORECASE)
 
 
 def keyword_pattern() -> re.Pattern[str]:
-    """Match any configured keyword as a whole word, tolerating plurals."""
-    parts = [re.escape(word) + r"(?:s|es|zes)?" for word in keywords()]
-    return re.compile(r"\b(?:" + "|".join(parts) + r")\b", re.IGNORECASE)
+    """Match any configured assessment keyword as a whole word, tolerating plurals."""
+    return _pattern(keywords())
+
+
+def assignment_pattern() -> re.Pattern[str]:
+    return _pattern(assignment_keywords())
+
+
+def classify(title: str) -> str | None:
+    """``"assessment"``, ``"assignment"`` or None. Assessment wins a tie, so
+    "Quiz 2 due" counts as the quiz it is."""
+    if keyword_pattern().search(title):
+        return "assessment"
+    if assignment_pattern().search(title):
+        return "assignment"
+    return None
 
 
 def settings() -> dict[str, Any]:
@@ -74,6 +104,10 @@ def settings() -> dict[str, Any]:
         "hour": _int_env("STUDY_BRIEF_HOUR", DEFAULT_HOUR, 0, 23),
         "window_days": _int_env("STUDY_BRIEF_WINDOW_DAYS", DEFAULT_WINDOW_DAYS, 1, 60),
         "keywords": keywords(),
+        "assignment_keywords": assignment_keywords(),
+        "assignment_window_days": _int_env(
+            "STUDY_BRIEF_ASSIGNMENT_WINDOW_DAYS", DEFAULT_ASSIGNMENT_WINDOW_DAYS, 1, 60
+        ),
         "style": " ".join((os.getenv("STUDY_BRIEF_STYLE", "") or "").split())[:400],
     }
 
@@ -122,13 +156,13 @@ def plan_briefs(
     cfg = cfg or settings()
     now = (now or datetime.now()).astimezone()
     today = now.date()
-    pattern = keyword_pattern()
 
-    upcoming: list[tuple[str, datetime, bool]] = []
+    upcoming: list[tuple[str, datetime, bool, str]] = []
     for event in dedupe_same_day(events):
         title = str(event.get("summary") or "").strip()
         start = _event_start(event)
-        if not title or start is None or not pattern.search(title):
+        kind = classify(title) if title else None
+        if start is None or kind is None:
             continue
         all_day = bool(event.get("all_day", False))
         if all_day:
@@ -136,7 +170,7 @@ def plan_briefs(
                 continue
         elif start <= now:
             continue
-        upcoming.append((title, start, all_day))
+        upcoming.append((title, start, all_day, kind))
     upcoming.sort(key=lambda item: item[1])
 
     briefs: list[dict[str, Any]] = []
@@ -146,28 +180,33 @@ def plan_briefs(
         if fire <= now:
             continue
         items = []
-        for title, start, all_day in upcoming:
+        for title, start, all_day, kind in upcoming:
             remaining = (start.date() - day).days
-            if remaining < 0 or remaining > cfg["window_days"]:
+            window = cfg["window_days"] if kind == "assessment" else cfg["assignment_window_days"]
+            if remaining < 0 or remaining > window:
                 continue
             if not all_day and start < fire:
                 continue
-            items.append({"title": title, "days_left": remaining})
+            items.append({"title": title, "days_left": remaining, "kind": kind})
         if items:
             briefs.append({"id": day.isoformat(), "fire_at": fire.timestamp(), "items": items})
     return briefs
 
 
-def template_line(title: str, days_left: int) -> str:
+def template_line(title: str, days_left: int, kind: str = "assessment") -> str:
+    verb = "due" if kind == "assignment" else "is"
     if days_left <= 0:
-        return f"{title} is today."
+        return f"{title} {verb} today."
     if days_left == 1:
-        return f"{title} is tomorrow."
-    return f"{title} is in {days_left} days."
+        return f"{title} {verb} tomorrow."
+    return f"{title} {verb} in {days_left} days."
 
 
 def template_body(items: list[dict[str, Any]]) -> str:
-    lines = [template_line(str(i["title"]), int(i["days_left"])) for i in items[:4]]
+    lines = [
+        template_line(str(i["title"]), int(i["days_left"]), str(i.get("kind", "assessment")))
+        for i in items[:4]
+    ]
     if len(items) > 4:
         lines.append(f"+{len(items) - 4} more in your Hub.")
     return "\n".join(lines)
@@ -228,12 +267,13 @@ def _system_prompt(cfg: dict[str, Any]) -> str:
     return (
         "You are JARVIS, Nick's personal assistant: polished, dry British wit, "
         f"never breaks character, addresses him as \"{address}\". You are writing "
-        "the body of a morning phone notification that counts down to his "
-        "upcoming quizzes and exams.\n"
-        "Rules: plain text only, no markdown or emoji. At most three short lines "
-        "per brief, under 220 characters total. Every assessment listed must be "
-        "named with its exact days-left figure (today, tomorrow, or 'in N days'); "
-        "never invent or omit one. Keep the wit to a light touch; the facts come "
+        "the body of a morning phone notification: a synopsis of his upcoming "
+        "assessments (quizzes, testlets, exams) and assignments due.\n"
+        "Rules: plain text only, no markdown or emoji. At most four short lines "
+        "per brief, under 260 characters total. Every item listed must be named "
+        "with its exact days-left figure (today, tomorrow, or 'in N days'); items "
+        "of kind 'assignment' are work due, say 'due'; never invent or omit one. "
+        "Keep the wit to a light touch; the facts come "
         f"first.{style_line}"
     )
 
@@ -242,7 +282,13 @@ def compose_bodies_with_model(client: Any, briefs: list[dict[str, Any]], cfg: di
     """Ask the model for one body per brief. Raises on any failure so the
     caller can fall back; validates count and length."""
     payload = [
-        {"day": b["id"], "assessments": [{"title": i["title"], "days_left": i["days_left"]} for i in b["items"]]}
+        {
+            "day": b["id"],
+            "items": [
+                {"title": i["title"], "days_left": i["days_left"], "kind": i.get("kind", "assessment")}
+                for i in b["items"]
+            ],
+        }
         for b in briefs
     ]
     response = client.messages.create(
@@ -274,6 +320,8 @@ def compose(
         "hour": cfg["hour"],
         "window_days": cfg["window_days"],
         "keywords": cfg["keywords"],
+        "assignment_keywords": cfg["assignment_keywords"],
+        "assignment_window_days": cfg["assignment_window_days"],
         "style": cfg["style"],
         "generated_at": time.time(),
         "composed_by": "template",
@@ -339,10 +387,13 @@ def spoken_preview(payload: dict[str, Any], calendar_error: str = "") -> str:
     clock = f"{hour % 12 or 12} {'AM' if hour < 12 else 'PM'}"
     window = int(payload.get("window_days", DEFAULT_WINDOW_DAYS))
     keywords_text = ", ".join(payload.get("keywords") or [])
+    assignment_text = ", ".join(payload.get("assignment_keywords") or [])
+    assignment_window = int(payload.get("assignment_window_days", DEFAULT_ASSIGNMENT_WINDOW_DAYS))
     style = payload.get("style") or "none"
     header = (
         f"Study brief: {'on' if payload.get('enabled') else 'off'}, fires daily at {clock}, "
-        f"{window}-day warning window, keywords: {keywords_text}. Style note: {style}."
+        f"{window}-day warning for assessments ({keywords_text}), {assignment_window}-day "
+        f"warning for assignments ({assignment_text}). Style note: {style}."
     )
     if calendar_error:
         return f"{header} {calendar_error}"

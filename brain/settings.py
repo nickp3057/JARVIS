@@ -196,8 +196,21 @@ SETTINGS_SCHEMA: dict[str, dict[str, Any]] = {
         "type": "string",
         "description": (
             "Comma-separated calendar-title words that count as an assessment. "
-            "Default: quiz,test,exam,midterm,final."
+            "Default: quiz,test,testlet,exam,midterm,final."
         ),
+    },
+    "STUDY_BRIEF_ASSIGNMENT_KEYWORDS": {
+        "type": "string",
+        "description": (
+            "Comma-separated calendar-title words that count as work due. "
+            "Default: assignment,homework,hw,lab,project,paper,essay,due."
+        ),
+    },
+    "STUDY_BRIEF_ASSIGNMENT_WINDOW_DAYS": {
+        "type": "int",
+        "min": 1,
+        "max": 60,
+        "description": "How many days ahead an assignment starts appearing in the brief. Default 7.",
     },
     "STUDY_BRIEF_STYLE": {
         "type": "string",
