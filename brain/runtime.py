@@ -17,7 +17,7 @@ from threading import RLock
 import threading
 from typing import Any, Iterator
 
-from brain import memory_extractor
+from brain import memory_extractor, tool_health
 from brain.agent import JarvisAgent
 from brain.history import load_session_messages, session_exists, request_context, begin_companion_request, delete_session
 from brain.memory import list_facts
@@ -536,6 +536,7 @@ class JarvisRuntime:
                 continue
 
             self._home_monitor_failed = False
+            self._mark_home_monitor_healthy()
             current: dict[str, str] = {}
             entities_by_domain: dict[str, list[dict[str, Any]]] = {}
             for entity in payload:
@@ -621,6 +622,7 @@ class JarvisRuntime:
                 nonlocal ever_connected
                 was_offline = self._home_monitor_failed
                 self._home_monitor_failed = False
+                self._mark_home_monitor_healthy()
                 if not ever_connected or was_offline:
                     self.record_event(
                         kind="monitor",
@@ -682,6 +684,13 @@ class JarvisRuntime:
             self._home_snapshot = snapshot
         self._evaluate_home_proactive_rules(snapshot)
 
+    def _mark_home_monitor_healthy(self) -> None:
+        """Record a live-link success so the self-diagnosis flag clears."""
+        try:
+            tool_health.record("home_assistant_monitor", ok=True)
+        except Exception:  # noqa: BLE001
+            log.debug("tool_health.record failed for home monitor", exc_info=True)
+
     def _set_home_monitor_offline(self, error: str) -> None:
         with self._lock:
             previous = self._home_snapshot
@@ -700,6 +709,12 @@ class JarvisRuntime:
                 title="Home live monitor offline",
                 detail=error,
             )
+            try:
+                # Two strikes so the self-diagnosis block flags the link as degraded.
+                tool_health.record("home_assistant_monitor", ok=False, error=error)
+                tool_health.record("home_assistant_monitor", ok=False, error=error)
+            except Exception:  # noqa: BLE001
+                log.debug("tool_health.record failed for home monitor", exc_info=True)
 
     def _should_record_home_change(self, entity_id: str, old_state: str, state: str) -> bool:
         noisy_states = {"unknown", "unavailable", "none", ""}

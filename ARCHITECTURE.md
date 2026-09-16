@@ -126,6 +126,10 @@ Near-term responsibilities:
   system state.
 - Add more monitor workers that feed the event inbox: calendar, files, and
   system health.
+- Self-diagnosis is shipped at the tool layer: `brain/tool_health.py` scores
+  every tool call and every home-monitor outage, and degraded tools are
+  injected into the prompt so the model stops retrying, names the fault, and
+  clears it on recovery. Governed self-repair builds on this ledger.
 - Store task state for multi-step work.
 - Decide when to interrupt, notify quietly, or stay silent.
 - Grow the Obsidian baseline into indexed episodic and semantic memory, with the

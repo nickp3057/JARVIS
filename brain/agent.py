@@ -35,11 +35,13 @@ from brain.memory import render_memory_block
 from brain import standing_orders
 from brain.personality import (
     build_habits_section,
+    build_systems_health_section,
     build_memory_section,
     build_persona_prompt,
     build_standing_orders_section,
 )
 from brain.tools import execute_tool, get_tool_specs
+from brain import tool_health
 from jarvis_logger import get_logger
 
 # Load .env from the project root, regardless of where the user launched from.
@@ -48,8 +50,17 @@ load_dotenv(dotenv_path=_ENV_PATH)
 
 log = get_logger(__name__)
 
-ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
-ANTHROPIC_MODEL = os.getenv("ANTHROPIC_MODEL", "claude-haiku-4-5-20251001")
+_DEFAULT_MODEL = "claude-haiku-4-5-20251001"
+
+
+def _api_key() -> str:
+    """Read live so a key added to .env after launch is picked up on re-init."""
+    return (os.getenv("ANTHROPIC_API_KEY", "") or "").strip()
+
+
+def _model() -> str:
+    """Read live per request so `update_setting ANTHROPIC_MODEL` takes effect without a restart."""
+    return (os.getenv("ANTHROPIC_MODEL", "") or "").strip() or _DEFAULT_MODEL
 
 _MAX_TOKENS = 1024
 _MAX_TOOL_TURNS = 6
@@ -100,7 +111,7 @@ def _stream_round_separator(text_parts: list[str], delta: str, at_round_start: b
 
 
 def _get_client() -> Any | None:
-    if not ANTHROPIC_API_KEY:
+    if not _api_key():
         log.warning(
             "ANTHROPIC_API_KEY not set in environment (.env) - agent disabled."
         )
@@ -113,7 +124,7 @@ def _get_client() -> Any | None:
         )
         return None
     try:
-        return Anthropic(api_key=ANTHROPIC_API_KEY)
+        return Anthropic(api_key=_api_key())
     except Exception as exc:  # noqa: BLE001
         log.warning("Anthropic client init failed: %s - agent disabled.", exc)
         return None
@@ -264,7 +275,7 @@ class JarvisAgent:
 
         for _ in range(_MAX_TOOL_TURNS):
             response = self._client.messages.create(  # type: ignore[union-attr]
-                model=ANTHROPIC_MODEL,
+                model=_model(),
                 max_tokens=_MAX_TOKENS,
                 system=system,
                 tools=tools,
@@ -325,7 +336,7 @@ class JarvisAgent:
         for _ in range(_MAX_TOOL_TURNS):
             at_round_start = True
             with self._client.messages.stream(  # type: ignore[union-attr]
-                model=ANTHROPIC_MODEL,
+                model=_model(),
                 max_tokens=_MAX_TOKENS,
                 system=system,
                 tools=tools,
@@ -405,6 +416,7 @@ class JarvisAgent:
         dynamic = build_standing_orders_section(standing_orders.render_block())
         dynamic += build_memory_section(render_memory_block(latest_user_text))
         dynamic += build_habits_section(render_habits_block())
+        dynamic += build_systems_health_section(tool_health.render_block())
         context = self._recent_tool_context.get(self._session_id)
         if context:
             dynamic += (

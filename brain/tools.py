@@ -13,6 +13,7 @@ them and don't dispatch them locally.
 from __future__ import annotations
 
 import os
+import time
 from datetime import datetime
 from typing import Any, Callable
 
@@ -45,6 +46,7 @@ from brain.memory_proposals import (
 from brain.history import describe_session_summaries
 from brain import study_brief
 from brain.standing_orders import add_order, list_orders, remove_order
+from brain import tool_health
 from brain.habits import describe_habits
 from brain.knowledge_vault import capture_note, describe_search
 from brain.timers import cancel_timer, dismiss_timer, list_timers, pause_timer, resume_timer, set_timer
@@ -387,6 +389,15 @@ def _tool_update_setting(args: dict[str, Any]) -> str:
 
 def _tool_add_standing_order(args: dict[str, Any]) -> str:
     return add_order(args.get("text", ""))
+
+
+def _tool_system_health(_: dict[str, Any]) -> str:
+    return tool_health.report()
+
+
+def _tool_clear_tool_health(args: dict[str, Any]) -> str:
+    name = str(args.get("tool") or "").strip() or None
+    return tool_health.clear(name)
 
 
 def _tool_list_standing_orders(_: dict[str, Any]) -> str:
@@ -1308,6 +1319,27 @@ _CUSTOM_TOOLS: list[dict[str, Any]] = [
         },
     },
     {
+        "name": "system_health",
+        "description": (
+            "Self-diagnosis: report which of your own tools/integrations are failing "
+            "(consecutive errors, last error, when), which recovered, and which are slow. "
+            "Use it when Nick asks how you're doing, whether something is broken, or "
+            "before retrying a tool you suspect is down."
+        ),
+        "input_schema": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "clear_tool_health",
+        "description": (
+            "Clear the fault flag on one tool (or all tools when omitted) after Nick "
+            "says he fixed the cause, so you trust it again immediately."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {"tool": {"type": "string", "description": "Tool name; omit for all."}},
+        },
+    },
+    {
         "name": "list_standing_orders",
         "description": "List the standing orders currently in force, with ids.",
         "input_schema": {"type": "object", "properties": {}},
@@ -1725,6 +1757,8 @@ _DISPATCH: dict[str, Callable[[dict[str, Any]], str]] = {
     "get_setting": _tool_get_setting,
     "update_setting": _tool_update_setting,
     "add_standing_order": _tool_add_standing_order,
+    "system_health": _tool_system_health,
+    "clear_tool_health": _tool_clear_tool_health,
     "list_standing_orders": _tool_list_standing_orders,
     "remove_standing_order": _tool_remove_standing_order,
     "study_brief_preview": _tool_study_brief_preview,
@@ -1788,11 +1822,26 @@ def execute_tool(name: str, args: dict[str, Any], session_id: str | None = None)
     if handler is None:
         log.warning("Unknown tool requested: %s", name)
         return f"Tool error: no such tool '{name}'."
+    started = time.monotonic()
     try:
         safe_args = dict(args or {})
         if session_id:
             safe_args["_jarvis_session_id"] = session_id
-        return handler(safe_args)
+        result = handler(safe_args)
     except Exception as exc:  # noqa: BLE001
         log.exception("Tool %s raised", name)
+        _score_tool(name, ok=False, error=f"{type(exc).__name__}: {exc}", started=started)
         return f"Tool error while running {name}: {exc}"
+    failed = tool_health.looks_like_failure(result)
+    _score_tool(name, ok=not failed, error=result if failed else "", started=started)
+    return result
+
+
+def _score_tool(name: str, *, ok: bool, error: str, started: float) -> None:
+    """Feed the self-diagnosis ledger; never let bookkeeping break a tool call."""
+    if name in ("system_health", "clear_tool_health"):
+        return
+    try:
+        tool_health.record(name, ok=ok, error=error, elapsed_ms=(time.monotonic() - started) * 1000)
+    except Exception:  # noqa: BLE001
+        log.debug("tool_health.record failed for %s", name, exc_info=True)

@@ -60,6 +60,7 @@ Pearson-Stark-Jarvis/
 │   ├── runtime.py           JarvisRuntime — wraps agent + status snapshot
 │   ├── settings.py          Whitelist-based .env editor (update_setting tool)
 │   ├── standing_orders.py   Durable behavioural directives from Nick, injected every turn
+│   ├── tool_health.py       Self-diagnosis ledger: per-tool failures, degraded flags, prompt warning
 │   ├── study_brief.py       Daily quiz/exam countdown: settings, planning, JARVIS-composed text
 │   ├── timers.py            Timer store: set/cancel/pause/resume/dismiss/alarming state
 │   ├── tools.py             All tool schemas + dispatch (45+ tools)
@@ -154,7 +155,7 @@ RMS envelope from ElevenLabs audio drives the orb in real time using a monotonic
 
 ---
 
-## Tools (35+)
+## Tools (45+)
 
 ### Time & Info
 - `get_time` — current local time/date
@@ -314,6 +315,21 @@ RMS envelope from ElevenLabs audio drives the orb in real time using a monotonic
   unique fragment of the wording. Stored in `memory/standing_orders.json`,
   capped at 40 short lines. Persona rules tell JARVIS to record one whenever
   Nick corrects his behaviour instead of complying once.
+
+### Self-diagnosis *(new)*
+- `system_health` — which tools/integrations are failing right now (consecutive
+  errors, last error text, when), which recovered, and which are slow.
+- `clear_tool_health(tool?)` — drop the fault flag on one tool (or all) after
+  Nick fixes the cause. Backed by `brain/tool_health.py` and
+  `memory/tool_health.json`: every `execute_tool` call is scored (a raised
+  exception, a `Tool error` reply, or an outage phrase such as "not
+  configured"/"unreachable"/"timed out" counts as a failure); two failures in a
+  row, or four inside an hour, mark the tool degraded. Degraded tools are
+  injected into the dynamic system block as a "Systems health" section telling
+  JARVIS not to retry, to name the subsystem and likely fix, and to clear the
+  flag once Nick says it's repaired. The section disappears when everything is
+  healthy, so it costs no tokens in the normal case. The Home Assistant live
+  monitor reports into the same ledger as `home_assistant_monitor`.
 
 ### Study brief *(new)*
 - `study_brief_preview` — read back the daily study brief's settings and what
@@ -507,6 +523,15 @@ CALENDAR_ALERT_LEAD_MIN=10  # warn this many minutes before a meeting
 
 ## Recently Shipped
 
+- **Self-diagnosis and live model selection (1.27 / build 29)** —
+  `brain/tool_health.py` scores every tool call so JARVIS knows when one of
+  his own integrations is down: degraded tools ride into the system prompt as
+  a "Systems health" section (only while something is failing), and the
+  `system_health` / `clear_tool_health` tools let him report on and reset his
+  own faults. The Home Assistant live monitor feeds the same ledger.
+  `brain/agent.py` now reads `ANTHROPIC_MODEL` and `ANTHROPIC_API_KEY` live
+  per request, so `update_setting ANTHROPIC_MODEL` switches models without a
+  restart (the import-time read was a roadmap bug).
 - **Standing orders and a JARVIS-owned study brief (1.22 / build 24)** —
   `brain/standing_orders.py` gives Nick a durable way to change how JARVIS
   behaves by just telling him: the model records a one-line directive with
@@ -855,11 +880,6 @@ in value order:
   (serializing the runtime during companion streams). The agent already has
   its own conversation lock; the runtime lock should cover only session
   switching and shared-state mutation.
-- **`ANTHROPIC_API_KEY` / `ANTHROPIC_MODEL` read at import time** in
-  `brain/agent.py` — breaks the repo's "settings are read live" rule, so
-  changing the model via `update_setting` silently does nothing until
-  restart. Read them inside the request path (or at least re-read the model
-  per call).
 - **Per-turn memory disk reads** — `render_memory_block()` re-reads
   `profile.json` and re-tokenizes every fact each turn. Bounded and fine at
   60 facts; add an in-memory cache invalidated on write before the vault
@@ -892,6 +912,9 @@ in value order:
 - **Governed self-modification** — allow JARVIS to propose source/configuration
   changes through patches, tests, approval, activation, and automatic rollback;
   never permit unrestricted silent code rewriting.
+  The self-diagnosis ledger (`brain/tool_health.py`) is the sensing half of
+  this; the next step is letting JARVIS propose a `.env` or service fix for a
+  degraded tool and apply it only on approval.
 - **Media operations phase two** — add Radarr/Sonarr manual search and retry
   operations; guarded torrent controls and read-only history/missing/upcoming
   views are shipped.

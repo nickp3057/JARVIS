@@ -252,6 +252,26 @@ def build_standing_orders_section(orders_block: str = "") -> str:
     )
 
 
+def build_systems_health_section(health_block: str = "") -> str:
+    """Render degraded-tool warnings, or "" when every subsystem is healthy.
+
+    Self-diagnosis feed from brain/tool_health.py: only tools that are
+    currently failing appear, so the section vanishes once they recover.
+    """
+    health_block = (health_block or "").strip()
+    if not health_block:
+        return ""
+    return (
+        "\n\n# Systems health (self-diagnosis)\n"
+        "These tools of yours are currently failing. Do not call them again this turn "
+        "unless Nick explicitly asks; tell him plainly which subsystem is down, quote the "
+        "last error in one line, and suggest the likely fix (a .env setting, a service "
+        "on the NAS/Optiplex, or the network). Offer an alternative where one exists. "
+        "When he says it's fixed, call clear_tool_health and try again.\n\n"
+        f"{health_block}\n"
+    )
+
+
 def build_memory_section(memory_block: str = "") -> str:
     """Render the per-turn memory section, or "" when there is nothing to add.
 
