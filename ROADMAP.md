@@ -357,3 +357,10 @@ correctly.
 Update this file when priorities or milestones change. Move shipped work into
 `JARVIS.md`'s “Recently Shipped” section and keep `ARCHITECTURE.md` synchronized
 whenever runtime responsibilities, monitor settings, or API ownership change.
+
+## Beyond these milestones
+
+The self-learning / self-healing backlog (governed source patches, reflection
+after failed turns, skill acquisition, self-tuning settings, watchdog) lives in
+`FUTURE_SESSIONS.md`. Self-diagnosis and configuration self-repair shipped on
+2026-09-16; see `SELF_HEALING_HANDOFF.md`.
