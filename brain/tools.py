@@ -47,6 +47,7 @@ from brain.history import describe_session_summaries
 from brain import study_brief
 from brain.standing_orders import add_order, list_orders, remove_order
 from brain import tool_health
+from brain import self_repair
 from brain.habits import describe_habits
 from brain.knowledge_vault import capture_note, describe_search
 from brain.timers import cancel_timer, dismiss_timer, list_timers, pause_timer, resume_timer, set_timer
@@ -398,6 +399,26 @@ def _tool_system_health(_: dict[str, Any]) -> str:
 def _tool_clear_tool_health(args: dict[str, Any]) -> str:
     name = str(args.get("tool") or "").strip() or None
     return tool_health.clear(name)
+
+
+def _tool_diagnose_tool(args: dict[str, Any]) -> str:
+    return self_repair.diagnose(str(args.get("tool") or ""))
+
+
+def _tool_list_repair_proposals(args: dict[str, Any]) -> str:
+    return self_repair.list_proposals(str(args.get("status") or "pending"))
+
+
+def _tool_apply_repair(args: dict[str, Any]) -> str:
+    return self_repair.apply(
+        str(args.get("proposal_id") or ""),
+        confirmed=bool(args.get("confirmed", False)),
+        value=args.get("value"),
+    )
+
+
+def _tool_reject_repair(args: dict[str, Any]) -> str:
+    return self_repair.reject(str(args.get("proposal_id") or ""))
 
 
 def _tool_list_standing_orders(_: dict[str, Any]) -> str:
@@ -1340,6 +1361,53 @@ _CUSTOM_TOOLS: list[dict[str, Any]] = [
         },
     },
     {
+        "name": "diagnose_tool",
+        "description": (
+            "Self-repair step one: probe the subsystem behind a failing tool (settings "
+            "present? endpoint reachable?) and stage ONE repair proposal with an id. Never "
+            "applies anything. Use after system_health shows a degraded tool, or when Nick "
+            "asks you to fix yourself."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {"tool": {"type": "string", "description": "Failing tool name, e.g. control_device."}},
+            "required": ["tool"],
+        },
+    },
+    {
+        "name": "apply_repair",
+        "description": (
+            "Self-repair step two: execute a staged repair proposal. Only after Nick "
+            "explicitly approves that proposal id; pass confirmed=true then. Repairs are "
+            "bounded: write one validated .env setting (pass value), run one command Nick "
+            "pre-approved in SELF_REPAIR_COMMANDS, or clear a fault flag. A setting change "
+            "that doesn't fix reachability is rolled back automatically."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "proposal_id": {"type": "string"},
+                "confirmed": {"type": "boolean", "description": "true only after Nick approved this exact proposal."},
+                "value": {"type": "string", "description": "New value for a set_setting repair."},
+            },
+            "required": ["proposal_id", "confirmed"],
+        },
+    },
+    {
+        "name": "list_repair_proposals",
+        "description": "List staged self-repair proposals (pending by default; status=all for history).",
+        "input_schema": {"type": "object", "properties": {"status": {"type": "string"}}},
+    },
+    {
+        "name": "reject_repair",
+        "description": "Discard a pending self-repair proposal Nick declined.",
+        "input_schema": {
+            "type": "object",
+            "properties": {"proposal_id": {"type": "string"}},
+            "required": ["proposal_id"],
+        },
+    },
+    {
         "name": "list_standing_orders",
         "description": "List the standing orders currently in force, with ids.",
         "input_schema": {"type": "object", "properties": {}},
@@ -1759,6 +1827,10 @@ _DISPATCH: dict[str, Callable[[dict[str, Any]], str]] = {
     "add_standing_order": _tool_add_standing_order,
     "system_health": _tool_system_health,
     "clear_tool_health": _tool_clear_tool_health,
+    "diagnose_tool": _tool_diagnose_tool,
+    "apply_repair": _tool_apply_repair,
+    "list_repair_proposals": _tool_list_repair_proposals,
+    "reject_repair": _tool_reject_repair,
     "list_standing_orders": _tool_list_standing_orders,
     "remove_standing_order": _tool_remove_standing_order,
     "study_brief_preview": _tool_study_brief_preview,
@@ -1839,7 +1911,7 @@ def execute_tool(name: str, args: dict[str, Any], session_id: str | None = None)
 
 def _score_tool(name: str, *, ok: bool, error: str, started: float) -> None:
     """Feed the self-diagnosis ledger; never let bookkeeping break a tool call."""
-    if name in ("system_health", "clear_tool_health"):
+    if name in ("system_health", "clear_tool_health", "diagnose_tool", "apply_repair", "list_repair_proposals", "reject_repair"):
         return
     try:
         tool_health.record(name, ok=ok, error=error, elapsed_ms=(time.monotonic() - started) * 1000)

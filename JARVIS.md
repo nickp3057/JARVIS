@@ -61,6 +61,7 @@ Pearson-Stark-Jarvis/
 │   ├── settings.py          Whitelist-based .env editor (update_setting tool)
 │   ├── standing_orders.py   Durable behavioural directives from Nick, injected every turn
 │   ├── tool_health.py       Self-diagnosis ledger: per-tool failures, degraded flags, prompt warning
+│   ├── self_repair.py       Governed self-repair: diagnose a subsystem, stage a bounded fix, apply on approval
 │   ├── study_brief.py       Daily quiz/exam countdown: settings, planning, JARVIS-composed text
 │   ├── timers.py            Timer store: set/cancel/pause/resume/dismiss/alarming state
 │   ├── tools.py             All tool schemas + dispatch (45+ tools)
@@ -331,6 +332,32 @@ RMS envelope from ElevenLabs audio drives the orb in real time using a monotonic
   healthy, so it costs no tokens in the normal case. The Home Assistant live
   monitor reports into the same ledger as `home_assistant_monitor`.
 
+### Self-repair *(new)*
+- `diagnose_tool(tool)` — maps the failing tool to its subsystem playbook
+  (Home Assistant, Spotify, Radarr, Sonarr, media views, qBittorrent, weather,
+  local model), probes it read-only (required `.env` keys present? host:port
+  reachable?), and stages ONE repair proposal with an id. Never applies.
+- `apply_repair(proposal_id, confirmed, value?)` — executes a staged proposal
+  only with `confirmed=true` after Nick approves that id. Three bounded
+  actions: `set_setting` (one schema-validated `.env` key, old value kept and
+  rolled back automatically if the endpoint is still unreachable afterwards),
+  `run_command` (a command Nick pre-approved by name in `SELF_REPAIR_COMMANDS`;
+  JARVIS can never compose a command), or `clear_flag` (transient fault).
+- `list_repair_proposals(status?)` / `reject_repair(proposal_id)`.
+- Stored in `memory/repair_proposals.json` via `brain/self_repair.py`. This is
+  the "propose → approve → apply → verify → rollback" loop from the governed
+  self-modification roadmap item, scoped to configuration and services, not
+  source code.
+
+### Lesson capture *(new)*
+- `brain/memory_extractor.py` now also asks the extraction model for
+  `corrections`: clear "from now on" behavioural instructions in the turn.
+  Any correction at confidence 0.85+ that no existing standing order already
+  covers is written with `add_standing_order` automatically and surfaces as a
+  "Lesson learned" memory event, so a correction sticks even when the
+  conversational model forgot to persist it. The existing orders are fed into
+  the extraction prompt so wording is reused rather than duplicated.
+
 ### Study brief *(new)*
 - `study_brief_preview` — read back the daily study brief's settings and what
   the next notification will say. The brief itself is served to the phone by
@@ -413,6 +440,7 @@ ELEVENLABS_SPEED=1.155     # TTS speed; clamped to 0.7–1.2 in speech/tts.py (c
 ELEVENLABS_MODEL_ID=eleven_flash_v2_5
 DEFAULT_LOCATION=Herriman, Utah
 ANTHROPIC_MODEL=claude-haiku-4-5-20251001
+SELF_REPAIR_COMMANDS=            # name=command;name2=command2 JARVIS may run by name after approval, e.g. restart_home_assistant=ssh nas 'docker restart homeassistant'
 WEB_SEARCH_ENABLED=true
 PRICE_WATCH_MONITOR_ENABLED=true # periodically refresh saved product URLs
 PRICE_WATCH_INTERVAL_S=21600     # six hours; minimum five minutes
@@ -523,6 +551,14 @@ CALENDAR_ALERT_LEAD_MIN=10  # warn this many minutes before a meeting
 
 ## Recently Shipped
 
+- **Governed self-repair and lesson capture (1.28 / build 30)** —
+  `brain/self_repair.py` closes the loop opened by the health ledger: JARVIS
+  can probe the subsystem behind a degraded tool, stage a bounded repair
+  (validated `.env` write with automatic rollback, a pre-approved
+  `SELF_REPAIR_COMMANDS` entry by name, or a flag clear), and apply it only
+  when Nick approves the proposal id. `ANTHROPIC_MODEL` and
+  `SELF_REPAIR_COMMANDS` are now editable settings. The memory extractor also
+  turns clear behavioural corrections into standing orders on its own.
 - **Self-diagnosis and live model selection (1.27 / build 29)** —
   `brain/tool_health.py` scores every tool call so JARVIS knows when one of
   his own integrations is down: degraded tools ride into the system prompt as
@@ -912,9 +948,8 @@ in value order:
 - **Governed self-modification** — allow JARVIS to propose source/configuration
   changes through patches, tests, approval, activation, and automatic rollback;
   never permit unrestricted silent code rewriting.
-  The self-diagnosis ledger (`brain/tool_health.py`) is the sensing half of
-  this; the next step is letting JARVIS propose a `.env` or service fix for a
-  degraded tool and apply it only on approval.
+  Configuration/service self-repair is shipped (`brain/self_repair.py`);
+  source-level patches with tests and activation/rollback remain open.
 - **Media operations phase two** — add Radarr/Sonarr manual search and retry
   operations; guarded torrent controls and read-only history/missing/upcoming
   views are shipped.

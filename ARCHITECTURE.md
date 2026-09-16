@@ -129,7 +129,9 @@ Near-term responsibilities:
 - Self-diagnosis is shipped at the tool layer: `brain/tool_health.py` scores
   every tool call and every home-monitor outage, and degraded tools are
   injected into the prompt so the model stops retrying, names the fault, and
-  clears it on recovery. Governed self-repair builds on this ledger.
+  clears it on recovery. `brain/self_repair.py` is the acting half: probe,
+  stage one bounded repair, apply only on approval of that id, verify, and roll
+  back a setting change that did not help. Repairs never touch source code.
 - Store task state for multi-step work.
 - Decide when to interrupt, notify quietly, or stay silent.
 - Grow the Obsidian baseline into indexed episodic and semantic memory, with the

@@ -17,3 +17,4 @@ memory/google_credentials.json
 memory/google_token.json
 memory/standing_orders.json
 memory/tool_health.json
+memory/repair_proposals.json

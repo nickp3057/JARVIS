@@ -30,12 +30,14 @@ from brain import habits
 from brain.knowledge_vault import append_journal_entry
 from brain.memory import list_facts, remember_fact, update_fact
 from brain.memory_proposals import propose_memory_fact
+from brain import standing_orders
 from jarvis_logger import get_logger
 
 log = get_logger(__name__)
 
 _DEFAULT_MODEL = "claude-haiku-4-5-20251001"
 _MAX_EXISTING_CHARS = 6000
+_CORRECTION_THRESHOLD = 0.85
 _CATEGORIES = ("person", "preference", "routine", "project", "goal", "general")
 _ERROR_REPLY_MARKERS = ("I ran into a problem reaching my reasoning", "I got tangled up")
 
@@ -81,6 +83,25 @@ _EXTRACT_TOOL: dict[str, Any] = {
                     "required": ["category", "content", "kind", "confidence"],
                 },
             },
+            "corrections": {
+                "type": "array",
+                "description": (
+                    "Behavioural corrections Nick gave JARVIS this turn ('stop doing X', "
+                    "'always Y', 'don't call me that'). Empty unless he clearly told JARVIS "
+                    "how to behave differently from now on."
+                ),
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "directive": {
+                            "type": "string",
+                            "description": "One short imperative sentence addressed to JARVIS.",
+                        },
+                        "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+                    },
+                    "required": ["directive", "confidence"],
+                },
+            },
             "episode": {
                 "type": "string",
                 "description": (
@@ -116,7 +137,13 @@ Rules:
 - The episode line is for a daily log: fill it only when the turn completed a
   task, made a plan or decision, or changed a setting or preference. Write it
   in past tense, one sentence, mentioning the specific thing. Leave it empty
-  for chit-chat and simple lookups."""
+  for chit-chat and simple lookups.
+- Corrections are lessons: when Nick tells JARVIS to behave differently from
+  now on ("stop apologising", "always answer in Celsius", "don't read the whole
+  list"), emit one directive with confidence 0.85+ only if it is clearly a
+  standing instruction, not a one-off request for this turn. Reuse the
+  existing standing orders' wording when one already covers it, so nothing is
+  duplicated. Leave the list empty otherwise."""
 
 
 # --- Settings ----------------------------------------------------------------
@@ -209,6 +236,7 @@ def _call_model(
 ) -> dict[str, Any]:
     prompt = (
         f"Existing memories about Nick:\n{_existing_memories_text()}\n\n"
+        f"Standing orders already in force:\n{standing_orders.render_block() or '(none)'}\n\n"
         f"Tools JARVIS used this turn: {_tools_text(tools)}\n\n"
         f"Exchange:\nNick: {user_text.strip()[:4000]}\n"
         f"JARVIS: {reply.strip()[:2000]}"
@@ -282,12 +310,40 @@ def apply_extraction(payload: dict[str, Any], *, evidence: str = "") -> list[str
         else:
             log.debug("Extraction produced no change: %s", result)
 
+    changes.extend(_apply_corrections(payload))
     episode = " ".join(str(payload.get("episode") or "").split()) if isinstance(payload, dict) else ""
     if episode:
         try:
             append_journal_entry(episode[:300], section="Log")
         except Exception as exc:  # noqa: BLE001
             log.warning("Could not write journal entry: %s", exc)
+    return changes
+
+
+def _apply_corrections(payload: dict[str, Any]) -> list[str]:
+    """Persist clear behavioural corrections as standing orders (lesson capture)."""
+    changes: list[str] = []
+    items = payload.get("corrections") if isinstance(payload, dict) else None
+    if not items:
+        return changes
+    existing = {" ".join(str(o.get("text", "")).lower().split()) for o in standing_orders.all_orders()}
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        directive = " ".join(str(item.get("directive") or "").split())[:200]
+        confidence = _confidence(item.get("confidence"), "explicit")
+        if not directive or confidence < _CORRECTION_THRESHOLD:
+            continue
+        if directive.lower() in existing:
+            continue
+        try:
+            result = standing_orders.add_order(directive)
+        except Exception as exc:  # noqa: BLE001
+            log.warning("Could not record standing order from correction: %s", exc)
+            continue
+        existing.add(directive.lower())
+        changes.append(result)
+        _notify("Lesson learned", directive)
     return changes
 
 

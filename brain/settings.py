@@ -142,6 +142,17 @@ SETTINGS_SCHEMA: dict[str, dict[str, Any]] = {
     },
 
     # --- Web search toggle ---
+    "ANTHROPIC_MODEL": {
+        "type": "string",
+        "description": "Claude model id used for conversation turns (read live per request).",
+    },
+    "SELF_REPAIR_COMMANDS": {
+        "type": "string",
+        "description": (
+            "Pre-approved repair commands JARVIS may run by name after Nick confirms, "
+            "as name=command;name2=command2 (e.g. restart_home_assistant=ssh nas 'docker restart homeassistant')."
+        ),
+    },
     "WEB_SEARCH_ENABLED": {
         "type": "bool",
         "description": "Whether Claude can use the web search tool.",
