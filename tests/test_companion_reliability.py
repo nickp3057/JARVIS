@@ -23,6 +23,7 @@ class CompanionReliabilityTests(unittest.TestCase):
         self.calls = []
         self.core = JarvisRuntime.__new__(JarvisRuntime)
         self.core._lock = threading.RLock()
+        self.core._turn_lock = threading.RLock()
         self.core.agent = SimpleNamespace(switch_session=lambda session: None)
 
         def reply(text):

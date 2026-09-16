@@ -132,6 +132,9 @@ Near-term responsibilities:
   clears it on recovery. `brain/self_repair.py` is the acting half: probe,
   stage one bounded repair, apply only on approval of that id, verify, and roll
   back a setting change that did not help. Repairs never touch source code.
+- Runtime locking rule: `_turn_lock` wraps a whole turn or session switch;
+  `_lock` is a short-held state lock and must never wrap a network or model
+  call.
 - Store task state for multi-step work.
 - Decide when to interrupt, notify quietly, or stay silent.
 - Grow the Obsidian baseline into indexed episodic and semantic memory, with the

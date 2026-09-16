@@ -551,6 +551,13 @@ CALENDAR_ALERT_LEAD_MIN=10  # warn this many minutes before a meeting
 
 ## Recently Shipped
 
+- **Runtime turn lock split (1.29 / build 31)** — `JarvisRuntime` now has
+  two locks. `_turn_lock` serializes conversation turns and session
+  switching (including companion streams); `_lock` guards only tasks, events,
+  snapshots, and monitor state and is never held across a model call. So
+  monitors can `record_event()` and panels can read status while a
+  multi-second Claude turn is in flight, and GUI/voice streaming is now
+  serialized against companion turns instead of racing them.
 - **Governed self-repair and lesson capture (1.28 / build 30)** —
   `brain/self_repair.py` closes the loop opened by the health ledger: JARVIS
   can probe the subsystem behind a degraded tool, stage a bounded repair
@@ -908,14 +915,6 @@ in value order:
   Cheap fix: cache facts behind an mtime check and skip rebuilds when the
   data is unchanged. Right fix per ARCHITECTURE.md: panels subscribe to
   runtime change events instead of owning QTimers.
-- **Runtime lock held across the whole Claude turn** —
-  `JarvisRuntime.respond()` holds `_lock` for the entire multi-second API
-  call, so monitor `record_event()` calls and task/event UI reads block until
-  the turn ends. Locking is also inconsistent: `respond_streaming()` takes no
-  lock while `respond_streaming_in_session()` holds it for the entire stream
-  (serializing the runtime during companion streams). The agent already has
-  its own conversation lock; the runtime lock should cover only session
-  switching and shared-state mutation.
 - **Per-turn memory disk reads** — `render_memory_block()` re-reads
   `profile.json` and re-tokenizes every fact each turn. Bounded and fine at
   60 facts; add an in-memory cache invalidated on write before the vault

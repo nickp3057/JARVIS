@@ -109,6 +109,10 @@ class JarvisRuntime:
 
     def __init__(self, agent: JarvisAgent | None = None) -> None:
         self._lock = RLock()
+        # Serializes conversation turns and session switching only. Never hold
+        # _lock across a model call: it guards tasks, events, and snapshots that
+        # monitors and UI panels read while a turn is in flight.
+        self._turn_lock = RLock()
         self._events: deque[RuntimeEvent] = deque(maxlen=100)
         self._tasks: dict[int, RuntimeTask] = {}
         self._reminder_event_ids: set[str] = set()
@@ -221,7 +225,7 @@ class JarvisRuntime:
     def respond(self, user_input: str) -> str:
         """Run one conversational turn through the best available brain."""
         task_id = self.start_task("Reasoning", user_input.strip())
-        with self._lock:
+        with self._turn_lock:
             try:
                 reply = self.agent.respond(user_input)
             except Exception:
@@ -242,8 +246,9 @@ class JarvisRuntime:
         """Streaming twin of respond() that yields reply fragments for TTS."""
         task_id = self.start_task("Reasoning", user_input.strip())
         try:
-            for chunk in self.agent.respond_streaming(user_input):
-                yield chunk
+            with self._turn_lock:
+                for chunk in self.agent.respond_streaming(user_input):
+                    yield chunk
         except Exception:
             self.finish_task(task_id, state="failed", detail="Conversation failed")
             raise
@@ -259,7 +264,7 @@ class JarvisRuntime:
 
     def respond_in_session(self, session_id: str, user_input: str, request_id: str | None = None) -> str:
         """Atomically select and answer a remote turn; retries reuse its receipt."""
-        with self._lock:
+        with self._turn_lock:
             if not session_exists(session_id):
                 raise KeyError(session_id)
             if request_id:
@@ -275,7 +280,7 @@ class JarvisRuntime:
 
     def respond_streaming_in_session(self, session_id: str, user_input: str, request_id: str | None = None) -> Iterator[str]:
         """Consume on one worker thread: the lock and request context are thread-bound."""
-        with self._lock:
+        with self._turn_lock:
             if not session_exists(session_id):
                 raise KeyError(session_id)
             if request_id:
@@ -292,7 +297,7 @@ class JarvisRuntime:
 
     def delete_companion_session(self, session_id: str) -> bool:
         """Serialize deletion with turns that may still be saving history."""
-        with self._lock:
+        with self._turn_lock:
             return delete_session(session_id)
 
     def compose_briefing(self) -> str:
@@ -377,7 +382,7 @@ class JarvisRuntime:
 
     def start_session(self) -> str:
         """Start a fresh conversation session."""
-        with self._lock:
+        with self._turn_lock:
             session_id = self.agent.start_session()
         self.record_event(
             kind="session",
@@ -389,7 +394,7 @@ class JarvisRuntime:
 
     def switch_session(self, session_id: str) -> list[dict[str, Any]]:
         """Switch active context and return messages for transcript loading."""
-        with self._lock:
+        with self._turn_lock:
             self.agent.switch_session(session_id)
             messages = load_session_messages(session_id)
         self.record_event(
