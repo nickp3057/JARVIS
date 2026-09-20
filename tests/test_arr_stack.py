@@ -224,5 +224,39 @@ class TransportTests(unittest.TestCase):
         agent._client.messages.create.assert_not_called()
         agent._client.messages.stream.assert_not_called()
 
+class ServerMonitorStartupTests(unittest.TestCase):
+    def test_configured_monitor_starts_without_http_request(self):
+        import asyncio
+        import app.server as server
+        for settings in ({'ARR_STACK_MONITOR_ENABLED': 'true', 'JARVIS_HEALTHCHECKS_URL': ''},
+                         {'ARR_STACK_MONITOR_ENABLED': 'false', 'JARVIS_HEALTHCHECKS_URL': 'https://hc-ping.com/test'}):
+            core = Mock()
+            async def cycle():
+                async with server.lifespan(server.app):
+                    factory.assert_called_once()
+            with patch.dict(os.environ, settings), patch.object(server, '_runtime', None), patch.object(server, 'JarvisRuntime', return_value=core) as factory:
+                asyncio.run(cycle())
+            core.stop_monitors.assert_called_once()
+
+    def test_unconfigured_startup_remains_lazy(self):
+        import asyncio
+        import app.server as server
+        async def cycle():
+            async with server.lifespan(server.app):
+                pass
+        with patch.dict(os.environ, {'ARR_STACK_MONITOR_ENABLED': 'false', 'JARVIS_HEALTHCHECKS_URL': ''}), patch.object(server, '_runtime', None), patch.object(server, 'JarvisRuntime') as factory:
+            asyncio.run(cycle())
+            factory.assert_not_called()
+
+    def test_parallel_requests_share_one_runtime(self):
+        import app.server as server
+        with patch.object(server, '_runtime', None), patch.object(server, 'JarvisRuntime', return_value=Mock()) as factory:
+            threads = [threading.Thread(target=server.runtime) for _ in range(5)]
+            for thread in threads:
+                thread.start()
+            for thread in threads:
+                thread.join(2)
+            factory.assert_called_once()
+
 if __name__ == '__main__':
     unittest.main()

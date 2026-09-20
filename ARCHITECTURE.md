@@ -435,3 +435,10 @@ URLs and credentials reuse existing qBit/Radarr/Sonarr and Home Assistant
 settings. Configure monitor startup flags/heartbeat URL before starting the
 runtime; interval/cooldown/delivery values are read each cycle. Editing `.env`
 externally requires reloading the environment or restarting Jarvis.
+
+
+When arr monitoring or a Healthchecks URL is configured, the companion server's
+ASGI lifespan creates the runtime before accepting requests. Monitor startup
+therefore does not depend on opening the phone app after a reboot. A creation
+lock prevents simultaneous first requests from creating duplicate runtimes;
+server shutdown signals the monitor stop event.

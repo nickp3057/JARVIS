@@ -1048,3 +1048,8 @@ hand-test commands. Installation hardens previously writable path/SSH ACLs.
 See `PROGRESS.md` for what is actually installed/activated and the known live
 NAS outage; implemented functionality must not be mistaken for completed live
 recovery verification.
+
+
+The companion server starts configured arr monitoring/heartbeats during server
+startup, without waiting for a phone connection. Runtime creation is serialized
+to prevent duplicate monitors, and server shutdown stops them.

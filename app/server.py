@@ -6,6 +6,7 @@ import asyncio
 import threading
 import hmac
 import os
+from contextlib import asynccontextmanager
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Response, status
 from fastapi.responses import StreamingResponse
@@ -21,8 +22,24 @@ from app import status_hub
 from brain.debug_reports import create_debug_report
 from brain.runtime import JarvisRuntime
 
-app = FastAPI(title="JARVIS Core", version="1.0")
 _runtime: JarvisRuntime | None = None
+_runtime_lock = threading.Lock()
+
+
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    """Start scheduled monitoring even when no companion has connected yet."""
+    from integrations.nas_stack import enabled
+    if enabled("ARR_STACK_MONITOR_ENABLED") or os.getenv("JARVIS_HEALTHCHECKS_URL", "").strip():
+        await asyncio.to_thread(runtime)
+    try:
+        yield
+    finally:
+        if _runtime is not None:
+            await asyncio.to_thread(_runtime.stop_monitors)
+
+
+app = FastAPI(title="JARVIS Core", version="1.0", lifespan=lifespan)
 
 _COMPANION_API_VERSION = 1
 _COMPANION_CAPABILITIES: dict[str, object] = {
@@ -52,9 +69,10 @@ _COMPANION_CAPABILITIES: dict[str, object] = {
 
 def runtime() -> JarvisRuntime:
     global _runtime
-    if _runtime is None:
-        _runtime = JarvisRuntime()
-    return _runtime
+    with _runtime_lock:
+        if _runtime is None:
+            _runtime = JarvisRuntime()
+        return _runtime
 
 
 def authorize(authorization: str | None = Header(default=None)) -> None:

@@ -92,9 +92,9 @@ The 41 focused tests also passed in the actual patched checkout.
 Only new env keys were appended: monitor enabled, interval 60s, cooldown 1800s,
 existing iPhone notify service, restricted key paths, and service URLs. Existing
 API credentials/URLs were preserved. Recovery is **disabled** pending NAS key
-installation/tests; heartbeat URL is blank. Runtime activation awaits Nick's
-confirmation to restart **only** `jarvis-api` on the Optiplex. No restart was
-performed. The final NAS test suite now has eleven passing tests, including
+installation/tests; heartbeat URL is blank. Nick subsequently approved restarting **only** `jarvis-api`. It was restarted
+at 16:51 MDT, with an authenticated HTTP 200 health check and the first live
+arr alert at 16:52 MDT. No phone-delivery failure was reported. The final NAS test suite now has eleven passing tests, including
 proof that the detached fake worker retains flock and duplicate UUIDs do not
 launch twice.
 
@@ -102,8 +102,7 @@ Remaining live checks:
 1. Nick runs the staged NAS installers with interactive sudo (diffs reviewed).
 2. From Optiplex, recovery `probe` succeeds; shell/SCP/forwarding requests fail;
    status key returns JSON and rejects recovery. Then enable the restart flag.
-3. Confirm and restart Jarvis API to activate monitoring. Verify HA accepts the
-   resulting alert and Nick receives it on his phone.
+3. Jarvis monitoring is active; confirm receipt of the iPhone alert on the device.
 4. Supply Healthchecks success URL, configure its alert integration/period/grace,
    activate heartbeat, and test a missed heartbeat in a maintenance window.
 5. Separately confirm the disruptive NAS recovery test, inspect the matching
@@ -114,5 +113,23 @@ Final focused validation after the lock dependency: **42 tests passed on the
 Optiplex**, including 21 arr-specific tests. The local suite's earlier full-run
 study-brief failure is unchanged; no new full-suite pass is claimed. All three
 requested task commits are present in the Mac repository. NAS sudo installation,
-restricted-key hand tests, service activation confirmation, Healthchecks URL,
+restricted-key hand tests, Healthchecks URL,
 and disruptive recovery verification remain pending user input.
+
+
+### Activation follow-up — 2026-09-20
+
+Nick approved the Jarvis API restart only. Startup verification exposed lazy
+runtime initialization: monitors previously waited for the first companion
+request. The server now starts the runtime during its ASGI lifespan when arr
+monitoring or Healthchecks is configured, and stops monitors on shutdown.
+Runtime construction is protected against simultaneous first requests.
+Three regression tests cover no-request startup, disabled/lazy startup, and
+concurrent initialization. All 35 arr/server/companion tests passed locally and
+on the Optiplex. The older deployed companion-test fixture was also aligned
+with the already-backported runtime turn lock.
+
+The original server file and test fixture are backed up beside `before.tar`;
+`/tmp/jarvis-arr-startup.patch` records this follow-up deployment. Only the
+Jarvis API service was reloaded to activate it. No NAS container was restarted.
+NAS installation/key testing and the Healthchecks URL remain outstanding.
