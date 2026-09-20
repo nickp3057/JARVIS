@@ -373,3 +373,11 @@ gluetun and its five named dependents are recreated, with `--no-deps`; other
 containers, including mooney-plaid-backend, are outside this capability.
 A status file records each phase, result, and verified DHT count. Root cron
 retains its current triggers; Jarvis will request recovery only after approval.
+
+Jarvis authenticates as NAS user Nick with distinct forced-command recovery
+and read-only status keys. The recovery entry validates a UUID, invokes only
+a fixed sudo launcher, and detaches a worker while retaining the flock. Durable
+receipts prevent duplicate requests; completion is correlated by request ID
+through the read-only key. SSH transport failure cannot imply recovery success.
+The installer protects script/Compose ancestors and records ACL backups before
+adding sudo. Neither a Docker socket nor a root SSH identity reaches Jarvis.

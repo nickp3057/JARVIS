@@ -22,6 +22,7 @@ class RecoveryTests(unittest.TestCase):
         (self.root / 'qbit_creds.env').write_text('QBIT_USER=test\nQBIT_PASS=test\n')
         self.script = self.root / 'recover.sh'
         source = SOURCE.read_text().replace('PATH=/usr/sbin:/usr/bin:/sbin:/bin', f'PATH={self.bin}:/usr/bin:/bin')
+        source = source.replace('[[ $EUID -ne 0 ]]', '[[ 0 -ne 0 ]]')
         source = source.replace('/volume1/docker/watchdog', str(self.root)).replace('[[ $EUID -eq 0 ]]', '[[ 0 -eq 0 ]]')
         self.script.write_text(source)
         self.script.chmod(0o755)

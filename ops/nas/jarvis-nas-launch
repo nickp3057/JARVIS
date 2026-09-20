@@ -1,0 +1,24 @@
+#!/bin/bash
+# Root-owned, narrowly sudo-authorized launcher. No shell text is evaluated.
+set -euo pipefail
+PATH=/usr/sbin:/usr/bin:/sbin:/bin
+export PATH
+[[ $EUID == 0 && $# == 1 && $1 =~ ^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$ ]] || exit 64
+REQUEST=$1
+WD=/volume1/docker/watchdog
+STATE=/var/lib/jarvis-nas
+umask 077
+# Durable receipt: retries after an SSH disconnect must never repeat a restart.
+if [[ -d "$STATE/requests/$REQUEST" ]]; then
+    printf '{"request_id":"%s","state":"already_started"}\n' "$REQUEST"
+    exit 0
+fi
+exec 9>"$WD/stack.lock"
+flock -n 9 || { echo 'BUSY: stack.lock is held; no restart performed.' >&2; exit 75; }
+mkdir "$STATE/requests/$REQUEST"
+# Lock FD 9 stays open in the child. It owns the lock after this launcher exits.
+# Detach all SSH descriptors; UGOS drops interactive connections at ~4 minutes.
+nohup setsid /volume1/docker/watchdog/recover_stack.sh jarvis "$REQUEST" \
+    </dev/null >>"$WD/watchdog.log" 2>&1 &
+disown
+printf '{"request_id":"%s","state":"accepted"}\n' "$REQUEST"

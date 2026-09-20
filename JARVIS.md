@@ -1005,3 +1005,10 @@ Every failed step aborts and records a failed result. DHT's three checks/30-minu
 cooldown and indexer's two strikes/one-hour cooldown are preserved. No Docker
 socket or root SSH is exposed to Jarvis. See `PROGRESS.md` for deployment state;
 a live restart always requires separate confirmation.
+
+NAS SSH setup uses dedicated `jarvis_nas_recovery` and `jarvis_nas_status` keys
+on the Optiplex plus a pinned known-hosts file. The status key reads a fixed
+JSON summary and bounded watchdog tails without sudo; it cannot restart. The
+recovery key validates request IDs, detaches from UGOS SSH timeouts, and uses
+one narrow sudo launcher. See `ops/nas/README.md` for the preview/install and
+hand-test commands. Installation hardens previously writable path/SSH ACLs.

@@ -5,6 +5,20 @@ PATH=/usr/sbin:/usr/bin:/sbin:/bin
 export PATH
 WD=/volume1/docker/watchdog
 COMPOSE=/volume1/docker/docker-compose.yaml
+# The forced SSH command runs as Nick. Ignore/reject arbitrary client commands;
+# only an explicit UUID request reaches the fixed, root-owned launcher.
+if [[ $EUID -ne 0 ]]; then
+    [[ $# == 0 ]] || exit 64
+    if [[ ${SSH_ORIGINAL_COMMAND:-} == probe ]]; then
+        echo 'jarvis-recovery-key: restricted; no restart performed'
+        exit 0
+    fi
+    if [[ ${SSH_ORIGINAL_COMMAND:-} =~ ^recover\ ([a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12})$ ]]; then
+        exec /usr/bin/sudo -n /usr/local/libexec/jarvis-nas-launch "${BASH_REMATCH[1]}"
+    fi
+    echo 'DENIED: only probe or recover UUID is allowed.' >&2
+    exit 64
+fi
 SOURCE=${1:-manual}
 REQUEST=${2:-$(cat /proc/sys/kernel/random/uuid)}
 [[ $# -le 2 && "$SOURCE" =~ ^(manual|dht|indexer|jarvis)$ && "$REQUEST" =~ ^[a-f0-9-]{36}$ ]] || exit 64
