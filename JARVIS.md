@@ -994,3 +994,14 @@ python create_shortcut.py
   answer, no filler / hedging / preamble / sign-offs, never restate the
   request back. Dry, confident, never apologetic. (Persona rules live in
   `brain/personality.py`; tightened August 2026.)
+
+### NAS recovery operations
+
+`ops/nas/` contains the reviewed UGOS recovery scripts and installer. The single
+recovery chain takes the existing watchdog flock, explicitly removes gluetun
+before recreating it, waits 20 seconds, recreates the five VPN dependents, then
+waits 130 seconds for Byparr and verifies gluetun health plus positive qBit DHT.
+Every failed step aborts and records a failed result. DHT's three checks/30-minute
+cooldown and indexer's two strikes/one-hour cooldown are preserved. No Docker
+socket or root SSH is exposed to Jarvis. See `PROGRESS.md` for deployment state;
+a live restart always requires separate confirmation.

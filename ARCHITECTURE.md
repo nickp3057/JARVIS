@@ -363,3 +363,13 @@ caller after `memory_extractor`.
   "due" for assignments.
 - `STUDY_BRIEF_STYLE`: free-form tone note handed to the composer.
 - `STUDY_BRIEF_MODEL`: composer model; falls back to `MEMORY_EXTRACT_MODEL`.
+
+## NAS recovery boundary
+
+The NAS owns Docker execution through `ops/nas/recover_stack.sh`. The common
+chain serializes against existing cron via `/volume1/docker/watchdog/stack.lock`.
+An inherited lock descriptor is reused, avoiding nested flock deadlocks. Only
+gluetun and its five named dependents are recreated, with `--no-deps`; other
+containers, including mooney-plaid-backend, are outside this capability.
+A status file records each phase, result, and verified DHT count. Root cron
+retains its current triggers; Jarvis will request recovery only after approval.
