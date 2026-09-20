@@ -381,3 +381,57 @@ receipts prevent duplicate requests; completion is correlated by request ID
 through the read-only key. SSH transport failure cannot imply recovery success.
 The installer protects script/Compose ancestors and records ACL backups before
 adding sudo. Neither a Docker socket nor a root SSH identity reaches Jarvis.
+
+## Arr monitoring and dead-man heartbeat
+
+`JarvisRuntime` owns the opt-in arr monitor and heartbeat threads. The polling
+loop calls only Python HTTP/SSH integrations: qBit transfer info (with
+sync/maindata fallback when DHT is absent), Radarr/Sonarr v3 health, Prowlarr v1
+health when configured with a key (otherwise public readiness), and Byparr
+readiness. Unknown/malformed DHT never counts as zero. Three consecutive zeros
+trigger an alert; unreachable APIs and health errors alert on the first check.
+Per-condition 30-minute cooldowns persist in `memory/arr_stack_alerts.json`.
+Alerts use the existing runtime inbox/voice path and the configured HA mobile
+notification service. Failed phone delivery remains visible in the inbox.
+Each alert adds watchdog cooldown timestamps and latest recovery status using
+the separate read-only SSH key; unavailable status is explicitly unknown.
+
+The restart tool only stages a session-bound, ten-minute proposal. Original
+user text is checked at the agent boundary, before model/offline routing, in
+both ordinary and streaming turns. Only the exact returned confirmation phrase
+can consume the proposal and invoke SSH. Tool arguments, model-generated
+`confirmed=true`, stale tokens, and another conversation cannot authorize it.
+The runtime's existing conversation lock serializes the turn; the short state
+lock remains free for monitoring. Jarvis waits for a matching NAS request ID,
+then independently reads qBit DHT again. Timeout is an unknown outcome, with
+no automatic launch retry. Canonical `restart arr stack` works without an LLM.
+
+Heartbeat pings use the Healthchecks success API (HTTPS GET, no redirects, ten
+second timeout), every five minutes by default. When arr monitoring is enabled,
+pings stop if its thread dies or the latest complete polling cycle is stale.
+A completed cycle reporting broken NAS services still counts as a live Jarvis.
+This measures process/monitor liveness, not whether every conversation/model
+call can complete. No ping URL means no heartbeat thread; configure the
+Healthchecks account's notification integration and grace period separately.
+
+Admin-only environment controls (not model-editable settings):
+
+| Variable | Default / purpose |
+| --- | --- |
+| `ARR_STACK_MONITOR_ENABLED` | false; enable runtime polling |
+| `ARR_STACK_MONITOR_INTERVAL_S` | 60; minimum 30 seconds |
+| `ARR_STACK_ALERT_COOLDOWN_S` | 1800; minimum 60 seconds per condition |
+| `ARR_STACK_NOTIFY_SERVICE` | blank; HA `notify.mobile_app_*` service |
+| `PROWLARR_URL`, `PROWLARR_API_KEY` | API base and optional key; v1 health with key, `/ping` without |
+| `BYPARR_URL` | Byparr base URL, usually NAS port 8191 |
+| `ARR_STACK_RESTART_ENABLED` | false; enable only after restricted-key tests |
+| `NAS_SSH_HOST`, `NAS_SSH_USER` | host required; user defaults Nick |
+| `NAS_RECOVERY_SSH_KEY`, `NAS_STATUS_SSH_KEY` | separate absolute private-key paths |
+| `NAS_SSH_KNOWN_HOSTS` | dedicated pinned NAS host-key file |
+| `JARVIS_HEALTHCHECKS_URL` | secret `https://hc-ping.com/...` success URL; blank disables |
+| `JARVIS_HEALTHCHECKS_INTERVAL_S` | 300; minimum 60 seconds |
+
+URLs and credentials reuse existing qBit/Radarr/Sonarr and Home Assistant
+settings. Configure monitor startup flags/heartbeat URL before starting the
+runtime; interval/cooldown/delivery values are read each cycle. Editing `.env`
+externally requires reloading the environment or restarting Jarvis.

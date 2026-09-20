@@ -53,7 +53,9 @@ passes. Review these with a second model before deploying to the Optiplex.
 ssh optiplex
 cd ~/jarvis && git pull
 # add to .env, adjust names/commands to taste:
-# SELF_REPAIR_COMMANDS=restart_home_assistant=ssh nas 'docker restart homeassistant';restart_radarr=ssh nas 'docker restart radarr'
+# Do not add NAS Docker/SSH commands to SELF_REPAIR_COMMANDS.
+# Arr recovery uses the dedicated restricted key and per-request confirmation;
+# see ops/nas/README.md and PROGRESS.md for installation/activation status.
 # restart the JARVIS process as usual
 ```
 

@@ -17,6 +17,7 @@ import time
 from datetime import datetime
 from typing import Any, Callable
 
+from brain import arr_stack
 from brain.apps import close_app, focus_app, list_open_apps, open_app
 from brain.automation_workshop import (
     apply_automation_draft,
@@ -628,6 +629,16 @@ def _tool_check_prices(_: dict[str, Any]) -> str:
 # --- Anthropic tool schemas -------------------------------------------------
 
 _CUSTOM_TOOLS: list[dict[str, Any]] = [
+    {
+        "name": "restart_arr_stack",
+        "description": "Prepare a NAS arr stack restart confirmation. Always warns that downloads disconnect and returns a session-bound confirmation phrase. This tool cannot execute recovery; Nick must send that exact phrase in a subsequent message. Never claim a restart has happened from this tool.",
+        "input_schema": {"type": "object", "properties": {}, "additionalProperties": False},
+    },
+    {
+        "name": "arr_stack_status",
+        "description": "Read live qBit DHT/connection, Radarr/Sonarr/Prowlarr/Byparr API health, and NAS watchdog activity. Never restarts anything.",
+        "input_schema": {"type": "object", "properties": {}, "additionalProperties": False},
+    },
     {
         "name": "get_time",
         "description": "Get the current local time and date. Use this any time the user asks what time or day it is.",
@@ -1766,6 +1777,8 @@ _CUSTOM_TOOLS: list[dict[str, Any]] = [
 # Map each tool name to the local function that executes it. Server tools
 # (like web_search) are intentionally absent - Anthropic runs those.
 _DISPATCH: dict[str, Callable[[dict[str, Any]], str]] = {
+    "restart_arr_stack": lambda args: arr_stack.prepare_restart(args.get("_jarvis_session_id")),
+    "arr_stack_status": lambda args: arr_stack.describe_status(),
     "get_time": _tool_get_time,
     "control_device": _tool_control_device,
     "list_devices": _tool_list_devices,

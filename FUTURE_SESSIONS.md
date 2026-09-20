@@ -94,6 +94,11 @@ pause or the morning briefing. Log every decision so the policy can be
 tuned. This is the Presence layer's missing piece.
 
 ### 8. Watchdog and self-restart
+The NAS integration now includes runtime-owned arr health polling, restricted
+confirmed recovery, and optional Healthchecks heartbeats that stop if its arr
+monitor stalls. See `PROGRESS.md` for activation status. Process supervision
+and automatic monitor-thread repair below remain separate future work.
+
 A tiny supervisor (launchd on the Mac, systemd on the Optiplex) that restarts
 the process on crash, plus an in-process watchdog thread that detects a
 hung turn or dead monitor thread, records it in `tool_health`, and restarts

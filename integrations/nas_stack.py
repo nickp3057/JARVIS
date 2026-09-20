@@ -1,0 +1,164 @@
+"""Read-only arr health, restricted SSH transport, and existing HA delivery."""
+from __future__ import annotations
+
+import json
+import os
+from pathlib import Path
+import re
+import subprocess
+from typing import Any
+from urllib.parse import urlsplit
+
+import requests
+
+from integrations import home_assistant, qbittorrent, servarr_common
+
+
+def seconds(name: str, default: float, minimum: float = 30) -> float:
+    try:
+        value = float(os.getenv(name, str(default)))
+        return max(minimum, min(value, 86400)) if value == value else default
+    except ValueError:
+        return default
+
+
+def enabled(name: str) -> bool:
+    return os.getenv(name, '').strip().lower() in {'1', 'true', 'yes', 'on'}
+
+
+def network_status() -> tuple[bool, dict[str, Any]]:
+    ok, info = qbittorrent.transfer_info()
+    if not ok or not isinstance(info, dict):
+        return False, {'error': 'qBittorrent API unreachable, authentication failed, or invalid response'}
+    info = dict(info)
+    nodes = info.get('dht_nodes')
+    if type(nodes) is not int or nodes < 0:
+        ok, sync = qbittorrent._request('/sync/maindata')
+        state = sync.get('server_state') if ok and isinstance(sync, dict) else None
+        nodes = state.get('dht_nodes') if isinstance(state, dict) else None
+    info['dht_nodes'] = nodes if type(nodes) is int and nodes >= 0 else None
+    return True, info
+
+
+def poll_health() -> dict[str, Any]:
+    """One bounded polling cycle. No model calls and no recovery actions."""
+    issues: dict[str, str] = {}
+    ok, qbit = network_status()
+    if not ok:
+        issues['qbittorrent-api'] = qbit['error']
+    elif qbit['dht_nodes'] is None:
+        issues['qbittorrent-dht-unavailable'] = 'qBittorrent DHT count unavailable'
+    if ok and qbit.get('connection_status') == 'disconnected':
+        issues['qbittorrent-connection'] = 'qBittorrent reports disconnected'
+    for service in ('radarr', 'sonarr'):
+        healthy, payload = servarr_common.get_health(service)
+        if not healthy or not isinstance(payload, list) or any(not isinstance(x, dict) for x in payload):
+            issues[service + '-api'] = f'{service.title()} API unreachable, authentication failed, or invalid health response'
+            continue
+        warnings = [str(x.get('message') or x.get('type') or 'health error')[:220] for x in payload if str(x.get('type', 'error')).lower() != 'ok']
+        if warnings:
+            issues[service + '-health'] = f'{service.title()} health: ' + '; '.join(warnings[:3])
+    # Prowlarr v1 health when a key exists; public /ping otherwise. Byparr's
+    # GET / endpoint reports service readiness without solving third-party URLs.
+    for service in ('prowlarr', 'byparr'):
+        base = os.getenv(service.upper() + '_URL', '').strip().rstrip('/')
+        if not base:
+            issues[service + '-api'] = f'{service.title()} monitoring URL is not configured'
+            continue
+        key = os.getenv('PROWLARR_API_KEY', '').strip() if service == 'prowlarr' else ''
+        path = '/api/v1/health' if key else '/ping' if service == 'prowlarr' else '/'
+        try:
+            response = requests.get(base + path, headers={'X-Api-Key': key} if key else {}, timeout=10, allow_redirects=False)
+            response.raise_for_status()
+            payload = response.json()
+            if not 200 <= response.status_code < 300:
+                raise ValueError('redirect')
+            if key:
+                if not isinstance(payload, list) or any(not isinstance(x, dict) for x in payload):
+                    raise ValueError('invalid health')
+                if payload:
+                    issues['prowlarr-health'] = 'Prowlarr health: ' + '; '.join(str(x.get('message', 'health error'))[:220] for x in payload[:3])
+            elif not isinstance(payload, dict) or (service == 'prowlarr' and str(payload.get('status', '')).lower() != 'ok') or (service == 'byparr' and not (payload.get('msg') or payload.get('version'))):
+                raise ValueError('invalid readiness')
+        except (requests.RequestException, ValueError):
+            issues[service + '-api'] = f'{service.title()} API unreachable or readiness check failed'
+    return {'issues': issues, 'dht_nodes': qbit.get('dht_nodes'), 'connection_status': qbit.get('connection_status', 'unknown')}
+
+
+def _ssh(kind: str, command: str) -> tuple[bool, Any]:
+    host = os.getenv('NAS_SSH_HOST', '').strip()
+    user = os.getenv('NAS_SSH_USER', 'Nick').strip()
+    key = os.getenv(f'NAS_{kind.upper()}_SSH_KEY', '').strip()
+    hosts = os.getenv('NAS_SSH_KNOWN_HOSTS', '').strip()
+    if not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9.:-]*', host) or not re.fullmatch(r'[A-Za-z_][A-Za-z0-9_-]*', user):
+        return False, 'NAS SSH host/user is not configured correctly'
+    if not key or not hosts or not Path(key).is_file() or not Path(hosts).is_file():
+        return False, 'NAS restricted key or pinned known-hosts file is missing'
+    argv = ['ssh', '-F', '/dev/null', '-T', '-o', 'BatchMode=yes', '-o', 'IdentitiesOnly=yes',
+            '-o', 'IdentityAgent=none', '-o', 'StrictHostKeyChecking=yes', '-o', 'ClearAllForwardings=yes',
+            '-o', 'ConnectTimeout=8', '-o', 'ConnectionAttempts=1', '-o', 'ServerAliveInterval=5',
+            '-o', 'ServerAliveCountMax=2', '-o', f'UserKnownHostsFile={hosts}', '-i', key,
+            f'{user}@{host}', command]
+    try:
+        result = subprocess.run(argv, capture_output=True, text=True, timeout=25, check=False)
+    except (OSError, subprocess.TimeoutExpired):
+        return False, 'NAS SSH unavailable or timed out; outcome unknown'
+    if result.returncode:
+        return False, f'NAS restricted SSH failed (exit {result.returncode}); no success confirmed'
+    try:
+        data = json.loads(result.stdout)
+    except ValueError:
+        return False, 'NAS returned invalid status; outcome unknown'
+    return (True, data) if isinstance(data, dict) else (False, 'NAS returned invalid status')
+
+
+def watchdog_status() -> tuple[bool, Any]:
+    return _ssh('status', 'status')
+
+
+def start_recovery(request_id: str) -> tuple[bool, Any]:
+    if not re.fullmatch(r'[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}', request_id):
+        return False, 'Invalid recovery request ID'
+    return _ssh('recovery', 'recover ' + request_id)
+
+
+def watchdog_note(status: tuple[bool, Any] | None = None) -> str:
+    ok, data = status if status is not None else watchdog_status()
+    if not ok or not isinstance(data, dict):
+        return 'NAS watchdog activity: unknown (read-only SSH unavailable).'
+    try:
+        now = float(data['observed_at'])
+        actions = data['watchdog_actions']
+        recent = [name for name, stamp in actions.items() if stamp and 0 <= now - float(stamp) <= 3600]
+        recovery = data.get('recovery') or {}
+        parts = ['NAS watchdog acted within the last hour: ' + ', '.join('DHT' if x == '.last_action' else 'indexer' for x in recent) + '.' if recent else 'No recorded NAS watchdog action in the last hour.']
+        if recovery:
+            age = max(0, int(now - float(recovery['updated_at'])))
+            parts.append(f"Last shared recovery: {recovery.get('source', 'unknown')}, {recovery.get('state', 'unknown')}, {age // 60} min ago.")
+        if data.get('errors'):
+            parts.append('Some watchdog files were unavailable; activity may be incomplete.')
+        return ' '.join(parts)
+    except (KeyError, ValueError, TypeError, AttributeError, OverflowError):
+        return 'NAS watchdog activity: unknown (invalid status).'
+
+
+def notify_phone(message: str) -> bool:
+    service = os.getenv('ARR_STACK_NOTIFY_SERVICE', '').strip().removeprefix('notify.')
+    if not re.fullmatch(r'mobile_app_[a-z0-9_]+', service):
+        return False
+    ok, _ = home_assistant.call_service('notify', service, service_data={'title': 'Jarvis — arr stack', 'message': message[:1800]})
+    return ok
+
+
+def ping_deadman() -> bool:
+    url = os.getenv('JARVIS_HEALTHCHECKS_URL', '').strip()
+    parsed = urlsplit(url)
+    # Prevent accidentally publishing the secret ping URL or sending it to a
+    # redirect. Account/notification integrations are managed in Healthchecks.
+    if parsed.scheme != 'https' or parsed.hostname not in {'hc-ping.com', 'ping.healthchecks.io'} or parsed.username or parsed.password:
+        return False
+    try:
+        response = requests.get(url, timeout=10, allow_redirects=False)
+        return response.status_code == 200 and response.text.strip() == 'OK'
+    except requests.RequestException:
+        return False

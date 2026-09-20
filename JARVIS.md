@@ -1012,3 +1012,39 @@ JSON summary and bounded watchdog tails without sudo; it cannot restart. The
 recovery key validates request IDs, detaches from UGOS SSH timeouts, and uses
 one narrow sudo launcher. See `ops/nas/README.md` for the preview/install and
 hand-test commands. Installation hardens previously writable path/SSH ACLs.
+
+### Arr stack monitor, alerts, and confirmed restart
+
+- `brain/arr_stack.py`: durable alert cooldowns and session-bound recovery
+  proposals; `integrations/nas_stack.py`: plain HTTP checks, restricted SSH,
+  HA mobile delivery, and Healthchecks pings.
+- `arr_stack_status` reports API reachability, qBit DHT/connection, health
+  warnings, and recent NAS watchdog actions. Polling never calls a model.
+- `restart_arr_stack` only prepares a warning. Nick must send the exact
+  `confirm restart arr stack <token>` phrase in the same conversation within
+  ten minutes. It is consumed once, before SSH. `cancel arr restart` cancels it.
+  The canonical `restart arr stack` request also works in offline text/voice.
+- Recovery returns promptly on SSH and continues detached on the NAS. Jarvis
+  polls the matching result for up to ten minutes, reports failure phases,
+  and independently post-checks DHT. A lost/unknown result never auto-retries.
+- The runtime alerts after three zero-DHT polls or immediately for failed APIs
+  and health errors, with persistent per-condition cooldowns. HA
+  `notify.mobile_app_nicks_iphone_17_pro` was discovered as Nick's existing
+  phone channel; the inbox/voice path also receives each alert. HA unavailability
+  is reported locally. This channel depends on HA on the NAS, so an entire NAS
+  outage may prevent phone delivery; the external dead-man check separately
+  covers Jarvis process/arr-monitor liveness.
+- A separate status SSH key reports recent watchdog actions/log tails and
+  never runs recovery. Missing status is reported as unknown.
+- Environment names/defaults are in `.env.example` and ARCHITECTURE.md's
+  "Arr monitoring and dead-man heartbeat" section. Startup is opt-in; leave
+  restart disabled until the key restrictions pass hand tests. Never put NAS
+  Docker commands into `SELF_REPAIR_COMMANDS` or grant Docker/root SSH access.
+- Healthchecks needs a user-supplied secret ping URL and an account notification
+  integration. For five-minute pings configure a five-minute period and at
+  least five-minute grace. Its success API is documented at
+  <https://healthchecks.io/docs/http_api/>. No URL is embedded in source or logs.
+
+See `PROGRESS.md` for what is actually installed/activated and the known live
+NAS outage; implemented functionality must not be mistaken for completed live
+recovery verification.

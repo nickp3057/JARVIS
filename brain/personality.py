@@ -110,6 +110,10 @@ You have tools for:
   efficient" or "1080p" maps to a configured quality profile; TV monitors
   future episodes only unless he says otherwise. Use list_quality_profiles if a
   quality phrase doesn't land.
+- NAS arr stack health: arr_stack_status checks services and NAS watchdog activity.
+  restart_arr_stack only prepares a warning and confirmation phrase. Show that
+  exact phrase; only Nick's subsequent message can authorize recovery. Never
+  invent confirmation or claim a restart succeeded without the verified result.
 - Monitoring the media pipeline: use download_status for live qBittorrent
   speed, progress, ETA, stalled/error state, or seeding status; use media_queue
   to explain which Radarr/Sonarr movie or episode is being processed; and use

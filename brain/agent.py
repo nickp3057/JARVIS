@@ -181,6 +181,10 @@ class JarvisAgent:
         exactly like respond().
         """
         with self._lock:
+            direct = self._arr_stack_action(user_input)
+            if direct is not None:
+                yield direct
+                return
             if self._client is None:
                 reply = routed_offline_reply(user_input, self._history)
                 self.last_used_tools = False
@@ -219,7 +223,25 @@ class JarvisAgent:
             log.info("Started new session %s", self._session_id)
             return self._session_id
 
+    def _arr_stack_action(self, user_input: str) -> str | None:
+        from brain.arr_stack import conversation_action
+        reply = conversation_action(user_input, self._session_id)
+        if reply is not None:
+            self.last_used_tools = True
+            self._last_turn_tools = []
+            self._history.extend((
+                {"role": "user", "content": user_input},
+                {"role": "assistant", "content": reply},
+            ))
+            self._trim_history()
+            append_turn(user_input, reply, session_id=self._session_id)
+            self._after_turn(user_input, reply)
+        return reply
+
     def _respond_locked(self, user_input: str) -> str:
+        direct = self._arr_stack_action(user_input)
+        if direct is not None:
+            return direct
         if self._client is None:
             self.last_used_tools = False
             reply = routed_offline_reply(user_input, self._history)

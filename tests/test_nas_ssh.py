@@ -3,6 +3,9 @@ import os
 from pathlib import Path
 import subprocess
 import tempfile
+import shutil
+import sys
+import time
 import unittest
 
 ROOT = Path(__file__).resolve().parents[1] / 'ops/nas'
@@ -38,6 +41,32 @@ class RestrictedSSHTests(unittest.TestCase):
         for args in ([], ['bad'], ['11111111-1111-1111-1111-111111111111', 'id']):
             result = subprocess.run(['bash', str(ROOT / 'jarvis-nas-launch'), *args], capture_output=True)
             self.assertEqual(result.returncode, 64)
+
+@unittest.skipUnless(sys.platform == 'linux' and shutil.which('flock') and shutil.which('setsid'), 'Linux flock/setsid required')
+class DetachedLauncherTests(unittest.TestCase):
+    def test_detached_request_is_idempotent_and_retains_lock(self):
+        import fcntl
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / 'state/requests').mkdir(parents=True)
+            worker = root / 'recover_stack.sh'
+            worker.write_text('#!/bin/bash\necho started >> "' + tmp + '/trace"\nsleep 1\n')
+            worker.chmod(0o755)
+            script = root / 'launcher'
+            source = (ROOT / 'jarvis-nas-launch').read_text().replace('[[ $EUID == 0', '[[ 0 == 0')
+            source = source.replace('/volume1/docker/watchdog', tmp).replace('/var/lib/jarvis-nas', tmp + '/state')
+            script.write_text(source)
+            request = '11111111-1111-1111-1111-111111111111'
+            result = subprocess.run(['bash', str(script), request], capture_output=True, text=True, timeout=3)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn('accepted', result.stdout)
+            with (root / 'stack.lock').open('w') as lock:
+                with self.assertRaises(BlockingIOError):
+                    fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            result = subprocess.run(['bash', str(script), request], capture_output=True, text=True, timeout=3)
+            self.assertIn('already_started', result.stdout)
+            time.sleep(1.1)
+            self.assertEqual((root / 'trace').read_text().splitlines(), ['started'])
 
 if __name__ == '__main__':
     unittest.main()

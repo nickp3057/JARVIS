@@ -63,3 +63,32 @@ Tests: `python3 -m unittest tests.test_nas_recovery tests.test_nas_ssh -v`.
 The recovery harness requires Linux, jq, flock and procfs; all Docker/network
 commands and waits are replaced in a temporary script. Tests never restart the
 real stack.
+
+## Jarvis monitor and confirmation tests
+
+The Optiplex uses the existing Home Assistant iPhone notification service.
+Configure the `ARR_STACK_*`, `NAS_*`, and heartbeat fields in `.env.example`;
+the implementation is documented in `ARCHITECTURE.md`. Monitoring is opt-in.
+Enable recovery only after the restriction tests above. Never pass SSH/Docker
+commands through the generic self-repair command registry.
+
+Run `python -m unittest tests.test_arr_stack tests.test_runtime_monitors
+ tests.test_agent_serialization tests.test_media_selection_safety tests.test_server -q`
+(on one line). With restart enabled, say `restart arr stack` and check that it
+warns about interrupted downloads and returns a confirmation phrase. No SSH
+recovery runs until you send the exact phrase in that same conversation. Reject,
+expire, or switch sessions to verify the gate; automated tests cover each case.
+
+Healthchecks success pings run every 300 seconds by default, with no LLM or
+secret URL logging. Configure the check's external alert integration, five-minute
+period and at least five-minute grace. Check its dashboard for a received ping;
+a controlled Jarvis shutdown should produce a missed-ping notification after
+period + grace. Confirm that shutdown/restart separately. The heartbeat also
+stops when the enabled arr monitor dies or stops completing cycles; it does not
+assert conversational model responsiveness.
+
+For the 2026-09-20 deployment, source and `.env` are backed up in
+`/home/nick/jarvis-backups/arr-20260920/before.tar`. Restore reviewed files from
+that archive to roll back the Optiplex patch, then restart Jarvis only after
+confirmation. New unused Python modules may remain on disk after restoration.
+`PROGRESS.md` distinguishes installed source from activated/live-tested behavior.

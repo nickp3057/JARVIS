@@ -364,3 +364,12 @@ The self-learning / self-healing backlog (governed source patches, reflection
 after failed turns, skill acquisition, self-tuning settings, watchdog) lives in
 `FUTURE_SESSIONS.md`. Self-diagnosis and configuration self-repair shipped on
 2026-09-16; see `SELF_HEALING_HANDOFF.md`.
+
+## NAS arr integration update (2026-09-20)
+
+Implemented opt-in runtime arr health polling, persistent alert cooldowns,
+existing HA mobile delivery, and session-confirmed restricted-SSH recovery.
+The NAS retains Docker authority and its existing watchdog triggers. Optional
+external Healthchecks heartbeats cover Jarvis/arr-monitor liveness. Installation,
+activation, and live-test status are tracked in `PROGRESS.md`; whole-NAS phone
+alerting independent of NAS-hosted HA remains a separate delivery improvement.

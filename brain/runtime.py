@@ -131,6 +131,9 @@ class JarvisRuntime:
         self._weather_monitor_failed = False
         self._download_monitor_started = False
         self._download_monitor_failed = False
+        self._arr_monitor_thread = None
+        self._arr_last_cycle = 0.0
+        self._deadman_started = False
         self._price_monitor_started = False
         self._price_monitor_failed = False
         self._home_snapshot = HomeSnapshot(
@@ -211,6 +214,51 @@ class JarvisRuntime:
         if price_enabled in ("1", "true", "yes", "on") and not self._price_monitor_started:
             self._price_monitor_started = True
             threading.Thread(target=self._price_monitor_loop, daemon=True).start()
+
+        from integrations import nas_stack
+        if nas_stack.enabled("ARR_STACK_MONITOR_ENABLED") and self._arr_monitor_thread is None:
+            self._arr_monitor_thread = threading.Thread(target=self._arr_stack_monitor_loop, daemon=True)
+            self._arr_monitor_thread.start()
+        if os.getenv("JARVIS_HEALTHCHECKS_URL", "").strip() and not self._deadman_started:
+            self._deadman_started = True
+            threading.Thread(target=self._deadman_loop, daemon=True).start()
+
+    def _arr_stack_monitor_loop(self) -> None:
+        from brain.arr_stack import AlertTracker
+        from integrations import nas_stack
+        tracker = AlertTracker()
+        while not self._stop_monitors.is_set():
+            try:
+                snapshot = nas_stack.poll_health()
+                notices = tracker.notices(snapshot)
+                if notices:
+                    message = "; ".join(notices) + ". " + nas_stack.watchdog_note()
+                    self.announce(message, source="arr-stack", title="Arr stack health alert")
+                    if os.getenv("ARR_STACK_NOTIFY_SERVICE", "").strip() and not nas_stack.notify_phone(message):
+                        self.record_event(kind="alert", source="arr-stack", title="Phone alert delivery failed", detail="Arr alert remains in the runtime inbox; check Home Assistant notification delivery.")
+                self._arr_last_cycle = time.monotonic()
+            except Exception:
+                # Leave the heartbeat stale if the worker cannot complete a
+                # polling cycle; do not keep reporting the monitor as healthy.
+                log.exception("Arr stack monitor cycle failed")
+            if self._stop_monitors.wait(nas_stack.seconds("ARR_STACK_MONITOR_INTERVAL_S", 60)):
+                break
+
+    def _deadman_loop(self) -> None:
+        from integrations import nas_stack
+        failed = False
+        while not self._stop_monitors.is_set():
+            monitor_ok = not nas_stack.enabled("ARR_STACK_MONITOR_ENABLED") or (
+                self._arr_monitor_thread is not None and self._arr_monitor_thread.is_alive()
+                and self._arr_last_cycle > 0
+                and time.monotonic() - self._arr_last_cycle < max(180, nas_stack.seconds("ARR_STACK_MONITOR_INTERVAL_S", 60) * 3)
+            )
+            ok = monitor_ok and nas_stack.ping_deadman()
+            if not ok and not failed:
+                self.record_event(kind="alert", source="deadman", title="Dead-man heartbeat not delivered", detail="Check arr monitor liveness and Healthchecks configuration/network.")
+            failed = not ok
+            if self._stop_monitors.wait(nas_stack.seconds("JARVIS_HEALTHCHECKS_INTERVAL_S", 300, 60)):
+                break
 
     def stop_monitors(self) -> None:
         """Ask background monitors to stop."""
