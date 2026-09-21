@@ -55,14 +55,28 @@ class ArrMonitorTests(unittest.TestCase):
 
     def test_api_health_and_readiness_failures_are_reported(self):
         response = Mock(status_code=200)
-        response.json.return_value = {'status': 'ok', 'msg': 'ready'}
-        with patch.object(nas_stack, 'network_status', return_value=(False, {'error': 'qBit down'})), patch.object(nas_stack.servarr_common, 'get_health', side_effect=[(True, [{'type': 'error', 'message': 'disk full'}]), (True, '<html>login</html>')]), patch.object(nas_stack.requests, 'get', return_value=response), patch.dict(os.environ, {'PROWLARR_URL': 'http://nas:9696', 'BYPARR_URL': 'http://nas:8191', 'PROWLARR_API_KEY': ''}):
+        response.json.return_value = {'status': 'ok'}
+        with patch.object(nas_stack, 'network_status', return_value=(False, {'error': 'qBit down'})), patch.object(nas_stack.servarr_common, 'get_health', side_effect=[(True, [{'type': 'error', 'message': 'disk full'}]), (True, '<html>login</html>')]), patch.object(nas_stack.requests, 'get', return_value=response), patch.dict(os.environ, {'PROWLARR_URL': 'http://nas:9696', 'PROWLARR_API_KEY': ''}):
             result = nas_stack.poll_health()
         self.assertIn('qbittorrent-api', result['issues'])
         self.assertIn('disk full', result['issues']['radarr-health'])
         self.assertIn('sonarr-api', result['issues'])
         self.assertNotIn('prowlarr-api', result['issues'])
+
+    def test_byparr_is_not_checked_directly_prowlarr_health_reports_proxy_failure(self):
+        # Byparr's :8191 is not published on the host by design (only
+        # Prowlarr reaches it, over the internal Docker network), so a down
+        # Byparr/indexer-proxy must surface through Prowlarr's own health
+        # list instead of a direct check.
+        response = Mock(status_code=200)
+        response.json.return_value = [{'source': 'IndexerProxyCheck', 'type': 'error', 'message': 'Indexer proxy Byparr is unreachable'}]
+        with patch.object(nas_stack, 'network_status', return_value=(True, {'dht_nodes': 5, 'connection_status': 'connected'})), \
+             patch.object(nas_stack.servarr_common, 'get_health', return_value=(True, [])), \
+             patch.object(nas_stack.requests, 'get', return_value=response), \
+             patch.dict(os.environ, {'PROWLARR_URL': 'http://nas:9696', 'PROWLARR_API_KEY': 'key', 'BYPARR_URL': 'http://nas:8191'}):
+            result = nas_stack.poll_health()
         self.assertNotIn('byparr-api', result['issues'])
+        self.assertIn('Byparr', result['issues']['prowlarr-health'])
 
     def test_watchdog_note_recent_and_unknown(self):
         note = nas_stack.watchdog_note((True, {'observed_at': 5000, 'watchdog_actions': {'.last_action': 4800, '.rotate_cooldown': 0}, 'recovery': {'source': 'dht', 'state': 'success', 'updated_at': 4900}}))

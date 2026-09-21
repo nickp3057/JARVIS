@@ -59,14 +59,17 @@ def poll_health() -> dict[str, Any]:
         if warnings:
             issues[service + '-health'] = f'{service.title()} health: ' + '; '.join(warnings[:3])
     # Prowlarr v1 health when a key exists; public /ping otherwise. Byparr's
-    # GET / endpoint reports service readiness without solving third-party URLs.
-    for service in ('prowlarr', 'byparr'):
-        base = os.getenv(service.upper() + '_URL', '').strip().rstrip('/')
-        if not base:
-            issues[service + '-api'] = f'{service.title()} monitoring URL is not configured'
-            continue
-        key = os.getenv('PROWLARR_API_KEY', '').strip() if service == 'prowlarr' else ''
-        path = '/api/v1/health' if key else '/ping' if service == 'prowlarr' else '/'
+    # :8191 is intentionally not published on the host (only Prowlarr reaches
+    # it, over the internal Docker network) — do not add a direct check for
+    # it here. Prowlarr's own health list is the only supported signal for a
+    # down Byparr/indexer-proxy from outside the stack, so a failure there is
+    # treated as critical the same way a down Byparr would have been.
+    base = os.getenv('PROWLARR_URL', '').strip().rstrip('/')
+    if not base:
+        issues['prowlarr-api'] = 'Prowlarr monitoring URL is not configured'
+    else:
+        key = os.getenv('PROWLARR_API_KEY', '').strip()
+        path = '/api/v1/health' if key else '/ping'
         try:
             response = requests.get(base + path, headers={'X-Api-Key': key} if key else {}, timeout=10, allow_redirects=False)
             response.raise_for_status()
@@ -78,10 +81,10 @@ def poll_health() -> dict[str, Any]:
                     raise ValueError('invalid health')
                 if payload:
                     issues['prowlarr-health'] = 'Prowlarr health: ' + '; '.join(str(x.get('message', 'health error'))[:220] for x in payload[:3])
-            elif not isinstance(payload, dict) or (service == 'prowlarr' and str(payload.get('status', '')).lower() != 'ok') or (service == 'byparr' and not (payload.get('msg') or payload.get('version'))):
+            elif not isinstance(payload, dict) or str(payload.get('status', '')).lower() != 'ok':
                 raise ValueError('invalid readiness')
         except (requests.RequestException, ValueError):
-            issues[service + '-api'] = f'{service.title()} API unreachable or readiness check failed'
+            issues['prowlarr-api'] = 'Prowlarr API unreachable or readiness check failed'
     return {'issues': issues, 'dht_nodes': qbit.get('dht_nodes'), 'connection_status': qbit.get('connection_status', 'unknown')}
 
 

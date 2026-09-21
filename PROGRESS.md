@@ -413,3 +413,33 @@ Nothing was written to the Optiplex's `.env` from here (SSH writes are
 blocked in this environment) and the URL was never pasted into this
 conversation. `.env.example`'s `JARVIS_HEALTHCHECKS_INTERVAL_S` default is
 the only file changed in this repo.
+
+## Arr monitor notification-noise fix — 2026-09-20, approved and implemented
+
+Nick approved the plan from the read-only investigation above and granted
+autonomy to implement, test, commit, and push (no restarts, no writes to
+Optiplex/NAS, mooney-plaid-backend untouched, no secrets/URLs in commits, no
+force pushes).
+
+### Byparr check replaced with Prowlarr health
+
+Confirmed via `docker port gluetun` (Nick) that Byparr's `:8191` is not
+published on the host — only `7878`/`8080`/`8989`/`9696` are — so Byparr is
+reachable from Prowlarr internally but was never reachable from our own
+direct check by design, not a monitoring bug. `poll_health()`'s direct
+`byparr-api` check is removed entirely; a down Byparr/indexer-proxy is now
+expected to surface through Prowlarr's own authenticated `/api/v1/health`
+list instead (existing `prowlarr-health` issue key, now classified
+critical — see below).
+
+**Could not verify live that Prowlarr's health API actually reports a
+Byparr/proxy failure** — `PROWLARR_API_KEY` is currently blank on the live
+Optiplex `.env` (confirmed: 0-length value), so the authenticated endpoint
+returns 401 and my own read-only test against it couldn't inspect a real
+payload. `poll_health()` already silently falls back to the unauthenticated
+`/ping` (reachability only, no health detail) when the key is blank — same
+as today, not a regression, but it means this fix has no effect until a real
+key is added. **Action needed from Nick**: add a real `PROWLARR_API_KEY`,
+redeploy, and with Byparr down, confirm Prowlarr's health list actually
+contains a proxy-related entry. If it doesn't, this replacement doesn't
+restore Byparr-failure detection and should be revisited.
