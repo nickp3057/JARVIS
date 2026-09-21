@@ -46,8 +46,9 @@ class AlertTracker:
     def __init__(self, path: Path | None = None):
         self.path = path or _ALERT_FILE
         self.zeros = 0
-        # condition key -> {detail, first_seen, last_escalated}
-        self.active: dict[str, dict[str, float | str]] = {}
+        self.grace_until = 0.0
+        # condition key -> {detail, first_seen, last_escalated, announced}
+        self.active: dict[str, dict[str, float | str | bool]] = {}
         try:
             data = json.loads(self.path.read_text())
             if isinstance(data, dict):
@@ -60,19 +61,24 @@ class AlertTracker:
                                 'detail': str(value.get('detail', key)),
                                 'first_seen': first_seen,
                                 'last_escalated': float(value.get('last_escalated', first_seen)),
+                                'announced': bool(value.get('announced', True)),
                             }
                 zeros = data.get('zeros')
                 # Persisted so a restart right after 3 zero-DHT checks does not
                 # spuriously "recover" dht-zero while it's still actually zero.
                 if isinstance(zeros, int) and zeros >= 0:
                     self.zeros = zeros
+                grace_until = data.get('grace_until')
+                if isinstance(grace_until, (int, float)):
+                    self.grace_until = float(grace_until)
         except (OSError, ValueError, AttributeError, TypeError):
             pass
 
     def _save(self) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
+        payload = {'active': self.active, 'zeros': self.zeros, 'grace_until': self.grace_until}
         temporary = self.path.with_suffix('.tmp')
-        temporary.write_text(json.dumps({'active': self.active, 'zeros': self.zeros}))
+        temporary.write_text(json.dumps(payload))
         temporary.replace(self.path)
 
     def notices(self, snapshot: dict, now: float | None = None) -> list[Notice]:
@@ -87,26 +93,46 @@ class AlertTracker:
         # One reminder per long window while a condition stays unresolved,
         # instead of either repeating forever or going silent for good.
         escalation_interval = nas_stack.seconds('ARR_STACK_ESCALATION_INTERVAL_S', 21600, 300)
+        # New conditions appearing right after a critical recovery are often
+        # still settling (recreated containers, restarted apps); suppress
+        # their first notice until the grace window ends. Already-active
+        # conditions are unaffected -- grace only holds back brand-new ones.
+        in_grace = now < self.grace_until
         notices: list[Notice] = []
         changed = self.zeros != previous_zeros
 
         for key, detail in issues.items():
             state = self.active.get(key)
             if state is None:
-                self.active[key] = {'detail': detail, 'first_seen': now, 'last_escalated': now}
-                notices.append(Notice(key, detail, _severity(key), 'new'))
+                self.active[key] = {'detail': detail, 'first_seen': now, 'last_escalated': now, 'announced': not in_grace}
                 changed = True
+                if not in_grace:
+                    notices.append(Notice(key, detail, _severity(key), 'new'))
             else:
                 state['detail'] = detail
-                if now - state['last_escalated'] >= escalation_interval:
+                if not state['announced']:
+                    if not in_grace:
+                        state['announced'] = True
+                        state['last_escalated'] = now
+                        notices.append(Notice(key, detail, _severity(key), 'new'))
+                        changed = True
+                elif now - state['last_escalated'] >= escalation_interval:
                     state['last_escalated'] = now
                     hours = max(1, int((now - state['first_seen']) // 3600))
                     notices.append(Notice(key, f'Still unresolved after {hours}h: {detail}', _severity(key), 'escalation'))
                     changed = True
 
+        recovered_critical = False
         for key in [k for k in self.active if k not in issues]:
-            detail = self.active.pop(key)['detail']
-            notices.append(Notice(key, f'Recovered: {detail}', _severity(key), 'recovered'))
+            state = self.active.pop(key)
+            changed = True
+            if state['announced']:
+                notices.append(Notice(key, f"Recovered: {state['detail']}", _severity(key), 'recovered'))
+                recovered_critical = recovered_critical or _severity(key) == 'critical'
+
+        if recovered_critical:
+            grace = nas_stack.seconds('ARR_STACK_POST_RECOVERY_GRACE_S', 300, 0)
+            self.grace_until = max(self.grace_until, now + grace)
             changed = True
 
         if changed:

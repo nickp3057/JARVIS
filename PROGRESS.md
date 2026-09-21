@@ -526,3 +526,41 @@ never a crash or wrong escalation timing.
 Tests: fires once per window while unresolved, stays silent between
 boundaries, fires again at the next boundary; escalation timing survives an
 `AlertTracker` restart (persisted `last_escalated`).
+
+### Post-recovery grace window
+
+New `ARR_STACK_POST_RECOVERY_GRACE_S` (default 300; `0` disables). When a
+**critical** condition recovers, `grace_until = max(grace_until, now +
+grace)` opens (persisted, restart-safe like everything else here). Any
+condition that first appears while `now < grace_until` is tracked (so it can
+still resolve or eventually surface) but not announced — `active[key]`
+carries a new `announced` flag. Once grace ends, if it's still present it
+gets its proper `new` notice (fresh `last_escalated` baseline); if it
+resolved first, it's dropped with no notice either way (never telling Nick
+about something he was never told started). Already-active conditions are
+unaffected by grace — it only holds back brand-new ones, and escalation of
+something already active keeps firing on schedule regardless. Chose to key
+grace off *any* critical recovery rather than scoping it to specific
+services (e.g. only the five recreated dependents) — simpler, and the
+downside (a genuinely new, unrelated problem's first notice delayed by up to
+`grace` seconds) is bounded and backstopped by escalation; can be narrowed
+later if that proves too broad in practice.
+
+Tests: suppressed during grace then surfaces once grace ends; resolves
+silently before ever being announced; only a critical (not advisory)
+recovery opens grace; escalation of an already-active, already-announced
+condition is unaffected by a grace window opened by something else
+recovering at the same time.
+
+### Config summary (new/changed since this section started)
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `ARR_STACK_ESCALATION_INTERVAL_S` | 21600 (6h) | One reminder per window while a condition stays unresolved |
+| `ARR_STACK_POST_RECOVERY_GRACE_S` | 300 | Suppress a brand-new condition's first notice for this long after a critical recovery; 0 disables |
+| `PROWLARR_API_KEY` | (blank) | Now required (not just optional) for proxy/Byparr-failure detection via Prowlarr health; currently blank on the live Optiplex |
+
+Removed: `ARR_STACK_ALERT_COOLDOWN_S` (no longer read anywhere).
+Unchanged: `ARR_STACK_MONITOR_ENABLED`, `ARR_STACK_MONITOR_INTERVAL_S`,
+`ARR_STACK_NOTIFY_SERVICE`, `PROWLARR_URL`, `BYPARR_URL` (kept, documented
+as no longer directly checked), `ARR_STACK_RESTART_ENABLED`.

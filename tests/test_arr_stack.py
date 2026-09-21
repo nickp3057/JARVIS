@@ -71,9 +71,12 @@ class ArrMonitorTests(unittest.TestCase):
         self.assertEqual(self.tracker.notices(self.sample(5, {}), 220), [])
 
     def test_condition_reappearing_after_recovery_is_new_again(self):
-        self.tracker.notices(self.sample(5, {'radarr-api': 'Radarr down'}), 100)
-        self.tracker.notices(self.sample(5, {}), 160)
-        fresh = self.tracker.notices(self.sample(5, {'radarr-api': 'Radarr down again'}), 220)
+        # Post-recovery grace is a separate concern (see its own tests);
+        # disable it here to isolate reappear-as-new dedup behavior.
+        with patch.dict(os.environ, {'ARR_STACK_POST_RECOVERY_GRACE_S': '0'}):
+            self.tracker.notices(self.sample(5, {'radarr-api': 'Radarr down'}), 100)
+            self.tracker.notices(self.sample(5, {}), 160)
+            fresh = self.tracker.notices(self.sample(5, {'radarr-api': 'Radarr down again'}), 220)
         self.assertEqual(self.texts(fresh), ['Radarr down again'])
         self.assertEqual(fresh[0].kind, 'new')
 
@@ -133,6 +136,41 @@ class ArrMonitorTests(unittest.TestCase):
             self.assertEqual(restarted.notices(self.sample(5, {'radarr-api': 'Radarr down'}), 200), [])
             escalated = restarted.notices(self.sample(5, {'radarr-api': 'Radarr down'}), 500)
             self.assertEqual([n.kind for n in escalated], ['escalation'])
+
+    def test_post_recovery_grace_suppresses_new_condition_until_window_ends(self):
+        with patch.dict(os.environ, {'ARR_STACK_POST_RECOVERY_GRACE_S': '300'}):
+            self.tracker.notices(self.sample(5, {'radarr-api': 'Radarr down'}), 100)
+            recovered = self.tracker.notices(self.sample(5, {}), 160)  # critical recovery -> opens grace
+            self.assertEqual([n.kind for n in recovered], ['recovered'])
+            # A brand-new condition appearing inside the grace window is
+            # tracked but not announced.
+            self.assertEqual(self.tracker.notices(self.sample(5, {'sonarr-api': 'Sonarr down'}), 200), [])
+            self.assertEqual(self.tracker.notices(self.sample(5, {'sonarr-api': 'Sonarr down'}), 400), [])
+            # Grace (160 + 300 = 460) has now passed and it's still present.
+            surfaced = self.tracker.notices(self.sample(5, {'sonarr-api': 'Sonarr down'}), 470)
+            self.assertEqual([(n.text, n.kind) for n in surfaced], [('Sonarr down', 'new')])
+
+    def test_condition_resolving_during_grace_before_announced_is_silent(self):
+        with patch.dict(os.environ, {'ARR_STACK_POST_RECOVERY_GRACE_S': '300'}):
+            self.tracker.notices(self.sample(5, {'radarr-api': 'Radarr down'}), 100)
+            self.tracker.notices(self.sample(5, {}), 160)  # opens grace
+            self.assertEqual(self.tracker.notices(self.sample(5, {'sonarr-api': 'Sonarr down'}), 200), [])
+            # Resolves before it was ever announced: no notice either way.
+            self.assertEqual(self.tracker.notices(self.sample(5, {}), 250), [])
+
+    def test_grace_only_opens_on_critical_recovery_not_advisory(self):
+        with patch.dict(os.environ, {'ARR_STACK_POST_RECOVERY_GRACE_S': '300'}):
+            self.tracker.notices(self.sample(5, {'radarr-health': 'Radarr health: warning'}), 100)
+            self.tracker.notices(self.sample(5, {}), 160)  # advisory recovery -> no grace
+            fresh = self.tracker.notices(self.sample(5, {'sonarr-api': 'Sonarr down'}), 161)
+            self.assertEqual([(n.text, n.kind) for n in fresh], [('Sonarr down', 'new')])
+
+    def test_grace_does_not_suppress_escalation_of_already_active_conditions(self):
+        with patch.dict(os.environ, {'ARR_STACK_POST_RECOVERY_GRACE_S': '300', 'ARR_STACK_ESCALATION_INTERVAL_S': '300'}):
+            self.tracker.notices(self.sample(5, {'radarr-api': 'Radarr down', 'sonarr-api': 'Sonarr down'}), 100)
+            self.tracker.notices(self.sample(5, {'sonarr-api': 'Sonarr down'}), 160)  # radarr-api recovers -> opens grace
+            escalated = self.tracker.notices(self.sample(5, {'sonarr-api': 'Sonarr down'}), 500)
+            self.assertEqual([(n.key, n.kind) for n in escalated], [('sonarr-api', 'escalation')])
 
     def test_missing_dht_uses_sync_without_masking_connection(self):
         with patch.object(nas_stack.qbittorrent, 'transfer_info', return_value=(True, {'connection_status': 'connected'})), patch.object(nas_stack.qbittorrent, '_request', return_value=(True, {'server_state': {'dht_nodes': 14}})):
