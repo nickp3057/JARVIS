@@ -332,3 +332,63 @@ healthy, DHT climbing normally (319+ by 21:10:01).
 
 `ARR_STACK_RESTART_ENABLED` is still `false`; no live recovery has been
 requested through Jarvis.
+
+## Healthchecks dead-man heartbeat setup — 2026-09-20
+
+Nick created the Healthchecks.io check (period 5 min, grace 5 min) and has
+the ping URL, kept out of this repo, chat, and terminal history entirely.
+
+Read the full call chain (`brain/runtime.py`'s `_deadman_loop`/
+`start_monitors`, `integrations/nas_stack.py`'s `ping_deadman`) rather than
+assuming the usual "`.env` is read live" rule applied here — it doesn't
+fully: `JARVIS_HEALTHCHECKS_URL`'s presence is checked exactly once, inside
+`JarvisRuntime.__init__` → `start_monitors()`, gated by a `_deadman_started`
+flag that's never re-evaluated, and `JarvisRuntime()` is a guarded singleton
+constructed once per process. Adding the URL to `.env` alone does not start
+the heartbeat thread; `sudo systemctl restart jarvis-api` is required (NAS
+containers are on a separate machine and untouched by this).
+
+Chose `JARVIS_HEALTHCHECKS_INTERVAL_S=60` (updated `.env.example`'s default
+from `300`, which left near-zero margin for a single missed ping, to `60`,
+matching the value's own enforced minimum in `nas_stack.seconds()`): with
+period 5 min + grace 5 min giving 10 minutes of tolerance, a 60s interval
+means even several consecutive missed pings stay well inside that window.
+
+Verified the exposure surface rather than assuming it: `ping_deadman()` never
+logs, and swallows `requests.RequestException` (timeouts/connection errors —
+the cases most likely to otherwise embed the URL in an exception message)
+silently, returning `False`. The only logging in the whole path is a fixed,
+generic failure string in `_deadman_loop`'s `record_event()` call — never the
+URL. `brain/settings.py`'s `list_settings`/`get_setting`/`update_setting`
+only touch an explicit allowlist of voice/persona settings that does not
+include this variable, so it is structurally unreachable there, not merely
+unused. No code anywhere dumps `os.environ`, and no HTTP endpoint in
+`app/server.py` returns raw config. Nothing needed fixing.
+
+Confirmed the heartbeat is tied to the arr monitor loop actually completing
+cycles, not just the process being alive: `_deadman_loop`'s `monitor_ok`
+check requires the arr monitor thread to be alive and to have completed a
+poll cycle within the last `max(180s, 3× its interval)`. Expected transient:
+right after any `jarvis-api` restart, the very first deadman check can race
+the arr monitor's first poll cycle and report `not ok`, producing one
+harmless `Dead-man heartbeat not delivered` runtime-inbox event that
+resolves on the next 60s cycle — far short of the 10-minute Healthchecks
+tolerance, so it will not reach Healthchecks as a real "down."
+
+There is no explicit success log line anywhere in this path — only the
+failure transition logs (via `record_event`'s own `log.info`). Confirmation
+of live delivery is the Healthchecks dashboard ("Up" status, advancing "Last
+Ping"); absence of the `Dead-man heartbeat not delivered` line in
+`jarvis.log` is the local-side "no news is good news" signal, not a positive
+confirmation.
+
+Nick ran the recommended test: `sudo systemctl stop jarvis-api`, waited, and
+confirmed a Healthchecks alert email actually arrived, then
+`sudo systemctl start jarvis-api` to restore. Live delivery, the dashboard
+"Up" transition, and real end-to-end alerting are all now confirmed, not
+just traced through code.
+
+Nothing was written to the Optiplex's `.env` from here (SSH writes are
+blocked in this environment) and the URL was never pasted into this
+conversation. `.env.example`'s `JARVIS_HEALTHCHECKS_INTERVAL_S` default is
+the only file changed in this repo.
