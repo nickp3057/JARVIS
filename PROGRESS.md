@@ -187,3 +187,34 @@ repo change only. Since `install-restricted-ssh.sh` installs `recover_stack.sh`
 too, re-running it (once Nick applies the `Jarvis`-account migration) will
 pick up this fix in the same pass; a separate `install-recovery.sh --apply`
 run is not required but is harmless if Nick prefers to run it explicitly.
+
+### `install-recovery.sh` re-run bug — 2026-09-20
+
+Nick actually ran `install-recovery.sh --preview`/`--apply` from the NAS to
+pick up the fix above and both failed: `dht_watchdog.sh: FAILED`,
+`indexer_watchdog.sh: FAILED`, `sha256sum: WARNING: 2 computed checksums did
+NOT match`. Cause: the installer pinned only the two hashes of the original
+pre-refactor scripts it read live on 2026-09-20; the first `--apply` run
+earlier that same night already replaced them with the refactored versions
+(from commit `0489557`), so a second run no longer matches. The claim in the
+previous entry that the pins "still match" was wrong beyond a first, fresh
+run.
+
+Fixed by accepting either hash per file (original pre-refactor, or the
+already-installed refactored version) and failing closed only on a third,
+unreviewed value — implemented as a `check_known_hash` function rather than
+the previous single-shot `sha256sum -c -`, since `sha256sum -c` has no
+built-in concept of "any of these." Backup step is unchanged. Added
+`tests/test_nas_install_recovery.py` (4 tests: accepts the original pin,
+accepts the already-refactored content — the exact re-run case — rejects
+unreviewed drift, rejects a missing live file), run for real inside a
+`python:3.12-slim` Linux container via local Docker Desktop (same reasoning
+as the recover_stack.sh test: the installer needs `flock` and GNU
+`sha256sum`, neither reliably available on macOS). Also confirmed the *old*
+script genuinely reproduces Nick's exact reported error
+(`sha256sum: WARNING: 2 computed checksums did NOT match`) under the same
+harness, and that the new script no longer does.
+
+Full local suite: 322 tests (up from 318), same one pre-existing unrelated
+`test_study_brief` failure, 11 skipped (the Linux-gated NAS/install tests on
+this Mac). Nothing changed on the NAS for this fix.
