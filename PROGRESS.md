@@ -443,3 +443,39 @@ key is added. **Action needed from Nick**: add a real `PROWLARR_API_KEY`,
 redeploy, and with Byparr down, confirm Prowlarr's health list actually
 contains a proxy-related entry. If it doesn't, this replacement doesn't
 restore Byparr-failure detection and should be revisited.
+
+### Dedupe by condition (alert once, silent while active, one recovery notice)
+
+`AlertTracker` rewritten: replaced the `{key: last_alerted_ts}` + fixed
+cooldown re-alert loop with `{key: detail}` active-condition tracking. A
+condition fires exactly once when it first appears, stays completely silent
+every subsequent cycle while it persists (regardless of how long), and fires
+exactly one `Recovered: ...` notice the cycle it clears. A condition that
+resolves and later reappears is treated as new again, not a continuation.
+`_arr_stack_monitor_loop`/`describe_status` needed no changes — `notices()`
+kept its `list[str]` return shape for this step. `ARR_STACK_ALERT_COOLDOWN_S`
+is no longer read anywhere; removed from `.env.example` (existing live
+`.env` values are simply ignored now, not harmful to leave in place).
+
+State file format changed from a flat `{key: timestamp}` to
+`{"active": {...}, "zeros": n}`; old-format files are silently treated as
+empty (safe — worst case is every then-active condition re-announcing once
+after this deploys, not a crash or wrong state).
+
+Caught and fixed a real bug in review, not just in a test: the "3
+consecutive zero-DHT checks" streak counter lived only in memory, while the
+new `active` dict is persisted to disk. Since `_arr_stack_monitor_loop`
+constructs a fresh `AlertTracker()` on every process start, a restart
+occurring right after `dht-zero` had already fired would reset the in-memory
+streak to 0, and the *next* poll would see `dht-zero` missing from that
+cycle's issues (streak not yet back at 3) and spuriously announce it as
+"Recovered" even though DHT was still actually zero the whole time. Fixed by
+persisting the streak counter (`zeros`) alongside `active` in the same file.
+A dedicated regression test (`test_restart_right_after_threshold_does_not_
+spuriously_recover`) covers this; without the fix it fails.
+
+Tests: new/persist-silent/recover-once/reappear-as-new/old-format-migration/
+restart-does-not-spuriously-recover, plus the two pre-existing DHT and
+per-service tests updated for the new semantics (both still pass unchanged
+in spirit — dedup produces the same observable result they were already
+asserting for a short time gap, just for a different reason).

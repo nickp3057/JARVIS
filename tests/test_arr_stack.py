@@ -21,16 +21,18 @@ class ArrMonitorTests(unittest.TestCase):
     def sample(self, nodes=0, issues=None):
         return {'dht_nodes': nodes, 'connection_status': 'connected', 'issues': issues or {}}
 
-    def test_three_zero_checks_then_rate_limit_and_persist(self):
+    def test_three_zero_checks_then_persists_silently_until_recovered(self):
         self.assertEqual(self.tracker.notices(self.sample(), 100), [])
         self.assertEqual(self.tracker.notices(self.sample(), 160), [])
         self.assertIn('3 consecutive', self.tracker.notices(self.sample(), 220)[0])
         self.assertEqual(self.tracker.notices(self.sample(), 280), [])
         other = arr_stack.AlertTracker(self.path)
-        other.notices(self.sample(), 300)
-        other.notices(self.sample(), 360)
-        self.assertEqual(other.notices(self.sample(), 420), [])
-        self.assertTrue(other.notices(self.sample(), 2200))
+        self.assertEqual(other.notices(self.sample(), 300), [])
+        # No cooldown re-fire: still active a long time later stays silent.
+        self.assertEqual(other.notices(self.sample(), 100000), [])
+        recovered = other.notices(self.sample(999), 100060)
+        self.assertEqual(recovered, ['Recovered: qBittorrent DHT has been zero for 3 consecutive checks'])
+        self.assertEqual(other.notices(self.sample(999), 100120), [])
 
     def test_unknown_or_positive_count_resets_consecutive_checks(self):
         for interruption in (None, 12):
@@ -42,6 +44,40 @@ class ArrMonitorTests(unittest.TestCase):
     def test_unreachable_alert_is_immediate_and_per_service(self):
         self.assertEqual(self.tracker.notices(self.sample(None, {'radarr-api': 'Radarr down'}), 100), ['Radarr down'])
         self.assertEqual(self.tracker.notices(self.sample(None, {'radarr-api': 'Radarr down', 'sonarr-api': 'Sonarr down'}), 160), ['Sonarr down'])
+
+    def test_new_condition_fires_once_then_silent_while_persisting(self):
+        self.assertEqual(self.tracker.notices(self.sample(5, {'radarr-api': 'Radarr down'}), 100), ['Radarr down'])
+        self.assertEqual(self.tracker.notices(self.sample(5, {'radarr-api': 'Radarr down'}), 160), [])
+        self.assertEqual(self.tracker.notices(self.sample(5, {'radarr-api': 'Radarr down'}), 5000), [])
+
+    def test_recovered_condition_fires_one_notice_then_silent(self):
+        self.tracker.notices(self.sample(5, {'radarr-api': 'Radarr down'}), 100)
+        self.assertEqual(self.tracker.notices(self.sample(5, {}), 160), ['Recovered: Radarr down'])
+        self.assertEqual(self.tracker.notices(self.sample(5, {}), 220), [])
+
+    def test_condition_reappearing_after_recovery_is_new_again(self):
+        self.tracker.notices(self.sample(5, {'radarr-api': 'Radarr down'}), 100)
+        self.tracker.notices(self.sample(5, {}), 160)
+        fresh = self.tracker.notices(self.sample(5, {'radarr-api': 'Radarr down again'}), 220)
+        self.assertEqual(fresh, ['Radarr down again'])
+
+    def test_restart_right_after_threshold_does_not_spuriously_recover(self):
+        # A fresh AlertTracker (e.g. after a Jarvis restart) must not report
+        # dht-zero as recovered just because its own in-memory streak
+        # counter reset to 0, while DHT is in fact still zero.
+        self.tracker.notices(self.sample(), 100)
+        self.tracker.notices(self.sample(), 160)
+        self.tracker.notices(self.sample(), 220)
+        restarted = arr_stack.AlertTracker(self.path)
+        self.assertEqual(restarted.notices(self.sample(), 280), [])
+
+    def test_state_persists_and_survives_old_format(self):
+        self.tracker.notices(self.sample(5, {'radarr-api': 'Radarr down'}), 100)
+        reloaded = arr_stack.AlertTracker(self.path)
+        self.assertEqual(reloaded.notices(self.sample(5, {'radarr-api': 'Radarr down'}), 160), [])
+        self.path.write_text(json.dumps({'radarr-api': 100.0}))  # pre-dedup file shape
+        migrated = arr_stack.AlertTracker(self.path)
+        self.assertEqual(migrated.notices(self.sample(5, {'radarr-api': 'Radarr down'}), 220), ['Radarr down'])
 
     def test_missing_dht_uses_sync_without_masking_connection(self):
         with patch.object(nas_stack.qbittorrent, 'transfer_info', return_value=(True, {'connection_status': 'connected'})), patch.object(nas_stack.qbittorrent, '_request', return_value=(True, {'server_state': {'dht_nodes': 14}})):

@@ -18,35 +18,56 @@ _WARNING = 'Recreating gluetun kills active downloads and takes about 3 minutes 
 
 
 class AlertTracker:
+    """Alerts once per condition: fires on new, stays silent while it
+    persists, fires one "Recovered" notice when it clears. A condition that
+    resolves and later reappears is treated as new again, not a continuation."""
+
     def __init__(self, path: Path | None = None):
         self.path = path or _ALERT_FILE
         self.zeros = 0
+        self.active: dict[str, str] = {}  # condition key -> last known detail text
         try:
             data = json.loads(self.path.read_text())
-            self.last = {str(k): float(v) for k, v in data.items() if isinstance(v, (int, float))}
+            if isinstance(data, dict):
+                active = data.get('active')
+                if isinstance(active, dict):
+                    self.active = {str(k): str(v) for k, v in active.items()}
+                zeros = data.get('zeros')
+                # Persisted so a restart right after 3 zero-DHT checks does not
+                # spuriously "recover" dht-zero while it's still actually zero.
+                if isinstance(zeros, int) and zeros >= 0:
+                    self.zeros = zeros
         except (OSError, ValueError, AttributeError):
-            self.last = {}
+            pass
+
+    def _save(self) -> None:
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        temporary = self.path.with_suffix('.tmp')
+        temporary.write_text(json.dumps({'active': self.active, 'zeros': self.zeros}))
+        temporary.replace(self.path)
 
     def notices(self, snapshot: dict, now: float | None = None) -> list[str]:
         now = time.time() if now is None else now
         nodes = snapshot.get('dht_nodes')
+        previous_zeros = self.zeros
         self.zeros = self.zeros + 1 if type(nodes) is int and nodes == 0 else 0
         issues = dict(snapshot['issues'])
         if self.zeros >= 3:
             issues['dht-zero'] = 'qBittorrent DHT has been zero for 3 consecutive checks'
-        cooldown = nas_stack.seconds('ARR_STACK_ALERT_COOLDOWN_S', 1800, 60)
-        notices = []
+
+        notices: list[str] = []
+        changed = self.zeros != previous_zeros
         for key, detail in issues.items():
-            previous = self.last.get(key)
-            if previous is None or now - previous >= cooldown or now < previous:
+            if key not in self.active:
                 notices.append(detail)
-                self.last[key] = now
-        if notices:
-            self.last = {k: v for k, v in self.last.items() if now - v < 86400}
-            self.path.parent.mkdir(parents=True, exist_ok=True)
-            temporary = self.path.with_suffix('.tmp')
-            temporary.write_text(json.dumps(self.last))
-            temporary.replace(self.path)
+                changed = True
+            self.active[key] = detail
+        for key in [k for k in self.active if k not in issues]:
+            notices.append(f'Recovered: {self.active.pop(key)}')
+            changed = True
+
+        if changed:
+            self._save()
         return notices
 
 
