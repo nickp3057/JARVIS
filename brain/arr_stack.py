@@ -6,6 +6,7 @@ from pathlib import Path
 import re
 import threading
 import time
+from typing import NamedTuple
 import uuid
 
 from integrations import nas_stack
@@ -15,6 +16,26 @@ _pending: dict[str, tuple[float, str, str]] = {}
 _pending_lock = threading.Lock()
 _restart_lock = threading.Lock()
 _WARNING = 'Recreating gluetun kills active downloads and takes about 3 minutes to settle; verification can take another 5 minutes.'
+
+# Radarr/Sonarr indexer-health warnings are advisory: Radarr/Sonarr already
+# gate them behind their own 6-hour threshold before we ever see them, and
+# they're usually self-healing once Prowlarr/the indexer recovers. Everything
+# else (unreachable services, DHT zero, Prowlarr health -- which is also how
+# a down Byparr/indexer-proxy surfaces, see integrations/nas_stack.py) is
+# critical: it's either a hard outage or something that could affect every
+# indexer/download, not just one app's view of one indexer.
+_ADVISORY_KEYS = frozenset({'radarr-health', 'sonarr-health'})
+
+
+def _severity(key: str) -> str:
+    return 'advisory' if key in _ADVISORY_KEYS else 'critical'
+
+
+class Notice(NamedTuple):
+    key: str
+    text: str
+    severity: str  # 'critical' | 'advisory'
+    kind: str  # 'new' | 'recovered' | 'escalation'
 
 
 class AlertTracker:
@@ -46,7 +67,7 @@ class AlertTracker:
         temporary.write_text(json.dumps({'active': self.active, 'zeros': self.zeros}))
         temporary.replace(self.path)
 
-    def notices(self, snapshot: dict, now: float | None = None) -> list[str]:
+    def notices(self, snapshot: dict, now: float | None = None) -> list[Notice]:
         now = time.time() if now is None else now
         nodes = snapshot.get('dht_nodes')
         previous_zeros = self.zeros
@@ -55,15 +76,16 @@ class AlertTracker:
         if self.zeros >= 3:
             issues['dht-zero'] = 'qBittorrent DHT has been zero for 3 consecutive checks'
 
-        notices: list[str] = []
+        notices: list[Notice] = []
         changed = self.zeros != previous_zeros
         for key, detail in issues.items():
             if key not in self.active:
-                notices.append(detail)
+                notices.append(Notice(key, detail, _severity(key), 'new'))
                 changed = True
             self.active[key] = detail
         for key in [k for k in self.active if k not in issues]:
-            notices.append(f'Recovered: {self.active.pop(key)}')
+            detail = self.active.pop(key)
+            notices.append(Notice(key, f'Recovered: {detail}', _severity(key), 'recovered'))
             changed = True
 
         if changed:

@@ -21,17 +21,25 @@ class ArrMonitorTests(unittest.TestCase):
     def sample(self, nodes=0, issues=None):
         return {'dht_nodes': nodes, 'connection_status': 'connected', 'issues': issues or {}}
 
+    def texts(self, notices):
+        return [n.text for n in notices]
+
     def test_three_zero_checks_then_persists_silently_until_recovered(self):
         self.assertEqual(self.tracker.notices(self.sample(), 100), [])
         self.assertEqual(self.tracker.notices(self.sample(), 160), [])
-        self.assertIn('3 consecutive', self.tracker.notices(self.sample(), 220)[0])
+        third = self.tracker.notices(self.sample(), 220)
+        self.assertEqual(len(third), 1)
+        self.assertIn('3 consecutive', third[0].text)
+        self.assertEqual((third[0].severity, third[0].kind), ('critical', 'new'))
         self.assertEqual(self.tracker.notices(self.sample(), 280), [])
         other = arr_stack.AlertTracker(self.path)
         self.assertEqual(other.notices(self.sample(), 300), [])
         # No cooldown re-fire: still active a long time later stays silent.
         self.assertEqual(other.notices(self.sample(), 100000), [])
         recovered = other.notices(self.sample(999), 100060)
-        self.assertEqual(recovered, ['Recovered: qBittorrent DHT has been zero for 3 consecutive checks'])
+        self.assertEqual(len(recovered), 1)
+        self.assertEqual(recovered[0].kind, 'recovered')
+        self.assertIn('Recovered', recovered[0].text)
         self.assertEqual(other.notices(self.sample(999), 100120), [])
 
     def test_unknown_or_positive_count_resets_consecutive_checks(self):
@@ -42,24 +50,31 @@ class ArrMonitorTests(unittest.TestCase):
             self.assertEqual(self.tracker.zeros, 2)
 
     def test_unreachable_alert_is_immediate_and_per_service(self):
-        self.assertEqual(self.tracker.notices(self.sample(None, {'radarr-api': 'Radarr down'}), 100), ['Radarr down'])
-        self.assertEqual(self.tracker.notices(self.sample(None, {'radarr-api': 'Radarr down', 'sonarr-api': 'Sonarr down'}), 160), ['Sonarr down'])
+        first = self.tracker.notices(self.sample(None, {'radarr-api': 'Radarr down'}), 100)
+        self.assertEqual(self.texts(first), ['Radarr down'])
+        second = self.tracker.notices(self.sample(None, {'radarr-api': 'Radarr down', 'sonarr-api': 'Sonarr down'}), 160)
+        self.assertEqual(self.texts(second), ['Sonarr down'])
 
     def test_new_condition_fires_once_then_silent_while_persisting(self):
-        self.assertEqual(self.tracker.notices(self.sample(5, {'radarr-api': 'Radarr down'}), 100), ['Radarr down'])
+        first = self.tracker.notices(self.sample(5, {'radarr-api': 'Radarr down'}), 100)
+        self.assertEqual(self.texts(first), ['Radarr down'])
+        self.assertEqual(first[0].severity, 'critical')
         self.assertEqual(self.tracker.notices(self.sample(5, {'radarr-api': 'Radarr down'}), 160), [])
         self.assertEqual(self.tracker.notices(self.sample(5, {'radarr-api': 'Radarr down'}), 5000), [])
 
     def test_recovered_condition_fires_one_notice_then_silent(self):
         self.tracker.notices(self.sample(5, {'radarr-api': 'Radarr down'}), 100)
-        self.assertEqual(self.tracker.notices(self.sample(5, {}), 160), ['Recovered: Radarr down'])
+        recovered = self.tracker.notices(self.sample(5, {}), 160)
+        self.assertEqual(self.texts(recovered), ['Recovered: Radarr down'])
+        self.assertEqual(recovered[0].kind, 'recovered')
         self.assertEqual(self.tracker.notices(self.sample(5, {}), 220), [])
 
     def test_condition_reappearing_after_recovery_is_new_again(self):
         self.tracker.notices(self.sample(5, {'radarr-api': 'Radarr down'}), 100)
         self.tracker.notices(self.sample(5, {}), 160)
         fresh = self.tracker.notices(self.sample(5, {'radarr-api': 'Radarr down again'}), 220)
-        self.assertEqual(fresh, ['Radarr down again'])
+        self.assertEqual(self.texts(fresh), ['Radarr down again'])
+        self.assertEqual(fresh[0].kind, 'new')
 
     def test_restart_right_after_threshold_does_not_spuriously_recover(self):
         # A fresh AlertTracker (e.g. after a Jarvis restart) must not report
@@ -77,7 +92,21 @@ class ArrMonitorTests(unittest.TestCase):
         self.assertEqual(reloaded.notices(self.sample(5, {'radarr-api': 'Radarr down'}), 160), [])
         self.path.write_text(json.dumps({'radarr-api': 100.0}))  # pre-dedup file shape
         migrated = arr_stack.AlertTracker(self.path)
-        self.assertEqual(migrated.notices(self.sample(5, {'radarr-api': 'Radarr down'}), 220), ['Radarr down'])
+        fresh = migrated.notices(self.sample(5, {'radarr-api': 'Radarr down'}), 220)
+        self.assertEqual(self.texts(fresh), ['Radarr down'])
+
+    def test_radarr_sonarr_health_is_advisory_everything_else_critical(self):
+        notices = self.tracker.notices(self.sample(5, {
+            'radarr-health': 'Radarr health: indexer warning',
+            'sonarr-health': 'Sonarr health: indexer warning',
+            'radarr-api': 'Radarr down',
+            'prowlarr-health': 'Prowlarr health: proxy failure',
+        }), 100)
+        severities = {n.key: n.severity for n in notices}
+        self.assertEqual(severities['radarr-health'], 'advisory')
+        self.assertEqual(severities['sonarr-health'], 'advisory')
+        self.assertEqual(severities['radarr-api'], 'critical')
+        self.assertEqual(severities['prowlarr-health'], 'critical')
 
     def test_missing_dht_uses_sync_without_masking_connection(self):
         with patch.object(nas_stack.qbittorrent, 'transfer_info', return_value=(True, {'connection_status': 'connected'})), patch.object(nas_stack.qbittorrent, '_request', return_value=(True, {'server_state': {'dht_nodes': 14}})):

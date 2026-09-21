@@ -479,3 +479,26 @@ restart-does-not-spuriously-recover, plus the two pre-existing DHT and
 per-service tests updated for the new semantics (both still pass unchanged
 in spirit — dedup produces the same observable result they were already
 asserting for a short time gap, just for a different reason).
+
+### Critical vs advisory severity + routing
+
+`AlertTracker.notices()` now returns `Notice(key, text, severity, kind)`
+instead of plain strings (`kind` is `'new'`/`'recovered'`, with
+`'escalation'` reserved for the next change). `radarr-health`/`sonarr-health`
+are classified advisory (a fixed set, not an env var — a code-level
+judgment call, not something to tune per deploy); everything else
+(unreachable services, `dht-zero`, `prowlarr-health` — which is also how a
+down Byparr/proxy now surfaces) is critical. `_arr_stack_monitor_loop`
+splits notices by severity: critical still announces + pushes to the phone
+(unchanged path); advisory goes to the runtime inbox/event feed only, no
+announce, no phone push. Every notice, either severity, is logged in
+`jarvis.log` as `Arr stack condition <key>: <kind> (<severity>)` — the
+condition key and a short status, satisfying that requirement directly.
+
+Not unit-tested separately: the phone-push/inbox routing wiring itself and
+the log line, since `_arr_stack_monitor_loop` (an infinite thread loop) was
+already untested at that boundary before this change — consistent with the
+existing convention of testing `AlertTracker`/`nas_stack` logic directly
+rather than the runtime loop wrapper. The severity *classification* (the
+part with actual judgment, and the part a future edit could get wrong) is
+covered by `test_radarr_sonarr_health_is_advisory_everything_else_critical`.

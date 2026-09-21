@@ -231,11 +231,18 @@ class JarvisRuntime:
             try:
                 snapshot = nas_stack.poll_health()
                 notices = tracker.notices(snapshot)
-                if notices:
-                    message = "; ".join(notices) + ". " + nas_stack.watchdog_note()
+                for notice in notices:
+                    log.info("Arr stack condition %s: %s (%s)", notice.key, notice.kind, notice.severity)
+                critical = [n.text for n in notices if n.severity == "critical"]
+                advisory = [n.text for n in notices if n.severity == "advisory"]
+                if critical:
+                    message = "; ".join(critical) + ". " + nas_stack.watchdog_note()
                     self.announce(message, source="arr-stack", title="Arr stack health alert")
                     if os.getenv("ARR_STACK_NOTIFY_SERVICE", "").strip() and not nas_stack.notify_phone(message):
                         self.record_event(kind="alert", source="arr-stack", title="Phone alert delivery failed", detail="Arr alert remains in the runtime inbox; check Home Assistant notification delivery.")
+                if advisory:
+                    # Inbox/event feed only -- no announce, no phone push.
+                    self.record_event(kind="notice", source="arr-stack", title="Arr stack advisory", detail="; ".join(advisory))
                 self._arr_last_cycle = time.monotonic()
             except Exception:
                 # Leave the heartbeat stale if the worker cannot complete a
