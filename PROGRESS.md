@@ -218,3 +218,117 @@ harness, and that the new script no longer does.
 Full local suite: 322 tests (up from 318), same one pre-existing unrelated
 `test_study_brief` failure, 11 skipped (the Linux-gated NAS/install tests on
 this Mac). Nothing changed on the NAS for this fix.
+
+## NAS restricted-key enforcement fix — 2026-09-20
+
+Nick ran `install-recovery.sh` and `install-restricted-ssh.sh` (`--preview`
+then `--apply`) against the `Nick` admin account, exactly as staged; both
+completed cleanly with backups at
+`/volume1/docker/watchdog/backups/20260920T230040Z-recovery` and
+`/var/backups/jarvis-nas/20260920T230040Z-ssh`. Hand-testing the two
+restricted keys immediately after found they granted a full, unrestricted
+shell: `probe` ran as a literal nonexistent command and `id` returned a real
+`uid=1000(Nick) gid=10(admin)...` line for both the recovery and status keys.
+`authorized_keys` itself was byte-for-byte what was reviewed; sshd's own `-vv`
+debug output even confirmed it recognized the per-key `command=` option
+(`key options: command`) — it just never got applied.
+
+Root cause: `/etc/ssh/sshd_config` carries an unconditional, vendor-owned
+`ForceCommand /etc/ssh/force_command.sh` (UGOS, not ours). A global
+`ForceCommand` overrides any per-key `command=` restriction entirely. That
+wrapper gives admin/root-group logins (`Nick` is `gid=10(admin)`) an arbitrary
+shell, and limits every other account to `rsync`/`scp`/`sftp-server`,
+denying everything else. So a non-admin account alone would not have fixed
+this — it would have made both keys deny-all instead of unrestricted, since
+`probe`/`status`/`recover <uuid>` don't match the wrapper's allowed patterns.
+
+Fix, approved by Nick: a `/etc/ssh/sshd_config.d/jarvis-nas.conf` drop-in
+(`ops/nas/sshd-jarvis.conf`) with `Match User Jarvis` / `ForceCommand none`,
+closed with a trailing `Match all` so it cannot leak into later-sorted
+`sshd_config.d/*.conf` files. This restores normal `command=` enforcement for
+`Jarvis` only, leaving `Nick` and everyone else unaffected. Nick created a new
+non-admin NAS account for this (`Jarvis`, uid 1001, primary group `users`,
+Personal Folder enabled, all shared folders Access Denied); confirmed via
+`ls /home` that UGOS stored it as `Jarvis` (title case), not `JARVIS`.
+
+`install-restricted-ssh.sh` was rewritten to be reproducible for this
+architecture rather than a one-off manual fix: it installs the sshd drop-in
+first (highest blast radius) and runs `sshd -t` immediately, auto-reverting
+just that file and aborting before touching anything else if validation
+fails; it never reloads sshd itself. It also fixes `Jarvis`'s shell (UGOS's
+GUI-created default was `/usr/sbin/nologin`, which ignores forced commands
+the same way it ignores an interactive login — sshd invokes a forced command
+via `$SHELL -c "..."`) to `/bin/bash`, safe here only because every key on
+that account carries a `command=` restriction. It refuses to run at all if
+`RESTRICTED_USER` resolves to an admin/root-group account, moves the sudoers
+rule for `jarvis-nas-launch` from `Nick` to `Jarvis` (same narrow scope, only
+that script, UUID-arg only), removes the two restricted-key lines from
+`Nick`'s `authorized_keys` (backed up first, Nick's own login key untouched),
+and verifies (fixing via a targeted `setfacl`, not the shared-folder
+permission GUI, if needed) that `Jarvis` can read the watchdog status/log
+files `stack_status.sh` needs and cannot read `qbit_creds.env`.
+
+`NAS_SSH_USER` changed from `Nick` to `Jarvis` in `.env.example`; the
+Optiplex's live `.env` needs the same one-line edit (handed to Nick, not run
+here — SSH writes to `jarvis`/`nas` are blocked in this environment). No code
+changes were needed in `integrations/nas_stack.py` or `brain/arr_stack.py`;
+they already read the account purely from `NAS_SSH_USER`/`NAS_*_SSH_KEY`.
+
+**Re-run all four hand tests (recovery+probe, recovery+id, status+status,
+status+id) any time you suspect `/etc/ssh/sshd_config.d/jarvis-nas.conf`
+might have moved** — after running the rollback command, after a NAS/UGOS
+update, or if that directory was otherwise touched — not just after this
+initial install.
+
+State as of this entry: sshd drop-in, shell change, `Jarvis` `authorized_keys`/
+sudoers, and `Nick` cleanup are all drafted in `ops/nas/` but **not yet
+applied** — Nick is about to run the updated `install-restricted-ssh.sh`
+(`--preview` then `--apply`) plus `sshd -t` and `systemctl reload ssh`
+himself, then all four hand tests get re-run against the `Jarvis` account
+before anything further proceeds. `ARR_STACK_RESTART_ENABLED` stays `false`
+and no live recovery runs until Nick separately approves that step.
+
+Correction: none of the `Jarvis`-account migration above (sshd drop-in,
+shell change, `authorized_keys`/sudoers move, `Nick` cleanup) had actually
+been run when this file first said so — Nick had not yet executed the
+installer commands. Nothing changed on the NAS from that section; it is
+still purely staged in this repo, awaiting Nick.
+
+### `Jarvis`-account migration: installed, verified live — 2026-09-20
+
+Nick ran the full updated install sequence on the NAS: `install-recovery.sh
+--preview`/`--apply` (now re-runnable) and `install-restricted-ssh.sh
+--preview`/`--apply` both succeeded — `sshd -t` passed, `Jarvis`'s shell is
+`/bin/bash`, sudoers is parsed and points at `Jarvis`, and the two restricted
+key lines are off `Nick`'s `authorized_keys`. He updated the Optiplex's live
+`.env` to `NAS_SSH_USER=Jarvis` himself. `systemctl reload ssh` was run
+separately once he was back home.
+
+After that reload, all four hand tests initially came back
+all-commands-denied (`nologin`: "This account is currently not available.")
+for both keys, including `probe`/`status`, which should have worked. Cause:
+`/etc/ssh/sshd_config.d/jarvis-nas.conf` was missing — confirmed via the NAS
+journal to be Nick running the rollback command
+(`sudo rm -f /etc/ssh/sshd_config.d/jarvis-nas.conf`) at 21:05, not a UGOS
+reset. (An earlier version of this entry and `ops/nas/README.md` incorrectly
+speculated a UGOS firmware/security-scan reset; there's no evidence for that,
+and the wording has been corrected above and in the README.) Nick reinstalled
+the drop-in and reloaded again (`sudo sshd -t && sudo systemctl reload ssh`);
+the file survived this time.
+
+All four hand tests then passed against `Jarvis`, over Tailscale (`jarvis-ts`
+/ `nas-ts` aliases — the LAN routes were briefly unreachable):
+`probe` → `jarvis-recovery-key: restricted; no restart performed` (exit 0);
+recovery key `id` → `DENIED: only probe or recover UUID is allowed.` (exit
+64); `status` → valid JSON (exit 0); status key `id` → `DENIED` (exit 64).
+The restricted-key enforcement fix is confirmed working end to end.
+
+The `status` response also incidentally confirmed the `recover_stack.sh`
+dependent-conflict fix works live: `indexer_watchdog.log` shows an 18:00:01
+recovery failing with the exact "Conflict. The container name ... is already
+in use" error (from before the fix was installed), and a clean 19:30:01
+indexer-triggered recovery succeeding afterward with no conflict, gluetun
+healthy, DHT climbing normally (319+ by 21:10:01).
+
+`ARR_STACK_RESTART_ENABLED` is still `false`; no live recovery has been
+requested through Jarvis.

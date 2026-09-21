@@ -16,15 +16,80 @@ changed, stop and review new diffs instead of bypassing the check. Both are
 short jobs and do not execute recovery. `sed` writes the reviewed replacements.
 
 The restricted installer also removes unsafe ACL/write permissions on the
-Compose/watchdog path and Nick's SSH files. This is **non-recursive**: service
-data folders are untouched. Creating new top-level `/volume1/docker` entries
-or editing Compose thereafter requires sudo. Existing root cron schedules are
-preserved. Permission backups can be restored with `setfacl --restore` from
-the root-only backup, but remove the Jarvis sudo rule first if rolling back
-these security protections. Restore backed-up files only after inspecting
-the backup path printed by the installer.
+Compose/watchdog path and the restricted account's SSH files. This is
+**non-recursive**: service data folders are untouched. Creating new top-level
+`/volume1/docker` entries or editing Compose thereafter requires sudo.
+Existing root cron schedules are preserved. Permission backups can be restored
+with `setfacl --restore` from the root-only backup, but remove the Jarvis sudo
+rule first if rolling back these security protections. Restore backed-up
+files only after inspecting the backup path printed by the installer.
 
-Sudo permits Nick to invoke one fixed root launcher with a validated UUID.
+### The restricted keys live on a dedicated `Jarvis` account, not Nick
+
+UGOS ships a system-wide `ForceCommand /etc/ssh/force_command.sh` in
+`/etc/ssh/sshd_config` (no `Match` scoping it). A global `ForceCommand`
+overrides any per-key `command=` restriction in `authorized_keys` entirely —
+sshd resolves each keyword to the first value obtained for a connection, and
+the global directive is obtained before any per-key option ever would be.
+`force_command.sh` gives **admin/root-group** logins an arbitrary shell
+(`exec "$SHELL" -c "$SSH_ORIGINAL_COMMAND"`, ignoring `command=` completely)
+and limits everyone else to `rsync`/`scp`/`sftp-server`, denying everything
+else — including our own forced commands. Discovered 2026-09-20 by hand-testing
+the first install against the admin `Nick` account: `probe` ran as a literal
+(nonexistent) shell command and `id` returned a real, unrestricted shell.
+
+The fix (installed by `install-restricted-ssh.sh`) is `sshd-jarvis.conf`, a
+`/etc/ssh/sshd_config.d/` drop-in:
+
+```
+Match User Jarvis
+    ForceCommand none
+
+Match all
+```
+
+This restores normal `authorized_keys` `command=` enforcement for the `Jarvis`
+account only — Nick, admin access, rsync, and SFTP are untouched, since a
+Match block's directives are only "obtained" for connections that satisfy it.
+The trailing `Match all` closes the block explicitly so it can never leak
+into whatever a later-sorted `sshd_config.d/*.conf` file declares. The
+installer runs `sshd -t` immediately after installing this file and reverts
+it automatically (before touching anything else) if validation fails; it
+never reloads sshd itself — run `sudo systemctl reload ssh` yourself once the
+installer reports success, with your existing SSH session left open in case
+something is still wrong. Rollback: `sudo rm -f
+/etc/ssh/sshd_config.d/jarvis-nas.conf && sudo sshd -t && sudo systemctl
+reload ssh`.
+
+On 2026-09-20 this file briefly disappeared after a working `--apply` +
+reload cycle, reproducing the original all-commands-denied symptom below.
+The NAS journal showed the cause was Nick running the rollback command above
+himself (`sudo rm -f /etc/ssh/sshd_config.d/jarvis-nas.conf` at 21:05) —
+**not** a UGOS reset; there's no evidence UGOS touches this directory on its
+own. **Re-run the four hand tests below any time you suspect this file might
+have moved** (after running the rollback command, after a NAS/UGOS update, or
+if `sshd_config.d/` was otherwise touched) to be sure. If
+`sshd_config.d/jarvis-nas.conf` is missing, both restricted keys get denied
+entirely — UGOS's vendor wrapper falls back to its non-admin branch, which
+only allows `rsync`/`scp`/`sftp-server`, so `probe` and `status` return
+`nologin`'s "This account is currently not available." too, exactly as
+confirmed live on 2026-09-20. That's a lockout, not a leak; the leak this
+whole setup exists to prevent (`id` returning a real shell) only happens if
+these keys ever end up on an admin/root-group account again.
+
+`Jarvis` (uid 1001, primary group `users`, **not** `admin`) also needs a
+working login shell — sshd invokes a forced command via the account's shell
+(`$SHELL -c "..."`), and `/usr/sbin/nologin` (UGOS's GUI-created default for
+this account) ignores that and just refuses, exactly like `nologin-origin` in
+the deny branch above. The installer sets it to `/bin/bash`. This is safe
+specifically because every key on the `Jarvis` account carries a `command=`
+restriction — there is no unrestricted key on this account to fall back to.
+The installer also refuses to run at all (`RESTRICTED_USER` check) if pointed
+at any admin/root-group account, and cleans the two restricted-key lines out
+of `Nick`'s `authorized_keys` once they're installed for `Jarvis`, leaving
+Nick's own login key untouched.
+
+Sudo permits `Jarvis` to invoke one fixed root launcher with a validated UUID.
 The launcher accepts exactly one UUID argument; its wildcard sudo rule cannot
 supply shell commands or extra arguments. A durable request directory prevents
 replays. The recovery key's forced command is exactly
@@ -41,10 +106,12 @@ are documented at <https://man.openbsd.org/sshd.8#AUTHORIZED_KEYS_FILE_FORMAT>.
 
 Use `ssh -F /dev/null -o BatchMode=yes -o IdentitiesOnly=yes
 -o StrictHostKeyChecking=yes -o UserKnownHostsFile=/home/nick/.ssh/jarvis_nas_known_hosts
--i /home/nick/.ssh/jarvis_nas_recovery -T Nick@100.97.179.53 probe`
+-i /home/nick/.ssh/jarvis_nas_recovery -T Jarvis@100.97.179.53 probe`
 (on one line). It must return `restricted; no restart performed`.
 Change `probe` to `id`, `sh`, or `status`: each must return exit 64 and no shell
-output. A port-forwarding attempt must fail; do not enable agent forwarding.
+output — if any of them instead returns a real shell result (e.g. `id` prints
+a `uid=...` line), STOP; the sshd drop-in above is not in effect. A
+port-forwarding attempt must fail; do not enable agent forwarding.
 With the status key, `status` must return JSON and `id` must be rejected.
 The pinned NAS ed25519 host key was read through the existing trusted NAS
 connection; never use `StrictHostKeyChecking=no`.

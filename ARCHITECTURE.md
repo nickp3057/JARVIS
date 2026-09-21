@@ -374,13 +374,19 @@ containers, including mooney-plaid-backend, are outside this capability.
 A status file records each phase, result, and verified DHT count. Root cron
 retains its current triggers; Jarvis will request recovery only after approval.
 
-Jarvis authenticates as NAS user Nick with distinct forced-command recovery
-and read-only status keys. The recovery entry validates a UUID, invokes only
-a fixed sudo launcher, and detaches a worker while retaining the flock. Durable
-receipts prevent duplicate requests; completion is correlated by request ID
-through the read-only key. SSH transport failure cannot imply recovery success.
-The installer protects script/Compose ancestors and records ACL backups before
-adding sudo. Neither a Docker socket nor a root SSH identity reaches Jarvis.
+Jarvis authenticates as a dedicated non-admin NAS user (`Jarvis`, not Nick's
+own admin account) with distinct forced-command recovery and read-only status
+keys. UGOS ships a global `ForceCommand` that overrides per-key `command=`
+restrictions and gives admin/root-group logins an unrestricted shell instead,
+so the account must stay non-admin, and a `Match User Jarvis` /
+`ForceCommand none` drop-in (`ops/nas/sshd-jarvis.conf`) is required to
+restore normal restriction enforcement for it. The recovery entry validates a
+UUID, invokes only a fixed sudo launcher, and detaches a worker while
+retaining the flock. Durable receipts prevent duplicate requests; completion
+is correlated by request ID through the read-only key. SSH transport failure
+cannot imply recovery success. The installer protects script/Compose
+ancestors and records ACL backups before adding sudo. Neither a Docker socket
+nor a root SSH identity reaches Jarvis.
 
 ## Arr monitoring and dead-man heartbeat
 
@@ -425,7 +431,7 @@ Admin-only environment controls (not model-editable settings):
 | `PROWLARR_URL`, `PROWLARR_API_KEY` | API base and optional key; v1 health with key, `/ping` without |
 | `BYPARR_URL` | Byparr base URL, usually NAS port 8191 |
 | `ARR_STACK_RESTART_ENABLED` | false; enable only after restricted-key tests |
-| `NAS_SSH_HOST`, `NAS_SSH_USER` | host required; user defaults Nick |
+| `NAS_SSH_HOST`, `NAS_SSH_USER` | host required; user defaults to the dedicated non-admin account `Jarvis` |
 | `NAS_RECOVERY_SSH_KEY`, `NAS_STATUS_SSH_KEY` | separate absolute private-key paths |
 | `NAS_SSH_KNOWN_HOSTS` | dedicated pinned NAS host-key file |
 | `JARVIS_HEALTHCHECKS_URL` | secret `https://hc-ping.com/...` success URL; blank disables |
