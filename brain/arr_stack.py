@@ -46,19 +46,27 @@ class AlertTracker:
     def __init__(self, path: Path | None = None):
         self.path = path or _ALERT_FILE
         self.zeros = 0
-        self.active: dict[str, str] = {}  # condition key -> last known detail text
+        # condition key -> {detail, first_seen, last_escalated}
+        self.active: dict[str, dict[str, float | str]] = {}
         try:
             data = json.loads(self.path.read_text())
             if isinstance(data, dict):
                 active = data.get('active')
                 if isinstance(active, dict):
-                    self.active = {str(k): str(v) for k, v in active.items()}
+                    for key, value in active.items():
+                        if isinstance(value, dict) and isinstance(value.get('first_seen'), (int, float)):
+                            first_seen = float(value['first_seen'])
+                            self.active[str(key)] = {
+                                'detail': str(value.get('detail', key)),
+                                'first_seen': first_seen,
+                                'last_escalated': float(value.get('last_escalated', first_seen)),
+                            }
                 zeros = data.get('zeros')
                 # Persisted so a restart right after 3 zero-DHT checks does not
                 # spuriously "recover" dht-zero while it's still actually zero.
                 if isinstance(zeros, int) and zeros >= 0:
                     self.zeros = zeros
-        except (OSError, ValueError, AttributeError):
+        except (OSError, ValueError, AttributeError, TypeError):
             pass
 
     def _save(self) -> None:
@@ -76,15 +84,28 @@ class AlertTracker:
         if self.zeros >= 3:
             issues['dht-zero'] = 'qBittorrent DHT has been zero for 3 consecutive checks'
 
+        # One reminder per long window while a condition stays unresolved,
+        # instead of either repeating forever or going silent for good.
+        escalation_interval = nas_stack.seconds('ARR_STACK_ESCALATION_INTERVAL_S', 21600, 300)
         notices: list[Notice] = []
         changed = self.zeros != previous_zeros
+
         for key, detail in issues.items():
-            if key not in self.active:
+            state = self.active.get(key)
+            if state is None:
+                self.active[key] = {'detail': detail, 'first_seen': now, 'last_escalated': now}
                 notices.append(Notice(key, detail, _severity(key), 'new'))
                 changed = True
-            self.active[key] = detail
+            else:
+                state['detail'] = detail
+                if now - state['last_escalated'] >= escalation_interval:
+                    state['last_escalated'] = now
+                    hours = max(1, int((now - state['first_seen']) // 3600))
+                    notices.append(Notice(key, f'Still unresolved after {hours}h: {detail}', _severity(key), 'escalation'))
+                    changed = True
+
         for key in [k for k in self.active if k not in issues]:
-            detail = self.active.pop(key)
+            detail = self.active.pop(key)['detail']
             notices.append(Notice(key, f'Recovered: {detail}', _severity(key), 'recovered'))
             changed = True
 

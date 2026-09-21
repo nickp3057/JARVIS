@@ -34,9 +34,10 @@ class ArrMonitorTests(unittest.TestCase):
         self.assertEqual(self.tracker.notices(self.sample(), 280), [])
         other = arr_stack.AlertTracker(self.path)
         self.assertEqual(other.notices(self.sample(), 300), [])
-        # No cooldown re-fire: still active a long time later stays silent.
-        self.assertEqual(other.notices(self.sample(), 100000), [])
-        recovered = other.notices(self.sample(999), 100060)
+        # No cooldown re-fire: still active well within the escalation
+        # window (default 6h) stays silent.
+        self.assertEqual(other.notices(self.sample(), 10000), [])
+        recovered = other.notices(self.sample(999), 10060)
         self.assertEqual(len(recovered), 1)
         self.assertEqual(recovered[0].kind, 'recovered')
         self.assertIn('Recovered', recovered[0].text)
@@ -107,6 +108,31 @@ class ArrMonitorTests(unittest.TestCase):
         self.assertEqual(severities['sonarr-health'], 'advisory')
         self.assertEqual(severities['radarr-api'], 'critical')
         self.assertEqual(severities['prowlarr-health'], 'critical')
+
+    def test_escalation_fires_once_per_window_while_unresolved(self):
+        with patch.dict(os.environ, {'ARR_STACK_ESCALATION_INTERVAL_S': '300'}):
+            first = self.tracker.notices(self.sample(5, {'radarr-api': 'Radarr down'}), 100)
+            self.assertEqual(first[0].kind, 'new')
+            # Still well within the window: silent.
+            self.assertEqual(self.tracker.notices(self.sample(5, {'radarr-api': 'Radarr down'}), 200), [])
+            escalated = self.tracker.notices(self.sample(5, {'radarr-api': 'Radarr down'}), 500)
+            self.assertEqual(len(escalated), 1)
+            self.assertEqual(escalated[0].kind, 'escalation')
+            self.assertIn('unresolved', escalated[0].text)
+            self.assertEqual(escalated[0].severity, 'critical')
+            # Just escalated: silent again until the next window.
+            self.assertEqual(self.tracker.notices(self.sample(5, {'radarr-api': 'Radarr down'}), 600), [])
+            second = self.tracker.notices(self.sample(5, {'radarr-api': 'Radarr down'}), 900)
+            self.assertEqual(len(second), 1)
+            self.assertEqual(second[0].kind, 'escalation')
+
+    def test_escalation_state_persists_across_restart(self):
+        with patch.dict(os.environ, {'ARR_STACK_ESCALATION_INTERVAL_S': '300'}):
+            self.tracker.notices(self.sample(5, {'radarr-api': 'Radarr down'}), 100)
+            restarted = arr_stack.AlertTracker(self.path)
+            self.assertEqual(restarted.notices(self.sample(5, {'radarr-api': 'Radarr down'}), 200), [])
+            escalated = restarted.notices(self.sample(5, {'radarr-api': 'Radarr down'}), 500)
+            self.assertEqual([n.kind for n in escalated], ['escalation'])
 
     def test_missing_dht_uses_sync_without_masking_connection(self):
         with patch.object(nas_stack.qbittorrent, 'transfer_info', return_value=(True, {'connection_status': 'connected'})), patch.object(nas_stack.qbittorrent, '_request', return_value=(True, {'server_state': {'dht_nodes': 14}})):

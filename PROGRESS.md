@@ -502,3 +502,27 @@ existing convention of testing `AlertTracker`/`nas_stack` logic directly
 rather than the runtime loop wrapper. The severity *classification* (the
 part with actual judgment, and the part a future edit could get wrong) is
 covered by `test_radarr_sonarr_health_is_advisory_everything_else_critical`.
+
+### Escalation — one reminder per long window
+
+New `ARR_STACK_ESCALATION_INTERVAL_S` (default 21600 = 6h). `active` state
+per condition grew from a plain detail string to `{detail, first_seen,
+last_escalated}` (both timestamps persisted, same restart-safety reasoning
+as the `zeros` streak counter fixed earlier — an in-memory-only escalation
+clock would let a restart delay or skip a due reminder). Once a condition
+has been unresolved for `last_escalated + interval`, one `Notice(...,
+kind='escalation')` fires with `"Still unresolved after Xh: <detail>"`, and
+`last_escalated` resets to now — silent again until the next boundary.
+Applies to both severities (advisory conditions still eventually remind, on
+the same long cadence, just never phone-push per the routing above).
+
+Old (commit-era) state files — both the original flat `{key: timestamp}`
+shape and the intermediate dedup-only `{"active": {key: "detail string"}}`
+shape — are recognized as incompatible (`first_seen` missing) and safely
+dropped per key, same graceful-migration approach as before: worst case is
+one avoidable re-announcement per still-active condition after this deploys,
+never a crash or wrong escalation timing.
+
+Tests: fires once per window while unresolved, stays silent between
+boundaries, fires again at the next boundary; escalation timing survives an
+`AlertTracker` restart (persisted `last_escalated`).
