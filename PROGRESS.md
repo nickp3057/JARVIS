@@ -333,6 +333,27 @@ healthy, DHT climbing normally (319+ by 21:10:01).
 `ARR_STACK_RESTART_ENABLED` is still `false`; no live recovery has been
 requested through Jarvis.
 
+## Task 5, dry run — arr restart confirmation gate — 2026-09-20
+
+Confirmed the confirmation gate end to end without ever sending a real
+`recover`: ran the existing `tests.test_arr_stack.RestartApprovalTests` (7
+tests, all pass — wrong token, single-use consumption, expired/cancelled,
+disabled-at-prepare, success/timeout/failure replies) and separately drove
+the real `brain.arr_stack.conversation_action` (the same function
+`brain/agent.py` calls at the top of every turn, before the model sees the
+message) with only `integrations.nas_stack.start_recovery` mocked. Verified
+every branch by exact reply text and mock call assertions: wrong token →
+`invalid or expired`; correct token → consumed once, replay rejected; flag
+disabled at prepare time → refused outright; a matched, mocked "success"
+response → the real recovered/DHT reply text. `nas_stack.start_recovery` is
+the only line in the whole flow that would ever reach the NAS, and it was
+mocked in every run.
+
+`ARR_STACK_RESTART_ENABLED` stays `false` in the live `.env`; Nick has not
+yet approved flipping it. `nas_stack.enabled()` reads `os.getenv()` fresh on
+every call (confirmed only two call sites, neither caches it), so flipping
+it needs no Jarvis restart.
+
 ## Healthchecks dead-man heartbeat setup — 2026-09-20
 
 Nick created the Healthchecks.io check (period 5 min, grace 5 min) and has
