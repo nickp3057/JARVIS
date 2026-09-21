@@ -74,10 +74,15 @@ step() {
 write_status running 0 || exit 1
 log 'START: full arr recovery; active downloads will disconnect'
 # Explicit service allowlist and --no-deps prevent unrelated compose services
-# (especially mooney-plaid-backend) from being created or restarted.
+# (especially mooney-plaid-backend) from being created or restarted. The five
+# dependents are also explicitly rm -f'd before recreation: a dead container
+# left behind by a prior failed/aborted recovery keeps its name, and Compose
+# then refuses to recreate it ("Conflict. The container name ... is already
+# in use") until it's gone. Confirmed live 2026-09-20 during a manual recovery.
 step remove-gluetun docker rm -f gluetun
 step recreate-gluetun docker compose --project-name stack --file "$COMPOSE" up -d --no-deps --force-recreate gluetun
 step vpn-settle sleep 20
+step remove-dependents docker rm -f qbittorrent radarr sonarr prowlarr flaresolverr
 step recreate-dependents docker compose --project-name stack --file "$COMPOSE" up -d --no-deps --force-recreate qbittorrent radarr sonarr prowlarr flaresolverr
 step byparr-cold-start sleep 130
 

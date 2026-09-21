@@ -54,20 +54,53 @@ esac
         self.assertEqual(lines[0], 'docker rm -f gluetun')
         self.assertTrue(lines[1].endswith('--force-recreate gluetun'))
         self.assertEqual(lines[2], 'sleep 20')
-        self.assertTrue(lines[3].endswith('--force-recreate qbittorrent radarr sonarr prowlarr flaresolverr'))
-        self.assertEqual(lines[4], 'sleep 130')
+        self.assertEqual(lines[3], 'docker rm -f qbittorrent radarr sonarr prowlarr flaresolverr')
+        self.assertTrue(lines[4].endswith('--force-recreate qbittorrent radarr sonarr prowlarr flaresolverr'))
+        self.assertEqual(lines[5], 'sleep 130')
         self.assertTrue(all('--no-deps' in line for line in lines if 'compose' in line))
         status = json.loads((self.root / 'recovery-status.json').read_text())
         self.assertEqual((status['state'], status['dht_nodes']), ('success', 21))
         self.assertNotIn('mooney', self.trace.read_text())
 
     def test_each_chain_failure_aborts(self):
-        for step, count in [('rm -f', 1), ('--force-recreate gluetun', 2), ('sleep 20', 3), ('--force-recreate qbittorrent', 4), ('sleep 130', 5)]:
+        cases = [
+            ('rm -f gluetun', 1),
+            ('--force-recreate gluetun', 2),
+            ('sleep 20', 3),
+            ('rm -f qbittorrent', 4),
+            ('--force-recreate qbittorrent', 5),
+            ('sleep 130', 6),
+        ]
+        for step, count in cases:
             with self.subTest(step=step):
                 self.trace.write_text('')
                 self.assertEqual(self.run_recovery(FAIL_STEP=step).returncode, 42)
                 self.assertEqual(len(self.trace.read_text().splitlines()), count)
                 self.assertEqual(json.loads((self.root / 'recovery-status.json').read_text())['state'], 'failed')
+
+    def test_stale_dependent_conflict_is_cleared_before_recreate(self):
+        # Reproduces the 2026-09-20 manual recovery: dead containers left
+        # behind by a prior aborted run keep their names, and Compose refuses
+        # to recreate them ("Conflict. The container name ... is already in
+        # use") until they're explicitly removed first.
+        marker = self.root / '.dependents_removed'
+        self.command('docker', f'''echo "docker $*" >> "$TRACE"
+case "$*" in
+  *"--force-recreate qbittorrent"*)
+    if [ ! -e {marker} ]; then
+        echo "Error response from daemon: Conflict. The container name /qbittorrent is already in use" >&2
+        exit 1
+    fi
+    ;;
+  "rm -f qbittorrent radarr sonarr prowlarr flaresolverr") touch {marker} ;;
+esac
+case "$1" in inspect) echo healthy ;; esac
+''')
+        self.assertEqual(self.run_recovery().returncode, 0)
+        lines = self.trace.read_text().splitlines()
+        self.assertEqual(lines[3], 'docker rm -f qbittorrent radarr sonarr prowlarr flaresolverr')
+        self.assertTrue(lines[4].endswith('--force-recreate qbittorrent radarr sonarr prowlarr flaresolverr'))
+        self.assertEqual(json.loads((self.root / 'recovery-status.json').read_text())['state'], 'success')
 
     def test_verification_timeout_fails(self):
         self.script.write_text(self.script.read_text().replace('+ 300', '+ 0'))

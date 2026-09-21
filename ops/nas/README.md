@@ -56,6 +56,13 @@ Only after Nick explicitly confirms downtime, invoke the recovery key with
 gluetun and positive DHT. A stale/missing status or lost SSH connection is an
 unknown result, never success and never an automatic retry with a new UUID.
 
+The chain now explicitly `rm -f`s the five dependents (qbittorrent, radarr,
+sonarr, prowlarr, flaresolverr) before recreating them, the same way it
+already did for gluetun. Found live on 2026-09-20 during a manual recovery: a
+dead container left behind by a prior failed/aborted run keeps its name, and
+`docker compose up -d --force-recreate` then refuses with "Conflict. The
+container name ... is already in use" until it's removed first.
+
 The existing weekly stack updater is unchanged. It already uses the common
 flock and excludes the mooney backend; it remains a separate update operation.
 

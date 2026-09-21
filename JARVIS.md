@@ -999,9 +999,13 @@ python create_shortcut.py
 
 `ops/nas/` contains the reviewed UGOS recovery scripts and installer. The single
 recovery chain takes the existing watchdog flock, explicitly removes gluetun
-before recreating it, waits 20 seconds, recreates the five VPN dependents, then
-waits 130 seconds for Byparr and verifies gluetun health plus positive qBit DHT.
-Every failed step aborts and records a failed result. DHT's three checks/30-minute
+before recreating it, waits 20 seconds, explicitly removes the five VPN
+dependents before recreating them, then waits 130 seconds for Byparr and
+verifies gluetun health plus positive qBit DHT. The dependents are rm -f'd
+first (not just force-recreated) because a dead container left behind by a
+prior failed/aborted recovery keeps its name and Compose refuses to recreate
+it until it's gone — hit live during a manual recovery on 2026-09-20. Every
+failed step aborts and records a failed result. DHT's three checks/30-minute
 cooldown and indexer's two strikes/one-hour cooldown are preserved. No Docker
 socket or root SSH is exposed to Jarvis. See `PROGRESS.md` for deployment state;
 a live restart always requires separate confirmation.

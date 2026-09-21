@@ -133,3 +133,57 @@ The original server file and test fixture are backed up beside `before.tar`;
 `/tmp/jarvis-arr-startup.patch` records this follow-up deployment. Only the
 Jarvis API service was reloaded to activate it. No NAS container was restarted.
 NAS installation/key testing and the Healthchecks URL remain outstanding.
+
+## Recovery chain fix: stale dependent containers block force-recreate — 2026-09-20
+
+Nick recovered the stack by hand tonight (outage from the Sonarr container-
+name conflict noted earlier) and hit a real bug in the shared chain: after
+`docker rm -f gluetun` + recreate, `docker compose up -d --force-recreate
+qbittorrent radarr sonarr prowlarr flaresolverr` failed with "Conflict. The
+container name /qbittorrent is already in use" — a dead container left behind
+by a prior failed/aborted recovery keeps its name, and Compose refuses to
+recreate it until it's gone. `docker rm -f` on the five, then recreate, fixed
+it by hand.
+
+`ops/nas/recover_stack.sh` now explicitly `rm -f`s the five dependents
+(qbittorrent, radarr, sonarr, prowlarr, flaresolverr — never
+mooney-plaid-backend) right before recreating them, the same pattern already
+used for gluetun. Chain is now: `rm -f gluetun` → recreate gluetun → sleep 20
+→ `rm -f` the five dependents → recreate the five → sleep 130 → verify. Each
+step is still checked independently; any failure aborts and records a failed
+result exactly as before.
+
+Added `test_stale_dependent_conflict_is_cleared_before_recreate` to
+`tests/test_nas_recovery.py`, reproducing the exact failure (a fake `docker`
+that refuses `--force-recreate qbittorrent...` with the real Conflict message
+until the new `rm -f` step has run) and asserting the chain still reaches
+`success`. Also updated `test_order_and_success` and
+`test_each_chain_failure_aborts` for the new step's position. Since this
+harness is gated to Linux (recover_stack.sh uses `/proc/$$/fd/9` and GNU
+`stat`, unavailable on macOS) and this Mac lacks `flock` too, verified for
+real by installing Homebrew `flock`, confirming the platform gate still skips
+it, then running the full `tests.test_nas_recovery tests.test_nas_ssh` suite
+inside a `python:3.12-slim` Linux container (with `jq`/`util-linux`
+installed) via local Docker Desktop: all 12 tests pass, including the new
+one. `install-recovery.sh` pins SHA256 hashes of the *pre-existing* live
+`dht_watchdog.sh`/`indexer_watchdog.sh` it found on the NAS on 2026-09-20 —
+`recover_stack.sh` itself was never hash-pinned (it was new, not a
+pre-existing live script), so this change needs no hash update, only a
+re-run of the installer to pick up the new file content.
+
+Full local suite (`.venv/bin/python -m unittest discover -s tests -q`): 318
+tests, one unrelated pre-existing failure in
+`test_study_brief.StudyBriefEndpointTests.test_composed_briefs_shape` (same
+quiz-ordering/date-fixture issue already noted earlier today), 7 skipped
+(the Linux-gated NAS tests on this Mac). `ARCHITECTURE.md` and `JARVIS.md`
+were also corrected here: both still said the restricted keys authenticate
+as NAS user `Nick`, left over from before the `Jarvis`-account migration
+below; both now describe the dedicated non-admin `Jarvis` account and the
+`sshd-jarvis.conf` requirement, and `JARVIS.md`'s recovery-chain summary now
+mentions the dependents `rm -f` step.
+
+Nothing was installed or restarted on the NAS for this fix — it is a local
+repo change only. Since `install-restricted-ssh.sh` installs `recover_stack.sh`
+too, re-running it (once Nick applies the `Jarvis`-account migration) will
+pick up this fix in the same pass; a separate `install-recovery.sh --apply`
+run is not required but is harmless if Nick prefers to run it explicitly.
