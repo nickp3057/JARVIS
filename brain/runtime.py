@@ -733,8 +733,15 @@ class JarvisRuntime:
                     entities.pop(entity_id, None)
                     self._update_home_snapshot_from_entities(entities)
                     return
+                known = entity_id in entities
                 entities[entity_id] = new_entity
                 new_state = str(new_entity.get("state", "unknown"))
+                if known and old_state == new_state:
+                    # Attribute-only update (media position, brightness,
+                    # sensor attributes). The snapshot only counts states,
+                    # so skip the full rebuild these frequent events used
+                    # to trigger.
+                    return
                 self._update_home_snapshot_from_entities(entities)
                 if old_state == new_state or not self._should_record_home_change(
                     entity_id, old_state, new_state,

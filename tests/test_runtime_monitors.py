@@ -38,6 +38,30 @@ class RuntimeMonitorTests(unittest.TestCase):
         self.assertEqual(snapshot.domains["light"].unavailable_count, 1)
         self.assertEqual(snapshot.domains["media_player"].active_count, 2)
 
+    def test_attribute_only_home_events_skip_snapshot_rebuild(self) -> None:
+        import threading
+        runtime = object.__new__(JarvisRuntime)
+        runtime._stop_monitors = threading.Event()
+        runtime._home_monitor_failed = False
+        runtime._home_event_last_seen = {}
+        runtime._update_home_snapshot_from_entities = Mock()
+        runtime._mark_home_monitor_healthy = Mock()
+        runtime.record_event = Mock()
+        light = {"entity_id": "light.desk", "state": "on", "attributes": {"brightness": 10}}
+
+        def fake_listen(stop, changed, on_connected):
+            on_connected()
+            rebuilds = runtime._update_home_snapshot_from_entities.call_count
+            changed({"entity_id": "light.desk", "old_state": light, "new_state": {**light, "attributes": {"brightness": 200}}})
+            self.assertEqual(runtime._update_home_snapshot_from_entities.call_count, rebuilds)
+            changed({"entity_id": "light.desk", "old_state": light, "new_state": {**light, "state": "off"}})
+            self.assertEqual(runtime._update_home_snapshot_from_entities.call_count, rebuilds + 1)
+            stop.set()
+
+        with patch("brain.runtime.get_states", return_value=(True, [light])), \
+             patch("brain.runtime.listen_state_changes", side_effect=fake_listen):
+            runtime._home_websocket_monitor_loop()
+
     def test_home_change_filter_ignores_noise_and_deduplicates(self) -> None:
         runtime = object.__new__(JarvisRuntime)
         runtime._home_event_last_seen = {}
