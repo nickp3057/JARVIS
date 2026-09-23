@@ -29,13 +29,18 @@ _ADVISORY_KEYS = frozenset({'radarr-health', 'sonarr-health'})
 
 
 def _severity(key: str) -> str:
+    # A single Prowlarr indexer going down is pushed to Nick (he asked for
+    # every one), but it is not an outage of the stack: it must not open the
+    # post-recovery grace window that holds back other new conditions.
+    if key.startswith('indexer:'):
+        return 'warning'
     return 'advisory' if key in _ADVISORY_KEYS else 'critical'
 
 
 class Notice(NamedTuple):
     key: str
     text: str
-    severity: str  # 'critical' | 'advisory'
+    severity: str  # 'critical' | 'warning' | 'advisory'
     kind: str  # 'new' | 'recovered' | 'escalation'
 
 

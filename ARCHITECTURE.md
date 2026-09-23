@@ -412,6 +412,15 @@ used when something already looks wrong. Found 2026-09-22 from HA's recorder:
 every "unreachable" page in the preceding two days was either a one-poll blip
 or the NAS DHT watchdog's own container recreation.
 
+Per-indexer alerts: with a Prowlarr key, each poll reads
+`/api/v1/indexerstatus`; every enabled indexer whose failure backoff
+(`disabledTill`) is in the future becomes its own `indexer:<id>` condition
+with the same hysteresis, severity `warning` (pushed like critical, but it
+does not open the post-recovery grace window). Prowlarr's aggregate
+"Indexers unavailable due to failures" health line is dropped when that
+succeeds, and kept as the fallback when it does not. Indexer names are cached
+for 15 minutes.
+
 The restart tool only stages a session-bound, ten-minute proposal. Original
 user text is checked at the agent boundary, before model/offline routing, in
 both ordinary and streaming turns. Only the exact returned confirmation phrase
@@ -443,7 +452,7 @@ Admin-only environment controls (not model-editable settings):
 | `ARR_STACK_ESCALATION_INTERVAL_S` | 21600; one reminder per window while unresolved |
 | `ARR_STACK_POST_RECOVERY_GRACE_S` | 300; hold brand-new conditions after a critical recovery |
 | `ARR_STACK_NOTIFY_SERVICE` | blank; HA `notify.mobile_app_*` service |
-| `PROWLARR_URL`, `PROWLARR_API_KEY` | API base and optional key; v1 health with key, `/ping` without |
+| `PROWLARR_URL`, `PROWLARR_API_KEY` | API base and optional key; v1 health plus per-indexer `indexerstatus` with key, `/ping` without |
 | `BYPARR_URL` | Byparr base URL, usually NAS port 8191 |
 | `ARR_STACK_RESTART_ENABLED` | false; enable only after restricted-key tests |
 | `NAS_SSH_HOST`, `NAS_SSH_USER` | host required; user defaults to the dedicated non-admin account `Jarvis` |

@@ -240,7 +240,9 @@ class JarvisRuntime:
                 notices = tracker.notices(snapshot)
                 for notice in notices:
                     log.info("Arr stack condition %s: %s (%s)", notice.key, notice.kind, notice.severity)
-                critical = [n.text for n in notices if n.severity == "critical"]
+                # Critical and warning (per-indexer) notices are pushed;
+                # advisory ones only reach the inbox.
+                critical = [n.text for n in notices if n.severity in ("critical", "warning")]
                 advisory = [n.text for n in notices if n.severity == "advisory"]
                 if critical:
                     note = nas_stack.watchdog_note(status) if status is not None else ""

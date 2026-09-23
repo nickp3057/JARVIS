@@ -1,6 +1,7 @@
 """Read-only arr health, restricted SSH transport, and existing HA delivery."""
 from __future__ import annotations
 
+from datetime import datetime, timezone
 import json
 import os
 from pathlib import Path
@@ -48,6 +49,76 @@ def network_status() -> tuple[bool, dict[str, Any]]:
     return True, info
 
 
+_INDEXER_STATUS_SOURCES = frozenset({'IndexerStatusCheck', 'IndexerLongTermStatusCheck'})
+# Indexer names change only when Nick edits Prowlarr; one list call per 15 min
+# instead of one per poll.
+_indexer_names: dict[str, Any] = {'at': 0.0, 'base': '', 'names': {}}
+
+
+def _is_indexer_status_health(item: dict) -> bool:
+    source = str(item.get('source', ''))
+    if source:
+        return source in _INDEXER_STATUS_SOURCES
+    return str(item.get('message', '')).lower().startswith(('indexers unavailable due to failures', 'all indexers are unavailable due to failures'))
+
+
+def _parse_utc(value: Any) -> float | None:
+    """Parse a .NET ISO timestamp (7 fractional digits, trailing Z)."""
+    if not isinstance(value, str) or not value:
+        return None
+    text = re.sub(r'\.\d+', '', value.strip()).replace('Z', '+00:00')
+    try:
+        parsed = datetime.fromisoformat(text)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.timestamp()
+
+
+def _indexer_name_map(base: str, key: str) -> dict[int, str]:
+    now = time.monotonic()
+    if _indexer_names['base'] == base and now - _indexer_names['at'] < 900 and _indexer_names['names']:
+        return _indexer_names['names']
+    response = requests.get(base + '/api/v1/indexer', headers={'X-Api-Key': key}, timeout=10, allow_redirects=False)
+    response.raise_for_status()
+    payload = response.json()
+    if not isinstance(payload, list):
+        raise ValueError('invalid indexer list')
+    names = {int(x['id']): str(x.get('name') or f"indexer {x['id']}") for x in payload
+             if isinstance(x, dict) and type(x.get('id')) is int and x.get('enable', True)}
+    _indexer_names.update(at=now, base=base, names=names)
+    return names
+
+
+def indexer_outages(base: str, key: str, now: float | None = None) -> dict[str, str] | None:
+    """Per-indexer down conditions from Prowlarr, or None if unavailable.
+
+    An indexer is down while Prowlarr's failure backoff (``disabledTill``) is
+    in the future. Disabled-by-Nick indexers are ignored. None means "could
+    not tell" and callers keep the aggregate health line as the fallback."""
+    now = time.time() if now is None else now
+    try:
+        response = requests.get(base + '/api/v1/indexerstatus', headers={'X-Api-Key': key}, timeout=10, allow_redirects=False)
+        response.raise_for_status()
+        payload = response.json()
+        if not isinstance(payload, list) or any(not isinstance(x, dict) or type(x.get('indexerId')) is not int for x in payload):
+            return None
+        down = [(x['indexerId'], until) for x in payload if (until := _parse_utc(x.get('disabledTill'))) is not None and until > now]
+        if not down:
+            return {}
+        names = _indexer_name_map(base, key)
+    except (requests.RequestException, ValueError, TypeError, KeyError):
+        return None
+    issues: dict[str, str] = {}
+    for indexer_id, until in down:
+        if indexer_id not in names:
+            continue  # disabled by Nick or deleted since the name refresh
+        retry = datetime.fromtimestamp(until).strftime('%H:%M')
+        issues[f'indexer:{indexer_id}'] = f'Indexer {names[indexer_id]} is down (Prowlarr backed it off after failures; next retry {retry})'
+    return issues
+
+
 def poll_health() -> dict[str, Any]:
     """One bounded polling cycle. No model calls and no recovery actions."""
     issues: dict[str, str] = {}
@@ -87,6 +158,13 @@ def poll_health() -> dict[str, Any]:
             if key:
                 if not isinstance(payload, list) or any(not isinstance(x, dict) for x in payload):
                     raise ValueError('invalid health')
+                down = indexer_outages(base, key)
+                if down is not None:
+                    # Per-indexer conditions replace Prowlarr's aggregate
+                    # "Indexers unavailable due to failures: a, b, c" line, so
+                    # each indexer alerts and recovers on its own.
+                    issues.update(down)
+                    payload = [x for x in payload if not _is_indexer_status_health(x)]
                 if payload:
                     issues['prowlarr-health'] = 'Prowlarr health: ' + '; '.join(str(x.get('message', 'health error'))[:220] for x in payload[:3])
             elif not isinstance(payload, dict) or str(payload.get('status', '')).lower() != 'ok':

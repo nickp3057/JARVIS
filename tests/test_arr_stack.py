@@ -326,6 +326,92 @@ class MaintenanceDetectionTests(unittest.TestCase):
             self.assertFalse(nas_stack.status_configured())
 
 
+class IndexerOutageTests(unittest.TestCase):
+    def setUp(self):
+        nas_stack._indexer_names.update(at=0.0, base='', names={})
+
+    def responses(self, mapping):
+        def fake_get(url, **_):
+            path = url.split('9696', 1)[1]
+            response = Mock(status_code=200)
+            response.raise_for_status = Mock()
+            response.json.return_value = mapping[path]
+            return response
+        return fake_get
+
+    def run_poll(self, mapping):
+        with patch.object(nas_stack, 'network_status', return_value=(True, {'dht_nodes': 5, 'connection_status': 'connected'})), \
+             patch.object(nas_stack.servarr_common, 'get_health', return_value=(True, [])), \
+             patch.object(nas_stack.requests, 'get', side_effect=self.responses(mapping)), \
+             patch.dict(os.environ, {'PROWLARR_URL': 'http://nas:9696', 'PROWLARR_API_KEY': 'key'}):
+            return nas_stack.poll_health()
+
+    def test_each_backed_off_indexer_is_its_own_condition(self):
+        result = self.run_poll({
+            '/api/v1/health': [{'source': 'IndexerStatusCheck', 'type': 'warning', 'message': 'Indexers unavailable due to failures: 1337x, EZTV'}],
+            '/api/v1/indexerstatus': [
+                {'indexerId': 1, 'disabledTill': '2999-01-01T00:00:00.1234567Z'},
+                {'indexerId': 2, 'disabledTill': '2999-01-01T00:00:00Z'},
+                {'indexerId': 3, 'disabledTill': '2000-01-01T00:00:00Z'},
+            ],
+            '/api/v1/indexer': [{'id': 1, 'name': '1337x', 'enable': True}, {'id': 2, 'name': 'EZTV', 'enable': True}, {'id': 3, 'name': 'YTS', 'enable': True}],
+        })
+        self.assertIn('1337x', result['issues']['indexer:1'])
+        self.assertIn('EZTV', result['issues']['indexer:2'])
+        self.assertNotIn('indexer:3', result['issues'])
+        # The aggregate line is replaced, not duplicated.
+        self.assertNotIn('prowlarr-health', result['issues'])
+
+    def test_proxy_health_is_kept_alongside_indexers(self):
+        result = self.run_poll({
+            '/api/v1/health': [{'source': 'IndexerProxyStatusCheck', 'type': 'error', 'message': 'All indexer proxies are unavailable due to failures'}],
+            '/api/v1/indexerstatus': [],
+        })
+        self.assertIn('proxies', result['issues']['prowlarr-health'])
+
+    def test_user_disabled_indexer_is_ignored(self):
+        result = self.run_poll({
+            '/api/v1/health': [],
+            '/api/v1/indexerstatus': [{'indexerId': 9, 'disabledTill': '2999-01-01T00:00:00Z'}],
+            '/api/v1/indexer': [{'id': 9, 'name': 'Old', 'enable': False}],
+        })
+        self.assertEqual(result['issues'], {})
+
+    def test_status_endpoint_failure_falls_back_to_aggregate(self):
+        result = self.run_poll({
+            '/api/v1/health': [{'source': 'IndexerStatusCheck', 'message': 'Indexers unavailable due to failures: 1337x'}],
+            '/api/v1/indexerstatus': '<html>',
+        })
+        self.assertIn('1337x', result['issues']['prowlarr-health'])
+
+    def test_indexer_names_are_cached_between_polls(self):
+        mapping = {
+            '/api/v1/health': [],
+            '/api/v1/indexerstatus': [{'indexerId': 1, 'disabledTill': '2999-01-01T00:00:00Z'}],
+            '/api/v1/indexer': [{'id': 1, 'name': '1337x'}],
+        }
+        fake = Mock(side_effect=self.responses(mapping))
+        with patch.object(nas_stack, 'network_status', return_value=(True, {'dht_nodes': 5})), \
+             patch.object(nas_stack.servarr_common, 'get_health', return_value=(True, [])), \
+             patch.object(nas_stack.requests, 'get', fake), \
+             patch.dict(os.environ, {'PROWLARR_URL': 'http://nas:9696', 'PROWLARR_API_KEY': 'key'}):
+            nas_stack.poll_health()
+            nas_stack.poll_health()
+        paths = [c.args[0].split('9696')[1] for c in fake.call_args_list]
+        self.assertEqual(paths.count('/api/v1/indexer'), 1)
+
+    def test_indexer_notice_is_pushed_but_does_not_open_grace(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        with patch.dict(os.environ, {'ARR_STACK_ALERT_CONFIRM_CHECKS': '1', 'ARR_STACK_RECOVERY_CONFIRM_CHECKS': '1'}):
+            tracker = arr_stack.AlertTracker(Path(tmp.name) / 'a.json')
+            [down] = tracker.notices({'dht_nodes': 5, 'issues': {'indexer:1': 'Indexer 1337x is down'}}, 0)
+            self.assertEqual(down.severity, 'warning')
+            [up] = tracker.notices({'dht_nodes': 5, 'issues': {}}, 60)
+            self.assertEqual(up.kind, 'recovered')
+            self.assertEqual(tracker.grace_until, 0.0)
+
+
 class RestartApprovalTests(unittest.TestCase):
     def setUp(self):
         arr_stack._pending.clear()
