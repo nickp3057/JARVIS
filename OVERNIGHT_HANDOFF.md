@@ -26,8 +26,8 @@ and tailscaled running. Work in this session, in order:
 | #4 NAS Tailscale IP → LAN | decided: swap (Nick edits `.env`) | — |
 | #6 DHT watchdog double restart | fixed (Nick deploys via install-recovery.sh) | `837c14f` |
 | BIOS AC-recovery mitigation | documented in `ops/optiplex/README.md` | `b563250` |
-| Real APNs push pipeline | in progress | |
-| #7 deploy | last | |
+| Real APNs push pipeline (server sender + iOS registration) | done; needs APNs key | `bfc662d`, `7dc1a8c` |
+| #7 deploy | see "Deploy checklist" below | |
 
 Findings:
 - **Boot race.** `jarvis-api.service` already had
@@ -75,6 +75,58 @@ Findings:
   starts on every attempt, with exactly one retry after a failure.
 - **Outage timeline.** The NAS booted 2026-09-22 20:26 (it has AC recovery
   on); the Optiplex stayed off until the button press at ~22:53.
+
+### APNs pipeline (2026-09-23)
+
+- Server: `brain/notifications.py` signs an ES256 provider JWT with the .p8
+  via `cryptography` (no PyJWT), reuses it 50 min, and posts over one HTTP/2
+  `httpx` client (new dependency `h2`). `BadDeviceToken` retries the other
+  environment once and remembers it; `410/Unregistered` prunes; any exception
+  falls back to HA. Verified with a real P-256 key and a mock Apple endpoint
+  (18 tests), not against Apple itself.
+- iOS: Push Notifications entitlement, `PushAppDelegate`, `PushRegistrar`
+  (permission once configured, register each foreground, upload on
+  token/server change, environment from the embedded profile), Settings row.
+  Device-SDK build and 19 simulator tests pass. Not yet run on the phone.
+- Values from the project: Team ID `47543PU92M`, bundle ID
+  `com.nickolaspearson.JarvisCompanion`.
+
+### Deploy checklist (in order)
+
+1. **Push to GitHub** (Mac): `git push origin main`.
+2. **Optiplex code + deps:**
+   `ssh jarvis 'cd ~/jarvis && git pull && .venv/bin/pip install -r requirements.txt'`
+3. **Optiplex `.env`: NAS over LAN (#4)** — replace the Tailscale IP:
+   `ssh jarvis "cd ~/jarvis && cp .env .env.bak-lan && sed -i 's#100\.97\.179\.53#10.0.0.147#g' .env && grep -n 10.0.0.147 .env"`
+   (touches `QBITTORRENT_URL`, `RADARR_URL`, `SONARR_URL`, `NAS_SSH_HOST`; the
+   pinned host key already lists 10.0.0.147). Optionally delete the obsolete
+   `ARR_STACK_ALERT_COOLDOWN_S` line.
+4. **Optiplex boot wait:** `ssh -t jarvis 'cd ~/jarvis && sudo sh ops/optiplex/install-network-wait.sh 10.0.0.1'`
+5. **Restart:** `ssh -t jarvis 'sudo systemctl restart jarvis-api'`, then
+   `ssh jarvis 'journalctl -u jarvis-api -n 30 --no-pager'`.
+6. **NAS shell fix + guard (#2):**
+   `scp ops/nas/ensure_jarvis_shell.sh ops/nas/dht_watchdog.sh ops/nas/recover_stack.sh ops/nas/indexer_watchdog.sh ops/nas/install-recovery.sh nas:jarvis-ops/`
+   then on the NAS: `sudo usermod -s /bin/bash Jarvis`, install the guard and
+   its cron line (`ops/nas/README.md` → "Shell reset").
+7. **NAS DHT watchdog (#6):** on the NAS, `cd ~/jarvis-ops && sudo bash install-recovery.sh --preview`, review, then `--apply`.
+8. **Verify status key** from the Optiplex: ask JARVIS "arr stack status"
+   (the "watchdog activity" line should no longer say unavailable).
+9. **APNs key:** developer.apple.com → Certificates, IDs & Profiles → Keys →
+   "+" → name it, tick **Apple Push Notifications service (APNs)** →
+   Continue → Register → **Download** the `AuthKey_<KEYID>.p8` (one download
+   only) and note the Key ID. Then:
+   `scp AuthKey_<KEYID>.p8 jarvis:jarvis/memory/ && ssh jarvis 'chmod 600 ~/jarvis/memory/AuthKey_*.p8'`
+   and add to the Optiplex `.env`:
+   `APNS_ENABLED=true`, `APNS_KEY_PATH=/home/nick/jarvis/memory/AuthKey_<KEYID>.p8`,
+   `APNS_KEY_ID=<KEYID>`, `APNS_TEAM_ID=47543PU92M`,
+   `APNS_BUNDLE_ID=com.nickolaspearson.JarvisCompanion`; restart jarvis-api.
+10. **App:** open the project in Xcode, build to the phone (automatic signing
+    adds Push to the App ID), open the app, allow notifications. Settings
+    should show "Push alerts on"; `GET /api/push/status` should report
+    `"primary": "app_push"`. HA then fires only if APNs fails.
+11. **BIOS:** AC Recovery → Power On (`ops/optiplex/README.md`).
+12. **Calendar:** nothing to do — the existing token is fine; the fix just
+    keeps a boot-time refresh failure from disabling it.
 
 ## Status (overnight session)
 
