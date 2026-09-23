@@ -372,6 +372,26 @@ struct JarvisAPIClient {
         return decoded
     }
 
+    // MARK: - Push
+
+    private struct PushRegisterRequest: Encodable {
+        let deviceToken: String
+        let environment: String
+        let deviceName: String
+        enum CodingKeys: String, CodingKey {
+            case deviceToken = "device_token", environment, deviceName = "device_name"
+        }
+    }
+
+    private struct PushRegisterResponse: Decodable { let registered: Bool }
+
+    /// Hand JARVIS Core this phone's APNs token so alerts arrive as pushes.
+    func registerPushDevice(token: String, environment: String, name: String) async throws {
+        _ = try await postJSON(PushRegisterResponse.self, path: "api/push/register",
+                               body: PushRegisterRequest(deviceToken: token, environment: environment,
+                                                         deviceName: String(name.prefix(80))))
+    }
+
     func torrentsStatus() async throws -> TorrentsStatus {
         try await getJSON(TorrentsStatus.self, path: "api/status/torrents")
     }

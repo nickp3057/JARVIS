@@ -15,6 +15,7 @@ struct SettingsView: View {
     @State private var connectionSucceeded = false
     @State private var notificationStatus = "Checking permission…"
     @State private var permissionUndetermined = false
+    @ObservedObject private var push = PushRegistrar.shared
 
     var body: some View {
         NavigationStack {
@@ -85,6 +86,8 @@ struct SettingsView: View {
                             }
                             Text("JARVIS writes this brief and owns its schedule. To change the hour, warning window, keywords, or tone, just tell him: “move my study brief to 7” or “be blunter in the morning brief.”")
                                 .font(.footnote).foregroundStyle(.secondary)
+                            Label(push.status, systemImage: "bell.badge")
+                                .font(.caption).foregroundStyle(.secondary)
                             HStack {
                                 Text(notificationStatus).font(.caption).foregroundStyle(.secondary)
                                 Spacer()
@@ -161,6 +164,7 @@ struct SettingsView: View {
     private func requestPermissionNow() async {
         _ = try? await UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge])
         await refreshPermission()
+        await push.refresh()
     }
 
     static func scheduleSummary(_ brief: StudyBrief) -> String {

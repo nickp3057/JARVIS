@@ -2,6 +2,7 @@ import SwiftUI
 
 @main
 struct JarvisCompanionApp: App {
+    @UIApplicationDelegateAdaptor(PushAppDelegate.self) private var pushDelegate
     @Environment(\.scenePhase) private var scenePhase
     @StateObject private var settings: AppSettings
     @StateObject private var chat: ChatViewModel
@@ -15,6 +16,7 @@ struct JarvisCompanionApp: App {
             settings: settings,
             academicNotifications: AcademicNotificationScheduler()
         ))
+        PushRegistrar.shared.attach(settings)
     }
 
     var body: some Scene {
@@ -26,11 +28,16 @@ struct JarvisCompanionApp: App {
                     case .active:
                         chat.appBecameActive()
                         if settings.isConfigured { Task { await hub.refreshNow() } }
+                        Task { await PushRegistrar.shared.refresh() }
                     case .inactive, .background:
                         chat.appBecameInactive()
                     @unknown default:
                         break
                     }
+                }
+                .onChange(of: settings.connectionIdentity) {
+                    PushRegistrar.shared.connectionChanged()
+                    Task { await PushRegistrar.shared.refresh() }
                 }
         }
     }

@@ -459,4 +459,36 @@ final class CompanionTests: XCTestCase {
         let other = HubViewModel(settings: settings, clientFactory: { client }, snapshotDefaults: defaults)
         XCTAssertNil(other.now.value)
     }
+
+    func testPushRegistrationPostsTokenInServerSchema() async throws {
+        var captured: URLRequest?
+        var body = Data()
+        MockProtocol.handler = { request in
+            captured = request
+            if let stream = request.httpBodyStream {
+                stream.open()
+                var buffer = [UInt8](repeating: 0, count: 4096)
+                while stream.hasBytesAvailable {
+                    let count = stream.read(&buffer, maxLength: buffer.count)
+                    if count <= 0 { break }
+                    body.append(buffer, count: count)
+                }
+                stream.close()
+            }
+            return (200, #"{"registered": true, "primary": "app_push"}"#, 0)
+        }
+        let client = JarvisAPIClient(baseURL: URL(string: "http://localhost:8000")!, token: "test", session: session)
+        try await client.registerPushDevice(token: String(repeating: "a", count: 64), environment: "sandbox", name: "iPhone")
+        XCTAssertEqual(captured?.url?.path, "/api/push/register")
+        XCTAssertEqual(captured?.httpMethod, "POST")
+        XCTAssertEqual(captured?.value(forHTTPHeaderField: "Authorization"), "Bearer test")
+        let json = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: String])
+        XCTAssertEqual(json, ["device_token": String(repeating: "a", count: 64), "environment": "sandbox", "device_name": "iPhone"])
+    }
+
+    func testSimulatorPushEnvironmentIsSandbox() {
+        #if targetEnvironment(simulator)
+        XCTAssertEqual(PushRegistrar.apsEnvironment(), "sandbox")
+        #endif
+    }
 }

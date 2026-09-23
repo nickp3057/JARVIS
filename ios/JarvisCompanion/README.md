@@ -173,8 +173,24 @@ The phone must be **connected to your tailnet** for the app to reach the server 
 the Tailscale app installed, logged into the same account, and its VPN toggle on.
 There is no fallback to a LAN address.
 
-Remote push notifications are not implemented. Academic countdowns use local
-iOS notifications and therefore need no APNs server or notification API key.
+Academic countdowns use local iOS notifications. JARVIS alerts (arr stack,
+indexers, recovery results) arrive as **remote push** via APNs:
+
+- The target has the Push Notifications capability
+  (`JarvisCompanion.entitlements`, `aps-environment`; Xcode swaps in
+  `production` when exporting a distribution build).
+- `Push/PushRegistrar.swift` asks for notification permission once a server
+  is configured, registers with APNs on every foreground, and sends the token
+  to `POST /api/push/register` whenever the token or server identity changes.
+  The environment (sandbox/production) is read from the embedded provisioning
+  profile; JARVIS Core also self-corrects on `BadDeviceToken`.
+- `PushAppDelegate` (via `@UIApplicationDelegateAdaptor`) receives the token
+  and shows alerts as banners while the app is open.
+- Settings shows the registration state ("Push alerts on").
+
+Server setup (APNs key, `APNS_*` in the Optiplex `.env`) is in
+`OVERNIGHT_HANDOFF.md`. With automatic signing, the first build after pulling
+lets Xcode add Push Notifications to the App ID.
 
 ## Voice input
 
