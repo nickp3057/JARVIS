@@ -414,11 +414,15 @@ or the NAS DHT watchdog's own container recreation.
 
 Phone delivery: every pushed alert goes through `brain/notifications.py`
 (`runtime.push_to_phone`). Channel order is JARVIS companion push (APNs),
-then Home Assistant `notify.mobile_app_*`. The APNs channel is a stub that
-always reports not-ready, so HA is the effective primary; the device-token
-endpoints (`POST/DELETE /api/push/register`, `GET /api/push/status`) exist so
-the iOS half can be built independently. A failed delivery on every channel
-records a "Phone alert delivery failed" inbox event.
+then Home Assistant `notify.mobile_app_*` as fallback only. APNs uses an ES256
+provider JWT (signed with `cryptography`, reused 50 minutes, refreshed once on
+`ExpiredProviderToken`) over one persistent HTTP/2 `httpx` client. Each
+registered device is tried; `BadDeviceToken` retries the other environment
+once and remembers it, `410`/`Unregistered` prunes the device, and delivery
+succeeds if any device accepts. The app registers through
+`POST /api/push/register`; `GET /api/push/status` reports the active channel
+and the first missing setup piece. A failed delivery on every channel records
+a "Phone alert delivery failed" inbox event.
 
 Per-indexer alerts: with a Prowlarr key, each poll reads
 `/api/v1/indexerstatus`; every enabled indexer whose failure backoff
@@ -469,7 +473,7 @@ Admin-only environment controls (not model-editable settings):
 | `ARR_STACK_ESCALATION_INTERVAL_S` | 21600; one reminder per window while unresolved |
 | `ARR_STACK_POST_RECOVERY_GRACE_S` | 300; hold brand-new conditions after a critical recovery |
 | `ARR_STACK_NOTIFY_SERVICE` | blank; HA `notify.mobile_app_*` service (fallback channel; `JARVIS_NOTIFY_HA_SERVICE` overrides) |
-| `APNS_ENABLED`, `APNS_KEY_PATH`, `APNS_KEY_ID`, `APNS_TEAM_ID`, `APNS_BUNDLE_ID` | companion push; **stubbed**, leave `APNS_ENABLED=false` |
+| `APNS_ENABLED`, `APNS_KEY_PATH`, `APNS_KEY_ID`, `APNS_TEAM_ID`, `APNS_BUNDLE_ID` | companion push (token-based APNs over HTTP/2); primary once enabled and a device has registered |
 | `PROWLARR_URL`, `PROWLARR_API_KEY` | API base and optional key; v1 health plus per-indexer `indexerstatus` with key, `/ping` without |
 | `BYPARR_URL` | Byparr base URL, usually NAS port 8191 |
 | `ARR_STACK_RESTART_ENABLED` | false; enable only after restricted-key tests |
