@@ -333,6 +333,40 @@ def torrents_control(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
+# --- Push notification registration -----------------------------------------
+# Server half of companion push. Tokens are stored now so the app can be
+# wired up independently; delivery stays on Home Assistant until APNs
+# credentials exist (see brain/notifications.py and OVERNIGHT_HANDOFF.md).
+
+
+class PushRegisterRequest(BaseModel):
+    device_token: str = Field(min_length=64, max_length=200)
+    environment: str = Field(default="production", pattern="^(production|sandbox)$")
+    device_name: str = Field(default="", max_length=80)
+
+
+@app.post("/api/push/register")
+def push_register(request: PushRegisterRequest, _: None = Depends(authorize)) -> dict[str, object]:
+    from brain import notifications
+    ok, detail = notifications.register_device(request.device_token, request.environment, request.device_name)
+    if not ok:
+        raise HTTPException(status_code=400, detail=detail)
+    return {"registered": True, **notifications.status()}
+
+
+@app.delete("/api/push/register/{device_token}")
+def push_unregister(device_token: str, _: None = Depends(authorize)) -> Response:
+    from brain import notifications
+    notifications.unregister_device(device_token)
+    return Response(status_code=204)
+
+
+@app.get("/api/push/status")
+def push_status(_: None = Depends(authorize)) -> dict[str, object]:
+    from brain import notifications
+    return notifications.status()
+
+
 def run_server() -> None:
     """Run the companion API using environment-configured bind settings."""
     import uvicorn

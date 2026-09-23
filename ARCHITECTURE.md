@@ -412,6 +412,14 @@ used when something already looks wrong. Found 2026-09-22 from HA's recorder:
 every "unreachable" page in the preceding two days was either a one-poll blip
 or the NAS DHT watchdog's own container recreation.
 
+Phone delivery: every pushed alert goes through `brain/notifications.py`
+(`runtime.push_to_phone`). Channel order is JARVIS companion push (APNs),
+then Home Assistant `notify.mobile_app_*`. The APNs channel is a stub that
+always reports not-ready, so HA is the effective primary; the device-token
+endpoints (`POST/DELETE /api/push/register`, `GET /api/push/status`) exist so
+the iOS half can be built independently. A failed delivery on every channel
+records a "Phone alert delivery failed" inbox event.
+
 Per-indexer alerts: with a Prowlarr key, each poll reads
 `/api/v1/indexerstatus`; every enabled indexer whose failure backoff
 (`disabledTill`) is in the future becomes its own `indexer:<id>` condition
@@ -451,7 +459,8 @@ Admin-only environment controls (not model-editable settings):
 | `ARR_STACK_MAINTENANCE_SETTLE_S` | 300; hold new alerts this long after a NAS recovery finishes (needs the status key) |
 | `ARR_STACK_ESCALATION_INTERVAL_S` | 21600; one reminder per window while unresolved |
 | `ARR_STACK_POST_RECOVERY_GRACE_S` | 300; hold brand-new conditions after a critical recovery |
-| `ARR_STACK_NOTIFY_SERVICE` | blank; HA `notify.mobile_app_*` service |
+| `ARR_STACK_NOTIFY_SERVICE` | blank; HA `notify.mobile_app_*` service (fallback channel; `JARVIS_NOTIFY_HA_SERVICE` overrides) |
+| `APNS_ENABLED`, `APNS_KEY_PATH`, `APNS_KEY_ID`, `APNS_TEAM_ID`, `APNS_BUNDLE_ID` | companion push; **stubbed**, leave `APNS_ENABLED=false` |
 | `PROWLARR_URL`, `PROWLARR_API_KEY` | API base and optional key; v1 health plus per-indexer `indexerstatus` with key, `/ping` without |
 | `BYPARR_URL` | Byparr base URL, usually NAS port 8191 |
 | `ARR_STACK_RESTART_ENABLED` | false; enable only after restricted-key tests |

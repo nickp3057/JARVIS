@@ -248,8 +248,7 @@ class JarvisRuntime:
                     note = nas_stack.watchdog_note(status) if status is not None else ""
                     message = "; ".join(critical) + "." + (f" {note}" if note else "")
                     self.announce(message, source="arr-stack", title="Arr stack health alert")
-                    if os.getenv("ARR_STACK_NOTIFY_SERVICE", "").strip() and not nas_stack.notify_phone(message):
-                        self.record_event(kind="alert", source="arr-stack", title="Phone alert delivery failed", detail="Arr alert remains in the runtime inbox; check Home Assistant notification delivery.")
+                    self.push_to_phone("Jarvis — arr stack", message, source="arr-stack")
                 if advisory:
                     # Inbox/event feed only -- no announce, no phone push.
                     self.record_event(kind="notice", source="arr-stack", title="Arr stack advisory", detail="; ".join(advisory))
@@ -260,6 +259,20 @@ class JarvisRuntime:
                 log.exception("Arr stack monitor cycle failed")
             if self._stop_monitors.wait(nas_stack.seconds("ARR_STACK_MONITOR_INTERVAL_S", 60)):
                 break
+
+    def push_to_phone(self, title: str, message: str, *, source: str) -> bool:
+        """Send a proactive alert to Nick's phone via brain.notifications.
+
+        Companion push first, Home Assistant as fallback. A failed delivery
+        is recorded in the inbox so the alert is never silently lost."""
+        from brain import notifications
+        if not notifications.configured():
+            return False
+        delivery = notifications.send(title, message)
+        if not delivery.delivered:
+            self.record_event(kind="alert", source=source, title="Phone alert delivery failed",
+                              detail=f"Alert remains in the runtime inbox. {delivery.detail}"[:500])
+        return delivery.delivered
 
     def _deadman_loop(self) -> None:
         from integrations import nas_stack

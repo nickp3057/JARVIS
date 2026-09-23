@@ -18,3 +18,5 @@ memory/google_token.json
 memory/standing_orders.json
 memory/tool_health.json
 memory/repair_proposals.json
+memory/push_devices.json
+memory/arr_stack_alerts.json
