@@ -12,7 +12,71 @@ Hard constraint honoured throughout: the NAS SSH permission model is
 unchanged (restricted forced-command keys only, no Docker socket, no root).
 No file under `ops/nas/` was modified.
 
-## Status
+## Follow-up session (2026-09-23)
+
+Nick reported the Optiplex lost power (outage), came back manually; jarvis-api
+and tailscaled running. Work in this session, in order:
+
+| Item | State | Commit |
+| --- | --- | --- |
+| Google OAuth "could not locate runnable browser" | fixed | `cfb0c46` |
+| Boot-time "Network is unreachable" race | fixed (needs Nick's sudo) | `b563250` |
+| #2 status key dead | root-caused, guard written (needs Nick's sudo) | `281f586` |
+| #3 Prowlarr key | verified working live | — |
+| #4 NAS Tailscale IP → LAN | decided: swap (Nick edits `.env`) | — |
+| #6 DHT watchdog double restart | fixed (Nick deploys via install-recovery.sh) | `837c14f` |
+| BIOS AC-recovery mitigation | documented in `ops/optiplex/README.md` | `b563250` |
+| Real APNs push pipeline | in progress | |
+| #7 deploy | last | |
+
+Findings:
+- **Boot race.** `jarvis-api.service` already had
+  `After=/Wants=network-online.target`, but on this ifupdown + dhcpcd host
+  `ifupdown-wait-online.service` was *disabled*, so `systemd-analyze
+  critical-chain` showed the target reached at 2.344 s and jarvis-api started
+  1 ms later. Fix: `ops/optiplex/install-network-wait.sh` enables the wait unit
+  with `WAIT_ONLINE_METHOD=ping` to the IPv4 gateway (10.0.0.1), timeout 90 s.
+  `route` was rejected: it accepts an IPv6 RA default route before the IPv4
+  lease HA/NAS need. App side: `STARTUP_NETWORK_GRACE_S` (120) suppresses
+  outage events during boot; weather retries with 30/60/120 s backoff instead
+  of waiting 30 minutes.
+- **The journal also showed a phone notification attempt at 22:53:15** —
+  the deployed (pre-overhaul) arr monitor alerting on its first failed poll.
+  The debounce from last night already prevents that.
+- **Google OAuth.** Worse than a log line: at boot the token refresh hit a
+  DNS failure, the code discarded the credentials, tried the browser flow,
+  failed, and set `_service_failed` — calendar dead for the whole process.
+  Now: network errors on refresh are retried; no in-process browser flow on
+  headless hosts (one log hint per hour, new token picked up without
+  restart); `python -m integrations.google_calendar --auth` does consent over
+  `ssh -L 8765:localhost:8765 jarvis` (device flow does not allow Calendar
+  scopes). The Optiplex token (2026-09-20) is fine and needs no action.
+- **Status key (#2).** SSH from the Optiplex with the status key returns
+  `This account is currently not available.` — the NAS `Jarvis` account's
+  shell is `/usr/sbin/nologin`. sshd runs forced commands via the login
+  shell. `/etc/passwd` + `/etc/shadow` were rewritten 2026-09-20 22:54, 1h45m
+  after the installer set `/bin/bash` — a UGOS account save. **The recovery
+  key shares the account, so arr restarts have also been failing since
+  then.** Fix: `usermod -s /bin/bash Jarvis` plus the root-cron guard
+  `ops/nas/ensure_jarvis_shell.sh` (restores only the shell, refuses if the
+  account is admin). Jarvis now reports this cause by name.
+- **Prowlarr (#3).** `PROWLARR_API_KEY` is set; `/api/v1/health`,
+  `/api/v1/indexerstatus` (empty = all healthy) and `/api/v1/indexer`
+  (6 enabled indexers with `id`/`name`/`enable`) all answer as the code
+  expects. A non-empty `indexerstatus` entry has still not been seen live.
+- **Tailscale vs LAN (#4).** Warm latency is equivalent (both ~15–90 ms; a
+  first LAN sample was a cold 0.4 s). Swap chosen because jarvis-api is not
+  ordered after tailscaled, so the Tailscale IPs can be unreachable at boot
+  even with the network wait, and a tailnet problem shouldn't take arr
+  monitoring down. The pinned NAS host key already covers `10.0.0.147`.
+- **DHT watchdog (#6).** Confirmed from `watchdog.log`: the 05:40 run failed
+  verification at 05:47:59; the cooldown file is only written on success,
+  so the 05:50 check ran again ("consecutive check 4/3"). Now the cooldown
+  starts on every attempt, with exactly one retry after a failure.
+- **Outage timeline.** The NAS booted 2026-09-22 20:26 (it has AC recovery
+  on); the Optiplex stayed off until the button press at ~22:53.
+
+## Status (overnight session)
 
 | Part | State | Commit |
 | --- | --- | --- |
