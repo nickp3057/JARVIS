@@ -181,3 +181,63 @@ class MultiCalendarTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class HeadlessAuthTests(unittest.TestCase):
+    """Boot-race refresh failures and headless hosts must not kill the calendar."""
+
+    def setUp(self) -> None:
+        import tempfile
+        from pathlib import Path
+        gc._service, gc._service_failed, gc._consent_logged_at = None, False, 0.0
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.token = Path(self.tmp.name) / "token.json"
+        self.token.write_text("{}")
+        self.creds_file = Path(self.tmp.name) / "client.json"
+        self.creds_file.write_text("{}")
+        env = patch.dict(os.environ, {"GOOGLE_TOKEN_FILE": str(self.token), "GOOGLE_CREDENTIALS_FILE": str(self.creds_file)})
+        env.start()
+        self.addCleanup(env.stop)
+        self.addCleanup(lambda: setattr(gc, "_service", None))
+        self.addCleanup(lambda: setattr(gc, "_service_failed", False))
+
+    def expired_creds(self, refresh_error):
+        from unittest.mock import MagicMock
+        creds = MagicMock(valid=False, expired=True, refresh_token="r")
+        creds.refresh.side_effect = refresh_error
+        return creds
+
+    def test_network_error_on_refresh_is_retried_not_fatal(self):
+        from google.auth.exceptions import TransportError
+        creds = self.expired_creds(TransportError("Network is unreachable"))
+        with patch("google.oauth2.credentials.Credentials.from_authorized_user_file", return_value=creds), \
+             patch("google_auth_oauthlib.flow.InstalledAppFlow.from_client_secrets_file") as flow:
+            self.assertIsNone(gc._get_service())
+        flow.assert_not_called()
+        self.assertFalse(gc._service_failed)
+        # Next call, network up: refresh succeeds and the service is built.
+        creds.refresh.side_effect = None
+        creds.valid = True
+        with patch("google.oauth2.credentials.Credentials.from_authorized_user_file", return_value=creds), \
+             patch("googleapiclient.discovery.build", return_value="svc"):
+            self.assertEqual(gc._get_service(), "svc")
+
+    def test_headless_host_never_opens_browser_and_stays_retryable(self):
+        from google.auth.exceptions import RefreshError
+        creds = self.expired_creds(RefreshError("invalid_grant"))
+        with patch("google.oauth2.credentials.Credentials.from_authorized_user_file", return_value=creds), \
+             patch.object(gc, "_browser_available", return_value=False), \
+             patch("google_auth_oauthlib.flow.InstalledAppFlow.from_client_secrets_file") as flow, \
+             self.assertLogs(gc.log, level="WARNING") as logs:
+            self.assertIsNone(gc._get_service())
+            self.assertIsNone(gc._get_service())
+        flow.assert_not_called()
+        self.assertFalse(gc._service_failed)
+        self.assertEqual(sum("--auth" in line for line in logs.output), 1)
+
+    def test_browser_detection_respects_headless_override_and_display(self):
+        with patch.dict(os.environ, {"GOOGLE_OAUTH_HEADLESS": "true"}):
+            self.assertFalse(gc._browser_available())
+        with patch.object(gc.sys, "platform", "linux"), patch.dict(os.environ, {"DISPLAY": "", "WAYLAND_DISPLAY": "", "GOOGLE_OAUTH_HEADLESS": ""}):
+            self.assertFalse(gc._browser_available())

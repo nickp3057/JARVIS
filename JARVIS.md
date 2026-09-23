@@ -527,9 +527,18 @@ CALENDAR_ALERT_LEAD_MIN=10  # warn this many minutes before a meeting
 1. Google Cloud Console -> create a project -> enable the Google Calendar API.
 2. Create OAuth credentials of type **Desktop app**; download the JSON.
 3. Put its path in `GOOGLE_CREDENTIALS_FILE` in `.env`.
-4. Launch JARVIS and ask "what's on my calendar" — a browser opens once for
-   consent, then the token is cached to `memory/google_token.json` and refreshes
-   silently after that. Access is read-only.
+4. On a desktop, launch JARVIS and ask "what's on my calendar" — a browser
+   opens once for consent, then the token is cached to
+   `memory/google_token.json` and refreshes silently after that. Access is
+   read-only.
+5. On the headless Optiplex, never rely on step 4 (there is no browser; the
+   process just logs a one-line hint). Instead, from the Mac:
+   `ssh -L 8765:localhost:8765 jarvis`, then in that session
+   `cd ~/jarvis && .venv/bin/python -m integrations.google_calendar --auth`
+   and open the printed URL in the Mac's browser. The running server picks up
+   the token on its next calendar call. A token refresh that fails because the
+   network is not up yet (boot) is retried, not treated as lost consent.
+   `GOOGLE_OAUTH_HEADLESS=true` forces headless behaviour on any host.
 
 ---
 

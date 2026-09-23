@@ -12,8 +12,13 @@ Configuration (.env):
   merges every calendar on the account (school, work, shared, holidays);
   otherwise a comma-separated list of calendar ids, e.g. ``primary``.
 
-First run opens a browser once for consent and caches a token; subsequent runs
-refresh silently. Everything degrades gracefully: if the libraries aren't
+First run needs consent once and caches a token; subsequent runs refresh
+silently. On a desktop with a browser that happens in-process. On a headless
+server (the Optiplex) run ``python -m integrations.google_calendar --auth``
+over an SSH tunnel instead (see ``_cli_auth``); the running process never
+tries to open a browser there, and picks up the new token without a restart.
+A token refresh that fails for network reasons (e.g. Wi-Fi still associating
+at boot) is retried on the next call rather than treated as lost consent. Everything degrades gracefully: if the libraries aren't
 installed or nothing is configured, the spoken helpers say so politely instead
 of raising.
 """
@@ -22,7 +27,10 @@ from __future__ import annotations
 
 import os
 import re
+import sys
 import threading
+import time
+import webbrowser
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
@@ -42,6 +50,8 @@ _DEFAULT_TOKEN = _PROJECT_ROOT / "memory" / "google_token.json"
 
 _service: Any | None = None
 _service_failed = False
+_consent_logged_at = 0.0
+_AUTH_PORT = 8765
 # googleapiclient/httplib2 are not thread-safe: the Now snapshot, the study
 # brief, the calendar monitor, and chat tools can all ask for events at once,
 # and concurrent calls through one service object fail with SSL record-layer
@@ -117,6 +127,33 @@ def is_configured() -> bool:
     return bool(_credentials_file()) or Path(_token_file()).exists()
 
 
+def _browser_available() -> bool:
+    """False on a headless box, where an in-process consent flow can't work."""
+    if os.getenv("GOOGLE_OAUTH_HEADLESS", "").strip().lower() in {"1", "true", "yes", "on"}:
+        return False
+    if sys.platform.startswith("linux") and not (os.getenv("DISPLAY") or os.getenv("WAYLAND_DISPLAY")):
+        return False
+    try:
+        webbrowser.get()
+    except webbrowser.Error:
+        return False
+    return True
+
+
+def _log_consent_needed() -> None:
+    """One actionable line per hour instead of a traceback per poll."""
+    global _consent_logged_at
+    now = time.monotonic()
+    if _consent_logged_at and now - _consent_logged_at < 3600:
+        return
+    _consent_logged_at = now
+    log.warning(
+        "Google Calendar needs one-time consent and no browser is available here. "
+        "Run: ssh -L %d:localhost:%d <this host>, then "
+        ".venv/bin/python -m integrations.google_calendar --auth", _AUTH_PORT, _AUTH_PORT,
+    )
+
+
 def _get_service(*, allow_interactive: bool = True) -> Any | None:
     global _service, _service_failed
     if _service is not None:
@@ -124,6 +161,7 @@ def _get_service(*, allow_interactive: bool = True) -> Any | None:
     if _service_failed:
         return None
     try:
+        from google.auth.exceptions import TransportError
         from google.oauth2.credentials import Credentials
         from google_auth_oauthlib.flow import InstalledAppFlow
         from google.auth.transport.requests import Request
@@ -145,9 +183,16 @@ def _get_service(*, allow_interactive: bool = True) -> Any | None:
         if creds is not None and creds.expired and creds.refresh_token:
             try:
                 creds.refresh(Request())
-            except Exception:  # noqa: BLE001
+            except TransportError as exc:
+                # Network not ready (boot race, Wi-Fi reassociating): the
+                # token is fine. Retry on the next call; never fall through to
+                # a consent flow or disable the calendar for the process.
+                log.info("Google token refresh deferred, network unavailable: %s", exc)
+                return None
+            except Exception as exc:  # noqa: BLE001 -- revoked/invalid grant
+                log.warning("Google token refresh rejected (%s); consent is needed again.", exc)
                 creds = None
-        if creds is None:
+        if creds is None or not creds.valid:
             # Dashboard polling must never open a browser or block waiting for
             # OAuth consent. Explicit calendar tools retain the setup flow.
             if not allow_interactive:
@@ -156,6 +201,11 @@ def _get_service(*, allow_interactive: bool = True) -> Any | None:
             if not cred_file or not Path(cred_file).exists():
                 log.warning("Google credentials file missing; calendar disabled.")
                 _service_failed = True
+                return None
+            if not _browser_available():
+                # Not permanent: a token created with --auth (or copied in)
+                # is picked up on the next call without a restart.
+                _log_consent_needed()
                 return None
             try:
                 flow = InstalledAppFlow.from_client_secrets_file(cred_file, _SCOPES)
@@ -177,6 +227,40 @@ def _get_service(*, allow_interactive: bool = True) -> Any | None:
         log.warning("Calendar service build failed: %s", exc)
         _service_failed = True
         return None
+
+
+def _cli_auth(port: int = _AUTH_PORT) -> int:
+    """One-time consent on a headless host, completed in another machine's browser.
+
+    Google's device-code flow does not allow Calendar scopes, so this uses the
+    normal loopback redirect with the browser on your laptop:
+
+        ssh -L 8765:localhost:8765 jarvis
+        cd ~/jarvis && .venv/bin/python -m integrations.google_calendar --auth
+
+    Open the printed URL on the laptop; Google redirects to
+    http://localhost:8765/, which the tunnel carries back to this process.
+    """
+    from google_auth_oauthlib.flow import InstalledAppFlow
+
+    cred_file = _credentials_file()
+    if not cred_file or not Path(cred_file).exists():
+        print("GOOGLE_CREDENTIALS_FILE is not set or missing; see JARVIS.md 'Google Calendar setup'.")
+        return 1
+    flow = InstalledAppFlow.from_client_secrets_file(cred_file, _SCOPES)
+    creds = flow.run_local_server(
+        host="localhost", bind_addr="127.0.0.1", port=port, open_browser=False,
+        authorization_prompt_message=(
+            f"Make sure this session was opened with: ssh -L {port}:localhost:{port} <host>\n"
+            "Then open this URL in your laptop's browser:\n{url}"
+        ),
+        success_message="JARVIS calendar access granted. You can close this tab.",
+    )
+    token_path = Path(_token_file())
+    token_path.parent.mkdir(parents=True, exist_ok=True)
+    token_path.write_text(creds.to_json())
+    print(f"Token saved to {token_path}. The running JARVIS picks it up on its next calendar call.")
+    return 0
 
 
 def _parse_dt(node: dict[str, Any]) -> datetime | None:
@@ -347,3 +431,9 @@ def next_event_spoken() -> str:
         return f"Next up: {e['summary']}."
     when = "all day" if e["all_day"] else f"at {_spoken_time(st)}"
     return f"Next up: {e['summary']} on {st.strftime('%A')} {when}."
+
+
+if __name__ == "__main__":
+    if "--auth" in sys.argv[1:]:
+        raise SystemExit(_cli_auth())
+    print("Usage: python -m integrations.google_calendar --auth")
