@@ -93,8 +93,10 @@ Findings:
 
 ### Deploy checklist (in order)
 
-1. **Push to GitHub** (Mac): `git push origin main`.
-2. **Optiplex code + deps:**
+1. ✅ **Push to GitHub** (Mac): `git push origin main` — done 2026-09-23.
+2. ✅ **Optiplex code + deps** — done 2026-09-23 (`f1aa372` on disk, `h2` 4.4.1
+   installed, full suite run on the Optiplex: 402 tests, only the known
+   study-brief failure). **Not active until the restart in step 5.**
    `ssh jarvis 'cd ~/jarvis && git pull && .venv/bin/pip install -r requirements.txt'`
 3. **Optiplex `.env`: NAS over LAN (#4)** — replace the Tailscale IP:
    `ssh jarvis "cd ~/jarvis && cp .env .env.bak-lan && sed -i 's#100\.97\.179\.53#10.0.0.147#g' .env && grep -n 10.0.0.147 .env"`
