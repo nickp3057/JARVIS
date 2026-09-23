@@ -253,6 +253,53 @@ class RestartApprovalTests(unittest.TestCase):
             self.assertIn('invalid', arr_stack.conversation_action(phrase, 'a'))
             run.assert_not_called()
 
+    def test_reasking_reuses_open_token_instead_of_minting(self):
+        first = arr_stack.prepare_restart('a').split('exactly: ')[1]
+        again = arr_stack.conversation_action('restart the arr stack', 'a').split('exactly: ')[1]
+        self.assertEqual(first, again)
+        self.assertIn('already open', arr_stack.prepare_restart('a'))
+
+    def test_bare_token_reprompts_with_same_token_and_does_not_run(self):
+        phrase = arr_stack.prepare_restart('a').split('exactly: ')[1]
+        token = phrase.split()[-1]
+        with patch.object(arr_stack, '_run_recovery', return_value='done') as run:
+            reply = arr_stack.conversation_action(token, 'a')
+            self.assertIn('token without the phrase', reply)
+            self.assertIn(phrase, reply)
+            self.assertIn(f'You sent: "{token}"', reply)
+            run.assert_not_called()
+            # The original phrase is still valid afterwards.
+            self.assertEqual(arr_stack.conversation_action(phrase, 'a'), 'done')
+
+    def test_typo_in_phrase_echoes_input_and_keeps_request(self):
+        phrase = arr_stack.prepare_restart('a').split('exactly: ')[1]
+        token = phrase.split()[-1]
+        typo = f'confirm restrat arr stack {token}'
+        with patch.object(arr_stack, '_run_recovery') as run:
+            reply = arr_stack.conversation_action(typo, 'a')
+            self.assertIn(f'You sent: "{typo}"', reply)
+            self.assertIn(phrase, reply)
+            run.assert_not_called()
+        self.assertEqual(arr_stack._pending['a'][1], token)
+
+    def test_wrong_token_echoes_and_keeps_request(self):
+        phrase = arr_stack.prepare_restart('a').split('exactly: ')[1]
+        token = phrase.split()[-1]
+        wrong = 'confirm restart arr stack ' + ('0' * 8 if token != '0' * 8 else '1' * 8)
+        with patch.object(arr_stack, '_run_recovery') as run:
+            reply = arr_stack.conversation_action(wrong, 'a')
+            self.assertIn('does not match the open request', reply)
+            self.assertIn(phrase, reply)
+            run.assert_not_called()
+
+    def test_unrelated_text_with_open_request_goes_to_model(self):
+        arr_stack.prepare_restart('a')
+        self.assertIsNone(arr_stack.conversation_action('what is the weather', 'a'))
+        self.assertIsNone(arr_stack.conversation_action('yes', 'a'))
+
+    def test_near_miss_without_open_request_goes_to_model(self):
+        self.assertIsNone(arr_stack.conversation_action('confirm restrat arr stack deadbeef', 'a'))
+
     def test_disabled_after_prepare_does_not_launch(self):
         phrase = arr_stack.prepare_restart('a').split('exactly: ')[1]
         with patch.dict(os.environ, {'ARR_STACK_RESTART_ENABLED': 'false'}), patch.object(arr_stack, '_run_recovery') as run:

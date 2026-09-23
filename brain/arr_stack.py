@@ -1,6 +1,7 @@
 """Runtime arr monitoring state and session-bound, human-only recovery approval."""
 from __future__ import annotations
 
+import difflib
 import json
 from pathlib import Path
 import re
@@ -140,20 +141,64 @@ class AlertTracker:
         return notices
 
 
+_PENDING_TTL_S = 600
+_PHRASE = 'confirm restart arr stack'
+_TOKEN_RE = re.compile(r'\b[a-f0-9]{8}\b')
+
+
+def _live_pending(session_id: str, now: float) -> tuple[float, str, str] | None:
+    """Caller holds _pending_lock. Drops expired entries as a side effect."""
+    for key, value in list(_pending.items()):
+        if now - value[0] > _PENDING_TTL_S:
+            _pending.pop(key, None)
+    return _pending.get(session_id)
+
+
+def _minutes_left(proposal: tuple[float, str, str], now: float) -> int:
+    return max(1, int((_PENDING_TTL_S - (now - proposal[0])) // 60))
+
+
 def prepare_restart(session_id: str | None) -> str:
     if not session_id:
         return 'Restart refused: a conversation session is required, sir.'
     if not nas_stack.enabled('ARR_STACK_RESTART_ENABLED'):
         return 'Arr stack restart is disabled until the restricted NAS keys are installed and tested, sir.'
-    request_id = str(uuid.uuid4())
-    token = uuid.uuid4().hex[:8]
     now = time.monotonic()
     with _pending_lock:
-        for key, value in list(_pending.items()):
-            if now - value[0] > 600:
-                _pending.pop(key, None)
+        # Re-asking (by Nick or by the model retrying the tool) must not churn
+        # the token: reuse the open request until it expires, so a phrase he
+        # already has in front of him stays valid.
+        existing = _live_pending(session_id, now)
+        if existing is not None:
+            return f'{_WARNING} A restart request is already open for {_minutes_left(existing, now)} more minute(s). Confirm by replying exactly: {_PHRASE} {existing[1]}'
+        request_id = str(uuid.uuid4())
+        token = uuid.uuid4().hex[:8]
         _pending[session_id] = (now, token, request_id)
-    return f'{_WARNING} Confirm by replying exactly: confirm restart arr stack {token}'
+    return f'{_WARNING} Confirm by replying exactly: {_PHRASE} {token}'
+
+
+def _looks_like_confirmation_attempt(normalized: str, token: str) -> bool:
+    """A near miss of the confirm phrase while a request is open.
+
+    Deliberately narrow: a bare "yes" still goes to the model (it may be
+    answering something else), but anything carrying the token, starting with
+    "confirm", or close to the phrase is clearly aimed at this gate.
+    """
+    if token in normalized or _TOKEN_RE.fullmatch(normalized):
+        return True
+    if normalized.startswith(('confirm', 'confrim', 'comfirm')) and any(w in normalized for w in ('restart', 'arr', 'stack', 'rsetart', 'retsart')):
+        return True
+    words = normalized.split()
+    if words and _TOKEN_RE.fullmatch(words[-1]):
+        body = ' '.join(words[:-1])
+        return difflib.SequenceMatcher(None, body, _PHRASE).ratio() >= 0.75
+    return difflib.SequenceMatcher(None, normalized, _PHRASE).ratio() >= 0.8
+
+
+def _mismatch_reply(sent: str, proposal: tuple[float, str, str], now: float, reason: str) -> str:
+    shown = sent.strip().replace('"', "'")[:120]
+    return (f'{reason} You sent: "{shown}". I need exactly: {_PHRASE} {proposal[1]} '
+            f'— same request, still open for {_minutes_left(proposal, now)} more minute(s), sir. No restart was sent.')
 
 
 def conversation_action(text: str, session_id: str) -> str | None:
@@ -166,12 +211,23 @@ def conversation_action(text: str, session_id: str) -> str | None:
             _pending.pop(session_id, None)
         return 'Arr stack restart cancelled, sir.'
     match = re.fullmatch(r'confirm restart arr stack ([a-f0-9]{8})', normalized)
+    now = time.monotonic()
     if not match:
+        with _pending_lock:
+            proposal = _live_pending(session_id, now)
+        if proposal is not None and _looks_like_confirmation_attempt(normalized, proposal[1]):
+            if _TOKEN_RE.fullmatch(normalized):
+                reason = 'That was the token without the phrase.'
+            else:
+                reason = "That doesn't match the confirmation phrase."
+            return _mismatch_reply(text, proposal, now, reason)
         return None
     with _pending_lock:
-        proposal = _pending.get(session_id)
-        if not proposal or time.monotonic() - proposal[0] > 600 or match[1] != proposal[1]:
+        proposal = _live_pending(session_id, now)
+        if not proposal:
             return 'That restart confirmation is invalid or expired, sir. Ask to restart the arr stack again.'
+        if match[1] != proposal[1]:
+            return _mismatch_reply(text, proposal, now, 'That token does not match the open request.')
         # Consume before any network side effect, including ambiguous failures.
         _pending.pop(session_id, None)
     if not nas_stack.enabled('ARR_STACK_RESTART_ENABLED'):

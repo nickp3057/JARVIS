@@ -6,6 +6,36 @@ heals, and grows on its own while staying governed. Read it alongside
 `ROADMAP.md` (milestones), `SELF_HEALING_HANDOFF.md` (what just shipped and
 needs review), and `ARCHITECTURE.md` (the layered design and runtime rule).
 
+## Overnight overhaul (started 2026-09-22) — IN PROGRESS
+
+Nick's unattended brief, recorded so a later session can resume. Hard
+constraint everywhere: do **not** change the NAS SSH permission model
+(restricted forced-command keys only, no Docker socket, no root). Priority is
+not breaking working behaviour. Small commits, one per logical change.
+Progress and review notes live in `OVERNIGHT_HANDOFF.md`.
+
+1. **Confirmation gate (arr restart).** Malformed confirmations (bare token,
+   typo, wrong token) must reuse the pending token while unexpired, and the
+   mismatch reply must echo exactly what Nick sent. Check the media-add gate
+   (`integrations/media_selections.py`) for the same problem.
+2. **Post-restart health.** Replace "outcome is unknown ... request <uuid>"
+   with a real up / still starting / failed status for Sonarr, Radarr,
+   Prowlarr and gluetun, polled within the SSH constraint; follow up
+   asynchronously instead of dead-ending on a UUID.
+3. **HA alert false positives.** Find why NAS-power-loss / device-offline
+   alerts over-fire; fix root cause; add N-consecutive-failure debounce and a
+   confirmed "back up" before declaring recovery.
+4. **Per-indexer alerts.** Alert on each individual indexer going down (not
+   only aggregate Prowlarr health), with the same debounce.
+5. **Push via the JARVIS iOS app.** Alerts go to JarvisCompanion as push;
+   HA notify becomes fallback-only. If APNs infra does not exist, stub it
+   cleanly, document Apple Developer / APNs key requirements, keep HA as the
+   working primary.
+6. **Performance pass.** Audit API slow paths (Optiplex i5-6500T, 4 GB),
+   Faster-Whisper latency, redundant polling / N+1 calls / missing caching on
+   status hub endpoints. Don't change Claude model choice; flag waste.
+7. **Setup TODO audit.** List everything Nick must do himself.
+
 ## Nick's stated goal
 
 Make JARVIS the ever-learning, ever-changing, self-adjusting, self-healing

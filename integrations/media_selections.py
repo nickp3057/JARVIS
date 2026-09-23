@@ -37,7 +37,14 @@ def validate(service: str, session_id: str | None, media_id: int) -> tuple[bool,
             _receipts.pop((service, session_id), None)
             return False, "That lookup expired, sir. Run it again so I can verify the exact title."
         if media_id not in candidates:
-            return False, "Safety check failed: that ID was not in the latest results I showed you, sir."
+            # Echo what was sent (and what was on offer) so a mistyped ID is
+            # visible. A miss never consumes the receipt, so a retry with the
+            # right ID still works without a fresh lookup.
+            offered = ", ".join(str(key) for key in list(candidates)[:5])
+            return False, (
+                f"Safety check failed: ID {media_id} was not in the latest results I showed you, sir"
+                f"{f' (those were {offered})' if offered else ''}."
+            )
     return True, ""
 
 
