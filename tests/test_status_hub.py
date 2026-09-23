@@ -452,3 +452,67 @@ class QuickActionEndpointTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class StatusHubEfficiencyTests(unittest.TestCase):
+    def setUp(self) -> None:
+        status_hub.clear_cache()
+        self.addCleanup(status_hub.clear_cache)
+
+    def test_concurrent_misses_compute_once(self):
+        import threading
+        calls = []
+        gate = threading.Event()
+
+        def slow():
+            calls.append(1)
+            gate.wait(1)
+            return {"value": len(calls)}
+
+        results = []
+        threads = [threading.Thread(target=lambda: results.append(status_hub._cached("k", 5, slow))) for _ in range(4)]
+        for thread in threads:
+            thread.start()
+        gate.set()
+        for thread in threads:
+            thread.join(2)
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(results, [{"value": 1}] * 4)
+
+    def test_recent_library_is_fetched_less_often_than_queue(self):
+        paths = []
+
+        def fake_request(service, method, path, **_):
+            paths.append((service, path))
+            return True, [{"title": "A", "year": 2020, "added": "2026-01-01"}]
+
+        with patch.object(status_hub, "servarr_configured", return_value=True), \
+             patch.object(status_hub, "get_queue", return_value=(True, {"records": []})), \
+             patch.object(status_hub, "servarr_request", side_effect=fake_request):
+            status_hub._servarr_section("radarr")
+            status_hub._servarr_section("radarr")
+        self.assertEqual(paths, [("radarr", "/api/v3/movie")])
+
+    def test_recent_library_failure_is_not_cached(self):
+        with patch.object(status_hub, "servarr_configured", return_value=True), \
+             patch.object(status_hub, "get_queue", return_value=(True, {"records": []})), \
+             patch.object(status_hub, "servarr_request", side_effect=[(False, "down"), (True, [])]) as request:
+            self.assertEqual(status_hub._servarr_section("sonarr")["error"], "down")
+            self.assertEqual(status_hub._servarr_section("sonarr")["error"], "")
+        self.assertEqual(request.call_count, 2)
+
+    def test_service_pings_run_in_parallel_and_keep_order(self):
+        import time as real_time
+
+        def slow_get(url, **_):
+            real_time.sleep(0.2)
+            return None
+
+        candidates = [(f"S{i}", f"http://s{i}", "x") for i in range(5)]
+        with patch.object(status_hub, "_service_candidates", return_value=candidates), \
+             patch.object(status_hub.requests, "get", side_effect=slow_get):
+            started = real_time.monotonic()
+            services = status_hub._services_uncached()["services"]
+            elapsed = real_time.monotonic() - started
+        self.assertLess(elapsed, 0.6)
+        self.assertEqual([s["name"] for s in services], [c[0] for c in candidates])

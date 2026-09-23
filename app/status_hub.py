@@ -25,6 +25,7 @@ import os
 import re
 import shutil
 import time
+from concurrent.futures import ThreadPoolExecutor
 from threading import Lock
 from typing import Any, Callable
 
@@ -59,6 +60,10 @@ _ENTITIES_TTL_S = 5.0
 _MEDIA_TTL_S = 15.0
 _NOW_TTL_S = 5.0
 _STORAGE_TTL_S = 30.0
+# The "recently added" lists come from the full /movie and /series library
+# dumps (no server-side sort/limit exists), which can be megabytes on a big
+# library. Additions are rare, so they refresh far less often than the queue.
+_RECENT_TTL_S = 120.0
 
 # Strip an API path suffix if one leaked into a base URL (e.g. ".../api/v2").
 _API_SUFFIX_RE = re.compile(r"/api(/v\d+)?/?$", re.IGNORECASE)
@@ -68,6 +73,10 @@ _API_SUFFIX_RE = re.compile(r"/api(/v\d+)?/?$", re.IGNORECASE)
 
 _cache: dict[str, tuple[float, Any]] = {}
 _cache_lock = Lock()
+# One compute lock per key (single-flight): the app fires several sections in
+# parallel and FastAPI serves them on worker threads, so without this two
+# simultaneous misses both hit the NAS for the same data.
+_compute_locks: dict[str, Lock] = {}
 
 
 def _cached(key: str, ttl: float, compute: Callable[[], Any]) -> Any:
@@ -76,9 +85,16 @@ def _cached(key: str, ttl: float, compute: Callable[[], Any]) -> Any:
         hit = _cache.get(key)
         if hit and hit[0] > now:
             return hit[1]
-    value = compute()
-    with _cache_lock:
-        _cache[key] = (now + ttl, value)
+        compute_lock = _compute_locks.setdefault(key, Lock())
+    with compute_lock:
+        # Another thread may have filled it while we waited.
+        with _cache_lock:
+            hit = _cache.get(key)
+            if hit and hit[0] > time.monotonic():
+                return hit[1]
+        value = compute()
+        with _cache_lock:
+            _cache[key] = (time.monotonic() + ttl, value)
     return value
 
 
@@ -320,10 +336,10 @@ def media_status() -> dict[str, Any]:
 
 
 def _media_uncached() -> dict[str, Any]:
-    return {
-        "radarr": _servarr_section("radarr"),
-        "sonarr": _servarr_section("sonarr"),
-    }
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        radarr = pool.submit(_servarr_section, "radarr")
+        sonarr = pool.submit(_servarr_section, "sonarr")
+        return {"radarr": radarr.result(), "sonarr": sonarr.result()}
 
 
 def _servarr_section(service: str) -> dict[str, Any]:
@@ -354,21 +370,33 @@ def _servarr_section(service: str) -> dict[str, Any]:
                 }
             )
 
+    ok, recent = _cached(f"recent:{service}", _RECENT_TTL_S, lambda: _recent_additions(service))
+    if not ok:
+        section["error"] = section["error"] or str(recent)
+        # Don't pin a failure for the long recent-list TTL.
+        invalidate(f"recent:{service}")
+    else:
+        section["recent"] = recent
+    return section
+
+
+def _recent_additions(service: str) -> tuple[bool, Any]:
+    """The library's five newest additions, or ``(False, error)``."""
     library_path = "/api/v3/movie" if service == "radarr" else "/api/v3/series"
     ok, items = servarr_request(service, "GET", library_path)
     if not ok:
-        section["error"] = section["error"] or str(items)
-    elif isinstance(items, list):
-        newest = sorted(items, key=lambda item: str(item.get("added") or ""), reverse=True)
-        section["recent"] = [
-            {
-                "title": str(item.get("title", "Unknown")),
-                "year": int(item.get("year", 0) or 0),
-                "added": str(item.get("added") or ""),
-            }
-            for item in newest[:5]
-        ]
-    return section
+        return False, items
+    if not isinstance(items, list):
+        return True, []
+    newest = sorted(items, key=lambda item: str(item.get("added") or ""), reverse=True)
+    return True, [
+        {
+            "title": str(item.get("title", "Unknown")),
+            "year": int(item.get("year", 0) or 0),
+            "added": str(item.get("added") or ""),
+        }
+        for item in newest[:5]
+    ]
 
 
 # --- Service reachability --------------------------------------------------
@@ -405,24 +433,30 @@ def services_status() -> dict[str, Any]:
     return _cached("services", _SERVICES_TTL_S, _services_uncached)
 
 
+def _ping_service(name: str, url: str) -> dict[str, Any]:
+    entry: dict[str, Any] = {"name": name, "up": False, "latency_ms": None, "error": ""}
+    if not url:
+        entry["error"] = f"{name} is not configured."
+        return entry
+    started = time.monotonic()
+    try:
+        # Any HTTP response (401/403 included) proves the service is up;
+        # auth'd checks aren't needed for reachability.
+        requests.get(url, timeout=_PING_TIMEOUT_S, allow_redirects=False)
+    except requests.RequestException as exc:
+        entry["error"] = str(exc)
+        return entry
+    entry["up"] = True
+    entry["latency_ms"] = int((time.monotonic() - started) * 1000)
+    return entry
+
+
 def _services_uncached() -> dict[str, Any]:
-    services: list[dict[str, Any]] = []
-    for name, url, _icon in _service_candidates():
-        entry: dict[str, Any] = {"name": name, "up": False, "latency_ms": None, "error": ""}
-        services.append(entry)
-        if not url:
-            entry["error"] = f"{name} is not configured."
-            continue
-        started = time.monotonic()
-        try:
-            # Any HTTP response (401/403 included) proves the service is up;
-            # auth'd checks aren't needed for reachability.
-            requests.get(url, timeout=_PING_TIMEOUT_S, allow_redirects=False)
-        except requests.RequestException as exc:
-            entry["error"] = str(exc)
-            continue
-        entry["up"] = True
-        entry["latency_ms"] = int((time.monotonic() - started) * 1000)
+    candidates = _service_candidates()
+    # In parallel: one down service used to add its full 5 s timeout to the
+    # whole response. Order is preserved.
+    with ThreadPoolExecutor(max_workers=max(1, len(candidates))) as pool:
+        services = list(pool.map(lambda item: _ping_service(item[0], item[1]), candidates))
     return {"services": services}
 
 
