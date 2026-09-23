@@ -564,3 +564,19 @@ Removed: `ARR_STACK_ALERT_COOLDOWN_S` (no longer read anywhere).
 Unchanged: `ARR_STACK_MONITOR_ENABLED`, `ARR_STACK_MONITOR_INTERVAL_S`,
 `ARR_STACK_NOTIFY_SERVICE`, `PROWLARR_URL`, `BYPARR_URL` (kept, documented
 as no longer directly checked), `ARR_STACK_RESTART_ENABLED`.
+
+
+## 2026-09-22 overnight overhaul (not deployed)
+
+Local commits only; see `OVERNIGHT_HANDOFF.md` for evidence, decisions and
+the review checklist. Activation notes:
+
+- The hysteresis, maintenance hold, per-indexer alerts and async recovery
+  follow-up activate on `git pull` + `sudo systemctl restart jarvis-api`; all
+  new env vars have defaults (see `.env.example`).
+- The maintenance hold needs the read-only status key working on the
+  Optiplex; every recent alert said "read-only SSH unavailable".
+- Per-indexer alerts need `PROWLARR_API_KEY` on the Optiplex (this file
+  earlier recorded it blank; recent alerts suggest it is now set).
+- Companion push is stubbed: `APNS_ENABLED` stays false and HA
+  `notify.mobile_app_*` remains the delivery path.

@@ -6,7 +6,7 @@ heals, and grows on its own while staying governed. Read it alongside
 `ROADMAP.md` (milestones), `SELF_HEALING_HANDOFF.md` (what just shipped and
 needs review), and `ARCHITECTURE.md` (the layered design and runtime rule).
 
-## Overnight overhaul (started 2026-09-22) — IN PROGRESS
+## Overnight overhaul (2026-09-22) — code done, awaiting review/deploy
 
 Nick's unattended brief, recorded so a later session can resume. Hard
 constraint everywhere: do **not** change the NAS SSH permission model

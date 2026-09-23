@@ -556,6 +556,20 @@ CALENDAR_ALERT_LEAD_MIN=10  # warn this many minutes before a meeting
 
 ## Recently Shipped
 
+- **Overnight overhaul: alerts, confirmation gate, notifications, efficiency
+  (1.35–1.43 / builds 37–45)** — Arr alerts now need 3 consecutive failing
+  polls (10 for zero DHT) and 2 clean ones to recover, and are held while a
+  NAS or Jarvis recovery runs: HA's recorder showed every recent phone page
+  was a one-poll blip or the NAS watchdog's own container recreation. Each
+  Prowlarr indexer alerts on its own. A confirmed arr restart replies at once
+  and follows up with a per-service up / still starting / failed report
+  instead of "outcome unknown"; malformed confirmations reuse the open token
+  and echo what was sent. Phone alerts route through `brain/notifications.py`
+  (companion push stubbed, HA fallback is primary; device-token endpoints
+  exist). The dashboard hub cache is single-flight, stops pulling full
+  Radarr/Sonarr libraries every 15 s, and pings services in parallel;
+  Whisper decodes in one deterministic pass. See `OVERNIGHT_HANDOFF.md`.
+
 - **Runtime turn lock split (1.29 / build 31)** — `JarvisRuntime` now has
   two locks. `_turn_lock` serializes conversation turns and session
   switching (including companion streams); `_lock` guards only tasks, events,
@@ -932,6 +946,16 @@ in value order:
 - **Streaming is still opt-in** (`STREAMING_TTS=false`), so GUI chat waits
   for the full completion before showing anything. The streaming path exists
   in every mode; consider making it the default once trusted.
+- **Companion turns reload the whole session** — `switch_session()` reads
+  every stored message for the session from SQLite on each `/chat` turn and
+  then trims to 40. Negligible today; switch to a `LIMIT` query (keeping the
+  current message-count trim semantics) if sessions grow long.
+- **No message-level cache breakpoint** — tools and persona are cached, but
+  each extra round of a tool loop re-sends the full history uncached. A
+  breakpoint on the last message would help multi-tool turns. This is a
+  Claude-integration change, so it was flagged, not made (2026-09-22 audit).
+- **96 tool schemas on every call** (~9k tokens, cached). Routing to a tool
+  subset per intent would cut latency further but changes behaviour.
 - **Cache-invalidation footnote** — persona `.env` changes (humor, address)
   and toggling `WEB_SEARCH_ENABLED` invalidate the cached prompt prefix for
   one full-price request each. Harmless, just worth knowing; keep the

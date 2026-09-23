@@ -21,8 +21,11 @@ No file under `ops/nas/` was modified.
 | 3. Per-indexer alerts | done | `b7fede7` |
 | 4. Notification router, companion push stubbed | done (stub) | `ddd1506` |
 | 1b. Post-restart real status, async follow-up | done | `0e774b3` |
-| 5. Performance pass | in progress | |
-| 6. Setup TODO audit | see bottom | |
+| 5a. Dashboard hub: single-flight cache, recent-list TTL, parallel pings | done | `85b9f49` |
+| 5b. Whisper single deterministic pass + timing log | done | `d832bc2` |
+| 5c. Skip snapshot rebuild on attribute-only HA events | done | `25cc24c` |
+| 5d. Remaining perf findings | documented only (below) | |
+| 6. Setup TODO audit | below | |
 
 ## What was found (evidence)
 
@@ -94,6 +97,109 @@ No file under `ops/nas/` was modified.
       to the chat transcript. Decide if it should be.
 - [ ] `memory/arr_stack_alerts.json` gained `pending` and `clear_count`
       fields; old files load fine.
+
+## Part 5 findings
+
+Changed (safe, unit-tested):
+- Hub cache was not single-flight; parallel app requests duplicated NAS calls.
+- `/api/status/media` downloaded the **entire** Radarr and Sonarr libraries
+  every 15 s to show five "recently added" items. Now cached 120 s
+  separately; queue still 15 s.
+- Service pings were sequential (a down service added 5 s); now parallel.
+- Whisper: default temperature fallback re-decoded up to 5 extra times on
+  low-confidence clips — the textbook cause of "highly variable" CPU
+  latency. Now one pass by default (`WHISPER_TEMPERATURE_FALLBACK=true`
+  reverts). Each utterance logs `STT <secs> for <secs> of audio`.
+- HA WebSocket monitor rebuilt the snapshot on attribute-only events.
+
+Found, not changed:
+- **Faster-Whisper is not on the server path at all.** `jarvis-api` runs
+  `--server`; the iOS app uses native dictation. STT only runs in
+  `--voice`/GUI mode. If voice mode on the Optiplex is still slow after the
+  single-pass change, the next steps are (1) `WHISPER_MODEL=base.en`
+  (~2–3× faster, somewhat less accurate) — a one-line `.env` change to try,
+  and (2) moving STT to the gaming PC's GPU, which is a real architecture
+  change (network STT service + fallback) and was not attempted.
+- Claude integration (not changed, flagged): no cache breakpoint on the
+  message history, so every extra round of a tool loop re-sends the whole
+  history at full price; 96 tool schemas (~9k tokens, cached) ride every
+  call; `max_tokens` 1024 and default model `claude-haiku-4-5` are fine.
+  The dynamic system block (memory retrieval keyed on the latest text)
+  legitimately changes every turn, so it correctly sits after the cached
+  persona.
+- `switch_session()` reloads the full session from SQLite on every companion
+  turn; small today.
+- `profile.json` per-turn reads: evaluated and deliberately skipped — ~60
+  facts parse in well under a millisecond and callers mutate the returned
+  dict, so a cache adds risk for no measurable gain.
+- Background monitors (HA WebSocket, calendar 120 s, qBit 30 s, arr 60 s,
+  weather 30 min, price 6 h) are reasonable for the i5-6500T. The arr
+  monitor makes ~6 HTTP calls a minute and SSHes only when something is
+  already wrong.
+
+## Part 4: what companion push still needs
+
+Server side is done (router, stub, `POST/DELETE /api/push/register`,
+`GET /api/push/status`). To make the JARVIS app the primary channel:
+
+1. **Apple Developer Program** membership ($99/yr). Free provisioning
+   cannot use push.
+2. In the developer portal: create an **APNs Auth Key (.p8)**, note its
+   Key ID and your Team ID. Copy the .p8 to the Optiplex (e.g.
+   `~/jarvis/memory/`, chmod 600).
+3. In Xcode: add the **Push Notifications** capability to JarvisCompanion
+   (creates the `aps-environment` entitlement), and in the app call
+   `UIApplication.shared.registerForRemoteNotifications()` after the existing
+   notification permission grant; forward the token from an
+   `UIApplicationDelegateAdaptor` to `POST /api/push/register`
+   (`{"device_token": "<hex>", "environment": "sandbox"|"production"}`).
+   Not done unattended: adding the entitlement without a paid team breaks
+   signing.
+4. Implement `_send_apns` in `brain/notifications.py` (ES256 JWT + HTTP/2
+   POST; the docstring spells out the request). Add `httpx[http2]` and
+   `PyJWT[crypto]` to `requirements.txt`.
+5. Set `APNS_ENABLED=true`, `APNS_KEY_PATH`, `APNS_KEY_ID`, `APNS_TEAM_ID`,
+   `APNS_BUNDLE_ID` in the Optiplex `.env`. `GET /api/push/status` will show
+   `primary: app_push`. HA then fires only when APNs fails.
+
+## Part 6: what Nick has to do
+
+Accounts / keys / certs
+- [ ] Apple Developer Program + APNs key, if you want app push (steps above).
+- [ ] Get the **read-only status key** working on the Optiplex
+      (`NAS_STATUS_SSH_KEY`, `NAS_SSH_KNOWN_HOSTS`, `NAS_SSH_HOST`); every
+      alert says it is unavailable. Without it the maintenance hold only
+      covers Jarvis-initiated recoveries, and the recovery follow-up relies
+      on live probes alone (which still works).
+- [ ] Confirm `PROWLARR_API_KEY` is set in the Optiplex `.env` (per-indexer
+      alerts and proxy detection need it).
+
+Physical / network
+- [ ] The Optiplex did not answer SSH on LAN (10.0.0.80) or Tailscale during
+      this session. Check it is up and `jarvis-api` is running.
+- [ ] The NAS Tailscale address (100.97.179.53) timed out while LAN worked;
+      the Optiplex reaches Radarr/Sonarr/qBit over the NAS Tailscale IP, so a
+      flaky tailnet path is a plausible cause of the non-watchdog blips.
+      Consider pointing those URLs at the NAS LAN IP.
+- [ ] If "NAS power loss" / "device offline" alerts keep arriving, check
+      which app sends them (UGOS notifications are the likely source); they
+      did not come through HA or Jarvis in the last two days.
+
+Deploy
+- [ ] `ssh jarvis 'cd ~/jarvis && git pull' && ssh -t jarvis 'sudo systemctl restart jarvis-api'`
+
+Decisions you may want to change (defaults picked overnight)
+- [ ] Alert thresholds (3 fail / 2 clear / 10 DHT) and whether per-indexer
+      "Recovered" notices should push or be inbox-only.
+- [ ] Whether the recovery result should also appear in the chat transcript.
+- [ ] Whether to keep Whisper's temperature fallback off.
+- [ ] The DHT watchdog on the NAS ran twice ten minutes apart despite its
+      30-minute cooldown; worth reviewing `dht_watchdog.sh`'s cooldown write.
+
+Stubbed / incomplete
+- Companion push sender (`_send_apns`) and all iOS push code.
+- Prowlarr per-indexer API shapes unverified against the live instance
+  (safe fallback to the old aggregate alert).
 
 ## Deploy (Nick)
 
