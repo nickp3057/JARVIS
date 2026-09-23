@@ -9,6 +9,7 @@ modern laptops, no GPU required. All knobs are env-overridable.
 from __future__ import annotations
 
 import os
+import time
 from typing import Any
 
 import numpy as np
@@ -21,6 +22,30 @@ WHISPER_MODEL_SIZE = os.getenv("WHISPER_MODEL", "small.en")
 WHISPER_DEVICE = os.getenv("WHISPER_DEVICE", "cpu")
 WHISPER_COMPUTE_TYPE = os.getenv("WHISPER_COMPUTE_TYPE", "int8")
 WHISPER_BEAM_SIZE = int(os.getenv("WHISPER_BEAM_SIZE", "1"))
+
+
+def _temperature_fallback() -> bool:
+    return os.getenv("WHISPER_TEMPERATURE_FALLBACK", "false").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _decode_options() -> dict[str, Any]:
+    """Decoding knobs for short voice commands.
+
+    faster-whisper's default temperature schedule re-decodes the clip up to
+    five more times whenever a pass looks low-confidence (compression ratio
+    or log-prob thresholds), which short or noisy commands trip often. That
+    is the main source of multi-second latency spikes on a CPU-only box, so
+    the default is one deterministic pass; ``WHISPER_TEMPERATURE_FALLBACK=true``
+    restores the library schedule. Timestamps and cross-segment conditioning
+    are useless for a one-utterance command and cost decode time.
+    """
+    options: dict[str, Any] = {
+        "without_timestamps": True,
+        "condition_on_previous_text": False,
+    }
+    if not _temperature_fallback():
+        options["temperature"] = 0.0
+    return options
 
 
 class Transcriber:
@@ -67,15 +92,24 @@ class Transcriber:
         if sample_rate != 16000:
             log.warning("Whisper expects 16 kHz; got %d. Skipping resample.", sample_rate)
 
+        started = time.monotonic()
         try:
             segments, _info = self._model.transcribe(
                 audio_f32,
                 language="en",
                 beam_size=WHISPER_BEAM_SIZE,
                 vad_filter=False,
+                **_decode_options(),
             )
+            # segments is a lazy generator: decoding happens while joining.
+            text = " ".join(seg.text.strip() for seg in segments).strip()
         except Exception:  # noqa: BLE001
             log.exception("Whisper transcription failed")
             return ""
 
-        return " ".join(seg.text.strip() for seg in segments).strip()
+        # Per-utterance timing so latency can be measured on the real host.
+        log.info(
+            "STT %.2fs for %.1fs of audio (%s, %s)",
+            time.monotonic() - started, audio_f32.size / 16000.0, WHISPER_MODEL_SIZE, WHISPER_COMPUTE_TYPE,
+        )
+        return text

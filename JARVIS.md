@@ -456,6 +456,9 @@ FOLLOWUP_TIMEOUT_S=10.0
 FOLLOWUP_TASK_S=2.5
 INTERRUPT_RMS_THRESHOLD=1500
 WHISPER_MODEL=small.en
+# Default is one deterministic decode (fast, stable latency on CPU); true
+# restores faster-whisper's re-decode-on-low-confidence temperature schedule.
+WHISPER_TEMPERATURE_FALLBACK=false
 
 # Feature flags / tuning (all optional, sensible defaults)
 BRIEFING_ON_LAUNCH=false    # speak a briefing at startup
