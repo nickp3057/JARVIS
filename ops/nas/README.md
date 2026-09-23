@@ -135,6 +135,18 @@ ssh -F /dev/null -T -o BatchMode=yes -o IdentitiesOnly=yes -i ~/.ssh/jarvis_nas_
     -o UserKnownHostsFile=~/.ssh/jarvis_nas_known_hosts Jarvis@<NAS_SSH_HOST> status | head -c 200
 ```
 
+## DHT watchdog cooldown (2026-09-23 revision)
+
+`dht_watchdog.sh` now starts its 30-minute cooldown at every remediation
+attempt, not only after a success, and allows exactly one retry after a
+failed attempt. Before, a failed run (2026-09-22 05:40, verification timed
+out) left the counter at threshold and the next five-minute check re-ran the
+full recreate immediately (05:50); a persistent fault would have looped every
+~13 minutes. Deploy with the usual `sudo ./install-recovery.sh --preview`
+then `--apply`; its hash pin accepts the currently deployed version and this
+one. State files: `.last_action` (attempt time), `.last_action_failed`,
+`.retry_used`.
+
 ## Hand tests on the Optiplex
 
 Use `ssh -F /dev/null -o BatchMode=yes -o IdentitiesOnly=yes

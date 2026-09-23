@@ -22,6 +22,15 @@ STATE_FILE="$WATCHDOG_DIR/.zero_count"
 CONSECUTIVE_THRESHOLD=3   # require 3 consecutive 5-min checks at 0 nodes (~15 min) before acting
 COOLDOWN_FILE="$WATCHDOG_DIR/.last_action"
 COOLDOWN_SECONDS=1800     # don't re-trigger remediation more than once per 30 min
+# The cooldown starts at every remediation *attempt*. It used to be written
+# only after a success, so a failed run left the zero counter at threshold and
+# the very next check restarted everything again (2026-09-22 05:40 failed
+# verification, 05:50 re-ran immediately); a persistent failure would loop a
+# full recreate every ~13 min. One quick retry after a failed attempt is still
+# allowed -- the 05:50 retry is what actually fixed it -- so at most two
+# attempts happen per cooldown window.
+FAILED_FILE="$WATCHDOG_DIR/.last_action_failed"
+RETRY_FILE="$WATCHDOG_DIR/.retry_used"
 
 timestamp() { date '+%Y-%m-%d %H:%M:%S'; }
 
@@ -102,13 +111,23 @@ fi
 
 # --- Cooldown check to avoid restart-looping ---
 NOW=$(date +%s)
+IN_COOLDOWN=0
 if [[ -f "$COOLDOWN_FILE" ]]; then
     LAST_ACTION=$(cat "$COOLDOWN_FILE")
     ELAPSED=$((NOW - LAST_ACTION))
-    if [[ "$ELAPSED" -lt "$COOLDOWN_SECONDS" ]]; then
-        log "Within cooldown window (${ELAPSED}s since last action, limit ${COOLDOWN_SECONDS}s) — skipping remediation, needs manual look"
+    [[ "$ELAPSED" -lt "$COOLDOWN_SECONDS" ]] && IN_COOLDOWN=1
+fi
+if [[ "$IN_COOLDOWN" == 1 ]]; then
+    if [[ -f "$FAILED_FILE" && ! -f "$RETRY_FILE" ]]; then
+        log "Previous remediation failed ${ELAPSED}s ago — allowing one retry inside the cooldown window"
+        touch "$RETRY_FILE"
+    else
+        log "Within cooldown window (${ELAPSED}s since last attempt, limit ${COOLDOWN_SECONDS}s) — skipping remediation, needs manual look"
         exit 0
     fi
+else
+    # Fresh window: the one-retry allowance resets.
+    rm -f "$RETRY_FILE"
 fi
 
 log "=== Threshold reached: zero DHT nodes confirmed across $CONSECUTIVE_THRESHOLD checks ==="
@@ -126,13 +145,15 @@ log "Capturing diagnostics before remediation..."
 } >> "$LOG_FILE"
 
 log "Running force-recreate chain..."
+# Start the cooldown before the attempt, whatever its outcome.
+echo "$NOW" > "$COOLDOWN_FILE"
 if ! "$WATCHDOG_DIR/recover_stack.sh" dht; then
-    log "ERROR: shared recovery failed; counters retained"
+    touch "$FAILED_FILE"
+    log "ERROR: shared recovery failed; counters retained, cooldown started"
     exit 1
 fi
 
 log "Remediation complete. Resetting counters."
-rm -f "$STATE_FILE"
-echo "$NOW" > "$COOLDOWN_FILE"
+rm -f "$STATE_FILE" "$FAILED_FILE" "$RETRY_FILE"
 
 log "=== Watchdog action finished ==="

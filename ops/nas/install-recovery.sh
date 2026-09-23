@@ -13,7 +13,8 @@ done
 exec 9>"$WD/stack.lock"
 flock -n 9 || { echo 'Stack operation in progress; retry later.'; exit 75; }
 # Fail closed if the live trigger logic doesn't match a hash we've reviewed.
-# Two hashes are accepted per file: the original pre-refactor script found
+# Each file accepts its reviewed hashes (dht_watchdog.sh also accepts its
+# 2026-09-23 cooldown revision, below). Originally two per file: the original pre-refactor script found
 # live on the NAS on 2026-09-20, and the refactored version this same
 # installer already writes (calls the shared recover_stack.sh instead of
 # duplicating the docker chain inline) — so a re-run after an earlier
@@ -31,9 +32,11 @@ check_known_hash() {
     echo "Unreviewed change in $WD/$file (sha256 $live matches neither known-good hash); stop and review before installing." >&2
     return 1
 }
+# Third dht hash: the 2026-09-23 cooldown-on-attempt revision (see its header).
 check_known_hash dht_watchdog.sh \
     832e2678f6cf1d4368507faa23691b18eae6ab649c47e49ef43f64302a72dda3 \
-    84cab6a3ce811b70209e7690445fb6c03dfd713913ba683f6b98a522e9490033
+    84cab6a3ce811b70209e7690445fb6c03dfd713913ba683f6b98a522e9490033 \
+    5794aca560d97f5f6197d412c425f8b1b25246b7535bf0264aefe74d8c45a03a
 check_known_hash indexer_watchdog.sh \
     30d7e41cbcbe14654a367d0a1d7deef783f6eae1ed02cb77464e8dc844a4b7a7 \
     9522647964651944450f80ced31fb238a23a9043a361da8a4a31903a2a7b42fd
