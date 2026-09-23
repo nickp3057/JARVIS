@@ -61,6 +61,8 @@ Pearson-Stark-Jarvis/
 │   ├── settings.py          Whitelist-based .env editor (update_setting tool)
 │   ├── standing_orders.py   Durable behavioural directives from Nick, injected every turn
 │   ├── tool_health.py       Self-diagnosis ledger: per-tool failures, degraded flags, prompt warning
+│   ├── notifications.py     Phone alert router: companion push (APNs, stubbed) then HA notify fallback
+│   ├── arr_stack.py         Arr alert hysteresis/per-indexer tracking, restart confirmation gate, async recovery follow-up
 │   ├── self_repair.py       Governed self-repair: diagnose a subsystem, stage a bounded fix, apply on approval
 │   ├── study_brief.py       Daily quiz/exam countdown: settings, planning, JARVIS-composed text
 │   ├── timers.py            Timer store: set/cancel/pause/resume/dismiss/alarming state

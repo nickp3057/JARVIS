@@ -12,7 +12,7 @@ Nick's unattended brief, recorded so a later session can resume. Hard
 constraint everywhere: do **not** change the NAS SSH permission model
 (restricted forced-command keys only, no Docker socket, no root). Priority is
 not breaking working behaviour. Small commits, one per logical change.
-Progress and review notes live in `OVERNIGHT_HANDOFF.md`.
+Progress, evidence, decisions and review notes live in `OVERNIGHT_HANDOFF.md` — read it first to resume.
 
 1. **Confirmation gate (arr restart).** Malformed confirmations (bare token,
    typo, wrong token) must reuse the pending token while unexpired, and the
