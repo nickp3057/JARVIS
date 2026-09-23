@@ -3,14 +3,17 @@ from __future__ import annotations
 
 import difflib
 import json
+import os
 from pathlib import Path
 import re
 import threading
 import time
-from typing import NamedTuple
+from typing import Callable, NamedTuple
 import uuid
 
-from integrations import nas_stack
+import requests
+
+from integrations import nas_stack, servarr_common
 
 _ALERT_FILE = Path(__file__).resolve().parents[1] / 'memory' / 'arr_stack_alerts.json'
 _pending: dict[str, tuple[float, str, str]] = {}
@@ -302,38 +305,165 @@ def conversation_action(text: str, session_id: str) -> str | None:
     if not _restart_lock.acquire(blocking=False):
         return 'An arr recovery request is already being monitored, sir. No second restart was requested.'
     try:
+        # On success the follow-up thread takes ownership of the lock and
+        # releases it when the outcome is known; it doubles as the monitor's
+        # "Jarvis recovery in progress" maintenance signal.
         return _run_recovery(proposal[2])
+    except BaseException:
+        _restart_lock.release()
+        raise
+
+
+# Recovery chain timing on the NAS (ops/nas/recover_stack.sh): ~25 s to
+# recreate gluetun and its dependents, then 20 s VPN settle + 130 s Byparr
+# cold start, then up to 300 s of verification. Live probes cannot declare
+# success before the chain has had time to actually recreate everything.
+_MIN_CHAIN_S = 160
+_POLL_S = 15
+_notifier: Callable[[str, str], None] | None = None
+
+
+def set_recovery_notifier(callback: Callable[[str, str], None] | None) -> None:
+    """Register how the follow-up reaches Nick: callback(title, message)."""
+    global _notifier
+    _notifier = callback
+
+
+def _probe_http(service: str) -> bool:
+    if service in {'radarr', 'sonarr'}:
+        if not servarr_common.is_configured(service):
+            return False
+        ok, _ = servarr_common.request(service, 'GET', '/api/v3/system/status')
+        return ok
+    base = os.getenv('PROWLARR_URL', '').strip().rstrip('/')
+    if not base:
+        return False
+    try:
+        response = requests.get(base + '/ping', timeout=8, allow_redirects=False)
+        return response.status_code == 200
+    except requests.RequestException:
+        return False
+
+
+def service_states(nas_recovery: dict | None = None) -> dict[str, tuple[bool, str]]:
+    """Live reachability of each stack component: name -> (up, detail).
+
+    Plain HTTP from the Optiplex; no SSH beyond the optional read-only status
+    the caller already fetched. qBittorrent shares gluetun's network
+    namespace, so qBit answering with positive DHT is proof the tunnel is up
+    even without the status key."""
+    states: dict[str, tuple[bool, str]] = {}
+    ok, info = nas_stack.network_status()
+    nodes = info.get('dht_nodes') if ok else None
+    states['qBittorrent'] = (ok, f'DHT {nodes}' if ok and nodes is not None else ('reachable' if ok else 'unreachable'))
+    health = (nas_recovery or {}).get('gluetun_health')
+    if health in {'healthy', 'starting', 'unhealthy'}:
+        states['gluetun'] = (health == 'healthy', health)
+    elif ok and type(nodes) is int and nodes > 0:
+        states['gluetun'] = (True, 'tunnel passing traffic')
+    else:
+        states['gluetun'] = (False, 'no traffic through the tunnel yet' if ok else 'unknown (qBit unreachable)')
+    for name, service in (('Radarr', 'radarr'), ('Sonarr', 'sonarr'), ('Prowlarr', 'prowlarr')):
+        up = _probe_http(service)
+        states[name] = (up, 'up' if up else 'unreachable')
+    return states
+
+
+def _summarize(states: dict[str, tuple[bool, str]], still_settling: bool) -> str:
+    down_word = 'still starting' if still_settling else 'failed'
+    up = [f'{name} up' + (f' ({detail})' if detail not in {'up', 'reachable'} else '') for name, (ok, detail) in states.items() if ok]
+    down = [f'{name} {down_word} ({detail})' for name, (ok, detail) in states.items() if not ok]
+    return '; '.join(down + up) + '.'
+
+
+def _follow_recovery(request_id: str, accepted: bool) -> str:
+    """Poll until the recovery outcome is known and return the final report.
+
+    Never retries the launch. Uses the NAS's correlated status when the
+    read-only key works, and live service probes either way, so a missing
+    status key yields a real per-service report instead of "unknown"."""
+    short = request_id[:8]
+    started_at = time.monotonic()
+    follow_s = nas_stack.seconds('ARR_RECOVERY_FOLLOW_S', 720, 300)
+    deadline = started_at + follow_s
+    status_known = False
+    last_phase = None
+    while True:
+        now = time.monotonic()
+        ok, payload = nas_stack.watchdog_status()
+        recovery = payload.get('recovery') if ok and isinstance(payload, dict) else None
+        if isinstance(recovery, dict) and recovery.get('request_id') == request_id:
+            status_known = True
+            last_phase = recovery.get('phase', last_phase)
+            state = recovery.get('state')
+            if state == 'running' and not accepted:
+                # Even if the launch reply was lost, a correlated running state
+                # proves the job started.
+                accepted = True
+            if state == 'failed':
+                states = service_states(recovery)
+                return (f"Arr recovery failed at {recovery.get('phase', 'an unknown phase')} (exit {recovery.get('exit_code', '?')}), sir. "
+                        f'Current state: {_summarize(states, still_settling=False)} Request {short}.')
+            if state == 'success':
+                states = service_states(recovery)
+                nodes = recovery.get('dht_nodes')
+                if all(up for up, _ in states.values()):
+                    return f'Arr stack recovered, sir. NAS verified gluetun healthy with DHT {nodes}; from the Optiplex: {_summarize(states, still_settling=False)}'
+                return (f'The NAS verified the recovery (gluetun healthy, DHT {nodes}), sir, but from the Optiplex: '
+                        f'{_summarize(states, still_settling=now < deadline)} Request {short}.')
+        elif not status_known and now - started_at >= _MIN_CHAIN_S:
+            # No status key (or no correlated record): judge from live probes
+            # once the chain has had time to recreate everything.
+            states = service_states()
+            if accepted and all(up for up, _ in states.values()):
+                return f'Arr stack is back up, sir: {_summarize(states, still_settling=False)}'
+        if not accepted and not status_known and now - started_at >= 60:
+            states = service_states()
+            return ('The NAS never confirmed the restart request, sir, and no matching recovery started, so nothing was retried. '
+                    f'Current state: {_summarize(states, still_settling=False)}')
+        if now >= deadline:
+            break
+        time.sleep(_POLL_S)
+    states = service_states()
+    minutes = int(follow_s // 60)
+    phase = f' (last NAS phase: {last_phase})' if last_phase else ''
+    if all(up for up, _ in states.values()):
+        return f'The NAS has not posted a final result after {minutes} minutes{phase}, sir, but every service is up: {_summarize(states, still_settling=False)}'
+    return f'Arr recovery has not settled after {minutes} minutes{phase}, sir: {_summarize(states, still_settling=False)} No automatic retry was sent. Request {short}.'
+
+
+def _follow_and_report(request_id: str, accepted: bool) -> None:
+    try:
+        try:
+            message = _follow_recovery(request_id, accepted)
+        except Exception as exc:  # noqa: BLE001 -- always tell Nick something
+            message = f'I lost track of the arr recovery ({type(exc).__name__}), sir. No retry was sent; ask me for arr stack status.'
+        callback = _notifier
+        if callback is not None:
+            try:
+                callback('Jarvis — arr recovery', message)
+            except Exception:  # noqa: BLE001
+                pass
     finally:
         _restart_lock.release()
 
 
 def _run_recovery(request_id: str) -> str:
+    """Launch once, hand the follow-up to a background thread, reply now.
+
+    Caller holds _restart_lock; the follow-up thread releases it. Waiting the
+    full ~8 minute chain inside the turn blocked every other conversation and
+    overran the companion app's 3-minute request timeout."""
     # Never retry the launch: a timeout might mean the detached job has started.
     ok, response = nas_stack.start_recovery(request_id)
     accepted = ok and isinstance(response, dict) and response.get('request_id') == request_id and response.get('state') in {'accepted', 'already_started'}
-    deadline = time.monotonic() + (600 if accepted else 40)
-    while time.monotonic() < deadline:
-        ok, payload = nas_stack.watchdog_status()
-        recovery = payload.get('recovery') if ok and isinstance(payload, dict) else None
-        if isinstance(recovery, dict) and recovery.get('request_id') == request_id:
-            if recovery.get('state') == 'failed':
-                return f"Arr recovery failed at {recovery.get('phase', 'unknown phase')} (exit {recovery.get('exit_code', 'unknown')}), sir. Post-check DHT: {recovery.get('dht_nodes', 'unknown')}. Request {request_id}."
-            if recovery.get('state') == 'success':
-                nodes = recovery.get('dht_nodes')
-                if recovery.get('gluetun_health') != 'healthy' or type(nodes) is not int or nodes <= 0:
-                    return f'NAS returned an inconsistent success result, sir. Recovery is unverified. Request {request_id}.'
-                live_ok, info = nas_stack.network_status()
-                if live_ok and type(info.get('dht_nodes')) is int and info['dht_nodes'] > 0:
-                    return f"Arr stack recovered, sir. Gluetun is healthy; NAS post-check DHT: {nodes}, current DHT from the Optiplex: {info['dht_nodes']}."
-                return f'NAS verified recovery with healthy gluetun and DHT {nodes}, sir, but the Optiplex post-check could not confirm positive DHT. Please inspect the connection. Request {request_id}.'
-            if recovery.get('state') == 'running':
-                # Even if the launch reply was lost, a correlated running state
-                # proves the job started; allow the full verification window.
-                if not accepted:
-                    accepted = True
-                    deadline = time.monotonic() + 600
-        time.sleep(5)
-    return f'Arr recovery outcome is unknown, sir; no automatic retry was sent. Check NAS recovery status for request {request_id} before requesting another restart.'
+    threading.Thread(target=_follow_and_report, args=(request_id, accepted), daemon=True, name='arr-recovery-follow').start()
+    if accepted:
+        return ('Restart accepted by the NAS, sir. Gluetun recreation takes about 3 minutes and verification up to 5 more; '
+                "I'll report gluetun, qBittorrent, Radarr, Sonarr and Prowlarr status when it settles.")
+    reason = response if isinstance(response, str) else 'unexpected reply'
+    return (f"The NAS didn't confirm the restart request ({reason}), sir. It may still have started, so I won't retry; "
+            "I'll watch for a minute and report what I find.")
 
 
 def describe_status() -> str:

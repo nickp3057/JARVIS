@@ -151,6 +151,8 @@ class JarvisRuntime:
         )
         self.agent = agent or JarvisAgent()
         memory_extractor.add_listener(self._on_memory_change)
+        from brain import arr_stack
+        arr_stack.set_recovery_notifier(self._report_arr_recovery)
         log.info("Runtime online. brain=%s", self.brain_label)
         self.record_event(
             kind="system",
@@ -259,6 +261,11 @@ class JarvisRuntime:
                 log.exception("Arr stack monitor cycle failed")
             if self._stop_monitors.wait(nas_stack.seconds("ARR_STACK_MONITOR_INTERVAL_S", 60)):
                 break
+
+    def _report_arr_recovery(self, title: str, message: str) -> None:
+        """Deliver the asynchronous outcome of a confirmed arr restart."""
+        self.announce(message, source="arr-stack", title="Arr recovery result")
+        self.push_to_phone(title, message, source="arr-stack")
 
     def push_to_phone(self, title: str, message: str, *, source: str) -> bool:
         """Send a proactive alert to Nick's phone via brain.notifications.

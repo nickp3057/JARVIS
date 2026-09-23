@@ -435,9 +435,18 @@ both ordinary and streaming turns. Only the exact returned confirmation phrase
 can consume the proposal and invoke SSH. Tool arguments, model-generated
 `confirmed=true`, stale tokens, and another conversation cannot authorize it.
 The runtime's existing conversation lock serializes the turn; the short state
-lock remains free for monitoring. Jarvis waits for a matching NAS request ID,
-then independently reads qBit DHT again. Timeout is an unknown outcome, with
-no automatic launch retry. Canonical `restart arr stack` works without an LLM.
+lock remains free for monitoring. After launching (never retried) the turn
+replies immediately and a background `arr-recovery-follow` thread takes over
+the restart lock. It polls every 15 s for up to `ARR_RECOVERY_FOLLOW_S`
+(default 720): the NAS's correlated status when the read-only key works, and
+live HTTP probes of qBittorrent/DHT, gluetun (NAS health, or inferred from
+qBit DHT since qBit shares its network namespace), Radarr, Sonarr and
+Prowlarr either way, never judging success before the ~160 s chain minimum.
+The result (per-service up / still starting / failed) goes to the inbox and
+the phone via `runtime._report_arr_recovery`. Near-miss confirmations (bare
+token, typo, wrong token) re-prompt with the same token and quote what was
+sent; re-asking reuses the open request. Canonical `restart arr stack` works
+without an LLM.
 
 Heartbeat pings use the Healthchecks success API (HTTPS GET, no redirects, ten
 second timeout), every five minutes by default. When arr monitoring is enabled,

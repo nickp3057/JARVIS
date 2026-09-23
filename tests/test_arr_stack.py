@@ -415,6 +415,8 @@ class IndexerOutageTests(unittest.TestCase):
 class RestartApprovalTests(unittest.TestCase):
     def setUp(self):
         arr_stack._pending.clear()
+        # Patched _run_recovery never hands the lock to a follow-up thread.
+        self.addCleanup(lambda: arr_stack._restart_lock.locked() and arr_stack._restart_lock.release())
         self.env = patch.dict(os.environ, {'ARR_STACK_RESTART_ENABLED': 'true'})
         self.env.start()
         self.addCleanup(self.env.stop)
@@ -499,24 +501,100 @@ class RestartApprovalTests(unittest.TestCase):
             self.assertIn('disabled', arr_stack.conversation_action(phrase, 'a'))
             run.assert_not_called()
 
-    def test_success_correlates_request_and_rechecks_live_dht(self):
-        request = '11111111-1111-1111-1111-111111111111'
-        with patch.object(nas_stack, 'start_recovery', return_value=(True, {'state': 'accepted', 'request_id': request})), patch.object(nas_stack, 'watchdog_status', side_effect=[(True, {'recovery': {'state': 'success', 'request_id': 'old'}}), (True, {'recovery': {'state': 'success', 'request_id': request, 'dht_nodes': 10, 'gluetun_health': 'healthy'}})]), patch.object(nas_stack, 'network_status', return_value=(True, {'dht_nodes': 19})), patch.object(arr_stack.time, 'sleep'):
-            reply = arr_stack._run_recovery(request)
-        self.assertIn('current DHT from the Optiplex: 19', reply)
+    REQUEST = '11111111-1111-1111-1111-111111111111'
+    ALL_UP = {'gluetun': (True, 'healthy'), 'qBittorrent': (True, 'DHT 19'), 'Radarr': (True, 'up'), 'Sonarr': (True, 'up'), 'Prowlarr': (True, 'up')}
+
+    def clock(self, *values):
+        return patch.object(arr_stack.time, 'monotonic', side_effect=list(values))
+
+    def test_accepted_launch_replies_immediately_and_follows_up_in_background(self):
+        arr_stack._restart_lock.acquire()
+        reported = []
+        arr_stack.set_recovery_notifier(lambda title, message: reported.append(message))
+        self.addCleanup(arr_stack.set_recovery_notifier, None)
+        with patch.object(nas_stack, 'start_recovery', return_value=(True, {'state': 'accepted', 'request_id': self.REQUEST})) as start, \
+             patch.object(arr_stack, '_follow_recovery', return_value='Arr stack recovered, sir.') as follow:
+            reply = arr_stack._run_recovery(self.REQUEST)
+            for thread in threading.enumerate():
+                if thread.name == 'arr-recovery-follow':
+                    thread.join(2)
+        self.assertIn('Restart accepted', reply)
+        self.assertNotIn(self.REQUEST, reply)
+        start.assert_called_once()
+        follow.assert_called_once_with(self.REQUEST, True)
+        self.assertEqual(reported, ['Arr stack recovered, sir.'])
+        self.assertFalse(arr_stack._restart_lock.locked())
+
+    def test_follow_up_crash_still_reports_and_releases_lock(self):
+        arr_stack._restart_lock.acquire()
+        reported = []
+        arr_stack.set_recovery_notifier(lambda title, message: reported.append(message))
+        self.addCleanup(arr_stack.set_recovery_notifier, None)
+        with patch.object(arr_stack, '_follow_recovery', side_effect=RuntimeError('x')):
+            arr_stack._follow_and_report(self.REQUEST, True)
+        self.assertIn('lost track', reported[0])
+        self.assertFalse(arr_stack._restart_lock.locked())
+
+    def test_success_correlates_request_and_reports_every_service(self):
+        with patch.object(nas_stack, 'watchdog_status', side_effect=[(True, {'recovery': {'state': 'success', 'request_id': 'old'}}), (True, {'recovery': {'state': 'success', 'request_id': self.REQUEST, 'dht_nodes': 10, 'gluetun_health': 'healthy'}})]), \
+             patch.object(arr_stack, 'service_states', return_value=self.ALL_UP), patch.object(arr_stack.time, 'sleep'), self.clock(0, 0, 15):
+            reply = arr_stack._follow_recovery(self.REQUEST, True)
+        self.assertIn('recovered', reply)
+        for name in ('gluetun', 'qBittorrent', 'Radarr', 'Sonarr', 'Prowlarr'):
+            self.assertIn(name, reply)
+        self.assertNotIn('unknown', reply)
+
+    def test_without_status_key_live_probes_declare_success_after_chain_time(self):
+        with patch.object(nas_stack, 'watchdog_status', return_value=(False, 'NAS restricted key or pinned known-hosts file is missing')), \
+             patch.object(arr_stack, 'service_states', return_value=self.ALL_UP) as probe, patch.object(arr_stack.time, 'sleep'), \
+             self.clock(0, 30, 90, 170):
+            reply = arr_stack._follow_recovery(self.REQUEST, True)
+        self.assertIn('back up', reply)
+        # Never judged before the chain could have recreated everything.
+        probe.assert_called_once()
+
+    def test_deadline_reports_per_service_status_not_unknown(self):
+        partial = dict(self.ALL_UP, Prowlarr=(False, 'unreachable'))
+        with patch.object(nas_stack, 'watchdog_status', return_value=(False, 'missing')), \
+             patch.object(arr_stack, 'service_states', return_value=partial), patch.object(arr_stack.time, 'sleep'), \
+             self.clock(0, 200, 800):
+            reply = arr_stack._follow_recovery(self.REQUEST, True)
+        self.assertIn('Prowlarr failed (unreachable)', reply)
+        self.assertIn('Radarr up', reply)
+        self.assertNotIn('outcome is unknown', reply)
 
     def test_launch_timeout_never_retries_or_claims_success(self):
-        with patch.object(nas_stack, 'start_recovery', return_value=(False, 'timeout')) as start, patch.object(nas_stack, 'watchdog_status', return_value=(False, 'timeout')), patch.object(arr_stack.time, 'monotonic', side_effect=[0, 0, 45]), patch.object(arr_stack.time, 'sleep'):
-            reply = arr_stack._run_recovery('11111111-1111-1111-1111-111111111111')
-        self.assertIn('unknown', reply)
+        with patch.object(nas_stack, 'start_recovery', return_value=(False, 'NAS SSH unavailable or timed out; outcome unknown')) as start, \
+             patch.object(arr_stack, '_follow_recovery', return_value='x'):
+            arr_stack._restart_lock.acquire()
+            reply = arr_stack._run_recovery(self.REQUEST)
+        self.assertIn("won't retry", reply)
+        self.assertNotIn('accepted', reply)
         start.assert_called_once()
 
-    def test_failed_recovery_reports_phase_and_dht(self):
-        request = '11111111-1111-1111-1111-111111111111'
-        with patch.object(nas_stack, 'start_recovery', return_value=(True, {'state': 'accepted', 'request_id': request})), patch.object(nas_stack, 'watchdog_status', return_value=(True, {'recovery': {'state': 'failed', 'request_id': request, 'phase': 'verify', 'exit_code': 1, 'dht_nodes': 0}})):
-            reply = arr_stack._run_recovery(request)
+    def test_unconfirmed_launch_with_no_recovery_reports_nothing_started(self):
+        with patch.object(nas_stack, 'watchdog_status', return_value=(False, 'missing')), \
+             patch.object(arr_stack, 'service_states', return_value=self.ALL_UP), patch.object(arr_stack.time, 'sleep'), \
+             self.clock(0, 0, 61):
+            reply = arr_stack._follow_recovery(self.REQUEST, False)
+        self.assertIn('never confirmed', reply)
+
+    def test_failed_recovery_reports_phase_and_services(self):
+        with patch.object(nas_stack, 'watchdog_status', return_value=(True, {'recovery': {'state': 'failed', 'request_id': self.REQUEST, 'phase': 'verify', 'exit_code': 1, 'dht_nodes': 0, 'gluetun_health': 'unhealthy'}})), \
+             patch.object(nas_stack, 'network_status', return_value=(True, {'dht_nodes': 0})), \
+             patch.object(arr_stack, '_probe_http', return_value=True), self.clock(0, 0):
+            reply = arr_stack._follow_recovery(self.REQUEST, True)
         self.assertIn('failed at verify', reply)
-        self.assertIn('DHT: 0', reply)
+        self.assertIn('gluetun failed (unhealthy)', reply)
+
+    def test_service_states_infers_gluetun_from_qbit_dht(self):
+        with patch.object(nas_stack, 'network_status', return_value=(True, {'dht_nodes': 42})), patch.object(arr_stack, '_probe_http', return_value=True):
+            states = arr_stack.service_states()
+        self.assertEqual(states['gluetun'], (True, 'tunnel passing traffic'))
+        with patch.object(nas_stack, 'network_status', return_value=(False, {'error': 'x'})), patch.object(arr_stack, '_probe_http', return_value=False):
+            states = arr_stack.service_states()
+        self.assertFalse(states['gluetun'][0])
+        self.assertFalse(states['Sonarr'][0])
 
 
 class TransportTests(unittest.TestCase):

@@ -1028,11 +1028,16 @@ hand-test commands. Installation hardens previously writable path/SSH ACLs.
   `confirm restart arr stack <token>` phrase in the same conversation within
   ten minutes. It is consumed once, before SSH. `cancel arr restart` cancels it.
   The canonical `restart arr stack` request also works in offline text/voice.
-- Recovery returns promptly on SSH and continues detached on the NAS. Jarvis
-  polls the matching result for up to ten minutes, reports failure phases,
-  and independently post-checks DHT. A lost/unknown result never auto-retries.
-- The runtime alerts after three zero-DHT polls or immediately for failed APIs
-  and health errors, with persistent per-condition cooldowns. HA
+- Recovery returns promptly on SSH and continues detached on the NAS. The
+  turn replies at once; a background follow-up polls the NAS result (if the
+  status key works) and live service probes for up to 12 minutes, then pushes
+  a per-service up / still starting / failed report. A lost result never
+  auto-retries. A bare token, typo'd phrase, or wrong token re-prompts with
+  the same token and echoes what was sent.
+- The runtime alerts after 3 consecutive failing polls (10 for zero DHT),
+  recovers after 2 clean ones, holds new alerts during NAS/Jarvis recoveries,
+  and tracks each Prowlarr indexer separately. Phone delivery goes through
+  `brain/notifications.py` (companion push stubbed; HA fallback is primary). HA
   `notify.mobile_app_nicks_iphone_17_pro` was discovered as Nick's existing
   phone channel; the inbox/voice path also receives each alert. HA unavailability
   is reported locally. This channel depends on HA on the NAS, so an entire NAS
