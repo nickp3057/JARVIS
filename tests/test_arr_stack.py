@@ -610,6 +610,27 @@ class TransportTests(unittest.TestCase):
             self.assertEqual(args[-2:], ['Nick@100.97.179.53', 'status'])
             self.assertNotIn('shell', run.call_args.kwargs)
 
+    def test_nologin_shell_reset_is_named_not_generic(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            key = Path(tmp) / 'key'; key.touch()
+            hosts = Path(tmp) / 'hosts'; hosts.touch()
+            failed = Mock(returncode=1, stdout='', stderr='This account is currently not available.\n')
+            with patch.dict(os.environ, {'NAS_SSH_HOST': 'nas', 'NAS_SSH_USER': 'Jarvis', 'NAS_STATUS_SSH_KEY': str(key), 'NAS_SSH_KNOWN_HOSTS': str(hosts)}), \
+                 patch.object(subprocess, 'run', return_value=failed):
+                ok, message = nas_stack.watchdog_status()
+        self.assertFalse(ok)
+        self.assertIn('nologin', message)
+
+    def test_shell_guard_script_is_syntactically_valid_and_scoped(self):
+        script = Path(__file__).resolve().parents[1] / 'ops' / 'nas' / 'ensure_jarvis_shell.sh'
+        subprocess.run(['bash', '-n', str(script)], check=True)
+        text = script.read_text()
+        self.assertIn('USER_NAME=Jarvis', text)
+        self.assertIn('admin|administrators|root', text)
+        body = text.split('set -uo pipefail', 1)[1]
+        for forbidden in ('authorized_keys', 'sudoers', 'sshd_config', 'docker ', 'chmod', 'chown'):
+            self.assertNotIn(forbidden, body)
+
     def test_bad_request_never_invokes_ssh(self):
         with patch.object(nas_stack, '_ssh') as ssh:
             self.assertFalse(nas_stack.start_recovery('id; reboot')[0])

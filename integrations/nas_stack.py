@@ -193,6 +193,11 @@ def _ssh(kind: str, command: str) -> tuple[bool, Any]:
     except (OSError, subprocess.TimeoutExpired):
         return False, 'NAS SSH unavailable or timed out; outcome unknown'
     if result.returncode:
+        if 'account is currently not available' in (result.stderr or ''):
+            # sshd runs forced commands via the login shell; UGOS resets the
+            # Jarvis account to nologin whenever it is saved in its UI.
+            return False, ('NAS Jarvis account shell was reset to nologin (UGOS account save), so no restricted '
+                           'key can run; see ops/nas/README.md "Shell reset"')
         return False, f'NAS restricted SSH failed (exit {result.returncode}); no success confirmed'
     try:
         data = json.loads(result.stdout)

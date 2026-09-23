@@ -102,6 +102,39 @@ Tradeoff: one extra key to manage, but no HTTP listener and no chance that a
 status poll invokes the recovery capability. OpenSSH forced-command options
 are documented at <https://man.openbsd.org/sshd.8#AUTHORIZED_KEYS_FILE_FORMAT>.
 
+## Shell reset (UGOS reverts Jarvis to nologin)
+
+Symptom: every restricted SSH call fails with exit 1 and
+`This account is currently not available.`; Jarvis reports "NAS Jarvis
+account shell was reset to nologin". sshd runs `command=` forced commands via
+the account's login shell, and UGOS rewrites `/etc/passwd` with
+`/usr/sbin/nologin` for non-admin users whenever the account is saved in its
+UI. Found 2026-09-22: `/etc/passwd` and `/etc/shadow` were rewritten
+2026-09-20 22:54, 1h45m after the installer set `/bin/bash`, and both keys
+had been dead since.
+
+Fix now, then keep it fixed (on the NAS as an admin):
+
+```bash
+sudo usermod -s /bin/bash Jarvis
+sudo install -o root -g root -m 755 ~/jarvis-ops/ensure_jarvis_shell.sh /volume1/docker/watchdog/ensure_jarvis_shell.sh
+( sudo crontab -l; echo '*/5 * * * * /volume1/docker/watchdog/ensure_jarvis_shell.sh' ) | sudo crontab -
+```
+
+(copy `ops/nas/ensure_jarvis_shell.sh` to `~/jarvis-ops/` first, e.g.
+`scp ops/nas/ensure_jarvis_shell.sh nas:jarvis-ops/`.) The guard only
+restores `/bin/bash` for `Jarvis`, refuses if that account is ever in an
+admin group, and logs each restore to `watchdog.log`. It touches no key,
+restriction, sudo rule or sshd setting. Avoid editing the Jarvis account in
+the UGOS UI; if you must, the guard repairs it within five minutes.
+
+Verify from the Optiplex:
+
+```bash
+ssh -F /dev/null -T -o BatchMode=yes -o IdentitiesOnly=yes -i ~/.ssh/jarvis_nas_status \
+    -o UserKnownHostsFile=~/.ssh/jarvis_nas_known_hosts Jarvis@<NAS_SSH_HOST> status | head -c 200
+```
+
 ## Hand tests on the Optiplex
 
 Use `ssh -F /dev/null -o BatchMode=yes -o IdentitiesOnly=yes
