@@ -402,6 +402,16 @@ notification service. Failed phone delivery remains visible in the inbox.
 Each alert adds watchdog cooldown timestamps and latest recovery status using
 the separate read-only SSH key; unavailable status is explicitly unknown.
 
+Alert hysteresis: a condition alerts only after `ARR_STACK_ALERT_CONFIRM_CHECKS`
+consecutive failing polls and recovers only after
+`ARR_STACK_RECOVERY_CONFIRM_CHECKS` clean ones. While the NAS reports a
+recovery running (or finished within the settle window), or Jarvis is
+following its own recovery, new conditions keep counting but are held; one
+that outlasts the maintenance alerts on the next poll. The status SSH is only
+used when something already looks wrong. Found 2026-09-22 from HA's recorder:
+every "unreachable" page in the preceding two days was either a one-poll blip
+or the NAS DHT watchdog's own container recreation.
+
 The restart tool only stages a session-bound, ten-minute proposal. Original
 user text is checked at the agent boundary, before model/offline routing, in
 both ordinary and streaming turns. Only the exact returned confirmation phrase
@@ -426,7 +436,12 @@ Admin-only environment controls (not model-editable settings):
 | --- | --- |
 | `ARR_STACK_MONITOR_ENABLED` | false; enable runtime polling |
 | `ARR_STACK_MONITOR_INTERVAL_S` | 60; minimum 30 seconds |
-| `ARR_STACK_ALERT_COOLDOWN_S` | 1800; minimum 60 seconds per condition |
+| `ARR_STACK_ALERT_CONFIRM_CHECKS` | 3; consecutive failing polls before a new condition alerts (one-poll blips stay silent) |
+| `ARR_STACK_RECOVERY_CONFIRM_CHECKS` | 2; consecutive clean polls before "Recovered" |
+| `ARR_STACK_DHT_ZERO_CHECKS` | 10; zero-DHT polls before alerting (a normal recovery holds DHT at zero for ~8 min) |
+| `ARR_STACK_MAINTENANCE_SETTLE_S` | 300; hold new alerts this long after a NAS recovery finishes (needs the status key) |
+| `ARR_STACK_ESCALATION_INTERVAL_S` | 21600; one reminder per window while unresolved |
+| `ARR_STACK_POST_RECOVERY_GRACE_S` | 300; hold brand-new conditions after a critical recovery |
 | `ARR_STACK_NOTIFY_SERVICE` | blank; HA `notify.mobile_app_*` service |
 | `PROWLARR_URL`, `PROWLARR_API_KEY` | API base and optional key; v1 health with key, `/ping` without |
 | `BYPARR_URL` | Byparr base URL, usually NAS port 8191 |

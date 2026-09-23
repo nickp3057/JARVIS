@@ -224,19 +224,27 @@ class JarvisRuntime:
             threading.Thread(target=self._deadman_loop, daemon=True).start()
 
     def _arr_stack_monitor_loop(self) -> None:
-        from brain.arr_stack import AlertTracker
+        from brain.arr_stack import AlertTracker, recovery_in_progress
         from integrations import nas_stack
         tracker = AlertTracker()
         while not self._stop_monitors.is_set():
             try:
                 snapshot = nas_stack.poll_health()
+                # Only spend the SSH round trip when something looks wrong and
+                # the read-only key exists; the result feeds both the
+                # maintenance hold and the watchdog note.
+                status = None
+                if (snapshot["issues"] or tracker.has_unconfirmed() or snapshot.get("dht_nodes") == 0) and nas_stack.status_configured():
+                    status = nas_stack.watchdog_status()
+                snapshot["maintenance"] = recovery_in_progress() or nas_stack.recovery_active(status)
                 notices = tracker.notices(snapshot)
                 for notice in notices:
                     log.info("Arr stack condition %s: %s (%s)", notice.key, notice.kind, notice.severity)
                 critical = [n.text for n in notices if n.severity == "critical"]
                 advisory = [n.text for n in notices if n.severity == "advisory"]
                 if critical:
-                    message = "; ".join(critical) + ". " + nas_stack.watchdog_note()
+                    note = nas_stack.watchdog_note(status) if status is not None else ""
+                    message = "; ".join(critical) + "." + (f" {note}" if note else "")
                     self.announce(message, source="arr-stack", title="Arr stack health alert")
                     if os.getenv("ARR_STACK_NOTIFY_SERVICE", "").strip() and not nas_stack.notify_phone(message):
                         self.record_event(kind="alert", source="arr-stack", title="Phone alert delivery failed", detail="Arr alert remains in the runtime inbox; check Home Assistant notification delivery.")

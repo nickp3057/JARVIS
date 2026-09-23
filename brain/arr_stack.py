@@ -42,14 +42,25 @@ class Notice(NamedTuple):
 class AlertTracker:
     """Alerts once per condition: fires on new, stays silent while it
     persists, fires one "Recovered" notice when it clears. A condition that
-    resolves and later reappears is treated as new again, not a continuation."""
+    resolves and later reappears is treated as new again, not a continuation.
+
+    Hysteresis: a condition must be seen on ``ARR_STACK_ALERT_CONFIRM_CHECKS``
+    consecutive polls before it is announced, and be absent for
+    ``ARR_STACK_RECOVERY_CONFIRM_CHECKS`` consecutive polls before it is
+    declared recovered. One-poll blips (a container recreate, a Tailscale
+    hiccup on the Optiplex) never reach the phone. While a NAS or Jarvis
+    recovery is running (``snapshot['maintenance']``), new conditions keep
+    counting but are held back; if they outlast the maintenance they alert
+    on the first poll after it ends."""
 
     def __init__(self, path: Path | None = None):
         self.path = path or _ALERT_FILE
         self.zeros = 0
         self.grace_until = 0.0
-        # condition key -> {detail, first_seen, last_escalated, announced}
-        self.active: dict[str, dict[str, float | str | bool]] = {}
+        # condition key -> {detail, first_seen, last_escalated, announced, clear_count}
+        self.active: dict[str, dict[str, float | str | bool | int]] = {}
+        # condition key -> {detail, first_seen, count}: seen, not yet confirmed
+        self.pending: dict[str, dict[str, float | str | int]] = {}
         try:
             data = json.loads(self.path.read_text())
             if isinstance(data, dict):
@@ -63,10 +74,20 @@ class AlertTracker:
                                 'first_seen': first_seen,
                                 'last_escalated': float(value.get('last_escalated', first_seen)),
                                 'announced': bool(value.get('announced', True)),
+                                'clear_count': int(value.get('clear_count', 0) or 0),
+                            }
+                pending = data.get('pending')
+                if isinstance(pending, dict):
+                    for key, value in pending.items():
+                        if isinstance(value, dict) and isinstance(value.get('first_seen'), (int, float)):
+                            self.pending[str(key)] = {
+                                'detail': str(value.get('detail', key)),
+                                'first_seen': float(value['first_seen']),
+                                'count': int(value.get('count', 1) or 1),
                             }
                 zeros = data.get('zeros')
-                # Persisted so a restart right after 3 zero-DHT checks does not
-                # spuriously "recover" dht-zero while it's still actually zero.
+                # Persisted so a restart right after the zero-DHT threshold does
+                # not spuriously "recover" dht-zero while it's still actually zero.
                 if isinstance(zeros, int) and zeros >= 0:
                     self.zeros = zeros
                 grace_until = data.get('grace_until')
@@ -77,10 +98,13 @@ class AlertTracker:
 
     def _save(self) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        payload = {'active': self.active, 'zeros': self.zeros, 'grace_until': self.grace_until}
+        payload = {'active': self.active, 'pending': self.pending, 'zeros': self.zeros, 'grace_until': self.grace_until}
         temporary = self.path.with_suffix('.tmp')
         temporary.write_text(json.dumps(payload))
         temporary.replace(self.path)
+
+    def has_unconfirmed(self) -> bool:
+        return bool(self.pending) or any(not s['announced'] for s in self.active.values())
 
     def notices(self, snapshot: dict, now: float | None = None) -> list[Notice]:
         now = time.time() if now is None else now
@@ -88,8 +112,16 @@ class AlertTracker:
         previous_zeros = self.zeros
         self.zeros = self.zeros + 1 if type(nodes) is int and nodes == 0 else 0
         issues = dict(snapshot['issues'])
-        if self.zeros >= 3:
-            issues['dht-zero'] = 'qBittorrent DHT has been zero for 3 consecutive checks'
+        # A recovery legitimately holds DHT at zero for several minutes
+        # (gluetun recreate + 130 s Byparr wait + up to 5 min verify), and the
+        # NAS watchdog itself only acts after ~15 min, so the threshold sits
+        # above a normal recovery window.
+        zero_checks = nas_stack.count('ARR_STACK_DHT_ZERO_CHECKS', 10)
+        if self.zeros >= zero_checks:
+            issues['dht-zero'] = f'qBittorrent DHT has been zero for {self.zeros} consecutive checks'
+        confirm_checks = nas_stack.count('ARR_STACK_ALERT_CONFIRM_CHECKS', 3)
+        clear_checks = nas_stack.count('ARR_STACK_RECOVERY_CONFIRM_CHECKS', 2)
+        maintenance = bool(snapshot.get('maintenance'))
 
         # One reminder per long window while a condition stays unresolved,
         # instead of either repeating forever or going silent for good.
@@ -105,14 +137,28 @@ class AlertTracker:
         for key, detail in issues.items():
             state = self.active.get(key)
             if state is None:
-                self.active[key] = {'detail': detail, 'first_seen': now, 'last_escalated': now, 'announced': not in_grace}
+                candidate = self.pending.get(key)
+                if candidate is None:
+                    candidate = self.pending[key] = {'detail': detail, 'first_seen': now, 'count': 0}
+                candidate['count'] = int(candidate['count']) + 1
+                candidate['detail'] = detail
                 changed = True
+                # dht-zero already carries its own consecutive-check threshold.
+                needed = 1 if key == 'dht-zero' else confirm_checks
+                if candidate['count'] < needed or maintenance:
+                    continue
+                self.pending.pop(key, None)
+                self.active[key] = {'detail': detail, 'first_seen': float(candidate['first_seen']), 'last_escalated': now,
+                                    'announced': not in_grace, 'clear_count': 0}
                 if not in_grace:
                     notices.append(Notice(key, detail, _severity(key), 'new'))
             else:
+                if state.get('clear_count'):
+                    state['clear_count'] = 0
+                    changed = True
                 state['detail'] = detail
                 if not state['announced']:
-                    if not in_grace:
+                    if not in_grace and not maintenance:
                         state['announced'] = True
                         state['last_escalated'] = now
                         notices.append(Notice(key, detail, _severity(key), 'new'))
@@ -123,10 +169,21 @@ class AlertTracker:
                     notices.append(Notice(key, f'Still unresolved after {hours}h: {detail}', _severity(key), 'escalation'))
                     changed = True
 
+        # A blip that cleared before confirmation is dropped silently.
+        for key in [k for k in self.pending if k not in issues]:
+            self.pending.pop(key)
+            changed = True
+
         recovered_critical = False
         for key in [k for k in self.active if k not in issues]:
-            state = self.active.pop(key)
+            state = self.active[key]
+            state['clear_count'] = int(state.get('clear_count', 0)) + 1
             changed = True
+            # An unannounced condition has nothing to "recover" publicly, so
+            # it can clear on the first clean poll.
+            if state['announced'] and state['clear_count'] < clear_checks:
+                continue
+            self.active.pop(key)
             if state['announced']:
                 notices.append(Notice(key, f"Recovered: {state['detail']}", _severity(key), 'recovered'))
                 recovered_critical = recovered_critical or _severity(key) == 'critical'
@@ -139,6 +196,11 @@ class AlertTracker:
         if changed:
             self._save()
         return notices
+
+
+def recovery_in_progress() -> bool:
+    """True while a Jarvis-initiated recovery is launching or being followed."""
+    return _restart_lock.locked()
 
 
 _PENDING_TTL_S = 600

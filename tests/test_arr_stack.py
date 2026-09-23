@@ -16,6 +16,11 @@ class ArrMonitorTests(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
         self.path = Path(self.tmp.name) / 'alerts.json'
+        # Pre-hysteresis semantics (dedupe, escalation, grace) are exercised
+        # with single-poll thresholds; DebounceTests covers the defaults.
+        env = patch.dict(os.environ, {'ARR_STACK_ALERT_CONFIRM_CHECKS': '1', 'ARR_STACK_RECOVERY_CONFIRM_CHECKS': '1', 'ARR_STACK_DHT_ZERO_CHECKS': '3'})
+        env.start()
+        self.addCleanup(env.stop)
         self.tracker = arr_stack.AlertTracker(self.path)
 
     def sample(self, nodes=0, issues=None):
@@ -217,6 +222,108 @@ class ArrMonitorTests(unittest.TestCase):
         with patch.object(nas_stack.home_assistant, 'call_service', return_value=(True, 'sent')) as call, patch.dict(os.environ, {'ARR_STACK_NOTIFY_SERVICE': 'notify.mobile_app_nicks_iphone_17_pro'}):
             self.assertTrue(nas_stack.notify_phone('DHT zero'))
         self.assertEqual(call.call_args.args, ('notify', 'mobile_app_nicks_iphone_17_pro'))
+
+
+class DebounceTests(unittest.TestCase):
+    """Default hysteresis: 3 polls to alert, 2 clean polls to recover."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.path = Path(self.tmp.name) / 'alerts.json'
+        env = patch.dict(os.environ, {'ARR_STACK_POST_RECOVERY_GRACE_S': '0'})
+        env.start()
+        self.addCleanup(env.stop)
+        for name in ('ARR_STACK_ALERT_CONFIRM_CHECKS', 'ARR_STACK_RECOVERY_CONFIRM_CHECKS', 'ARR_STACK_DHT_ZERO_CHECKS'):
+            os.environ.pop(name, None)
+        self.tracker = arr_stack.AlertTracker(self.path)
+
+    def poll(self, t, issues=None, nodes=5, maintenance=False):
+        return self.tracker.notices({'dht_nodes': nodes, 'connection_status': 'connected', 'issues': issues or {}, 'maintenance': maintenance}, t)
+
+    def test_one_poll_blip_is_silent(self):
+        down = {'radarr-api': 'Radarr down', 'sonarr-api': 'Sonarr down'}
+        self.assertEqual(self.poll(0, down), [])
+        self.assertEqual(self.poll(60), [])
+        self.assertEqual(self.poll(120), [])
+        self.assertEqual(self.tracker.pending, {})
+
+    def test_alerts_on_third_consecutive_poll(self):
+        down = {'radarr-api': 'Radarr down'}
+        self.assertEqual(self.poll(0, down), [])
+        self.assertEqual(self.poll(60, down), [])
+        [notice] = self.poll(120, down)
+        self.assertEqual((notice.key, notice.kind), ('radarr-api', 'new'))
+        self.assertEqual(self.poll(180, down), [])
+
+    def test_interrupted_streak_restarts_count(self):
+        down = {'radarr-api': 'Radarr down'}
+        self.poll(0, down)
+        self.poll(60, down)
+        self.poll(120)
+        self.assertEqual(self.poll(180, down), [])
+        self.assertEqual(self.poll(240, down), [])
+        self.assertEqual(len(self.poll(300, down)), 1)
+
+    def test_recovery_needs_two_clean_polls(self):
+        down = {'radarr-api': 'Radarr down'}
+        for t in (0, 60, 120):
+            self.poll(t, down)
+        self.assertEqual(self.poll(180), [])
+        # Flapping back down during recovery confirmation keeps it active, silently.
+        self.assertEqual(self.poll(240, down), [])
+        self.assertEqual(self.poll(300), [])
+        [notice] = self.poll(360)
+        self.assertEqual(notice.kind, 'recovered')
+
+    def test_maintenance_holds_alert_until_it_ends(self):
+        down = {'radarr-api': 'Radarr down'}
+        for t in (0, 60, 120, 180):
+            self.assertEqual(self.poll(t, down, maintenance=True), [])
+        # Recreated containers came back during maintenance: nothing to say.
+        self.assertEqual(self.poll(240, maintenance=True), [])
+        self.assertEqual(self.tracker.pending, {})
+
+    def test_condition_outlasting_maintenance_alerts_immediately_after(self):
+        down = {'radarr-api': 'Radarr down'}
+        for t in (0, 60, 120, 180):
+            self.poll(t, down, maintenance=True)
+        self.assertEqual(len(self.poll(240, down)), 1)
+
+    def test_dht_zero_default_threshold_outlasts_a_recovery(self):
+        for t in range(0, 540, 60):
+            self.assertEqual(self.poll(t, nodes=0), [])
+        [notice] = self.poll(540, nodes=0)
+        self.assertEqual(notice.key, 'dht-zero')
+
+    def test_pending_survives_restart(self):
+        down = {'radarr-api': 'Radarr down'}
+        self.poll(0, down)
+        self.poll(60, down)
+        self.tracker = arr_stack.AlertTracker(self.path)
+        self.assertEqual(len(self.poll(120, down)), 1)
+
+
+class MaintenanceDetectionTests(unittest.TestCase):
+    def test_running_recovery_is_maintenance_until_stale(self):
+        status = (True, {'observed_at': 1000, 'recovery': {'state': 'running', 'updated_at': 990}})
+        self.assertTrue(nas_stack.recovery_active(status))
+        stale = (True, {'observed_at': 5000, 'recovery': {'state': 'running', 'updated_at': 990}})
+        self.assertFalse(nas_stack.recovery_active(stale))
+
+    def test_recently_finished_recovery_settles(self):
+        status = (True, {'observed_at': 1200, 'recovery': {'state': 'success', 'updated_at': 1000}})
+        self.assertTrue(nas_stack.recovery_active(status))
+        self.assertFalse(nas_stack.recovery_active((True, {'observed_at': 2000, 'recovery': {'state': 'success', 'updated_at': 1000}})))
+
+    def test_unknown_status_is_not_maintenance(self):
+        self.assertFalse(nas_stack.recovery_active(None))
+        self.assertFalse(nas_stack.recovery_active((False, 'ssh down')))
+        self.assertFalse(nas_stack.recovery_active((True, {'recovery': None})))
+
+    def test_status_not_configured_without_key(self):
+        with patch.dict(os.environ, {'NAS_STATUS_SSH_KEY': '', 'NAS_SSH_HOST': 'nas'}):
+            self.assertFalse(nas_stack.status_configured())
 
 
 class RestartApprovalTests(unittest.TestCase):

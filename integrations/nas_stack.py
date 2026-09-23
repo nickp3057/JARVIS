@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 import re
 import subprocess
+import time
 from typing import Any
 from urllib.parse import urlsplit
 
@@ -18,6 +19,13 @@ def seconds(name: str, default: float, minimum: float = 30) -> float:
     try:
         value = float(os.getenv(name, str(default)))
         return max(minimum, min(value, 86400)) if value == value else default
+    except ValueError:
+        return default
+
+
+def count(name: str, default: int, minimum: int = 1, maximum: int = 100) -> int:
+    try:
+        return max(minimum, min(int(os.getenv(name, str(default))), maximum))
     except ValueError:
         return default
 
@@ -117,6 +125,40 @@ def _ssh(kind: str, command: str) -> tuple[bool, Any]:
 
 def watchdog_status() -> tuple[bool, Any]:
     return _ssh('status', 'status')
+
+
+def status_configured() -> bool:
+    """True when the read-only status key and pinned host file are set up.
+
+    Lets callers skip the SSH round trip entirely (and drop the "activity
+    unknown" suffix) instead of reporting a permanent unknown."""
+    key = os.getenv('NAS_STATUS_SSH_KEY', '').strip()
+    hosts = os.getenv('NAS_SSH_KNOWN_HOSTS', '').strip()
+    return bool(os.getenv('NAS_SSH_HOST', '').strip() and key and hosts and Path(key).is_file() and Path(hosts).is_file())
+
+
+def recovery_active(status: tuple[bool, Any] | None, now: float | None = None) -> bool:
+    """True while the NAS reports a recovery running or just finished.
+
+    Covers the NAS's own DHT/indexer watchdog recoveries, which recreate
+    every container and used to page Nick with a one-minute "unreachable"
+    blip. ``ARR_STACK_MAINTENANCE_SETTLE_S`` (default 300) extends the hold
+    past completion while apps finish starting."""
+    if not status or not status[0] or not isinstance(status[1], dict):
+        return False
+    recovery = status[1].get('recovery')
+    if not isinstance(recovery, dict):
+        return False
+    try:
+        observed = float(status[1].get('observed_at') or (now if now is not None else time.time()))
+        updated = float(recovery.get('updated_at') or 0)
+    except (TypeError, ValueError):
+        return False
+    age = observed - updated
+    if recovery.get('state') == 'running':
+        # A running record untouched for 15 min is a crashed job, not maintenance.
+        return 0 <= age <= 900
+    return 0 <= age <= seconds('ARR_STACK_MAINTENANCE_SETTLE_S', 300, 0)
 
 
 def start_recovery(request_id: str) -> tuple[bool, Any]:
