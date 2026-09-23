@@ -125,6 +125,7 @@ class JarvisRuntime:
         self._next_task_id = 1
         self._launch_briefing_claimed = False
         self._stop_monitors = threading.Event()
+        self._started_at = time.monotonic()
         self._home_monitor_started = False
         self._home_monitor_failed = False
         self._weather_monitor_started = False
@@ -224,6 +225,20 @@ class JarvisRuntime:
         if os.getenv("JARVIS_HEALTHCHECKS_URL", "").strip() and not self._deadman_started:
             self._deadman_started = True
             threading.Thread(target=self._deadman_loop, daemon=True).start()
+
+    def _in_startup_grace(self) -> bool:
+        """True during the first ``STARTUP_NETWORK_GRACE_S`` (120) seconds.
+
+        After a power cut the Optiplex's Wi-Fi can still be associating when
+        the process starts, so every integration fails its first attempt with
+        "Network is unreachable" or a DNS error. Monitors keep retrying during
+        this window but don't record those failures as outages."""
+        try:
+            grace = float(os.getenv("STARTUP_NETWORK_GRACE_S", "120"))
+        except ValueError:
+            grace = 120.0
+        started = getattr(self, "_started_at", None)
+        return started is not None and time.monotonic() - started < grace
 
     def _arr_stack_monitor_loop(self) -> None:
         from brain.arr_stack import AlertTracker, recovery_in_progress
@@ -798,7 +813,7 @@ class JarvisRuntime:
                 domains=previous.domains,
                 error=error,
             )
-        if not self._home_monitor_failed:
+        if not self._home_monitor_failed and not self._in_startup_grace():
             self._home_monitor_failed = True
             self.record_event(
                 kind="monitor",
@@ -914,6 +929,7 @@ class JarvisRuntime:
     def _weather_monitor_loop(self) -> None:
         interval = float(os.getenv("WEATHER_MONITOR_INTERVAL_S", "1800.0"))
         previous_temp: int | None = None
+        failures = 0
 
         while not self._stop_monitors.is_set():
             snapshot = get_weather_snapshot()
@@ -921,7 +937,11 @@ class JarvisRuntime:
                 self._weather_snapshot = snapshot
 
             if not snapshot.online:
-                if not self._weather_monitor_failed:
+                failures += 1
+                # Retry with backoff (30 s, 60 s, ... up to the interval)
+                # rather than leaving weather empty for a full interval
+                # after a boot-time network race.
+                if not self._weather_monitor_failed and not self._in_startup_grace():
                     self._weather_monitor_failed = True
                     self.record_event(
                         kind="monitor",
@@ -930,6 +950,7 @@ class JarvisRuntime:
                         detail=snapshot.error,
                     )
             else:
+                failures = 0
                 if self._weather_monitor_failed:
                     self.record_event(
                         kind="monitor",
@@ -954,7 +975,8 @@ class JarvisRuntime:
                     )
                 previous_temp = snapshot.temperature_f
 
-            if self._stop_monitors.wait(interval):
+            delay = min(interval, 30.0 * 2 ** (failures - 1)) if failures else interval
+            if self._stop_monitors.wait(delay):
                 break
 
     def _download_monitor_loop(self) -> None:
@@ -970,7 +992,7 @@ class JarvisRuntime:
         while not self._stop_monitors.is_set():
             success, result = download_snapshot()
             if not success:
-                if not self._download_monitor_failed:
+                if not self._download_monitor_failed and not self._in_startup_grace():
                     self._download_monitor_failed = True
                     self.record_event(
                         kind="monitor",

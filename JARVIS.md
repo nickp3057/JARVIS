@@ -461,6 +461,7 @@ WHISPER_MODEL=small.en
 WHISPER_TEMPERATURE_FALLBACK=false
 
 # Feature flags / tuning (all optional, sensible defaults)
+STARTUP_NETWORK_GRACE_S=120   # boot grace: monitors retry without recording outages
 BRIEFING_ON_LAUNCH=false    # speak a briefing at startup
 STREAMING_TTS=false         # opt-in sentence-streamed TTS in every interactive mode
 MEMORY_MAX_FACTS=60         # cap facts injected into the prompt (0 = no cap)

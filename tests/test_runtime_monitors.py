@@ -127,5 +127,62 @@ class RuntimeMonitorTests(unittest.TestCase):
         self.assertEqual(len(offline), 1)
 
 
+class _RecordingStop:
+    def __init__(self, iterations: int) -> None:
+        self.waits: list[float] = []
+        self.iterations = iterations
+
+    def is_set(self) -> bool:
+        return False
+
+    def wait(self, seconds: float) -> bool:
+        self.waits.append(seconds)
+        return len(self.waits) >= self.iterations
+
+
+class StartupGraceTests(unittest.TestCase):
+    def runtime(self, started_ago: float) -> JarvisRuntime:
+        import time
+        runtime = object.__new__(JarvisRuntime)
+        runtime._started_at = time.monotonic() - started_ago
+        runtime._lock = __import__("threading").Lock()
+        runtime.record_event = Mock()
+        runtime.announce = Mock()
+        return runtime
+
+    def titles(self, runtime):
+        return [c.kwargs.get("title") for c in runtime.record_event.call_args_list]
+
+    def test_download_failure_during_boot_grace_is_not_an_outage(self) -> None:
+        runtime = self.runtime(started_ago=5)
+        runtime._stop_monitors = _TwoIterationStop()
+        runtime._download_monitor_failed = False
+        with patch("integrations.qbittorrent.download_snapshot", side_effect=[(False, "Network is unreachable"), (False, "x")]), \
+             patch.dict(os.environ, {"QBITTORRENT_MONITOR_INTERVAL_S": "0"}):
+            runtime._download_monitor_loop()
+        self.assertNotIn("Download monitor offline", self.titles(runtime))
+
+    def test_weather_failure_retries_with_backoff_and_grace(self) -> None:
+        from brain.runtime import WeatherSnapshot
+        runtime = self.runtime(started_ago=5)
+        runtime._stop_monitors = _RecordingStop(iterations=4)
+        runtime._weather_monitor_failed = False
+        offline = WeatherSnapshot(online=False, error="DNS")
+        with patch("brain.runtime.get_weather_snapshot", return_value=offline), \
+             patch.dict(os.environ, {"WEATHER_MONITOR_INTERVAL_S": "1800"}):
+            runtime._weather_monitor_loop()
+        self.assertEqual(runtime._stop_monitors.waits, [30.0, 60.0, 120.0, 240.0])
+        self.assertNotIn("Weather monitor offline", self.titles(runtime))
+
+    def test_outages_after_grace_are_still_recorded(self) -> None:
+        runtime = self.runtime(started_ago=10_000)
+        runtime._stop_monitors = _TwoIterationStop()
+        runtime._download_monitor_failed = False
+        with patch("integrations.qbittorrent.download_snapshot", side_effect=[(False, "down"), (False, "down")]), \
+             patch.dict(os.environ, {"QBITTORRENT_MONITOR_INTERVAL_S": "0"}):
+            runtime._download_monitor_loop()
+        self.assertIn("Download monitor offline", self.titles(runtime))
+
+
 if __name__ == "__main__":
     unittest.main()
