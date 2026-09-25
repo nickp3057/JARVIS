@@ -116,13 +116,22 @@ had been dead since.
 Fix now, then keep it fixed (on the NAS as an admin):
 
 ```bash
-sudo usermod -s /bin/bash Jarvis
-sudo install -o root -g root -m 755 ~/jarvis-ops/ensure_jarvis_shell.sh /volume1/docker/watchdog/ensure_jarvis_shell.sh
-( sudo crontab -l; echo '*/5 * * * * /volume1/docker/watchdog/ensure_jarvis_shell.sh' ) | sudo crontab -
+sudo -v    # cache the password first; nothing below should prompt again
+sudo usermod -s /bin/bash Jarvis && getent passwd Jarvis
+sudo install -o root -g root -m 755 ~/jarvis-ops/ensure_jarvis_shell.sh /volume1/docker/watchdog/ensure_jarvis_shell.sh && ls -l /volume1/docker/watchdog/ensure_jarvis_shell.sh
+sudo crontab -l > /tmp/root.cron.bak && cp /tmp/root.cron.bak /tmp/root.cron.new
+grep -q ensure_jarvis_shell /tmp/root.cron.new || echo '*/5 * * * * /volume1/docker/watchdog/ensure_jarvis_shell.sh' >> /tmp/root.cron.new
+diff /tmp/root.cron.bak /tmp/root.cron.new; sudo crontab /tmp/root.cron.new && sudo crontab -l
 ```
 
-(copy `ops/nas/ensure_jarvis_shell.sh` to `~/jarvis-ops/` first, e.g.
-`scp ops/nas/ensure_jarvis_shell.sh nas:jarvis-ops/`.) The guard only
+Don't use `( sudo crontab -l; echo … ) | sudo crontab -`: with no cached
+password both `sudo`s prompt at once, and a failed first half installs a
+crontab containing only the new line (wiping the others).
+
+Copy `ops/nas/ensure_jarvis_shell.sh` to `~/jarvis-ops/` first with
+`ssh nas 'mkdir -p ~/jarvis-ops' && scp -O ops/nas/ensure_jarvis_shell.sh nas:jarvis-ops/`.
+The `-O` matters: plain `scp` uses UGOS's SFTP server, whose root is `/`,
+so `nas:jarvis-ops/` fails with `remote mkdir "jarvis-ops/": Permission denied`. The guard only
 restores `/bin/bash` for `Jarvis`, refuses if that account is ever in an
 admin group, and logs each restore to `watchdog.log`. It touches no key,
 restriction, sudo rule or sshd setting. Avoid editing the Jarvis account in

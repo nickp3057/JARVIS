@@ -108,9 +108,13 @@ Findings:
    `ssh jarvis 'journalctl -u jarvis-api -n 30 --no-pager'`.
 6. ❌ **NAS shell fix + guard (#2)** — NOT applied as of 2026-09-24: `getent passwd Jarvis` still ends in `/usr/sbin/nologin`, `~/jarvis-ops/` doesn't exist, no guard in `/volume1/docker/watchdog/`, and the status key from the Optiplex still gets `This account is currently not available.` This is why "confirm restart arr stack" failed with `NAS restricted SSH failed (exit 1)`.
   
-   `scp ops/nas/ensure_jarvis_shell.sh ops/nas/dht_watchdog.sh ops/nas/recover_stack.sh ops/nas/indexer_watchdog.sh ops/nas/install-recovery.sh nas:jarvis-ops/`
+   `ssh nas 'mkdir -p ~/jarvis-ops' && scp -O ops/nas/ensure_jarvis_shell.sh ops/nas/dht_watchdog.sh ops/nas/recover_stack.sh ops/nas/indexer_watchdog.sh ops/nas/install-recovery.sh nas:jarvis-ops/`
+   (`-O` is required: plain scp goes through UGOS's SFTP root `/` and fails. Done 2026-09-24, hashes verified.)
    then on the NAS: `sudo usermod -s /bin/bash Jarvis`, install the guard and
-   its cron line (`ops/nas/README.md` → "Shell reset").
+   its cron line with the step-by-step block in `ops/nas/README.md` → "Shell reset"
+   (not the one-line `crontab -l | crontab -` pipe, which races two sudo prompts).
+   Evidence none of this ran before 2026-09-24: `/etc/passwd` unchanged since 2026-09-20 22:54,
+   no `~/jarvis-ops`, no guard file, no cron line.
 7. ❌ **NAS DHT watchdog (#6)** — NOT applied: the deployed `dht_watchdog.sh` (2026-09-20) still differs from the repo; `recover_stack.sh`, `indexer_watchdog.sh`, `stack_status.sh` match. on the NAS, `cd ~/jarvis-ops && sudo bash install-recovery.sh --preview`, review, then `--apply`.
 8. **Verify status key** from the Optiplex: ask JARVIS "arr stack status"
    (the "watchdog activity" line should no longer say unavailable).
