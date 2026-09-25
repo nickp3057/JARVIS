@@ -115,7 +115,7 @@ Findings:
    (not the one-line `crontab -l | crontab -` pipe, which races two sudo prompts).
    Evidence none of this ran before 2026-09-24: `/etc/passwd` unchanged since 2026-09-20 22:54,
    no `~/jarvis-ops`, no guard file, no cron line.
-6b. **NAS share ACL** — found 2026-09-24 after the shell fix (done 21:58): the keys log in
+6b. ✅ **NAS share ACL** — fixed 2026-09-24 in the UGOS UI (Jarvis: Read only on `docker`, denied elsewhere). Verified live from the Optiplex: the status key returns JSON and the recovery key's `probe` answers `restricted; no restart performed`. The sudo launcher path is only exercised by a real restart. Found after the shell fix (done 21:58): the keys log in
    but get `Permission denied` on the scripts, because UGOS's `docker` share ACL is admin-only
    (`ugacltool get /volume1/docker`). Fix: UGOS UI → Shared folders → docker → Permissions →
    Jarvis: Read only (`ops/nas/README.md` → "Share ACL").
