@@ -106,7 +106,7 @@ Findings:
 4. ✅ **Optiplex boot wait:** verified 2026-09-24 (`ifupdown-wait-online` enabled, ping 10.0.0.1, 90 s). `ssh -t jarvis 'cd ~/jarvis && sudo sh ops/optiplex/install-network-wait.sh 10.0.0.1'`
 5. ✅ **Restart:** jarvis-api restarted 2026-09-23 09:39. `ssh -t jarvis 'sudo systemctl restart jarvis-api'`, then
    `ssh jarvis 'journalctl -u jarvis-api -n 30 --no-pager'`.
-6. ❌ **NAS shell fix + guard (#2)** — NOT applied as of 2026-09-24: `getent passwd Jarvis` still ends in `/usr/sbin/nologin`, `~/jarvis-ops/` doesn't exist, no guard in `/volume1/docker/watchdog/`, and the status key from the Optiplex still gets `This account is currently not available.` This is why "confirm restart arr stack" failed with `NAS restricted SSH failed (exit 1)`.
+6. ✅ **NAS shell fix + guard (#2)** — applied 2026-09-24 21:58 (shell `/bin/bash`, guard + root cron line verified). Before that it had never run: `getent passwd Jarvis` still ends in `/usr/sbin/nologin`, `~/jarvis-ops/` doesn't exist, no guard in `/volume1/docker/watchdog/`, and the status key from the Optiplex still gets `This account is currently not available.` This is why "confirm restart arr stack" failed with `NAS restricted SSH failed (exit 1)`.
   
    `ssh nas 'mkdir -p ~/jarvis-ops' && scp -O ops/nas/ensure_jarvis_shell.sh ops/nas/dht_watchdog.sh ops/nas/recover_stack.sh ops/nas/indexer_watchdog.sh ops/nas/install-recovery.sh nas:jarvis-ops/`
    (`-O` is required: plain scp goes through UGOS's SFTP root `/` and fails. Done 2026-09-24, hashes verified.)
@@ -115,6 +115,10 @@ Findings:
    (not the one-line `crontab -l | crontab -` pipe, which races two sudo prompts).
    Evidence none of this ran before 2026-09-24: `/etc/passwd` unchanged since 2026-09-20 22:54,
    no `~/jarvis-ops`, no guard file, no cron line.
+6b. **NAS share ACL** — found 2026-09-24 after the shell fix (done 21:58): the keys log in
+   but get `Permission denied` on the scripts, because UGOS's `docker` share ACL is admin-only
+   (`ugacltool get /volume1/docker`). Fix: UGOS UI → Shared folders → docker → Permissions →
+   Jarvis: Read only (`ops/nas/README.md` → "Share ACL").
 7. ❌ **NAS DHT watchdog (#6)** — NOT applied: the deployed `dht_watchdog.sh` (2026-09-20) still differs from the repo; `recover_stack.sh`, `indexer_watchdog.sh`, `stack_status.sh` match. on the NAS, `cd ~/jarvis-ops && sudo bash install-recovery.sh --preview`, review, then `--apply`.
 8. **Verify status key** from the Optiplex: ask JARVIS "arr stack status"
    (the "watchdog activity" line should no longer say unavailable).

@@ -137,6 +137,21 @@ admin group, and logs each restore to `watchdog.log`. It touches no key,
 restriction, sudo rule or sshd setting. Avoid editing the Jarvis account in
 the UGOS UI; if you must, the guard repairs it within five minutes.
 
+### Share ACL (second layer, found 2026-09-24)
+
+With the shell fixed, both keys still failed with
+`bash: /volume1/docker/watchdog/stack_status.sh: Permission denied`.
+`/volume1` is mounted with UGOS's own ACLs (`ugacl`), which override the
+`rwxrwxrwx` modes and are invisible to `getfacl`. `ugacltool get
+/volume1/docker` showed a single inherited entry,
+`group:admin:allow:rwxpdDaARWc--:-fd-`, so the non-admin Jarvis account could
+not even traverse the share. The installer's `setfacl -b` / `chmod 755`
+(2026-09-20 21:09) was undone by the same UGOS account save that reset the
+shell. Fix, done in UGOS itself so it isn't reverted: web UI → Shared folders →
+`docker` → Permissions → Jarvis: **Read only**. Check with
+`ugacltool get /volume1/docker/watchdog/stack_status.sh` (a Jarvis entry should
+appear). Writes still happen as root via the sudo launcher.
+
 Verify from the Optiplex:
 
 ```bash
