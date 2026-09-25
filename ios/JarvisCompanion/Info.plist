@@ -7,9 +7,5 @@
 		<key>NSAllowsArbitraryLoads</key>
 		<true/>
 	</dict>
-	<key>NSMicrophoneUsageDescription</key>
-	<string>JARVIS uses the microphone only while you dictate a message.</string>
-	<key>NSSpeechRecognitionUsageDescription</key>
-	<string>JARVIS converts your dictated message into text for the chat composer.</string>
 </dict>
 </plist>
