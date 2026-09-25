@@ -128,6 +128,8 @@ Debug and Release configurations must stay identical.
 1. User types → `ChatWidget._on_send()` → disables input
 2. `_AgentWorker` thread calls `agent.respond(text)`
 3. `JarvisAgent._run_tool_loop()` → Claude API → tool calls → final reply
+   (several tool calls in one round run concurrently; each round logs
+   `model round N: first token …, cache read …` to the journal)
 4. Reply appended to transcript, `input re-enabled immediately` (non-blocking)
 5. If not muted: `_SpeakWorker` thread calls `speak(reply)` → ElevenLabs TTS → RMS envelope → orb reacts
 
@@ -381,7 +383,7 @@ RMS envelope from ElevenLabs audio drives the orb in real time using a monotonic
 
 **Automatic memory** (`brain/memory_extractor.py`): after every completed turn the agent hands the exchange to a single background worker thread. The worker logs a habit signal, then makes one cheap forced-tool Haiku call that compares the exchange against existing memories and returns zero or more facts (`explicit` vs `inferred`, with confidence and an optional stable key or `supersedes_id`) plus an optional one-line `episode`. Facts at or above `MEMORY_AUTO_CONFIDENCE` are written with `remember_fact` / `update_fact` (source `auto:explicit` / `auto:inferred`); lower ones are staged in `memory_proposals.py` for approval. The episode is appended under `## Log` in today's vault journal note. The runtime subscribes and records a `memory` event ("Memory updated") so the cockpit shows it. Extraction failures are logged and never affect the reply.
 
-**Habits** (`brain/habits.py`): no model involved. Each turn appends `{time, hour, weekday, [tool, target]}` to a bounded JSON log (meta/memory tools excluded; targets come from the tool's natural argument such as `play_music.query`). `render_habits_block()` derives a few plain observations (peak period, weekday/weekend skew, most-used capabilities, frequent targets with their usual time of day) once `HABITS_MIN_TURNS` are logged, cached behind the file mtime, and the agent injects it as a "What you've noticed" section in the dynamic (uncached) prompt block.
+**Habits** (`brain/habits.py`): no model involved. Each turn appends `{time, hour, weekday, [tool, target]}` to a bounded JSON log (meta/memory tools excluded; targets come from the tool's natural argument such as `play_music.query`). `render_habits_block()` derives a few plain observations (peak period, weekday/weekend skew, most-used capabilities, frequent targets with their usual time of day) once `HABITS_MIN_TURNS` are logged, cached behind the file mtime, and the agent injects it as a "What you've noticed" section in the per-turn `<turn_context>` block on the newest user message.
 
 **Vision**: `brain/vision.py` uses `QScreen.grabWindow(0)` (PyQt6, no extra deps) to capture the screen, encodes to PNG/base64, then makes a separate Claude API call with the image. Falls back to a PowerShell `System.Drawing` capture in headless mode.
 
@@ -1063,16 +1065,26 @@ hand-test commands. Installation hardens previously writable path/SSH ACLs.
   HA mobile delivery, and Healthchecks pings.
 - `arr_stack_status` reports API reachability, qBit DHT/connection, health
   warnings, and recent NAS watchdog actions. Polling never calls a model.
-- `restart_arr_stack` only prepares a warning. Nick must send the exact
-  `confirm restart arr stack <token>` phrase in the same conversation within
-  ten minutes. It is consumed once, before SSH. `cancel arr restart` cancels it.
-  The canonical `restart arr stack` request also works in offline text/voice.
+- Asking directly ("restart the arr stack", "can you restart arr stack
+  please") first checks qBittorrent via `qbittorrent.active_downloads()`
+  (incomplete torrents in downloading/metaDL/forcedDL/allocating state or with
+  download speed > 0; stalled, queued and paused ones don't count). Zero
+  active: it restarts immediately ("Nothing downloading, restarting now").
+  Otherwise, or if qBittorrent can't be checked, it opens a session-bound
+  request with a 4-digit code: a bare "yes"/"confirm"/"go ahead" works only
+  as Nick's very next message (any other message closes that window), and
+  "confirm <code>" (or the bare code, or the old long phrase with the code)
+  works for ten minutes. A bare "no"/"cancel" as the next message, or
+  `cancel arr restart` any time, cancels. The request is consumed once, before
+  SSH. `restart_arr_stack` (the model's tool) never restarts by itself: it
+  only opens the same request. The direct request also works in offline
+  text/voice.
 - Recovery returns promptly on SSH and continues detached on the NAS. The
   turn replies at once; a background follow-up polls the NAS result (if the
   status key works) and live service probes for up to 12 minutes, then pushes
   a per-service up / still starting / failed report. A lost result never
-  auto-retries. A bare token, typo'd phrase, or wrong token re-prompts with
-  the same token and echoes what was sent.
+  auto-retries. A typo'd phrase, wrong code, old 8-character token, or a late
+  bare "confirm" re-prompts with the same code and echoes what was sent.
 - The runtime alerts after 3 consecutive failing polls (10 for zero DHT),
   recovers after 2 clean ones, holds new alerts during NAS/Jarvis recoveries,
   and tracks each Prowlarr indexer separately. Phone delivery goes through

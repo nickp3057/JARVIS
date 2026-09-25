@@ -29,11 +29,17 @@ Current responsibilities:
 - Sanitize Anthropic response blocks at the agent boundary before replaying
   them into a multi-round tool conversation; SDK-only parsed fields must never
   leak into Messages API input payloads.
-- Keep the stable request prefix cacheable: tool schemas carry a
-  `cache_control` breakpoint and the system prompt is sent as a stable persona
-  block (cached) plus a separate per-turn block for memory facts and recent
-  tool context (uncached). Anything that varies per turn must go in the
-  dynamic block or in messages, never spliced into the persona text.
+- Keep the request prefix cacheable end to end. Tool schemas and the persona
+  carry 1-hour `cache_control` breakpoints; the system prompt is only the
+  persona plus standing orders (both change only when Nick changes them).
+  Everything that varies per turn (recalled memory facts, habits, degraded-tool
+  health, recent tool results) is appended as a `<turn_context>` block to the
+  newest user message of the request only, never stored in history. Two
+  5-minute breakpoints sit on the newest block and on the reply before this
+  turn's message, so later tool rounds and the next turn read the whole
+  conversation from cache. `brain/agent.py` logs first-token time, total time
+  and cache read/write tokens for every API round. Never splice anything
+  per-turn into the system prompt: it would break the cache for all history.
 - Compose situational briefings (time, weather, agenda, reminders, and timers)
   via `compose_briefing` / `launch_briefing`. The launch method is a
   once-per-runtime claim shared by text, headless voice, and GUI front ends;
@@ -338,8 +344,8 @@ runtime knows, the more JARVIS feels like one mind instead of several scripts.
 facts, and habits: free-form directives from Nick about how JARVIS should
 behave ("stop saying certainly"). The model writes them through
 `add_standing_order` / `remove_standing_order`; `build_standing_orders_section`
-renders them into the *dynamic* system block each turn (never the cached
-persona block). The persona's hard rules require a behavioural correction to be
+renders them into a system block after the persona each turn (never into
+the persona text itself). The persona's hard rules require a behavioural correction to be
 persisted this way, or as a setting, rather than obeyed once.
 
 ## Study Brief Settings

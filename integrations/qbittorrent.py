@@ -178,6 +178,26 @@ def _is_incomplete(torrent: dict[str, Any]) -> bool:
     return float(torrent.get("progress", 0) or 0) < 1.0
 
 
+# Torrents a gluetun restart would actually interrupt mid-transfer. Stalled,
+# queued and paused downloads are not moving data, so they don't count.
+_MOVING_DL_STATES = {"downloading", "forcedDL", "metaDL", "forcedMetaDL", "allocating"}
+
+
+def active_downloads() -> tuple[bool, list[str] | str]:
+    """Names of incomplete torrents currently transferring, or an error."""
+    ok, payload = torrent_info("all")
+    if not ok:
+        return False, str(payload)
+    if not isinstance(payload, list):
+        return False, "qBittorrent returned an unexpected torrent list."
+    return True, [
+        str(item.get("name", "Unknown download"))
+        for item in payload
+        if _is_incomplete(item)
+        and (str(item.get("state", "")) in _MOVING_DL_STATES or int(item.get("dlspeed", 0) or 0) > 0)
+    ]
+
+
 def download_snapshot() -> tuple[bool, list[dict[str, Any]] | str]:
     """Return compact torrent records for runtime completion/error monitoring."""
     ok, payload = torrent_info("all")

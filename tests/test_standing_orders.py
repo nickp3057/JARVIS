@@ -88,7 +88,7 @@ class StandingOrdersReachThePromptTests(unittest.TestCase):
         with patch.object(standing_orders, "render_block", return_value="- Be blunt. (order abc)"), \
              patch("brain.agent.render_memory_block", return_value=""), \
              patch("brain.agent.render_habits_block", return_value=""):
-            blocks = agent._system_blocks("hello")
+            blocks = agent._system_blocks()
         self.assertEqual(len(blocks), 2)
         self.assertIn("cache_control", blocks[0])
         self.assertIn("Standing orders from Nick", blocks[1]["text"])

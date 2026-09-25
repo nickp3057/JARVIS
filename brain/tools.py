@@ -631,7 +631,7 @@ def _tool_check_prices(_: dict[str, Any]) -> str:
 _CUSTOM_TOOLS: list[dict[str, Any]] = [
     {
         "name": "restart_arr_stack",
-        "description": "Prepare a NAS arr stack restart confirmation. Always warns that downloads disconnect and returns a session-bound confirmation phrase. This tool cannot execute recovery; Nick must send that exact phrase in a subsequent message. Never claim a restart has happened from this tool.",
+        "description": "Prepare a NAS arr stack restart. Reports whether torrents are actively downloading and opens a session-bound request: Nick approves with a bare \"yes\" as his very next message or \"confirm <4-digit code>\" within 10 minutes. This tool cannot execute recovery. Never claim a restart has happened from this tool.",
         "input_schema": {"type": "object", "properties": {}, "additionalProperties": False},
     },
     {
@@ -1891,7 +1891,8 @@ def get_tool_specs() -> list[dict[str, Any]]:
     # Cache breakpoint on the last custom tool: the tool schemas are by far the
     # largest stable chunk of every request, so let the API reuse them instead
     # of re-processing them on each call (including every round of a tool loop).
-    specs[-1] = {**specs[-1], "cache_control": {"type": "ephemeral"}}
+    # 1-hour TTL, matching the persona block (see brain/agent.py _STATIC_CACHE).
+    specs[-1] = {**specs[-1], "cache_control": {"type": "ephemeral", "ttl": "1h"}}
     if _web_search_enabled():
         specs.append(_web_search_server_tool())
     return specs

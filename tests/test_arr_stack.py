@@ -1,5 +1,6 @@
 import json
 import os
+import re
 from pathlib import Path
 import subprocess
 import tempfile
@@ -8,7 +9,7 @@ import unittest
 from unittest.mock import Mock, patch
 
 from brain import arr_stack
-from integrations import nas_stack
+from integrations import nas_stack, qbittorrent
 
 
 class ArrMonitorTests(unittest.TestCase):
@@ -415,90 +416,175 @@ class IndexerOutageTests(unittest.TestCase):
 class RestartApprovalTests(unittest.TestCase):
     def setUp(self):
         arr_stack._pending.clear()
+        arr_stack._armed.clear()
         # Patched _run_recovery never hands the lock to a follow-up thread.
         self.addCleanup(lambda: arr_stack._restart_lock.locked() and arr_stack._restart_lock.release())
         self.env = patch.dict(os.environ, {'ARR_STACK_RESTART_ENABLED': 'true'})
         self.env.start()
         self.addCleanup(self.env.stop)
+        # Default: something is downloading, so the gate asks for approval.
+        self.downloads = patch.object(qbittorrent, 'active_downloads', return_value=(True, ['Movie.2026']))
+        self.downloads.start()
+        self.addCleanup(self.downloads.stop)
+
+    @staticmethod
+    def code(reply):
+        return re.search(r'confirm (\d{4})', reply)[1]
+
+    def test_idle_direct_request_restarts_without_confirmation(self):
+        with patch.object(qbittorrent, 'active_downloads', return_value=(True, [])), \
+                patch.object(arr_stack, '_run_recovery', return_value='Restart accepted by the NAS, sir.') as run:
+            reply = arr_stack.conversation_action('Restart the arr stack.', 'a')
+        self.assertEqual(reply, 'Nothing downloading, restarting now. Restart accepted by the NAS, sir.')
+        run.assert_called_once()
+        self.assertNotIn('a', arr_stack._pending)
+
+    def test_idle_tool_path_never_restarts_by_itself(self):
+        with patch.object(qbittorrent, 'active_downloads', return_value=(True, [])), \
+                patch.object(arr_stack, '_run_recovery') as run:
+            reply = arr_stack.prepare_restart('a')
+            run.assert_not_called()
+        self.assertIn('Nothing is downloading', reply)
+        self.assertIn('Reply "yes"', reply)
+
+    def test_unknown_download_state_still_asks(self):
+        with patch.object(qbittorrent, 'active_downloads', return_value=(False, 'Could not reach qBittorrent')), \
+                patch.object(arr_stack, '_run_recovery') as run:
+            reply = arr_stack.conversation_action('restart arr stack', 'a')
+            run.assert_not_called()
+        self.assertIn("couldn't check qBittorrent", reply)
+
+    def test_active_downloads_are_named_and_code_is_four_digits(self):
+        reply = arr_stack.conversation_action('can you restart the arr stack', 'a')
+        self.assertIn('1 torrent(s) actively downloading (Movie.2026)', reply)
+        self.assertRegex(self.code(reply), r'^\d{4}$')
+
+    def test_bare_yes_as_very_next_message_confirms(self):
+        arr_stack.conversation_action('restart arr stack', 'a')
+        with patch.object(arr_stack, '_run_recovery', return_value='done') as run:
+            self.assertEqual(arr_stack.conversation_action('Yes.', 'a'), 'done')
+            run.assert_called_once()
+
+    def test_yes_after_tool_prompt_confirms(self):
+        arr_stack.conversation_action('hmm, the downloads look stuck', 'a')
+        arr_stack.prepare_restart('a')  # model calls the tool during that turn
+        with patch.object(arr_stack, '_run_recovery', return_value='done'):
+            self.assertEqual(arr_stack.conversation_action('yes', 'a'), 'done')
+
+    def test_late_yes_does_not_confirm(self):
+        arr_stack.conversation_action('restart arr stack', 'a')
+        self.assertIsNone(arr_stack.conversation_action('what is the weather', 'a'))
+        with patch.object(arr_stack, '_run_recovery') as run:
+            self.assertIsNone(arr_stack.conversation_action('yes', 'a'))
+            reply = arr_stack.conversation_action('confirm', 'a')
+            run.assert_not_called()
+        self.assertIn('no longer counts', reply)
+
+    def test_bare_yes_without_request_goes_to_model(self):
+        self.assertIsNone(arr_stack.conversation_action('yes', 'a'))
+
+    def test_immediate_no_cancels_but_late_no_goes_to_model(self):
+        arr_stack.conversation_action('restart arr stack', 'a')
+        self.assertIn('cancelled', arr_stack.conversation_action('no', 'a'))
+        self.assertNotIn('a', arr_stack._pending)
+        arr_stack.conversation_action('restart arr stack', 'a')
+        arr_stack.conversation_action('something else', 'a')
+        self.assertIsNone(arr_stack.conversation_action('no', 'a'))
+        self.assertIn('a', arr_stack._pending)
+
+    def test_code_forms_confirm(self):
+        for form in ('confirm {}', '{}', 'confirm restart arr stack {}'):
+            arr_stack._pending.clear()
+            code = self.code(arr_stack.prepare_restart('a'))
+            arr_stack.conversation_action('unrelated', 'a')  # the yes window is closed
+            with patch.object(arr_stack, '_run_recovery', return_value='done'):
+                self.assertEqual(arr_stack.conversation_action(form.format(code), 'a'), 'done', form)
+            arr_stack._restart_lock.release()
 
     def test_prepare_cannot_start_and_other_session_cannot_confirm(self):
         with patch.object(nas_stack, 'start_recovery') as start:
-            prompt = arr_stack.conversation_action('restart arr stack', 'a')
-            phrase = prompt.split('exactly: ')[1]
-            self.assertIn('kills active downloads', prompt)
-            self.assertIn('invalid', arr_stack.conversation_action(phrase, 'b'))
-            self.assertIsNone(arr_stack.conversation_action('yes', 'a'))
+            code = self.code(arr_stack.conversation_action('restart arr stack', 'a'))
+            self.assertIn('invalid', arr_stack.conversation_action(f'confirm {code}', 'b'))
+            self.assertIsNone(arr_stack.conversation_action('yes', 'b'))
             start.assert_not_called()
 
     def test_confirmation_is_consumed_once(self):
-        phrase = arr_stack.prepare_restart('a').split('exactly: ')[1]
+        code = self.code(arr_stack.prepare_restart('a'))
         with patch.object(arr_stack, '_run_recovery', return_value='done') as run:
-            self.assertEqual(arr_stack.conversation_action(phrase, 'a'), 'done')
-            self.assertIn('invalid', arr_stack.conversation_action(phrase, 'a'))
+            self.assertEqual(arr_stack.conversation_action(f'confirm {code}', 'a'), 'done')
+            self.assertIn('invalid', arr_stack.conversation_action(f'confirm {code}', 'a'))
+            self.assertIsNone(arr_stack.conversation_action('yes', 'a'))
             run.assert_called_once()
 
     def test_expired_and_cancelled_approvals_cannot_run(self):
-        phrase = arr_stack.prepare_restart('a').split('exactly: ')[1]
+        code = self.code(arr_stack.prepare_restart('a'))
         stamp, token, request = arr_stack._pending['a']
         arr_stack._pending['a'] = (stamp - 601, token, request)
         with patch.object(arr_stack, '_run_recovery') as run:
-            self.assertIn('expired', arr_stack.conversation_action(phrase, 'a'))
-            phrase = arr_stack.prepare_restart('a').split('exactly: ')[1]
+            self.assertIn('expired', arr_stack.conversation_action(f'confirm {code}', 'a'))
+            code = self.code(arr_stack.prepare_restart('a'))
             arr_stack.conversation_action('cancel arr restart', 'a')
-            self.assertIn('invalid', arr_stack.conversation_action(phrase, 'a'))
+            self.assertIn('invalid', arr_stack.conversation_action(f'confirm {code}', 'a'))
             run.assert_not_called()
 
-    def test_reasking_reuses_open_token_instead_of_minting(self):
-        first = arr_stack.prepare_restart('a').split('exactly: ')[1]
-        again = arr_stack.conversation_action('restart the arr stack', 'a').split('exactly: ')[1]
-        self.assertEqual(first, again)
-        self.assertIn('already open', arr_stack.prepare_restart('a'))
+    def test_expired_request_rejects_immediate_yes(self):
+        arr_stack.prepare_restart('a')
+        stamp, token, request = arr_stack._pending['a']
+        arr_stack._pending['a'] = (stamp - 601, token, request)
+        with patch.object(arr_stack, '_run_recovery') as run:
+            self.assertIn('expired', arr_stack.conversation_action('yes', 'a'))
+            run.assert_not_called()
 
-    def test_bare_token_reprompts_with_same_token_and_does_not_run(self):
-        phrase = arr_stack.prepare_restart('a').split('exactly: ')[1]
-        token = phrase.split()[-1]
+    def test_reasking_reuses_open_code_instead_of_minting(self):
+        first = self.code(arr_stack.prepare_restart('a'))
+        again = arr_stack.conversation_action('restart the arr stack', 'a')
+        self.assertEqual(first, self.code(again))
+        self.assertIn('Same request as before', again)
+
+    def test_old_hex_phrase_reprompts_with_same_code_and_does_not_run(self):
+        code = self.code(arr_stack.prepare_restart('a'))
+        arr_stack.conversation_action('unrelated', 'a')
+        old = 'confirm restart arr stack 63d1aadd'
         with patch.object(arr_stack, '_run_recovery', return_value='done') as run:
-            reply = arr_stack.conversation_action(token, 'a')
-            self.assertIn('token without the phrase', reply)
-            self.assertIn(phrase, reply)
-            self.assertIn(f'You sent: "{token}"', reply)
+            reply = arr_stack.conversation_action(old, 'a')
+            self.assertIn(f'You sent: "{old}"', reply)
+            self.assertIn(f'confirm {code}', reply)
             run.assert_not_called()
-            # The original phrase is still valid afterwards.
-            self.assertEqual(arr_stack.conversation_action(phrase, 'a'), 'done')
+            self.assertEqual(arr_stack.conversation_action(f'confirm {code}', 'a'), 'done')
 
     def test_typo_in_phrase_echoes_input_and_keeps_request(self):
-        phrase = arr_stack.prepare_restart('a').split('exactly: ')[1]
-        token = phrase.split()[-1]
-        typo = f'confirm restrat arr stack {token}'
+        code = self.code(arr_stack.prepare_restart('a'))
+        typo = f'confirm restrat arr stack {code}'
         with patch.object(arr_stack, '_run_recovery') as run:
             reply = arr_stack.conversation_action(typo, 'a')
             self.assertIn(f'You sent: "{typo}"', reply)
-            self.assertIn(phrase, reply)
+            self.assertIn(f'confirm {code}', reply)
             run.assert_not_called()
-        self.assertEqual(arr_stack._pending['a'][1], token)
+        self.assertEqual(arr_stack._pending['a'][1], code)
 
-    def test_wrong_token_echoes_and_keeps_request(self):
-        phrase = arr_stack.prepare_restart('a').split('exactly: ')[1]
-        token = phrase.split()[-1]
-        wrong = 'confirm restart arr stack ' + ('0' * 8 if token != '0' * 8 else '1' * 8)
+    def test_wrong_code_echoes_and_keeps_request(self):
+        code = self.code(arr_stack.prepare_restart('a'))
+        wrong = f'confirm {(int(code) + 1) % 10000:04d}'
         with patch.object(arr_stack, '_run_recovery') as run:
             reply = arr_stack.conversation_action(wrong, 'a')
             self.assertIn('does not match the open request', reply)
-            self.assertIn(phrase, reply)
+            self.assertIn(f'confirm {code}', reply)
             run.assert_not_called()
+        self.assertEqual(arr_stack._pending['a'][1], code)
 
     def test_unrelated_text_with_open_request_goes_to_model(self):
         arr_stack.prepare_restart('a')
         self.assertIsNone(arr_stack.conversation_action('what is the weather', 'a'))
-        self.assertIsNone(arr_stack.conversation_action('yes', 'a'))
+        self.assertIsNone(arr_stack.conversation_action('confirmed the booking for friday', 'a'))
 
-    def test_near_miss_without_open_request_goes_to_model(self):
-        self.assertIsNone(arr_stack.conversation_action('confirm restrat arr stack deadbeef', 'a'))
+    def test_bare_number_without_request_goes_to_model(self):
+        self.assertIsNone(arr_stack.conversation_action('1080', 'a'))
+        self.assertIsNone(arr_stack.conversation_action('confirm restrat arr stack 1234', 'a'))
 
     def test_disabled_after_prepare_does_not_launch(self):
-        phrase = arr_stack.prepare_restart('a').split('exactly: ')[1]
+        code = self.code(arr_stack.prepare_restart('a'))
         with patch.dict(os.environ, {'ARR_STACK_RESTART_ENABLED': 'false'}), patch.object(arr_stack, '_run_recovery') as run:
-            self.assertIn('disabled', arr_stack.conversation_action(phrase, 'a'))
+            self.assertIn('disabled', arr_stack.conversation_action(f'confirm {code}', 'a'))
             run.assert_not_called()
 
     REQUEST = '11111111-1111-1111-1111-111111111111'

@@ -20,8 +20,11 @@ from __future__ import annotations
 
 import os
 import json
+from concurrent.futures import ThreadPoolExecutor
+import copy
 from pathlib import Path
 from threading import RLock
+import time
 from typing import Any, Iterator
 
 from dotenv import load_dotenv
@@ -95,6 +98,65 @@ def _serialize_content_block(block: Any) -> dict[str, Any]:
     if not isinstance(result, dict):
         raise TypeError("Anthropic content block did not serialize to an object")
     return result
+
+
+# The persona and tool schemas are identical across turns, but Nick's messages
+# are often more than 5 minutes apart, so a 5-minute entry expired between
+# nearly every exchange and each first reply re-processed ~12k tokens. The
+# 1-hour entry costs 2x once to write and 0.1x per read after that.
+_STATIC_CACHE = {"type": "ephemeral", "ttl": "1h"}
+_TAIL_CACHE = {"type": "ephemeral"}
+
+
+def _as_blocks(content: Any) -> list[dict[str, Any]]:
+    if isinstance(content, str):
+        return [{"type": "text", "text": content}]
+    return [dict(block) for block in content]
+
+
+def _turn_messages(history: list[dict[str, Any]], turn_context: str) -> list[dict[str, Any]]:
+    """History as sent this turn: per-turn context rides on the newest user
+    message instead of the system prompt, so the system prompt and earlier
+    history stay byte-identical from turn to turn and can be read from cache."""
+    messages = list(history)
+    if turn_context and messages and messages[-1].get("role") == "user":
+        messages[-1] = {
+            "role": "user",
+            "content": _as_blocks(messages[-1]["content"])
+            + [{"type": "text", "text": "<turn_context>\n(Supplied by JARVIS's own memory systems, "
+                "not typed by Nick.)" + turn_context + "\n</turn_context>"}],
+        }
+    return messages
+
+
+def _with_cache_breakpoints(messages: list[dict[str, Any]], anchor: int) -> list[dict[str, Any]]:
+    """Mark the conversation for caching without touching stored history.
+
+    Two markers (the persona and tool schemas hold the other two of four):
+    the newest block, so later rounds of a tool loop re-read everything
+    before it, and the reply just before this turn's user message (``anchor``),
+    which next turn's request finds by lookback because that message is sent
+    unchanged while the turn context moves on to the new user message."""
+    # Every message goes out in block form, so a message is rendered the same
+    # whether or not it carries a marker this time.
+    out = [{**message, "content": _as_blocks(message["content"])} for message in messages]
+    for index in {len(out) - 1, anchor}:
+        if 0 <= index < len(out) and out[index]["content"]:
+            blocks = out[index]["content"]
+            blocks[-1] = {**copy.deepcopy(blocks[-1]), "cache_control": _TAIL_CACHE}
+    return out
+
+
+def _log_round(started: float, first_token_at: float | None, usage: Any, round_no: int) -> None:
+    """One line per API round so slow turns can be diagnosed from the journal."""
+    total = time.monotonic() - started
+    ttft = (first_token_at - started) if first_token_at else total
+    log.info(
+        "model round %d: first token %.2fs, total %.2fs, input %s, cache read %s, cache write %s, output %s",
+        round_no, ttft, total,
+        getattr(usage, "input_tokens", "?"), getattr(usage, "cache_read_input_tokens", "?"),
+        getattr(usage, "cache_creation_input_tokens", "?"), getattr(usage, "output_tokens", "?"),
+    )
 
 
 def _stream_round_separator(text_parts: list[str], delta: str, at_round_start: bool) -> str:
@@ -287,22 +349,22 @@ class JarvisAgent:
 
     def _run_tool_loop(self) -> str:
         """Call Claude, execute any tools it wants, repeat until done."""
-        latest_user_text = str(self._history[-1].get("content", "")) if self._history else ""
-        system = self._system_blocks(latest_user_text)
+        system, messages, anchor = self._prepare_turn()
         tools = get_tool_specs()
-        messages: list[dict[str, Any]] = list(self._history)
         used_tools_this_turn = False
         tool_context: list[dict[str, Any]] = []
         self._last_turn_tools = []
 
-        for _ in range(_MAX_TOOL_TURNS):
+        for round_no in range(1, _MAX_TOOL_TURNS + 1):
+            started = time.monotonic()
             response = self._client.messages.create(  # type: ignore[union-attr]
                 model=_model(),
                 max_tokens=_MAX_TOKENS,
                 system=system,
                 tools=tools,
-                messages=messages,
+                messages=_with_cache_breakpoints(messages, anchor),
             )
+            _log_round(started, None, getattr(response, "usage", None), round_no)
 
             tool_uses = [b for b in response.content if getattr(b, "type", None) == "tool_use"]
             text_blocks = [b for b in response.content if getattr(b, "type", None) == "text"]
@@ -315,20 +377,7 @@ class JarvisAgent:
                         "content": [_serialize_content_block(block) for block in response.content],
                     }
                 )
-
-                tool_results: list[dict[str, Any]] = []
-                for use in tool_uses:
-                    tool_input = dict(use.input)
-                    result_text = execute_tool(use.name, tool_input, session_id=self._session_id)
-                    tool_context.append({"tool": use.name, "input": tool_input, "result": result_text})
-                    tool_results.append(
-                        {
-                            "type": "tool_result",
-                            "tool_use_id": use.id,
-                            "content": result_text,
-                        }
-                    )
-                messages.append({"role": "user", "content": tool_results})
+                messages.append({"role": "user", "content": self._run_tools(tool_uses, tool_context)})
                 continue
 
             text = "".join(getattr(b, "text", "") for b in text_blocks).strip()
@@ -346,26 +395,27 @@ class JarvisAgent:
         Returns (via ``return value`` in the generator) the full concatenated
         text so the caller can persist it to history.
         """
-        latest_user_text = str(self._history[-1].get("content", "")) if self._history else ""
-        system = self._system_blocks(latest_user_text)
+        system, messages, anchor = self._prepare_turn()
         tools = get_tool_specs()
-        messages: list[dict[str, Any]] = list(self._history)
         used_tools_this_turn = False
         text_parts: list[str] = []
         tool_context: list[dict[str, Any]] = []
         self._last_turn_tools = []
 
-        for _ in range(_MAX_TOOL_TURNS):
+        for round_no in range(1, _MAX_TOOL_TURNS + 1):
             at_round_start = True
+            started = time.monotonic()
+            first_token_at: float | None = None
             with self._client.messages.stream(  # type: ignore[union-attr]
                 model=_model(),
                 max_tokens=_MAX_TOKENS,
                 system=system,
                 tools=tools,
-                messages=messages,
+                messages=_with_cache_breakpoints(messages, anchor),
             ) as stream:
                 for delta in stream.text_stream:
                     if delta:
+                        first_token_at = first_token_at or time.monotonic()
                         # Claude can emit a short sentence before a tool call,
                         # then begin the post-tool answer without leading
                         # whitespace. Those are separate API rounds, so direct
@@ -381,6 +431,7 @@ class JarvisAgent:
                         text_parts.append(delta)
                         yield delta
                 final = stream.get_final_message()
+            _log_round(started, first_token_at, getattr(final, "usage", None), round_no)
 
             tool_uses = [b for b in final.content if getattr(b, "type", None) == "tool_use"]
             if final.stop_reason == "tool_use" and tool_uses:
@@ -391,19 +442,7 @@ class JarvisAgent:
                         "content": [_serialize_content_block(block) for block in final.content],
                     }
                 )
-                tool_results: list[dict[str, Any]] = []
-                for use in tool_uses:
-                    tool_input = dict(use.input)
-                    result_text = execute_tool(use.name, tool_input, session_id=self._session_id)
-                    tool_context.append({"tool": use.name, "input": tool_input, "result": result_text})
-                    tool_results.append(
-                        {
-                            "type": "tool_result",
-                            "tool_use_id": use.id,
-                            "content": result_text,
-                        }
-                    )
-                messages.append({"role": "user", "content": tool_results})
+                messages.append({"role": "user", "content": self._run_tools(tool_uses, tool_context)})
                 continue
 
             self.last_used_tools = used_tools_this_turn
@@ -418,25 +457,28 @@ class JarvisAgent:
             return
         self._history = self._history[-_HISTORY_KEEP_TURNS * 2 :]
 
-    def _system_blocks(self, latest_user_text: str) -> list[dict[str, Any]]:
-        """Build the system prompt as blocks so the stable prefix caches.
+    def _system_blocks(self) -> list[dict[str, Any]]:
+        """The system prompt: the stable persona, plus standing orders.
 
-        The persona is identical from turn to turn (until Nick changes a
-        persona setting), so it carries a cache breakpoint; together with the
-        breakpoint on the tool schemas this lets the API reuse the large
-        stable prefix on every call, including each round of a tool loop.
-        The memory block and recent tool context vary per turn and stay in a
-        separate uncached block after it.
+        Both change only when Nick changes them, so the whole system prompt is
+        byte-stable and cacheable. Anything that varies per turn goes through
+        ``_turn_context`` onto the newest user message instead.
         """
         blocks: list[dict[str, Any]] = [
             {
                 "type": "text",
                 "text": build_persona_prompt(),
-                "cache_control": {"type": "ephemeral"},
+                "cache_control": _STATIC_CACHE,
             }
         ]
-        dynamic = build_standing_orders_section(standing_orders.render_block())
-        dynamic += build_memory_section(render_memory_block(latest_user_text))
+        orders = build_standing_orders_section(standing_orders.render_block())
+        if orders.strip():
+            blocks.append({"type": "text", "text": orders})
+        return blocks
+
+    def _turn_context(self, latest_user_text: str) -> str:
+        """Memory recalled for this message, habits, tool health, recent tool results."""
+        dynamic = build_memory_section(render_memory_block(latest_user_text))
         dynamic += build_habits_section(render_habits_block())
         dynamic += build_systems_health_section(tool_health.render_block())
         context = self._recent_tool_context.get(self._session_id)
@@ -447,9 +489,34 @@ class JarvisAgent:
                 "media match, add it immediately with the default quality; do not reconfirm.\n"
                 f"{context}"
             )
-        if dynamic.strip():
-            blocks.append({"type": "text", "text": dynamic})
-        return blocks
+        return dynamic if dynamic.strip() else ""
+
+    def _prepare_turn(self) -> tuple[list[dict[str, Any]], list[dict[str, Any]], int]:
+        """System blocks, this turn's messages, and the cache anchor index."""
+        latest_user_text = str(self._history[-1].get("content", "")) if self._history else ""
+        messages = _turn_messages(self._history, self._turn_context(latest_user_text))
+        return self._system_blocks(), messages, len(self._history) - 2
+
+    def _run_tools(self, tool_uses: list[Any], tool_context: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Execute one round's tool calls, concurrently when there are several.
+
+        Claude only batches calls that don't depend on each other, and most
+        tools are network round trips (HA, Radarr, weather), so running them
+        side by side cuts a multi-tool round to its slowest call."""
+        def run(use: Any) -> tuple[dict[str, Any], str]:
+            tool_input = dict(use.input)
+            return tool_input, execute_tool(use.name, tool_input, session_id=self._session_id)
+
+        if len(tool_uses) == 1:
+            outcomes = [run(tool_uses[0])]
+        else:
+            with ThreadPoolExecutor(max_workers=min(4, len(tool_uses))) as pool:
+                outcomes = list(pool.map(run, tool_uses))
+        results: list[dict[str, Any]] = []
+        for use, (tool_input, result_text) in zip(tool_uses, outcomes):
+            tool_context.append({"tool": use.name, "input": tool_input, "result": result_text})
+            results.append({"type": "tool_result", "tool_use_id": use.id, "content": result_text})
+        return results
 
     def _save_tool_context(self, entries: list[dict[str, Any]]) -> None:
         self._last_turn_tools = [(str(e["tool"]), dict(e["input"])) for e in entries]

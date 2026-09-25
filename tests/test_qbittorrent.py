@@ -195,6 +195,20 @@ class QBittorrentTests(unittest.TestCase):
         self.assertIn("Going: 20.0%", result)
         self.assertIn("ETA unknown", result)
 
+    def test_active_downloads_counts_only_moving_incomplete_torrents(self) -> None:
+        torrents = [
+            {"name": "moving", "state": "downloading", "progress": 0.4, "dlspeed": 100},
+            {"name": "meta", "state": "metaDL", "progress": 0, "dlspeed": 0},
+            {"name": "stalled", "state": "stalledDL", "progress": 0.2, "dlspeed": 0},
+            {"name": "queued", "state": "queuedDL", "progress": 0, "dlspeed": 0},
+            {"name": "paused", "state": "pausedDL", "progress": 0.5, "dlspeed": 0},
+            {"name": "seeding", "state": "uploading", "progress": 1.0, "dlspeed": 0},
+        ]
+        with patch.object(qbit, "torrent_info", return_value=(True, torrents)):
+            self.assertEqual(qbit.active_downloads(), (True, ["moving", "meta"]))
+        with patch.object(qbit, "torrent_info", return_value=(False, "Could not reach qBittorrent")):
+            self.assertEqual(qbit.active_downloads(), (False, "Could not reach qBittorrent"))
+
     def test_empty_and_failed_torrent_lists_are_handled(self) -> None:
         with patch.object(qbit, "torrent_info", return_value=(True, [])), patch.object(
             qbit, "transfer_info", return_value=(True, {}),

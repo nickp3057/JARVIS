@@ -6,6 +6,7 @@ import json
 import os
 from pathlib import Path
 import re
+import secrets
 import threading
 import time
 from typing import Callable, NamedTuple
@@ -13,13 +14,12 @@ import uuid
 
 import requests
 
-from integrations import nas_stack, servarr_common
+from integrations import nas_stack, qbittorrent, servarr_common
 
 _ALERT_FILE = Path(__file__).resolve().parents[1] / 'memory' / 'arr_stack_alerts.json'
 _pending: dict[str, tuple[float, str, str]] = {}
 _pending_lock = threading.Lock()
 _restart_lock = threading.Lock()
-_WARNING = 'Recreating gluetun kills active downloads and takes about 3 minutes to settle; verification can take another 5 minutes.'
 
 # Radarr/Sonarr indexer-health warnings are advisory: Radarr/Sonarr already
 # gate them behind their own 6-hour threshold before we ever see them, and
@@ -212,8 +212,14 @@ def recovery_in_progress() -> bool:
 
 
 _PENDING_TTL_S = 600
-_PHRASE = 'confirm restart arr stack'
-_TOKEN_RE = re.compile(r'\b[a-f0-9]{8}\b')
+_LONG_PHRASE = 'confirm restart arr stack'
+_CODE_RE = re.compile(r'(?:confirm(?: restart(?: the)? arr stack)? )?(\d{4})')
+_RESTART_RE = re.compile(r'(?:(?:hey )?jarvis,? )?(?:(?:please|can you|could you) )?restart (?:the )?arr stack(?: please| now| for me)?')
+_YES = frozenset({'yes', 'y', 'yeah', 'yep', 'yup', 'yes please', 'yes sir', 'yes do it', 'do it',
+                  'go', 'go ahead', 'proceed', 'ok', 'okay', 'confirm', 'confirmed'})
+# Sessions whose very next message may approve with a bare "yes". Every
+# message disarms it, so a "yes" sent later can't approve a stale request.
+_armed: set[str] = set()
 
 
 def _live_pending(session_id: str, now: float) -> tuple[float, str, str] | None:
@@ -228,90 +234,123 @@ def _minutes_left(proposal: tuple[float, str, str], now: float) -> int:
     return max(1, int((_PENDING_TTL_S - (now - proposal[0])) // 60))
 
 
-def prepare_restart(session_id: str | None) -> str:
+def _launch(request_id: str) -> tuple[bool, str]:
+    if not _restart_lock.acquire(blocking=False):
+        return False, 'An arr recovery request is already being monitored, sir. No second restart was requested.'
+    try:
+        # On success the follow-up thread takes ownership of the lock and
+        # releases it when the outcome is known; it doubles as the monitor's
+        # "Jarvis recovery in progress" maintenance signal.
+        return True, _run_recovery(request_id)
+    except BaseException:
+        _restart_lock.release()
+        raise
+
+
+def prepare_restart(session_id: str | None, *, direct: bool = False) -> str:
+    """Restart at once when Nick asked directly and nothing is downloading;
+    otherwise open (or reuse) a session-bound request with a 4-digit code.
+
+    The model's tool path never restarts by itself (direct=False): it only
+    opens the request, so a restart always follows a message Nick sent."""
     if not session_id:
         return 'Restart refused: a conversation session is required, sir.'
     if not nas_stack.enabled('ARR_STACK_RESTART_ENABLED'):
         return 'Arr stack restart is disabled until the restricted NAS keys are installed and tested, sir.'
+    checked, downloading = qbittorrent.active_downloads()
+    if direct and checked and not downloading:
+        with _pending_lock:
+            _pending.pop(session_id, None)
+            _armed.discard(session_id)
+        started, reply = _launch(str(uuid.uuid4()))
+        return f'Nothing downloading, restarting now. {reply}' if started else reply
     now = time.monotonic()
     with _pending_lock:
         # Re-asking (by Nick or by the model retrying the tool) must not churn
-        # the token: reuse the open request until it expires, so a phrase he
+        # the code: reuse the open request until it expires, so a code he
         # already has in front of him stays valid.
-        existing = _live_pending(session_id, now)
-        if existing is not None:
-            return f'{_WARNING} A restart request is already open for {_minutes_left(existing, now)} more minute(s). Confirm by replying exactly: {_PHRASE} {existing[1]}'
-        request_id = str(uuid.uuid4())
-        token = uuid.uuid4().hex[:8]
-        _pending[session_id] = (now, token, request_id)
-    return f'{_WARNING} Confirm by replying exactly: {_PHRASE} {token}'
+        proposal = _live_pending(session_id, now)
+        reused = proposal is not None
+        if proposal is None:
+            proposal = (now, f'{secrets.randbelow(10000):04d}', str(uuid.uuid4()))
+            _pending[session_id] = proposal
+        _armed.add(session_id)
+    if not checked:
+        why = f"I couldn't check qBittorrent ({downloading}), so active downloads may be cut off."
+    elif downloading:
+        names = ', '.join(downloading[:3]) + (f' and {len(downloading) - 3} more' if len(downloading) > 3 else '')
+        why = f'{len(downloading)} torrent(s) actively downloading ({names}); restarting kills them.'
+    else:
+        why = 'Nothing is downloading right now.'
+    same = ' Same request as before.' if reused else ''
+    return (f'{why} Recovery takes about 3 minutes plus up to 5 to verify.{same} '
+            f'Reply "yes" now to restart, or "confirm {proposal[1]}" within {_minutes_left(proposal, now)} minute(s), sir.')
 
 
-def _looks_like_confirmation_attempt(normalized: str, token: str) -> bool:
-    """A near miss of the confirm phrase while a request is open.
+def _looks_like_confirmation_attempt(normalized: str) -> bool:
+    """A near miss of the confirmation while a request is open.
 
-    Deliberately narrow: a bare "yes" still goes to the model (it may be
-    answering something else), but anything carrying the token, starting with
-    "confirm", or close to the phrase is clearly aimed at this gate.
-    """
-    if token in normalized or _TOKEN_RE.fullmatch(normalized):
+    Deliberately narrow: a late bare "yes" still goes to the model (it may be
+    answering something else), but a bare code, anything starting with
+    "confirm" about the restart, or text close to the long phrase is clearly
+    aimed at this gate."""
+    if re.fullmatch(r'\d{3,5}|[a-f0-9]{8}', normalized):
         return True
-    if normalized.startswith(('confirm', 'confrim', 'comfirm')) and any(w in normalized for w in ('restart', 'arr', 'stack', 'rsetart', 'retsart')):
+    if normalized.startswith(('confirm', 'confrim', 'comfirm')) and (
+            normalized in _YES or re.search(r'\d|restart|arr|stack|rsetart|retsart', normalized)):
         return True
     words = normalized.split()
-    if words and _TOKEN_RE.fullmatch(words[-1]):
+    if words and re.fullmatch(r'\d+|[a-f0-9]{8}', words[-1]):
         body = ' '.join(words[:-1])
-        return difflib.SequenceMatcher(None, body, _PHRASE).ratio() >= 0.75
-    return difflib.SequenceMatcher(None, normalized, _PHRASE).ratio() >= 0.8
+        return difflib.SequenceMatcher(None, body, _LONG_PHRASE).ratio() >= 0.75
+    return difflib.SequenceMatcher(None, normalized, _LONG_PHRASE).ratio() >= 0.8
 
 
 def _mismatch_reply(sent: str, proposal: tuple[float, str, str], now: float, reason: str) -> str:
     shown = sent.strip().replace('"', "'")[:120]
-    return (f'{reason} You sent: "{shown}". I need exactly: {_PHRASE} {proposal[1]} '
+    return (f'{reason} You sent: "{shown}". Reply "confirm {proposal[1]}" '
             f'— same request, still open for {_minutes_left(proposal, now)} more minute(s), sir. No restart was sent.')
 
 
 def conversation_action(text: str, session_id: str) -> str | None:
     """Runs only on original user text at the agent boundary, never tool args."""
     normalized = ' '.join(text.lower().strip().split()).rstrip('.!?')
-    if normalized in {'restart arr stack', 'restart the arr stack', 'please restart arr stack', 'please restart the arr stack', 'can you restart the arr stack', 'can you restart arr stack'}:
-        return prepare_restart(session_id)
-    if normalized in {'cancel arr restart', 'cancel restart arr stack'}:
+    with _pending_lock:
+        armed = session_id in _armed
+        _armed.discard(session_id)
+    if _RESTART_RE.fullmatch(normalized):
+        return prepare_restart(session_id, direct=True)
+    if normalized in {'cancel arr restart', 'cancel restart arr stack'} or (
+            armed and normalized in {'cancel', 'no', 'nope', 'nevermind', 'never mind', 'not now'}):
         with _pending_lock:
             _pending.pop(session_id, None)
         return 'Arr stack restart cancelled, sir.'
-    match = re.fullmatch(r'confirm restart arr stack ([a-f0-9]{8})', normalized)
+    match = _CODE_RE.fullmatch(normalized)
+    bare_yes = match is None and armed and normalized in _YES
     now = time.monotonic()
-    if not match:
+    if match is None and not bare_yes:
         with _pending_lock:
             proposal = _live_pending(session_id, now)
-        if proposal is not None and _looks_like_confirmation_attempt(normalized, proposal[1]):
-            if _TOKEN_RE.fullmatch(normalized):
-                reason = 'That was the token without the phrase.'
+        if proposal is not None and _looks_like_confirmation_attempt(normalized):
+            if normalized in _YES:
+                reason = f'Another message came in after my prompt, so "{normalized}" alone no longer counts.'
             else:
-                reason = "That doesn't match the confirmation phrase."
+                reason = "That doesn't match the confirmation."
             return _mismatch_reply(text, proposal, now, reason)
         return None
     with _pending_lock:
         proposal = _live_pending(session_id, now)
         if not proposal:
+            if normalized.isdigit():
+                return None  # just a number; nothing is waiting for it
             return 'That restart confirmation is invalid or expired, sir. Ask to restart the arr stack again.'
-        if match[1] != proposal[1]:
-            return _mismatch_reply(text, proposal, now, 'That token does not match the open request.')
+        if match is not None and match[1] != proposal[1]:
+            return _mismatch_reply(text, proposal, now, 'That code does not match the open request.')
         # Consume before any network side effect, including ambiguous failures.
         _pending.pop(session_id, None)
     if not nas_stack.enabled('ARR_STACK_RESTART_ENABLED'):
         return 'Arr stack restart is now disabled; no restart was requested, sir.'
-    if not _restart_lock.acquire(blocking=False):
-        return 'An arr recovery request is already being monitored, sir. No second restart was requested.'
-    try:
-        # On success the follow-up thread takes ownership of the lock and
-        # releases it when the outcome is known; it doubles as the monitor's
-        # "Jarvis recovery in progress" maintenance signal.
-        return _run_recovery(proposal[2])
-    except BaseException:
-        _restart_lock.release()
-        raise
+    return _launch(proposal[2])[1]
 
 
 # Recovery chain timing on the NAS (ops/nas/recover_stack.sh): ~25 s to
