@@ -114,6 +114,20 @@ class AlertTracker:
     def has_unconfirmed(self) -> bool:
         return bool(self.pending) or any(not s['announced'] for s in self.active.values())
 
+    def failing(self) -> dict[str, tuple[str, float]]:
+        """Conditions past the confirmation hysteresis: key -> (detail, first_seen).
+
+        Includes ones the maintenance hold kept pending and ones still
+        waiting out ``ARR_STACK_RECOVERY_CONFIRM_CHECKS``. This is what
+        ``brain.arr_incidents`` decides pushes from; ``notices()`` remains
+        the per-condition transition log."""
+        confirm_checks = nas_stack.count('ARR_STACK_ALERT_CONFIRM_CHECKS', 3)
+        out = {key: (str(state['detail']), float(state['first_seen'])) for key, state in self.active.items()}
+        for key, candidate in self.pending.items():
+            if int(candidate['count']) >= (1 if key == 'dht-zero' else confirm_checks):
+                out[key] = (str(candidate['detail']), float(candidate['first_seen']))
+        return out
+
     def notices(self, snapshot: dict, now: float | None = None) -> list[Notice]:
         now = time.time() if now is None else now
         nodes = snapshot.get('dht_nodes')

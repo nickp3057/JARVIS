@@ -182,6 +182,30 @@ class ApnsSenderTests(unittest.TestCase):
         body = __import__("json").loads(request.content)
         self.assertEqual(body["aps"]["alert"], {"title": "Jarvis — arr stack", "body": "Radarr down"})
 
+    def test_incident_grouping_sets_thread_collapse_and_passive(self):
+        notifications.register_device(TOKEN, "sandbox")
+        notifications.send("T", "loud", thread_id="arr-stack-abc", collapse_id="arr-stack-abc")
+        notifications.send("T", "quiet", thread_id="arr-stack-abc", collapse_id="arr-stack-abc", passive=True)
+        loud, quiet = self.requests
+        loud_body, quiet_body = (__import__("json").loads(r.content)["aps"] for r in (loud, quiet))
+        self.assertEqual(loud.headers["apns-collapse-id"], "arr-stack-abc")
+        self.assertEqual(loud_body["thread-id"], "arr-stack-abc")
+        self.assertEqual((loud.headers["apns-priority"], loud_body["sound"]), ("10", "default"))
+        self.assertNotIn("interruption-level", loud_body)
+        self.assertEqual((quiet.headers["apns-priority"], quiet_body["interruption-level"]), ("5", "passive"))
+        self.assertNotIn("sound", quiet_body)
+        # Ungrouped sends keep the old payload exactly.
+        notifications.send("T", "plain")
+        self.assertNotIn("apns-collapse-id", self.requests[-1].headers)
+        self.assertNotIn("thread-id", __import__("json").loads(self.requests[-1].content)["aps"])
+
+    def test_ha_fallback_carries_group_and_tag(self):
+        with patch.dict(os.environ, {"ARR_STACK_NOTIFY_SERVICE": "notify.mobile_app_phone"}), \
+             patch("integrations.home_assistant.call_service", return_value=(True, "ok")) as call:
+            notifications.send("T", "m", thread_id="arr-stack-abc", collapse_id="arr-stack-abc", passive=True)
+        data = call.call_args.kwargs["service_data"]["data"]
+        self.assertEqual(data, {"group": "arr-stack-abc", "tag": "arr-stack-abc", "push": {"interruption-level": "passive"}})
+
     def test_unregistered_device_is_pruned_and_ha_fallback_used(self):
         notifications.register_device(TOKEN, "production")
         self.responses[("api.push.apple.com", TOKEN)] = (410, "Unregistered")

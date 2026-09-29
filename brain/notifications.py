@@ -182,10 +182,23 @@ def _apns_post(environment: str, device: str, payload: bytes, headers: dict[str,
     return response.status_code, reason or response.text[:80]
 
 
-def _send_apns(title: str, message: str) -> tuple[bool, str]:
-    """Push to every registered device; success if at least one accepted it."""
+def _send_apns(title: str, message: str, *, thread_id: str = "", collapse_id: str = "",
+               passive: bool = False) -> tuple[bool, str]:
+    """Push to every registered device; success if at least one accepted it.
+
+    ``thread_id`` groups notifications on the phone; ``collapse_id`` makes a
+    newer push replace the older one instead of stacking. ``passive`` lands
+    quietly in Notification Center (no sound, no banner). All three are
+    standard APNs fields iOS handles itself; the app needs no code for them."""
     config = _apns_config()
-    body = {"aps": {"alert": {"title": title[:120], "body": message[:1500]}, "sound": "default"}, "source": "jarvis"}
+    aps: dict[str, object] = {"alert": {"title": title[:120], "body": message[:1500]}}
+    if passive:
+        aps["interruption-level"] = "passive"
+    else:
+        aps["sound"] = "default"
+    if thread_id:
+        aps["thread-id"] = thread_id[:64]
+    body = {"aps": aps, "source": "jarvis"}
     payload = json.dumps(body, ensure_ascii=False).encode("utf-8")
     with _apns_lock:
         with _lock:
@@ -200,10 +213,12 @@ def _send_apns(title: str, message: str) -> tuple[bool, str]:
                 "authorization": f"bearer {token}",
                 "apns-topic": config["BUNDLE_ID"],
                 "apns-push-type": "alert",
-                "apns-priority": "10",
+                "apns-priority": "5" if passive else "10",
                 # Alerts older than six hours are stale; let APNs drop them.
                 "apns-expiration": str(int(time.time()) + 6 * 3600),
             }
+            if collapse_id:
+                headers["apns-collapse-id"] = collapse_id[:64]
             status, reason = _apns_post(environment, device, payload, headers)
             if status == 403 and reason == "ExpiredProviderToken":
                 token = _provider_token(config, force=True)
@@ -246,12 +261,24 @@ def ha_service() -> str:
     return service if re.fullmatch(r"mobile_app_[a-z0-9_]+", service) else ""
 
 
-def _send_home_assistant(title: str, message: str) -> tuple[bool, str]:
+def _send_home_assistant(title: str, message: str, *, thread_id: str = "", collapse_id: str = "",
+                         passive: bool = False) -> tuple[bool, str]:
     service = ha_service()
     if not service:
         return False, "No HA mobile_app notify service configured"
     from integrations import home_assistant
-    ok, detail = home_assistant.call_service("notify", service, service_data={"title": title[:120], "message": message[:1800]})
+    service_data: dict[str, object] = {"title": title[:120], "message": message[:1800]}
+    # HA companion equivalents: group -> thread-id, tag -> collapse-id.
+    data: dict[str, object] = {}
+    if thread_id:
+        data["group"] = thread_id[:64]
+    if collapse_id:
+        data["tag"] = collapse_id[:64]
+    if passive:
+        data["push"] = {"interruption-level": "passive"}
+    if data:
+        service_data["data"] = data
+    ok, detail = home_assistant.call_service("notify", service, service_data=service_data)
     return ok, "sent" if ok else str(detail)[:200]
 
 
@@ -260,8 +287,10 @@ def configured() -> bool:
     return app_push_status()[0] or bool(ha_service())
 
 
-def send(title: str, message: str) -> Delivery:
+def send(title: str, message: str, *, thread_id: str = "", collapse_id: str = "",
+         passive: bool = False) -> Delivery:
     """Deliver to the phone through the first working channel."""
+    grouping = {k: v for k, v in (("thread_id", thread_id), ("collapse_id", collapse_id), ("passive", passive)) if v}
     message = (message or "").strip()
     if not message:
         return Delivery(False, None, "empty message")
@@ -269,7 +298,7 @@ def send(title: str, message: str) -> Delivery:
     ready, reason = app_push_status()
     if ready:
         try:
-            ok, detail = _send_apns(title, message)
+            ok, detail = _send_apns(title, message, **grouping)
         except Exception as exc:  # noqa: BLE001 -- fall back to HA, never raise
             ok, detail = False, f"{type(exc).__name__}: {exc}"
         if ok:
@@ -277,7 +306,7 @@ def send(title: str, message: str) -> Delivery:
         failures.append(f"app push: {detail}")
         log.warning("Companion push failed, falling back to Home Assistant: %s", detail)
     try:
-        ok, detail = _send_home_assistant(title, message)
+        ok, detail = _send_home_assistant(title, message, **grouping)
     except Exception as exc:  # noqa: BLE001 -- a notifier must never kill a monitor
         ok, detail = False, f"{type(exc).__name__}: {exc}"
     if ok:

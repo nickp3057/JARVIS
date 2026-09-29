@@ -63,6 +63,7 @@ Pearson-Stark-Jarvis/
 │   ├── tool_health.py       Self-diagnosis ledger: per-tool failures, degraded flags, prompt warning
 │   ├── notifications.py     Phone alert router: companion push (APNs, stubbed) then HA notify fallback
 │   ├── arr_stack.py         Arr alert hysteresis/per-indexer tracking, restart confirmation gate, async recovery follow-up
+│   ├── arr_incidents.py     Arr push policy: watchdog-recovery hold + summary, minimum downtime, grouped incidents, daily indexer digest
 │   ├── self_repair.py       Governed self-repair: diagnose a subsystem, stage a bounded fix, apply on approval
 │   ├── study_brief.py       Daily quiz/exam countdown: settings, planning, JARVIS-composed text
 │   ├── timers.py            Timer store: set/cancel/pause/resume/dismiss/alarming state
@@ -1085,9 +1086,18 @@ hand-test commands. Installation hardens previously writable path/SSH ACLs.
   a per-service up / still starting / failed report. A lost result never
   auto-retries. A typo'd phrase, wrong code, old 8-character token, or a late
   bare "confirm" re-prompts with the same code and echoes what was sent.
-- The runtime alerts after 3 consecutive failing polls (10 for zero DHT),
-  recovers after 2 clean ones, holds new alerts during NAS/Jarvis recoveries,
-  and tracks each Prowlarr indexer separately. Phone delivery goes through
+- The runtime confirms a condition after 3 consecutive failing polls (10 for
+  zero DHT), recovers after 2 clean ones, and tracks each Prowlarr indexer
+  separately. `brain/arr_incidents.py` then decides what reaches the phone:
+  a condition pushes only after 4 minutes down (zero DHT/qBit disconnected
+  wait 25 minutes for the NAS watchdog); when the NAS watchdog acts, all arr
+  pushes are held for 20 minutes and replaced by one "Recovered after
+  watchdog: ..., took N min" summary or one "still failing" alert (indexer
+  backoff left after a recreate is expected and never counts as failing); one
+  incident = one APNs thread/collapse id, so updates replace each other; an
+  indexer backed off for 6h moves to one passive daily digest (09:00) that
+  suggests re-saving it in the Prowlarr UI. A NAS unreachable for 10 minutes
+  breaks through the hold. See ARCHITECTURE.md "Incident push policy". Phone delivery goes through
   `brain/notifications.py` (companion push stubbed; HA fallback is primary). HA
   `notify.mobile_app_nicks_iphone_17_pro` was discovered as Nick's existing
   phone channel; the inbox/voice path also receives each alert. HA unavailability

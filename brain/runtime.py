@@ -241,31 +241,36 @@ class JarvisRuntime:
         return started is not None and time.monotonic() - started < grace
 
     def _arr_stack_monitor_loop(self) -> None:
+        from brain.arr_incidents import IncidentPolicy, run_cycle
         from brain.arr_stack import AlertTracker, recovery_in_progress
         from integrations import nas_stack
         tracker = AlertTracker()
+        policy = IncidentPolicy()
         while not self._stop_monitors.is_set():
             try:
                 snapshot = nas_stack.poll_health()
                 # Only spend the SSH round trip when something looks wrong and
-                # the read-only key exists; the result feeds both the
-                # maintenance hold and the watchdog note.
+                # the read-only key exists; the result feeds the maintenance
+                # hold, the watchdog-recovery hold and the watchdog note.
                 status = None
                 if (snapshot["issues"] or tracker.has_unconfirmed() or snapshot.get("dht_nodes") == 0) and nas_stack.status_configured():
                     status = nas_stack.watchdog_status()
                 snapshot["maintenance"] = recovery_in_progress() or nas_stack.recovery_active(status)
-                notices = tracker.notices(snapshot)
-                for notice in notices:
-                    log.info("Arr stack condition %s: %s (%s)", notice.key, notice.kind, notice.severity)
-                # Critical and warning (per-indexer) notices are pushed;
-                # advisory ones only reach the inbox.
-                critical = [n.text for n in notices if n.severity in ("critical", "warning")]
-                advisory = [n.text for n in notices if n.severity == "advisory"]
-                if critical:
-                    note = nas_stack.watchdog_note(status) if status is not None else ""
-                    message = "; ".join(critical) + "." + (f" {note}" if note else "")
-                    self.announce(message, source="arr-stack", title="Arr stack health alert")
-                    self.push_to_phone("Jarvis — arr stack", message, source="arr-stack")
+                # brain/arr_incidents.py decides what reaches the phone: holds
+                # during watchdog recoveries, minimum downtime, one grouped
+                # notification per incident, daily digest for long backoff.
+                pushes, advisory = run_cycle(tracker, policy, snapshot, status)
+                for push in pushes:
+                    log.info("Arr stack push (%s, %s): %s", push.kind, push.thread_id, push.message)
+                    message = push.message
+                    if push.kind in ("alert", "urgent") and status is not None:
+                        message += f" {nas_stack.watchdog_note(status)}"
+                    if push.passive:
+                        self.record_event(kind="notice", source="arr-stack", title="Arr stack update", detail=message[:500])
+                    else:
+                        self.announce(message, source="arr-stack", title="Arr stack health alert")
+                    self.push_to_phone(push.title, message, source="arr-stack", thread_id=push.thread_id,
+                                       collapse_id=push.collapse_id, passive=push.passive)
                 if advisory:
                     # Inbox/event feed only -- no announce, no phone push.
                     self.record_event(kind="notice", source="arr-stack", title="Arr stack advisory", detail="; ".join(advisory))
@@ -282,7 +287,7 @@ class JarvisRuntime:
         self.announce(message, source="arr-stack", title="Arr recovery result")
         self.push_to_phone(title, message, source="arr-stack")
 
-    def push_to_phone(self, title: str, message: str, *, source: str) -> bool:
+    def push_to_phone(self, title: str, message: str, *, source: str, **grouping) -> bool:
         """Send a proactive alert to Nick's phone via brain.notifications.
 
         Companion push first, Home Assistant as fallback. A failed delivery
@@ -290,7 +295,7 @@ class JarvisRuntime:
         from brain import notifications
         if not notifications.configured():
             return False
-        delivery = notifications.send(title, message)
+        delivery = notifications.send(title, message, **grouping)
         if not delivery.delivered:
             self.record_event(kind="alert", source=source, title="Phone alert delivery failed",
                               detail=f"Alert remains in the runtime inbox. {delivery.detail}"[:500])

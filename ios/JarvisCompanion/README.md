@@ -210,6 +210,12 @@ Home shows allowlisted toggles, service health, and links. It refreshes while vi
 foregrounded and supports pull-to-refresh. Paused/stopped torrents stay visible
 so Resume remains available. Service failures retain stale data with an error.
 
+Arr-stack alerts arrive grouped: every push from one incident shares an APNs
+`thread-id` and `apns-collapse-id` (so an update replaces the previous
+banner), and recoveries, summaries and the daily indexer digest use
+`interruption-level: passive`. All three are handled by iOS itself; the app
+has no code for them.
+
 The Now card is backed by the typed `/api/now` snapshot and shows
 active/alarming timers, open reminders, the next calendar event, and upcoming
 calendar items whose titles contain quiz, test, exam, midterm, or final. Those

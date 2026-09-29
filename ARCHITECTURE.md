@@ -430,6 +430,44 @@ succeeds if any device accepts. The app registers through
 and the first missing setup piece. A failed delivery on every channel records
 a "Phone alert delivery failed" inbox event.
 
+Incident push policy (`brain/arr_incidents.py`, 2026-09-29): the tracker
+decides what is failing; the policy decides what is pushed. Root cause of the
+noise: a 2-5 minute upstream outage restarts gluetun's VPN, qBittorrent's DHT
+goes stale, the NAS DHT watchdog acts ~15 minutes later, and the recreate it
+runs made Radarr/Sonarr/qBit look unreachable and Prowlarr report "all
+indexer proxies unavailable" while Byparr cold-starts, i.e. 6-10 pushes per
+incident, about six incidents a day.
+- Watchdog hold: when the read-only status shows a new watchdog/shared
+  recovery action (recovery record `started_at`, or the `.last_action` /
+  `.rotate_cooldown` stamps; NAS clock skew cancels via `observed_at`), every
+  arr push is held for `ARR_STACK_WATCHDOG_HOLD_S`. At the end the stack is
+  re-checked: healthy gives one passive "Recovered after watchdog: <what>,
+  took N min" (N = action to first clean poll); anything failing gives one
+  alert listing it. Prowlarr indexer backoff is excluded from that check: it
+  persists after a recreate until the indexers are re-saved in the Prowlarr
+  UI, so those indexers are noted in the summary, stay quiet, and reach the
+  daily digest if they last. A Jarvis-requested recovery gets no summary (its
+  own follow-up reports). A stamp with no matching recovery record is described
+  as a qBittorrent restart (the NAS's stage 1).
+- Minimum downtime: a condition pushes only while still present and after
+  `ARR_STACK_MIN_DOWNTIME_S`; zero DHT and "qBittorrent disconnected" wait
+  `ARR_STACK_DHT_ALERT_AFTER_S` instead, so the watchdog gets its turn. A
+  condition that never pushed never sends "Recovered".
+- Grouping: every push in one incident carries the same APNs `thread-id` and
+  `apns-collapse-id` (`arr-stack-<id>`; HA fallback: `group`/`tag`) and
+  restates what is still failing, since it replaces the previous banner.
+  Recoveries are passive (no sound). A new incident starts once nothing is
+  failing or held.
+- Escalation: one "Still failing after Nh" per `ARR_STACK_ESCALATION_INTERVAL_S`
+  for stack conditions; never for indexers.
+- Indexer digest: an indexer backed off for `ARR_STACK_INDEXER_DIGEST_AFTER_S`
+  leaves the incident silently and is listed in one passive daily digest at
+  `ARR_STACK_DIGEST_HOUR` saying it may need re-saving in the Prowlarr UI.
+- Urgent: all four APIs plus the status SSH down for
+  `ARR_STACK_NAS_DOWN_ALERT_S` pushes even during a hold.
+State persists in `memory/arr_stack_incidents.json`. Advisory Radarr/Sonarr
+health lines still go to the inbox only. Replay tests: `tests/test_arr_incidents.py`.
+
 Per-indexer alerts: with a Prowlarr key, each poll reads
 `/api/v1/indexerstatus`; every enabled indexer whose failure backoff
 (`disabledTill`) is in the future becomes its own `indexer:<id>` condition
@@ -476,8 +514,14 @@ Admin-only environment controls (not model-editable settings):
 | `ARR_STACK_RECOVERY_CONFIRM_CHECKS` | 2; consecutive clean polls before "Recovered" |
 | `ARR_STACK_DHT_ZERO_CHECKS` | 10; zero-DHT polls before alerting (a normal recovery holds DHT at zero for ~8 min) |
 | `ARR_STACK_MAINTENANCE_SETTLE_S` | 300; hold new alerts this long after a NAS recovery finishes (needs the status key) |
-| `ARR_STACK_ESCALATION_INTERVAL_S` | 21600; one reminder per window while unresolved |
-| `ARR_STACK_POST_RECOVERY_GRACE_S` | 300; hold brand-new conditions after a critical recovery |
+| `ARR_STACK_ESCALATION_INTERVAL_S` | 21600; one reminder per window while unresolved (stack conditions only; indexers go to the digest) |
+| `ARR_STACK_POST_RECOVERY_GRACE_S` | 300; tracker-internal grace after a critical recovery (pushes are decided by the incident policy) |
+| `ARR_STACK_WATCHDOG_HOLD_S` | 1200; hold all arr pushes this long after a NAS watchdog/shared recovery action, then one summary or one alert; 0 disables |
+| `ARR_STACK_MIN_DOWNTIME_S` | 240; a condition must be failing this long before it pushes (shorter blips send nothing, including no "Recovered") |
+| `ARR_STACK_DHT_ALERT_AFTER_S` | 1500; zero DHT / qBit disconnected wait this long from the first zero so the NAS watchdog (acts at ~15 min) goes first |
+| `ARR_STACK_NAS_DOWN_ALERT_S` | 600; all APIs and the status SSH down this long pushes even during a hold |
+| `ARR_STACK_INDEXER_DIGEST_AFTER_S` | 21600; indexer backoff older than this moves to the daily digest |
+| `ARR_STACK_DIGEST_HOUR` | 9; local hour of the passive daily indexer digest |
 | `ARR_STACK_NOTIFY_SERVICE` | blank; HA `notify.mobile_app_*` service (fallback channel; `JARVIS_NOTIFY_HA_SERVICE` overrides) |
 | `APNS_ENABLED`, `APNS_KEY_PATH`, `APNS_KEY_ID`, `APNS_TEAM_ID`, `APNS_BUNDLE_ID` | companion push (token-based APNs over HTTP/2); primary once enabled and a device has registered |
 | `PROWLARR_URL`, `PROWLARR_API_KEY` | API base and optional key; v1 health plus per-indexer `indexerstatus` with key, `/ping` without |
