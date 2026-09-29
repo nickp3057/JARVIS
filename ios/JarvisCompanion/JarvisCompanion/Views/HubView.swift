@@ -459,6 +459,8 @@ struct HubView: View {
                 .tint(torrent.isPaused ? JarvisTheme.amber : JarvisTheme.cyan)
             HStack {
                 Text("\(Int(min(max(torrent.progress, 0), 1) * 100))%")
+                // qBittorrent reports 0 until the torrent's metadata arrives.
+                if torrent.size > 0 { Text("of \(Self.bytes(Int64(torrent.size)))") }
                 Text("· \(torrent.isPaused ? "Waiting" : Self.rate(torrent.dlSpeed))")
                 Spacer()
                 Text(Self.eta(torrent.eta))
@@ -499,6 +501,7 @@ struct HubView: View {
                         ProgressView(value: min(max(item.progress, 0), 1)).tint(JarvisTheme.blue)
                         HStack {
                             Text(item.status)
+                            if item.size > 0 { Text("· \(Self.bytes(Int64(item.size)))") }
                             Spacer()
                             Text(item.timeLeft)
                         }

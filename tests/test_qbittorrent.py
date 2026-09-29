@@ -65,6 +65,7 @@ class QBittorrentTests(unittest.TestCase):
             "dlspeed": 2 * 1024 * 1024,
             "eta": 5400,
             "state": "downloading",
+            "size": 2 * 1024 ** 3,
         }]
         transfer = {
             "dl_info_speed": 2 * 1024 * 1024,
@@ -75,7 +76,7 @@ class QBittorrentTests(unittest.TestCase):
             qbit, "transfer_info", return_value=(True, transfer),
         ):
             result = qbit.download_status()
-        self.assertIn("Example Movie: 62.5%", result)
+        self.assertIn("Example Movie: 62.5% of 2.0 GB", result)
         self.assertIn("1 hour 30 minutes", result)
         self.assertIn("2.0 MB/s down", result)
 

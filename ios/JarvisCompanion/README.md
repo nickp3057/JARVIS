@@ -208,7 +208,10 @@ glass-panel cards. Today shows Now, media storage, a briefing shortcut, and
 service health; Media shows storage, transfers, queues, and service links;
 Home shows allowlisted toggles, service health, and links. It refreshes while visible and
 foregrounded and supports pull-to-refresh. Paused/stopped torrents stay visible
-so Resume remains available. Service failures retain stale data with an error.
+so Resume remains available. Each transfer shows its total size next to the
+percentage ("42% of 2.0 GB", as qBittorrent's Size column; hidden until a
+magnet's metadata arrives), and Radarr/Sonarr queue rows show theirs next to
+the status. Service failures retain stale data with an error.
 
 Arr-stack alerts arrive grouped: every push from one incident shares an APNs
 `thread-id` and `apns-collapse-id` (so an update replaces the previous

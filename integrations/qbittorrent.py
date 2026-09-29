@@ -297,8 +297,10 @@ def download_status(scope: str = "downloading") -> str:
     lines = [header]
     for item in payload[:20]:
         progress = round(float(item.get("progress", 0) or 0) * 100, 1)
+        # size is 0 until a magnet's metadata arrives.
+        size = f" of {_bytes(item['size'])}" if isinstance(item.get("size"), (int, float)) and item["size"] > 0 else ""
         lines.append(
-            f"{item.get('name', 'Unknown')}: {progress}% — "
+            f"{item.get('name', 'Unknown')}: {progress}%{size} — "
             f"{_bytes(item.get('dlspeed'))}/s — {_duration(item.get('eta'))} — "
             f"{item.get('state', 'unknown')}"
         )
