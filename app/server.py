@@ -228,7 +228,15 @@ def chat_stream(request: ChatRequest, _: None = Depends(authorize)) -> Streaming
     return StreamingResponse(
         chunks(),
         media_type="text/plain; charset=utf-8",
-        headers={"X-Jarvis-Session-ID": session_id},
+        headers={
+            "X-Jarvis-Session-ID": session_id,
+            # URLSession sniffs up to 512 bytes of text/plain before handing
+            # any to the app, so most replies arrived all at once. nosniff
+            # turns that off; the others stop proxies from buffering.
+            "X-Content-Type-Options": "nosniff",
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        },
     )
 
 

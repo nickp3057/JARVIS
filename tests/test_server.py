@@ -114,6 +114,8 @@ class ServerTests(unittest.TestCase):
         ) as response:
             self.assertEqual(response.status_code, 200)
             session_id = response.headers["x-jarvis-session-id"]
+            # Without nosniff, iOS buffers the first 512 bytes (most replies).
+            self.assertEqual(response.headers["x-content-type-options"], "nosniff")
             self.assertEqual(response.read().decode(), "Stream: hello")
 
         transcript = self.client.get(f"/sessions/{session_id}", headers=self.headers).json()

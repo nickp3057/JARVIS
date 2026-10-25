@@ -678,3 +678,12 @@ JARVIS to `update_setting ANTHROPIC_MODEL auto`). Then check `jarvis.log` for
 "Conversation model for family haiku: ... -> claude-haiku-5-5" and do a voice
 turn and a tool turn (e.g. "what's downloading") to confirm latency and tool
 use on the new model.
+
+## 2026-10-25 companion streaming fix
+
+Nick: replies "don't stream to my app". The app does use `/chat/stream`, but
+URLSession content-sniffs up to 512 bytes of a `text/plain` body before
+delivering any, and most JARVIS replies are shorter, so they arrived whole.
+`/chat/stream` now sends `X-Content-Type-Options: nosniff` (plus
+`Cache-Control: no-cache`, `X-Accel-Buffering: no`). **Verify live** after
+restarting jarvis-api: a short reply should type out in the app.
