@@ -687,3 +687,15 @@ delivering any, and most JARVIS replies are shorter, so they arrived whole.
 `/chat/stream` now sends `X-Content-Type-Options: nosniff` (plus
 `Cache-Control: no-cache`, `X-Accel-Buffering: no`). **Verify live** after
 restarting jarvis-api: a short reply should type out in the app.
+
+## 2026-10-25 no more guessed media adds; quieter tool turns
+
+Nick saw "I assume you mean the 2016 movie starring Matthew McConaughey...
+it's added": the model picked one of several matches and added it. Now, when
+the session's latest `find_movie`/`find_series` offered more than one title,
+`add_movie`/`add_series` don't write: they propose the exact title and profile
+through `brain/confirm_gate.py`, and the add runs only on Nick's next "yes" /
+"approve <code>". A single match keeps the one-step "yes → added" flow.
+Persona: no text before or between tool calls (speak once, after the last
+result), and never assume which of several matches he means.
+Test: `test_pick_from_several_matches_needs_nicks_yes`.

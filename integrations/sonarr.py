@@ -186,30 +186,44 @@ def add_series(
         }
     )
 
-    outcome = servarr.call(_SERVICE, "POST", "/api/v3/series", json=body)
-    if not outcome.ok:
-        if outcome.kind != "timeout":
-            return str(outcome.payload)
-        # The add may have landed before the answer timed out. Never re-POST
-        # (that could duplicate it); check the library instead.
-        ok, check = _lookup(f"tvdb:{tvdb_id}")
-        landed = ok and isinstance(check, list) and any(
-            _in_library(entry) for entry in check if entry.get("tvdbId") == tvdb_id
-        )
-        if not landed:
-            return (
-                f"{outcome.payload} I couldn't confirm whether {series.get('title', 'it')} was added; "
-                "ask me to check before trying again, sir."
+    def post() -> str:
+        outcome = servarr.call(_SERVICE, "POST", "/api/v3/series", json=body)
+        if not outcome.ok:
+            if outcome.kind != "timeout":
+                return str(outcome.payload)
+            # The add may have landed before the answer timed out. Never re-POST
+            # (that could duplicate it); check the library instead.
+            ok, check = _lookup(f"tvdb:{tvdb_id}")
+            landed = ok and isinstance(check, list) and any(
+                _in_library(entry) for entry in check if entry.get("tvdbId") == tvdb_id
             )
+            if not landed:
+                return (
+                    f"{outcome.payload} I couldn't confirm whether {series.get('title', 'it')} was added; "
+                    "ask me to check before trying again, sir."
+                )
 
-    media_selections.consume(_SERVICE, session_id)
+        media_selections.consume(_SERVICE, session_id)
 
-    year = series.get("year", "")
-    monitor_phrase = "future episodes" if monitor_strategy == "future" else f"'{monitor_strategy}'"
-    return (
-        f"Added {series.get('title', 'the show')}{f' ({year})' if year else ''} to Sonarr "
-        f"on the {profile_detail} profile, monitoring {monitor_phrase}. Search is underway, sir."
-    )
+        year = series.get("year", "")
+        monitor_phrase = "future episodes" if monitor_strategy == "future" else f"'{monitor_strategy}'"
+        return (
+            f"Added {series.get('title', 'the show')}{f' ({year})' if year else ''} to Sonarr "
+            f"on the {profile_detail} profile, monitoring {monitor_phrase}. Search is underway, sir."
+        )
+
+    if media_selections.candidate_count(_SERVICE, session_id) > 1:
+        # The lookup offered several titles, so the model may have guessed
+        # which one Nick meant. Make him say yes to this exact title.
+        from brain import confirm_gate
+
+        year = series.get("year", "")
+        return confirm_gate.propose(
+            session_id,
+            f"add {series.get('title', 'it')}{f' ({year})' if year else ''} to Sonarr on the {profile_detail} profile",
+            post,
+        )
+    return post()
 
 
 def history(limit: int = 10) -> str:

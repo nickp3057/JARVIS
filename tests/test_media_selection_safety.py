@@ -43,6 +43,27 @@ class MediaSelectionSafetyTests(unittest.TestCase):
         replay = radarr.add_movie(286217, confirmed=True, session_id="phone")
         self.assertIn("fresh lookup", replay)
 
+    @patch("integrations.radarr.servarr.call")
+    @patch("integrations.radarr.servarr.resolve_root_folder", return_value=(1, "/movies"))
+    @patch("integrations.radarr.servarr.resolve_quality", return_value=(2, "HD-720p"))
+    @patch("integrations.radarr.servarr.is_configured", return_value=True)
+    @patch("integrations.radarr._lookup")
+    def test_pick_from_several_matches_needs_nicks_yes(
+        self, lookup, _configured, _quality, _root, call
+    ) -> None:
+        from brain import confirm_gate
+        confirm_gate.clear_for_tests()
+        gold = {"title": "Gold", "year": 2016, "tmdbId": 339964}
+        other = {"title": "Gold", "year": 2014, "tmdbId": 1}
+        lookup.side_effect = [(True, [gold, other]), (True, [gold])]
+        call.return_value = servarr.Result(True, {"id": 1}, "ok")
+        radarr.find_movie("Gold", session_id="phone")
+        prompt = radarr.add_movie(339964, confirmed=True, session_id="phone")
+        self.assertIn("add Gold (2016) to Radarr", prompt)
+        call.assert_not_called()
+        self.assertIn("Added Gold (2016)", confirm_gate.conversation_action("yes", "phone"))
+        call.assert_called_once()
+
     @patch("integrations.radarr.servarr.is_configured", return_value=True)
     def test_confirmation_is_still_required(self, _configured) -> None:
         result = radarr.add_movie(286217, confirmed=False, session_id="phone")

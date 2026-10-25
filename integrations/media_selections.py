@@ -48,6 +48,15 @@ def validate(service: str, session_id: str | None, media_id: int) -> tuple[bool,
     return True, ""
 
 
+def candidate_count(service: str, session_id: str | None) -> int:
+    """How many titles the session's latest lookup offered (0 if none)."""
+    if not session_id:
+        return 0
+    with _lock:
+        receipt = _receipts.get((service, session_id))
+    return len(receipt[1]) if receipt else 0
+
+
 def consume(service: str, session_id: str | None) -> None:
     if session_id:
         with _lock:

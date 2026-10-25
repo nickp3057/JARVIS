@@ -135,29 +135,43 @@ def add_movie(
         }
     )
 
-    outcome = servarr.call(_SERVICE, "POST", "/api/v3/movie", json=body)
-    if not outcome.ok:
-        if outcome.kind != "timeout":
-            return str(outcome.payload)
-        # The add may have landed before the answer timed out. Never re-POST
-        # (that could duplicate it); check the library instead.
-        ok, check = _lookup(f"tmdb:{tmdb_id}")
-        landed = ok and isinstance(check, list) and any(
-            _in_library(entry) for entry in check if entry.get("tmdbId") == tmdb_id
-        )
-        if not landed:
-            return (
-                f"{outcome.payload} I couldn't confirm whether {movie.get('title', 'it')} was added; "
-                "ask me to check before trying again, sir."
+    def post() -> str:
+        outcome = servarr.call(_SERVICE, "POST", "/api/v3/movie", json=body)
+        if not outcome.ok:
+            if outcome.kind != "timeout":
+                return str(outcome.payload)
+            # The add may have landed before the answer timed out. Never re-POST
+            # (that could duplicate it); check the library instead.
+            ok, check = _lookup(f"tmdb:{tmdb_id}")
+            landed = ok and isinstance(check, list) and any(
+                _in_library(entry) for entry in check if entry.get("tmdbId") == tmdb_id
             )
+            if not landed:
+                return (
+                    f"{outcome.payload} I couldn't confirm whether {movie.get('title', 'it')} was added; "
+                    "ask me to check before trying again, sir."
+                )
 
-    media_selections.consume(_SERVICE, session_id)
+        media_selections.consume(_SERVICE, session_id)
 
-    year = movie.get("year", "")
-    return (
-        f"Added {movie.get('title', 'the movie')}{f' ({year})' if year else ''} to Radarr "
-        f"on the {profile_detail} profile. Search is underway, sir."
-    )
+        year = movie.get("year", "")
+        return (
+            f"Added {movie.get('title', 'the movie')}{f' ({year})' if year else ''} to Radarr "
+            f"on the {profile_detail} profile. Search is underway, sir."
+        )
+
+    if media_selections.candidate_count(_SERVICE, session_id) > 1:
+        # The lookup offered several titles, so the model may have guessed
+        # which one Nick meant. Make him say yes to this exact title.
+        from brain import confirm_gate
+
+        year = movie.get("year", "")
+        return confirm_gate.propose(
+            session_id,
+            f"add {movie.get('title', 'it')}{f' ({year})' if year else ''} to Radarr on the {profile_detail} profile",
+            post,
+        )
+    return post()
 
 
 def history(limit: int = 10) -> str:
