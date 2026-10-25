@@ -1,7 +1,7 @@
 import unittest
 from unittest.mock import patch
 
-from integrations import media_selections, radarr, sonarr
+from integrations import media_selections, radarr, servarr_common as servarr, sonarr
 
 
 class MediaSelectionSafetyTests(unittest.TestCase):
@@ -25,7 +25,7 @@ class MediaSelectionSafetyTests(unittest.TestCase):
         result = radarr.add_movie(286217, confirmed=True, session_id="other")
         self.assertIn("fresh lookup", result)
 
-    @patch("integrations.radarr.servarr.request")
+    @patch("integrations.radarr.servarr.call")
     @patch("integrations.radarr.servarr.resolve_root_folder", return_value=(1, "/movies"))
     @patch("integrations.radarr.servarr.resolve_quality", return_value=(2, "HD"))
     @patch("integrations.radarr.servarr.is_configured", return_value=True)
@@ -35,7 +35,7 @@ class MediaSelectionSafetyTests(unittest.TestCase):
     ) -> None:
         movie = {"title": "The Martian", "year": 2015, "tmdbId": 286217}
         lookup.return_value = (True, [movie])
-        request.return_value = (True, {"id": 1})
+        request.return_value = servarr.Result(True, {"id": 1}, "ok")
         radarr.find_movie("The Martian", session_id="phone")
         result = radarr.add_movie(286217, confirmed=True, session_id="phone")
         self.assertIn("Added The Martian", result)

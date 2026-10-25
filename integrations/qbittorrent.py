@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import os
 import re
+import threading
 from typing import Any
 
 import requests
@@ -18,8 +19,20 @@ from jarvis_logger import get_logger
 load_dotenv()
 log = get_logger(__name__)
 
-_TIMEOUT_SECONDS = 12
+_TIMEOUT_SECONDS = (4, 12)
 _session_cache: tuple[requests.Session, str, str, str] | None = None
+# The download monitor and API requests run on different threads; without this
+# both can log in at once after a SID expiry, and repeated logins count toward
+# qBittorrent's failed-login IP ban.
+_login_lock = threading.Lock()
+
+
+def _unreachable(exc: Exception) -> str:
+    log.warning("qBittorrent request failed: %s", exc)
+    url, _, _ = _config()
+    if isinstance(exc, requests.ReadTimeout):
+        return "Could not reach qBittorrent: it accepted the connection but didn't answer in time."
+    return f"Could not reach qBittorrent at {url}; the NAS, VPN container or WebUI may be down."
 
 
 def _config() -> tuple[str, str, str]:
@@ -36,6 +49,11 @@ def is_configured() -> bool:
 
 
 def _session() -> tuple[requests.Session | None, str]:
+    with _login_lock:
+        return _login()
+
+
+def _login() -> tuple[requests.Session | None, str]:
     global _session_cache
     url, username, password = _config()
     if not (url and username and password):
@@ -52,13 +70,17 @@ def _session() -> tuple[requests.Session | None, str]:
             timeout=_TIMEOUT_SECONDS,
         )
     except requests.RequestException as exc:
-        return None, f"Could not reach qBittorrent: {exc}"
+        return None, _unreachable(exc)
     # qBittorrent 5.2 may return 204 No Content while still setting a valid SID.
     # Older versions return 200 with the literal body "Ok.".
     login_ok = (
         response.status_code == 204
         or (response.status_code == 200 and response.text.strip().lower() == "ok.")
     )
+    if response.status_code == 403:
+        return None, "qBittorrent has temporarily banned this machine's IP after failed logins; it lifts on its own (default 1 hour)."
+    if response.status_code == 200 and response.text.strip().lower() == "fails.":
+        return None, "qBittorrent login failed: wrong username or password; check QBITTORRENT_USERNAME/PASSWORD in .env."
     if not login_ok:
         return None, f"qBittorrent login failed ({response.status_code})."
     _session_cache = (session, url, username, password)
@@ -82,7 +104,7 @@ def _request(
             timeout=_TIMEOUT_SECONDS,
         )
     except requests.RequestException as exc:
-        return False, f"Could not reach qBittorrent: {exc}"
+        return False, _unreachable(exc)
     if response.status_code == 403:
         # The SID may have expired. Reauthenticate once so ordinary status
         # requests recover without making the user repeat themselves.
@@ -113,7 +135,7 @@ def _post(
             f"{url}/api/v2{path}", data=data, timeout=_TIMEOUT_SECONDS,
         )
     except requests.RequestException as exc:
-        return False, f"Could not reach qBittorrent: {exc}"
+        return False, _unreachable(exc)
     if response.status_code == 403:
         global _session_cache
         _session_cache = None

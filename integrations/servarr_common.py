@@ -26,8 +26,9 @@ from __future__ import annotations
 import difflib
 import os
 import re
+import time
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable, NamedTuple
 
 import requests
 from dotenv import load_dotenv
@@ -39,15 +40,35 @@ load_dotenv(dotenv_path=_ENV_PATH)
 
 log = get_logger(__name__)
 
-_TIMEOUT_SECONDS = 15
+# (connect, read): a powered-off NAS fails in 4 s instead of hanging for 15.
+_TIMEOUT_SECONDS = (4, 15)
+# Reads are retried once after this pause; writes never are (see ``call``).
+_RETRY_DELAY_SECONDS = 1.0
+# Profiles and root folders are re-fetched after this, so a profile renamed in
+# the Radarr UI doesn't break adds until JARVIS restarts.
+_CACHE_TTL_SECONDS = 300
 
 # Per-service cached (session, url, key) so a runtime key/URL change rebuilds it.
 _sessions: dict[str, tuple[requests.Session, str, str]] = {}
 
 # Per-service cache of the quality-profile and root-folder lists (rarely change
 # within a run; call the resolver helpers with refresh=True to bust it).
-_profile_cache: dict[str, list[dict[str, Any]]] = {}
-_rootfolder_cache: dict[str, list[dict[str, Any]]] = {}
+_profile_cache: dict[str, tuple[float, list[dict[str, Any]]]] = {}
+_rootfolder_cache: dict[str, tuple[float, list[dict[str, Any]]]] = {}
+
+
+class Result(NamedTuple):
+    """Outcome of one Servarr call.
+
+    ``kind`` is ``ok``, ``unconfigured``, ``unreachable`` (never connected),
+    ``timeout`` (connected, no answer: a write may still have landed),
+    ``auth`` (bad API key), ``not_found``, ``rejected`` (other 4xx, usually
+    validation) or ``server`` (5xx).
+    """
+
+    ok: bool
+    payload: Any
+    kind: str
 
 
 # --- Config ---------------------------------------------------------------
@@ -105,37 +126,81 @@ def _session(service: str) -> requests.Session | None:
     return sess
 
 
+def _rejection_detail(response: requests.Response) -> str:
+    """Servarr validation errors arrive as ``[{"errorMessage": ...}]``."""
+    try:
+        body = response.json()
+    except ValueError:
+        return response.text[:200].strip()
+    items = body if isinstance(body, list) else [body]
+    messages = [
+        str(item.get("errorMessage") or item.get("message") or "").strip()
+        for item in items if isinstance(item, dict)
+    ]
+    return "; ".join(m for m in messages if m)[:300] or response.text[:200].strip()
+
+
+def call(service: str, method: str, path: str, **kwargs: Any) -> Result:
+    """Perform a REST call against a Servarr service with a classified outcome.
+
+    GETs are retried once on a connection failure, timeout or 5xx. Writes are
+    never retried: a timed-out POST may already have been applied, so callers
+    verify instead (see ``radarr.add_movie``).
+    """
+    name = service.title()
+    sess = _session(service)
+    if sess is None:
+        return Result(False, f"{name} is not configured yet.", "unconfigured")
+
+    url = f"{_service_url(service)}{path}"
+    attempts = 2 if method.upper() == "GET" else 1
+    result = Result(False, f"{name} did not answer.", "unreachable")
+    for attempt in range(attempts):
+        if attempt:
+            time.sleep(_RETRY_DELAY_SECONDS)
+        try:
+            response = sess.request(method, url, timeout=_TIMEOUT_SECONDS, **kwargs)
+        except requests.ConnectTimeout as exc:
+            log.warning("%s connect timeout: %s %s -> %s", service, method, path, exc)
+            result = Result(False, f"I can't reach {name} at {_service_url(service)}; the NAS or its container may be down.", "unreachable")
+            continue
+        except requests.Timeout as exc:
+            log.warning("%s read timeout: %s %s -> %s", service, method, path, exc)
+            result = Result(False, f"{name} accepted the connection but didn't answer in time; it may be overloaded or still starting.", "timeout")
+            continue
+        except requests.RequestException as exc:
+            log.warning("%s request failed: %s %s -> %s", service, method, path, exc)
+            result = Result(False, f"I can't reach {name} at {_service_url(service)}; the NAS or its container may be down.", "unreachable")
+            continue
+
+        status = response.status_code
+        if status in (200, 201, 202):
+            try:
+                return Result(True, response.json(), "ok")
+            except ValueError:
+                return Result(True, response.text, "ok")
+
+        log.warning("%s %s %s returned %s: %s", service, method, path, status, response.text[:500])
+        if status in (401, 403):
+            return Result(False, f"{name} rejected the API key; check {service.upper()}_API_KEY in .env.", "auth")
+        if status == 404:
+            return Result(False, f"{name} has no such item ({path}).", "not_found")
+        if status >= 500:
+            result = Result(False, f"{name} hit an internal error ({status}); its log will say why.", "server")
+            continue
+        return Result(False, f"{name} refused that ({status}): {_rejection_detail(response)}", "rejected")
+    return result
+
+
 def request(service: str, method: str, path: str, **kwargs: Any) -> tuple[bool, Any]:
     """Perform a REST call against a Servarr service.
 
     Returns ``(success, payload)`` where payload is the decoded JSON on success
-    or a human-readable error string on failure.
+    or a human-readable error string on failure. Use ``call`` when the kind of
+    failure matters.
     """
-    if not is_configured(service):
-        return False, f"{service.title()} is not configured yet."
-
-    sess = _session(service)
-    if sess is None:
-        return False, f"{service.title()} is not configured yet."
-
-    url = f"{_service_url(service)}{path}"
-    try:
-        response = sess.request(method, url, timeout=_TIMEOUT_SECONDS, **kwargs)
-    except requests.RequestException as exc:
-        log.warning("%s request failed: %s %s -> %s", service, method, path, exc)
-        return False, f"Could not reach {service.title()}: {exc}"
-
-    if response.status_code in (200, 201, 202):
-        try:
-            return True, response.json()
-        except ValueError:
-            return True, response.text
-
-    log.warning(
-        "%s %s %s returned %s: %s",
-        service, method, path, response.status_code, response.text[:500],
-    )
-    return False, f"{service.title()} error {response.status_code}: {response.text[:300]}"
+    result = call(service, method, path, **kwargs)
+    return result.ok, result.payload
 
 
 def test_connection(service: str) -> str:
@@ -262,30 +327,57 @@ def _normalize(text: str) -> str:
     return " ".join(text.split())
 
 
+_RESOLUTION_ALIASES = {"4k": "2160", "uhd": "2160", "2160p": "2160", "1080p": "1080",
+                       "720p": "720", "480p": "480", "576p": "576", "sd": "480"}
+
+
+def _resolutions(text: str) -> set[str]:
+    found = set()
+    for token in _normalize(text).split():
+        token = _RESOLUTION_ALIASES.get(token, token.rstrip("p"))
+        if token in {"480", "576", "720", "1080", "2160"}:
+            found.add(token)
+    return found
+
+
 def _best_match(needle: str, haystack: list[str]) -> str | None:
     """Return the closest entry in ``haystack`` to ``needle`` or None.
 
-    Tries, in order: exact normalized equality, containment either direction,
-    then difflib similarity with a 0.6 cutoff.
+    Tries, in order: exact normalized equality, containment either direction
+    (the shortest, i.e. most specific, candidate wins; a tie is ambiguous and
+    returns None so the caller can list options), then difflib similarity with
+    a 0.6 cutoff. A candidate that names other resolutions than the needle
+    ("HD-1080p" for "720p") is never chosen.
     """
     n = _normalize(needle)
     if not n or not haystack:
         return None
 
-    norm_map = {_normalize(h): h for h in haystack}
+    wanted = _resolutions(needle)
+    norm_map = {
+        _normalize(h): h for h in haystack
+        if not wanted or not _resolutions(h) or wanted & _resolutions(h)
+    }
+    if not norm_map:
+        return None
 
     if n in norm_map:
         return norm_map[n]
 
-    contains = [
-        original for norm, original in norm_map.items()
-        if norm and (norm in n or n in norm)
-    ]
-    if len(contains) == 1:
-        return contains[0]
-    if len(contains) > 1:
-        # Prefer the longest overlap (most specific).
-        return max(contains, key=lambda h: len(_normalize(h)))
+    if wanted:
+        # '4k' -> the single profile that explicitly names 2160p.
+        named = [norm for norm, original in norm_map.items() if _resolutions(original)]
+        if len(named) == 1:
+            return norm_map[named[0]]
+
+    contains = sorted(
+        (norm for norm in norm_map if norm and (norm in n or n in norm)),
+        key=len,
+    )
+    if contains:
+        if len(contains) > 1 and len(contains[0]) == len(contains[1]):
+            return None
+        return norm_map[contains[0]]
 
     close = difflib.get_close_matches(n, list(norm_map.keys()), n=1, cutoff=0.6)
     if close:
@@ -293,31 +385,72 @@ def _best_match(needle: str, haystack: list[str]) -> str | None:
     return None
 
 
+# --- Title lookup -----------------------------------------------------
+
+_TRAILING_YEAR = re.compile(r"^(.*\S)\s*[\(\[]?((?:19|20)\d{2})[\)\]]?$")
+
+
+def split_trailing_year(title: str) -> tuple[str, int | None]:
+    """'Dune 2021' / 'Dune (2021)' -> ('Dune', 2021); anything else unchanged."""
+    match = _TRAILING_YEAR.match((title or "").strip())
+    if not match:
+        return title, None
+    return match.group(1).strip(" -,:(["), int(match.group(2))
+
+
+def ranked_lookup(
+    lookup: Callable[[str], tuple[bool, Any]], title: str,
+) -> tuple[bool, Any, int | None]:
+    """Run a Servarr title lookup that understands a trailing year.
+
+    Returns ``(ok, results_or_error, year)``. With a year, the search runs on
+    the bare title (TMDB/TVDB search often misses 'Dune 2021') and results from
+    that year come first. If none match the year, the literal title is searched
+    too, so 'Blade Runner 2049' still works.
+    """
+    term, year = split_trailing_year(title)
+    ok, payload = lookup(term)
+    if not ok:
+        return False, payload, year
+    results = payload if isinstance(payload, list) else []
+    if year is None:
+        return True, results, None
+    if not any(item.get("year") == year for item in results):
+        ok, payload = lookup(title)
+        if ok and isinstance(payload, list) and payload:
+            results = payload
+        if not any(item.get("year") == year for item in results):
+            return True, results, None
+    return True, sorted(results, key=lambda item: item.get("year") != year), year
+
+
 # --- Quality profiles / root folders ----------------------------------
 
 def get_quality_profiles(service: str, refresh: bool = False) -> tuple[bool, Any]:
     """Return ``(True, [{id, name}, ...])`` or ``(False, error_string)``."""
-    if not refresh and service in _profile_cache:
-        return True, _profile_cache[service]
+    cached = _profile_cache.get(service)
+    if not refresh and cached and time.monotonic() - cached[0] < _CACHE_TTL_SECONDS:
+        return True, cached[1]
     ok, payload = request(service, "GET", "/api/v3/qualityprofile")
     if not ok:
         return False, payload
     if not isinstance(payload, list):
         return False, f"Unexpected quality-profile response from {service.title()}."
-    _profile_cache[service] = payload
+    _profile_cache[service] = (time.monotonic(), payload)
     return True, payload
 
 
 def get_root_folders(service: str, refresh: bool = False) -> tuple[bool, Any]:
     """Return ``(True, [{path, ...}, ...])`` or ``(False, error_string)``."""
-    if not refresh and service in _rootfolder_cache:
-        return True, _rootfolder_cache[service]
+    cached = _rootfolder_cache.get(service)
+    if not refresh and cached and time.monotonic() - cached[0] < _CACHE_TTL_SECONDS:
+        return True, cached[1]
     ok, payload = request(service, "GET", "/api/v3/rootfolder")
     if not ok:
         return False, payload
     if not isinstance(payload, list):
         return False, f"Unexpected root-folder response from {service.title()}."
-    _rootfolder_cache[service] = payload
+    _rootfolder_cache[service] = (time.monotonic(), payload)
     return True, payload
 
 

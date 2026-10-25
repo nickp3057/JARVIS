@@ -140,7 +140,7 @@ class QBittorrentTests(unittest.TestCase):
         ):
             result, error = qbit._session()
         self.assertIsNone(result)
-        self.assertIn("offline", error)
+        self.assertIn("Could not reach qBittorrent at http://qbit:8080", error)
 
     def test_expired_session_reauthenticates_once(self) -> None:
         expired = Mock()

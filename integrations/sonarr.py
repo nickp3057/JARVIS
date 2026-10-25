@@ -90,11 +90,16 @@ def find_series(title: str, session_id: str | None = None) -> str:
     if not servarr.is_configured(_SERVICE):
         return "Sonarr isn't configured, sir."
 
-    ok, payload = _lookup(title)
+    ok, payload, year = servarr.ranked_lookup(_lookup, title)
     if not ok:
         return str(payload)
 
-    results = [s for s in payload if s.get("tvdbId")] if isinstance(payload, list) else []
+    results = [s for s in payload if s.get("tvdbId")]
+    if year is not None:
+        same_year = [s for s in results if s.get("year") == year]
+        if len(same_year) == 1:
+            # 'Dune 2021' names exactly one title: offer only that one.
+            results = same_year
     media_selections.record(_SERVICE, session_id, results[:_MAX_CANDIDATES], "tvdbId")
     if not results:
         return f"No match on Sonarr for '{title}', sir. Try the exact title or add a year."
@@ -181,9 +186,21 @@ def add_series(
         }
     )
 
-    ok, result = servarr.request(_SERVICE, "POST", "/api/v3/series", json=body)
-    if not ok:
-        return str(result)
+    outcome = servarr.call(_SERVICE, "POST", "/api/v3/series", json=body)
+    if not outcome.ok:
+        if outcome.kind != "timeout":
+            return str(outcome.payload)
+        # The add may have landed before the answer timed out. Never re-POST
+        # (that could duplicate it); check the library instead.
+        ok, check = _lookup(f"tvdb:{tvdb_id}")
+        landed = ok and isinstance(check, list) and any(
+            _in_library(entry) for entry in check if entry.get("tvdbId") == tvdb_id
+        )
+        if not landed:
+            return (
+                f"{outcome.payload} I couldn't confirm whether {series.get('title', 'it')} was added; "
+                "ask me to check before trying again, sir."
+            )
 
     media_selections.consume(_SERVICE, session_id)
 

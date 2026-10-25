@@ -46,11 +46,16 @@ def find_movie(title: str, session_id: str | None = None) -> str:
     if not servarr.is_configured(_SERVICE):
         return "Radarr isn't configured, sir."
 
-    ok, payload = _lookup(title)
+    ok, payload, year = servarr.ranked_lookup(_lookup, title)
     if not ok:
         return str(payload)
 
-    results = [m for m in payload if m.get("tmdbId")] if isinstance(payload, list) else []
+    results = [m for m in payload if m.get("tmdbId")]
+    if year is not None:
+        same_year = [m for m in results if m.get("year") == year]
+        if len(same_year) == 1:
+            # 'Dune 2021' names exactly one title: offer only that one.
+            results = same_year
     media_selections.record(_SERVICE, session_id, results[:_MAX_CANDIDATES], "tmdbId")
     if not results:
         return f"No match on Radarr for '{title}', sir. Try the exact title or add a year."
@@ -130,9 +135,21 @@ def add_movie(
         }
     )
 
-    ok, result = servarr.request(_SERVICE, "POST", "/api/v3/movie", json=body)
-    if not ok:
-        return str(result)
+    outcome = servarr.call(_SERVICE, "POST", "/api/v3/movie", json=body)
+    if not outcome.ok:
+        if outcome.kind != "timeout":
+            return str(outcome.payload)
+        # The add may have landed before the answer timed out. Never re-POST
+        # (that could duplicate it); check the library instead.
+        ok, check = _lookup(f"tmdb:{tmdb_id}")
+        landed = ok and isinstance(check, list) and any(
+            _in_library(entry) for entry in check if entry.get("tmdbId") == tmdb_id
+        )
+        if not landed:
+            return (
+                f"{outcome.payload} I couldn't confirm whether {movie.get('title', 'it')} was added; "
+                "ask me to check before trying again, sir."
+            )
 
     media_selections.consume(_SERVICE, session_id)
 

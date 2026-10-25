@@ -580,3 +580,34 @@ the review checklist. Activation notes:
   earlier recorded it blank; recent alerts suggest it is now set).
 - Companion push is stubbed: `APNS_ENABLED` stays false and HA
   `notify.mobile_app_*` remains the delivery path.
+
+## 2026-10-25 arr reliability + media doctor (Phase 1)
+
+### 1a — Servarr/qBittorrent reliability fixes
+
+Audit findings fixed in `integrations/servarr_common.py`, `radarr.py`,
+`sonarr.py`, `qbittorrent.py`:
+
+- `servarr_common.call()` returns a classified `Result(ok, payload, kind)`
+  (`unreachable`/`timeout`/`auth`/`not_found`/`rejected`/`server`);
+  `request()` keeps its old `(ok, payload)` shape. Timeouts are now
+  `(connect 4 s, read 15 s)` so a powered-off NAS fails fast.
+- GETs retry once (1 s pause) on connection errors, timeouts and 5xx.
+  Writes never retry: a timed-out add re-checks the library instead and
+  reports success if it landed, or says it couldn't confirm.
+- Error text is spoken-friendly: no raw urllib3 traces; a 401 names the
+  `.env` key; Servarr validation errors (`[{"errorMessage": ...}]`) are
+  extracted.
+- Quality-profile/root-folder caches expire after 5 minutes.
+- Profile matching: the most specific (shortest) containing name wins, a tie
+  is ambiguous (Nick gets the list), and a profile naming a different
+  resolution is never picked ("720p" can't land on "HD-1080p").
+- Titles with a trailing year ("Dune 2021", "Dune (2021)") search the bare
+  title and narrow to that year; "Blade Runner 2049" falls back to the
+  literal search.
+- qBittorrent: logins are serialized across threads, and the IP-ban (403)
+  and wrong-password cases get their own messages.
+
+Tests: `tests/test_servarr_reliability.py` (13). The full suite has the same
+15 environment-only errors as before this change (missing optional deps in
+the cloud container + the known study-brief fixture failure).
