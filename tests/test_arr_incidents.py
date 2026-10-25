@@ -208,7 +208,8 @@ class IndexerDigestTests(ReplayBase):
         for step in range(0, 12 * 34):  # 34 hours at 5-minute polls
             self.poll(start + step * 300, 250, issue)
         kinds = [(datetime.fromtimestamp(at).strftime('%d %H:%M'), p.kind) for at, p in self.pushes]
-        self.assertEqual(kinds, [('28 03:10', 'alert'), ('28 09:00', 'digest'), ('29 09:00', 'digest')])
+        # Indexers push only after ARR_STACK_INDEXER_ALERT_AFTER_S (20 min).
+        self.assertEqual(kinds, [('28 03:20', 'alert'), ('28 09:00', 'digest'), ('29 09:00', 'digest')])
         digest = self.pushes[1][1]
         self.assertTrue(digest.passive)
         self.assertEqual(digest.collapse_id, arr_incidents.DIGEST_THREAD)

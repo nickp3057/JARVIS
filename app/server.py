@@ -5,10 +5,12 @@ from __future__ import annotations
 import asyncio
 import threading
 import hmac
+import json
 import os
+import uuid
 from contextlib import asynccontextmanager
 
-from fastapi import Depends, FastAPI, Header, HTTPException, Response, status
+from fastapi import Depends, FastAPI, Header, HTTPException, Request, Response, status
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
@@ -22,7 +24,11 @@ from app import status_hub
 from brain.debug_reports import create_debug_report
 from brain.agent import stream_round_breaks
 from brain.runtime import JarvisRuntime
+from app import client_tokens
+from brain import event_bus
 from integrations import media_doctor
+
+_SSE_KEEPALIVE_S = 15.0
 
 _runtime: JarvisRuntime | None = None
 _runtime_lock = threading.Lock()
@@ -84,6 +90,29 @@ def authorize(authorization: str | None = Header(default=None)) -> None:
     supplied = authorization.removeprefix("Bearer ").strip() if authorization else ""
     if not hmac.compare_digest(supplied, expected):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
+
+
+def require_scope(scope: str):
+    """Admin token (JARVIS_API_TOKEN) or a client token holding ``scope``.
+
+    Client tokens (app/client_tokens.py) let a TV or dashboard read alerts
+    and status without ever holding the admin token."""
+    def dependency(authorization: str | None = Header(default=None)) -> None:
+        supplied = authorization.removeprefix("Bearer ").strip() if authorization else ""
+        expected = os.getenv("JARVIS_API_TOKEN", "").strip()
+        if expected and hmac.compare_digest(supplied, expected):
+            return
+        client = client_tokens.scopes_for(supplied)
+        if client is None:
+            if not expected:
+                raise HTTPException(status_code=503, detail="JARVIS_API_TOKEN is not configured")
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
+        if scope not in client[1]:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=f"Token lacks scope {scope}")
+    return dependency
+
+
+_status_read = Depends(require_scope("status:read"))
 
 
 class ChatRequest(BaseModel):
@@ -194,7 +223,7 @@ def chat_stream(
     session_id = _resolve_session(request)
     # Opt-in: separate model rounds with agent.ROUND_BREAK so the app can
     # show "checking..." and the result as separate bubbles.
-    segments = (stream_segments or "").strip() == "1"
+    segments = isinstance(stream_segments, str) and stream_segments.strip() == "1"
 
     async def chunks():
         # A synchronous StreamingResponse can resume a generator on different
@@ -276,12 +305,12 @@ def submit_debug_report(
 
 
 @app.get("/api/status/torrents")
-def status_torrents(_: None = Depends(authorize)) -> dict[str, object]:
+def status_torrents(_: None = _status_read) -> dict[str, object]:
     return status_hub.torrents_status()
 
 
 @app.get("/api/now")
-def now_status(_: None = Depends(authorize)) -> dict[str, object]:
+def now_status(_: None = _status_read) -> dict[str, object]:
     return status_hub.now_status()
 
 
@@ -291,26 +320,89 @@ def study_brief_status(_: None = Depends(authorize)) -> dict[str, object]:
 
 
 @app.get("/api/status/media")
-def status_media(_: None = Depends(authorize)) -> dict[str, object]:
+def status_media(_: None = _status_read) -> dict[str, object]:
     return status_hub.media_status()
 
 
 @app.get("/api/status/media/diagnose")
 def status_media_diagnose(
-    title: str | None = None, kind: str | None = None, _: None = Depends(authorize),
+    title: str | None = None, kind: str | None = None, _: None = _status_read,
 ) -> dict[str, object]:
     """Read-only trace of one title (or every queued download). Fixes are
     listed for display; applying one goes through chat and the confirm gate."""
     return media_doctor.diagnose(title, kind)
 
 
+@app.get("/api/clients/events")
+async def client_events(
+    request: Request,
+    since: int = 0,
+    last_event_id: str | None = Header(default=None, alias="Last-Event-ID"),
+    _: None = Depends(require_scope("events:read")),
+) -> StreamingResponse:
+    """Server-sent events of every bus alert (brain/event_bus.py).
+
+    Replays alerts newer than ``Last-Event-ID`` (or ``?since=``) so a client
+    that reconnects misses nothing still in the 200-alert history, then
+    streams live ones with a keep-alive comment every 15 s."""
+    await asyncio.to_thread(runtime)  # monitors are what publish alerts
+    try:
+        start = int(last_event_id) if last_event_id else since
+    except ValueError:
+        start = since
+    loop = asyncio.get_running_loop()
+    queue: asyncio.Queue = asyncio.Queue(maxsize=200)
+    name = f"sse-{uuid.uuid4()}"
+
+    def offer(alert: event_bus.Alert) -> None:
+        try:
+            queue.put_nowait(alert)
+        except asyncio.QueueFull:
+            pass  # slow client: it can catch up from history on reconnect
+
+    def on_alert(alert: event_bus.Alert) -> None:
+        try:
+            loop.call_soon_threadsafe(offer, alert)
+        except RuntimeError:
+            pass  # loop closed: the stream is gone
+
+    # Subscribe before replaying so nothing published in between is lost;
+    # ids dedupe the overlap.
+    event_bus.subscribe(name, on_alert)
+
+    def frame(alert: event_bus.Alert) -> str:
+        return f"id: {alert.id}\nevent: alert\ndata: {json.dumps(alert.to_dict())}\n\n"
+
+    async def events():
+        last = start
+        try:
+            for alert in event_bus.since(start):
+                last = alert.id
+                yield frame(alert)
+            while not await request.is_disconnected():
+                try:
+                    alert = await asyncio.wait_for(queue.get(), timeout=_SSE_KEEPALIVE_S)
+                except asyncio.TimeoutError:
+                    yield ": keep-alive\n\n"
+                    continue
+                if alert.id > last:
+                    last = alert.id
+                    yield frame(alert)
+        finally:
+            event_bus.unsubscribe(name)
+
+    return StreamingResponse(events(), media_type="text/event-stream", headers={
+        "Cache-Control": "no-cache", "X-Accel-Buffering": "no", "X-Content-Type-Options": "nosniff",
+    })
+
+
 @app.get("/api/status/storage")
-def status_storage(_: None = Depends(authorize)) -> dict[str, object]:
+def status_storage(_: None = _status_read) -> dict[str, object]:
     return status_hub.media_storage_status()
 
 
 @app.get("/api/status/services")
-def status_services(_: None = Depends(authorize)) -> dict[str, object]:
+def status_services(_: None = _status_read) -> dict[str, object]:
     return status_hub.services_status()
 
 

@@ -315,6 +315,29 @@ runtime knows, the more JARVIS feels like one mind instead of several scripts.
 - `PRICE_WATCH_DROP_PERCENT`: decrease threshold for a one-time transition alert,
   defaults to 5 percent.
 
+## Alert Bus
+
+Every proactive alert goes through `brain/event_bus.py` (`runtime.raise_alert`
+or, for grouped arr incidents, `runtime.push_to_phone`). Publishers never pick a
+channel. Subscribers: the phone (`runtime._deliver_alert_to_phone` →
+`brain/notifications.py`: APNs companion push, HA notify only as fallback;
+`push=False` alerts skip it) and each open `GET /api/clients/events` SSE
+stream (replay via `Last-Event-ID`, 15 s keep-alives). New monitors should
+call `raise_alert`, not `notifications.send`.
+
+Clients other than the iOS companion use their own scoped tokens
+(`app/client_tokens.py`, hashed in `memory/client_tokens.json`):
+`events:read` for the stream, `status:read` for the read-only `/api/status/*`
+and `/api/now` endpoints. Everything else stays admin-only
+(`JARVIS_API_TOKEN`).
+
+- `JARVIS_WATCH_DEVICES`: comma-separated HA entity ids to watch; empty
+  disables the device watch.
+- `DEVICE_OFFLINE_ALERT_MIN`: minutes unavailable before alerting, default 10.
+- `DEVICE_WATCH_INTERVAL_S`: poll interval, default 60.
+- `ARR_STACK_INDEXER_ALERT_AFTER_S`: one indexer must be down this long before
+  it pushes, default 1200 (20 minutes).
+
 ## Memory Learning Settings
 - `MEMORY_AUTO_EXTRACT`: true/false, defaults to true. Background post-turn
   fact extraction.

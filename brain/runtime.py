@@ -17,7 +17,7 @@ from threading import RLock
 import threading
 from typing import Any, Iterator
 
-from brain import memory_extractor, tool_health
+from brain import event_bus, memory_extractor, tool_health
 from brain.agent import JarvisAgent
 from brain.history import load_session_messages, session_exists, request_context, begin_companion_request, delete_session
 from brain.memory import list_facts
@@ -132,6 +132,10 @@ class JarvisRuntime:
         self._weather_monitor_failed = False
         self._download_monitor_started = False
         self._download_monitor_failed = False
+        self._device_watch_started = False
+        # The phone is one subscriber of the alert bus (companion push, HA
+        # fallback); client event streams subscribe in app/server.py.
+        event_bus.subscribe("phone", self._deliver_alert_to_phone)
         self._arr_monitor_thread = None
         self._arr_last_cycle = 0.0
         self._deadman_started = False
@@ -213,6 +217,10 @@ class JarvisRuntime:
                 self._download_monitor_started = True
                 threading.Thread(target=self._download_monitor_loop, daemon=True).start()
 
+        if _watched_devices() and not self._device_watch_started:
+            self._device_watch_started = True
+            threading.Thread(target=self._device_watch_loop, daemon=True).start()
+
         price_enabled = os.getenv("PRICE_WATCH_MONITOR_ENABLED", "true").strip().lower()
         if price_enabled in ("1", "true", "yes", "on") and not self._price_monitor_started:
             self._price_monitor_started = True
@@ -288,18 +296,72 @@ class JarvisRuntime:
         self.push_to_phone(title, message, source="arr-stack")
 
     def push_to_phone(self, title: str, message: str, *, source: str, **grouping) -> bool:
-        """Send a proactive alert to Nick's phone via brain.notifications.
+        """Publish an arr-stack alert on the bus (phone + client streams).
 
-        Companion push first, Home Assistant as fallback. A failed delivery
-        is recorded in the inbox so the alert is never silently lost."""
+        ``grouping`` (thread_id / collapse_id / passive) keeps one incident in
+        one phone notification."""
+        severity = "info" if grouping.get("passive") else "critical"
+        return event_bus.publish("arr_stack", title, message, source=source, severity=severity, **grouping) is not None
+
+    def raise_alert(self, kind: str, title: str, detail: str, *, source: str, severity: str = "warning",
+                    push: bool = True, dedupe_key: str | None = None, cooldown_s: float = 0.0) -> None:
+        """Inbox event plus bus alert: the one call for a new proactive alert."""
+        self.record_event(kind="alert", source=source, title=title, detail=detail)
+        event_bus.publish(kind, title, detail, source=source, severity=severity, push=push,
+                          dedupe_key=dedupe_key, cooldown_s=cooldown_s)
+
+    def _deliver_alert_to_phone(self, alert: "event_bus.Alert") -> None:
+        """Bus subscriber: companion push first, Home Assistant as fallback.
+
+        A failed delivery is recorded in the inbox (not re-published, which
+        would loop) so the alert is never silently lost."""
+        if not alert.push:
+            return
         from brain import notifications
         if not notifications.configured():
-            return False
-        delivery = notifications.send(title, message, **grouping)
+            return
+        delivery = notifications.send(alert.title, alert.message, **alert.grouping)
         if not delivery.delivered:
-            self.record_event(kind="alert", source=source, title="Phone alert delivery failed",
+            self.record_event(kind="alert", source=alert.source, title="Phone alert delivery failed",
                               detail=f"Alert remains in the runtime inbox. {delivery.detail}"[:500])
-        return delivery.delivered
+
+    def _device_watch_loop(self) -> None:
+        """Alert when a watched device stays unavailable in Home Assistant.
+
+        A device must be unavailable/unknown for DEVICE_OFFLINE_ALERT_MIN
+        (default 10) before it alerts, once, then a single info alert when it
+        returns. If Home Assistant itself is down nothing alerts here; the HA
+        monitor reports that.
+        """
+        down_since: dict[str, float] = {}
+        alerted: set[str] = set()
+        while not self._stop_monitors.is_set():
+            watched = _watched_devices()
+            grace = float(os.getenv("DEVICE_OFFLINE_ALERT_MIN", "10")) * 60
+            success, payload = get_states()
+            if success and isinstance(payload, list):
+                states = {str(e.get("entity_id")): e for e in payload if isinstance(e, dict)}
+                now = time.time()
+                for entity_id in watched:
+                    entity = states.get(entity_id)
+                    name = str(((entity or {}).get("attributes") or {}).get("friendly_name") or _friendly_entity_name(entity_id))
+                    offline = entity is None or str(entity.get("state", "")).lower() in {"unavailable", "unknown"}
+                    if offline:
+                        down_since.setdefault(entity_id, now)
+                        if entity_id not in alerted and now - down_since[entity_id] >= grace:
+                            alerted.add(entity_id)
+                            minutes = int((now - down_since[entity_id]) // 60)
+                            self.raise_alert("device_offline", f"{name} offline",
+                                             f"{name} has been unavailable in Home Assistant for {minutes} minutes.",
+                                             source="home")
+                    else:
+                        down_since.pop(entity_id, None)
+                        if entity_id in alerted:
+                            alerted.discard(entity_id)
+                            self.raise_alert("device_online", f"{name} back online", f"{name} is reachable again.",
+                                             source="home", severity="info", push=False)
+            if self._stop_monitors.wait(float(os.getenv("DEVICE_WATCH_INTERVAL_S", "60"))):
+                break
 
     def _deadman_loop(self) -> None:
         from integrations import nas_stack
@@ -312,7 +374,8 @@ class JarvisRuntime:
             )
             ok = monitor_ok and nas_stack.ping_deadman()
             if not ok and not failed:
-                self.record_event(kind="alert", source="deadman", title="Dead-man heartbeat not delivered", detail="Check arr monitor liveness and Healthchecks configuration/network.")
+                self.raise_alert("deadman", "Dead-man heartbeat not delivered",
+                                 "Check arr monitor liveness and Healthchecks configuration/network.", source="deadman")
             failed = not ok
             if self._stop_monitors.wait(nas_stack.seconds("JARVIS_HEALTHCHECKS_INTERVAL_S", 300, 60)):
                 break
@@ -1053,12 +1116,7 @@ class JarvisRuntime:
                     state = str(item.get("state", "")).lower()
                     old_state = str(old.get("state", "")).lower()
                     if "error" in state and "error" not in old_state:
-                        self.record_event(
-                            kind="alert",
-                            source="downloads",
-                            title="Download error",
-                            detail=name,
-                        )
+                        self.raise_alert("download_error", "Download error", name, source="downloads")
             now = time.time()
             for torrent_hash, item in current.items():
                 if float(item.get("progress", 0) or 0) >= 1:
@@ -1069,16 +1127,18 @@ class JarvisRuntime:
                     stalled.discard(torrent_hash)
                 elif torrent_hash not in stalled:
                     stalled.add(torrent_hash)
-                    self.record_event(
-                        kind="alert",
-                        source="downloads",
-                        title="Download stalled",
-                        detail=f"{item.get('name', 'Download')}: {why} Ask me to diagnose it.",
-                    )
+                    self.raise_alert("download_stalled", "Download stalled",
+                                     f"{item.get('name', 'Download')}: {why} Ask me to diagnose it.",
+                                     source="downloads")
             stalled &= set(current)
             previous = current
             if self._stop_monitors.wait(interval):
                 break
+
+
+def _watched_devices() -> list[str]:
+    """Home Assistant entity ids from JARVIS_WATCH_DEVICES (comma-separated)."""
+    return [e.strip() for e in os.getenv("JARVIS_WATCH_DEVICES", "").split(",") if "." in e]
 
 
 def _friendly_entity_name(entity_id: str) -> str:

@@ -713,3 +713,38 @@ the model. Voice, GUI and old apps are unaffected (default off). iOS:
 per segment (header on the first only). Tests: `tests/test_stream_rounds.py`
 (3) + server opt-in test. **Not compiled here (no Xcode on Linux): build in
 Xcode and check a tool turn ("add Gold") shows separate bubbles.**
+
+## 2026-10-25 Phase 2 — alert bus, client event stream, scoped tokens
+
+- `brain/event_bus.py`: one `publish()` for every proactive alert, with
+  severity, `push` flag, dedupe/cooldown, a 200-alert replay history and named
+  subscribers (one failing subscriber can't block the rest).
+- Runtime: `raise_alert()` (inbox + bus) now carries download errors, stalled
+  downloads, the dead-man heartbeat failure and the new device watch;
+  `push_to_phone()` (arr incidents) publishes with its thread/collapse ids.
+  The phone is a bus subscriber: APNs companion push first, HA notify only as
+  fallback (unchanged `brain/notifications.py`); a failed delivery is recorded
+  in the inbox and never re-published.
+- Device offline: `JARVIS_WATCH_DEVICES` (HA entity ids) alert after
+  `DEVICE_OFFLINE_ALERT_MIN` unavailable, once, plus a non-push "back online".
+- Indexer down: per-indexer pushes now wait `ARR_STACK_INDEXER_ALERT_AFTER_S`
+  (20 min) instead of the 4-minute stack threshold.
+- `GET /api/clients/events`: SSE of bus alerts, `Last-Event-ID` replay,
+  keep-alives, unsubscribes on disconnect.
+- `app/client_tokens.py`: per-client tokens with `events:read` /
+  `status:read`, SHA-256 only on disk (0600), CLI create/list/revoke. The
+  read-only status endpoints accept them; chat, sessions, control, links, home
+  and push stay admin-only.
+- NAS unreachable keeps flowing through the arr monitor's incident policy.
+  Unknown-SMS-sender alerts were dropped with the SMS phase.
+
+Tests: `tests/test_event_bus.py` (10), indexer-threshold expectation updated
+in `tests/test_arr_incidents.py`. Also fixed a regression from the bubble
+commit: `chat_stream` called directly (not via FastAPI) crashed on the header
+default.
+
+**Verify live:** after deploy, `curl -N -H "Authorization: Bearer <tv token>"
+http://optiplex:8000/api/clients/events` should print keep-alives; publish a
+test by pausing a torrent past the stall window or setting
+`JARVIS_WATCH_DEVICES` to an unplugged device. Check phone push still arrives
+for an arr incident (APNs if enabled, HA otherwise).

@@ -36,7 +36,8 @@ The character never breaks. It calls Nick "sir", uses dry British wit, answers i
 Pearson-Stark-Jarvis/
 ├── app/
 │   ├── main.py              Entry point. GUI / text / voice / server modes
-│   └── server.py            Authenticated HTTP bridge for the iOS companion
+│   ├── client_tokens.py     Scoped per-client tokens (events:read, status:read) + CLI; hashes in memory/client_tokens.json
+│   └── server.py            Authenticated HTTP bridge for the iOS companion (+ /api/clients/events SSE)
 │
 ├── brain/
 │   ├── agent.py             JarvisAgent: session management, tool loop, history
@@ -62,6 +63,7 @@ Pearson-Stark-Jarvis/
 │   ├── standing_orders.py   Durable behavioural directives from Nick, injected every turn
 │   ├── tool_health.py       Self-diagnosis ledger: per-tool failures, degraded flags, prompt warning
 │   ├── notifications.py     Phone alert router: companion push (APNs, stubbed) then HA notify fallback
+│   ├── event_bus.py         Single alert bus: publish once; phone (APNs→HA) and SSE client streams subscribe
 │   ├── arr_stack.py         Arr alert hysteresis/per-indexer tracking, restart confirmation gate, async recovery follow-up
 │   ├── confirm_gate.py      Generic session-bound "yes"/"approve <code>" gate for side-effecting fixes (media doctor)
 │   ├── arr_incidents.py     Arr push policy: watchdog-recovery hold + summary, minimum downtime, grouped incidents, daily indexer digest

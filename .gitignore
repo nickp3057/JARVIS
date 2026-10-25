@@ -21,3 +21,4 @@ memory/repair_proposals.json
 memory/push_devices.json
 memory/arr_stack_alerts.json
 memory/model_cache.json
+memory/client_tokens.json

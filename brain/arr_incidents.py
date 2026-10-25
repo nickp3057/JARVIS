@@ -167,6 +167,10 @@ class IncidentPolicy:
             return now - since >= nas_stack.seconds('ARR_STACK_DHT_ALERT_AFTER_S', 1500, 0)
         if key in _WATCHDOG_OWNED:
             return now - first_seen >= nas_stack.seconds('ARR_STACK_DHT_ALERT_AFTER_S', 1500, 0)
+        if key.startswith('indexer:'):
+            # One indexer in Prowlarr backoff often clears by itself; only
+            # push once it has been down this long (default 20 minutes).
+            return now - first_seen >= nas_stack.seconds('ARR_STACK_INDEXER_ALERT_AFTER_S', 1200, 0)
         return now - first_seen >= nas_stack.seconds('ARR_STACK_MIN_DOWNTIME_S', 240, 0)
 
     def evaluate(self, failing: dict[str, tuple[str, float]], snapshot: dict, status: tuple[bool, Any] | None,

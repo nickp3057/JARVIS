@@ -49,7 +49,7 @@ Server API tests use the standard-library runner: `.venv/bin/python -m unittest 
 Config lives in `.env` at the project root (never commit it — see `JARVIS.md` for the full variable list). Settings are read live via `os.getenv()` inside functions, not cached at import time, so `.env` edits (including ones JARVIS makes to itself via `update_setting`) take effect without a restart.
 
 The companion server requires `JARVIS_API_TOKEN`; its bind address and port are
-controlled by `JARVIS_SERVER_HOST` and `JARVIS_SERVER_PORT`.
+controlled by `JARVIS_SERVER_HOST` and `JARVIS_SERVER_PORT`. Non-companion clients (TV, dashboards) get their own scoped tokens via `python -m app.client_tokens create <name> events:read status:read`; never hand them `JARVIS_API_TOKEN`.
 
 ## Architecture
 
@@ -65,6 +65,6 @@ controlled by `JARVIS_SERVER_HOST` and `JARVIS_SERVER_PORT`.
 
 **Memory has three layers, don't conflate them**: `brain/history.py` (SQLite, short-term conversation transcript, session-scoped) vs. `brain/memory.py` (JSON `memory/profile.json`, durable cross-session facts via `remember_fact`/`forget_fact`, injected each turn by `render_memory_block()` into the `<turn_context>` block on the newest user message, not the system prompt, so history stays cacheable, capped at `MEMORY_MAX_FACTS`) vs. `brain/habits.py` (derived usage patterns, never written by the model). `brain/memory_extractor.py` is the background worker that fills the second layer automatically after every turn. It and `brain/study_brief.py` (composes the daily quiz countdown text) are the only places that should call the model outside a conversation turn. Notes Nick dictates go to the Obsidian vault via `capture_note`, not to profile facts. Behavioural directives ("stop doing X") are a separate store, `brain/standing_orders.py`, injected as orders every turn; numeric/on-off knobs go through `brain/settings.py`.
 
-**Background monitors** run on the runtime and feed a proactive event inbox (Home Assistant state polling, weather refresh, calendar alerts) — see `ARCHITECTURE.md`'s "Runtime Monitor Settings" for the relevant `.env` toggles. New sensors/proactive behavior should be added as a monitor here, not polled from the UI.
+**Background monitors** run on the runtime and feed a proactive event inbox (Home Assistant state polling, weather refresh, calendar alerts) — see `ARCHITECTURE.md`'s "Runtime Monitor Settings" for the relevant `.env` toggles. New sensors/proactive behavior should be added as a monitor here, not polled from the UI. Monitors raise alerts with `runtime.raise_alert` (→ `brain/event_bus.py`), never by calling `brain/notifications.py` directly; the phone (APNs, HA fallback) and `GET /api/clients/events` SSE streams are bus subscribers.
 
 **Personality is centralized**: `brain/personality.py` builds the system prompt (tone, address form, humor level, tool descriptions) from `.env` settings — this is the one place that defines how JARVIS "sounds," so persona changes belong there, not scattered across tool reply strings.
