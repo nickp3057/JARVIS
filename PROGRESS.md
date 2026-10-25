@@ -657,3 +657,24 @@ The runtime download monitor now also records a `Download stalled` alert
 `download_snapshot` carries seeds/peers/last_activity/time_active for this.
 Today these alerts land in the runtime inbox like download errors; Phase 2
 routes them through the event bus to the phone.
+
+## 2026-10-25 model auto-update
+
+Nick wants JARVIS to stay on the cheap Haiku tier but follow new releases.
+`brain/model_select.py`: `ANTHROPIC_MODEL=auto` (or empty) resolves the
+newest `claude-haiku-*` from the Models API once a day (cached in
+`memory/model_cache.json`, gitignored; failures keep the last id or the
+built-in Haiku 4.5 default). Haiku 5.5 is ~10x cheaper than 4.5 but thinks by
+default, so 5.x+ requests carry `effort: low` and, on Haiku, `thinking:
+disabled` (no thinking blocks means no history-editing check on replayed
+thinking, and replies stay inside `_MAX_TOKENS`). Settings go through
+`extra_body` so the Optiplex SDK version doesn't matter. A model that 400s on
+them is retried once plain and remembered. `refusal` stop reasons get an
+in-character reply. Tests: `tests/test_model_select.py` (9).
+
+**Verify live:** the Optiplex `.env` probably pins
+`ANTHROPIC_MODEL=claude-haiku-4-5-20251001`; change it to `auto` (or ask
+JARVIS to `update_setting ANTHROPIC_MODEL auto`). Then check `jarvis.log` for
+"Conversation model for family haiku: ... -> claude-haiku-5-5" and do a voice
+turn and a tool turn (e.g. "what's downloading") to confirm latency and tool
+use on the new model.

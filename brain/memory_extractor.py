@@ -31,6 +31,7 @@ from brain.knowledge_vault import append_journal_entry
 from brain.memory import list_facts, remember_fact, update_fact
 from brain.memory_proposals import propose_memory_fact
 from brain import standing_orders
+from brain import model_select
 from jarvis_logger import get_logger
 
 log = get_logger(__name__)
@@ -155,7 +156,8 @@ def enabled() -> bool:
 
 
 def _model() -> str:
-    return (os.getenv("MEMORY_EXTRACT_MODEL", "") or "").strip() or _DEFAULT_MODEL
+    # Empty follows the newest Haiku, like the conversation model.
+    return model_select.resolve(os.getenv("MEMORY_EXTRACT_MODEL", "") or "auto:haiku", _DEFAULT_MODEL)
 
 
 def _threshold() -> float:

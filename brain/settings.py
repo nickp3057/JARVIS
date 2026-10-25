@@ -144,7 +144,7 @@ SETTINGS_SCHEMA: dict[str, dict[str, Any]] = {
     # --- Web search toggle ---
     "ANTHROPIC_MODEL": {
         "type": "string",
-        "description": "Claude model id used for conversation turns (read live per request).",
+        "description": "Claude model id for conversation turns (read live). Empty or 'auto' follows the newest Haiku; 'auto:sonnet' follows the newest Sonnet; a full id pins it.",
     },
     "SELF_REPAIR_COMMANDS": {
         "type": "string",

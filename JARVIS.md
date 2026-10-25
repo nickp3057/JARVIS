@@ -447,7 +447,10 @@ ADDRESS=sir                # how JARVIS addresses Nick
 ELEVENLABS_SPEED=1.155     # TTS speed; clamped to 0.7–1.2 in speech/tts.py (code default 1.05)
 ELEVENLABS_MODEL_ID=eleven_flash_v2_5
 DEFAULT_LOCATION=Herriman, Utah
-ANTHROPIC_MODEL=claude-haiku-4-5-20251001
+ANTHROPIC_MODEL=auto        # empty/auto = newest Haiku (Models API, checked daily); auto:sonnet; or a full id to pin
+ANTHROPIC_MODEL_FAMILY=haiku   # family `auto` follows
+ANTHROPIC_EFFORT=low        # effort on 5.x+ models (low|medium|high); ignored on 4.x
+ANTHROPIC_THINKING=off      # Haiku 5.x: off keeps replies fast and inside the 1024-token budget
 SELF_REPAIR_COMMANDS=            # name=command;name2=command2 JARVIS may run by name after approval, e.g. restart_home_assistant=ssh nas 'docker restart homeassistant'
 WEB_SEARCH_ENABLED=true
 PRICE_WATCH_MONITOR_ENABLED=true # periodically refresh saved product URLs
@@ -603,6 +606,14 @@ CALENDAR_ALERT_LEAD_MIN=10  # warn this many minutes before a meeting
   when Nick approves the proposal id. `ANTHROPIC_MODEL` and
   `SELF_REPAIR_COMMANDS` are now editable settings. The memory extractor also
   turns clear behavioural corrections into standing orders on its own.
+- **Model auto-update (1.64 / build 66)** — `brain/model_select.py`:
+  `ANTHROPIC_MODEL` empty or `auto` follows the newest model in
+  `ANTHROPIC_MODEL_FAMILY` (haiku) via the Models API, cached daily in
+  `memory/model_cache.json`; a full id still pins. 5.x+ models get
+  `effort` (default low) and, on Haiku, thinking off, sent via `extra_body`;
+  a model that rejects them is remembered and sent plain requests. The memory
+  extractor and study brief follow the newest Haiku unless their own model
+  vars are set. A `refusal` stop reason gets a spoken in-character reply.
 - **Self-diagnosis and live model selection (1.27 / build 29)** —
   `brain/tool_health.py` scores every tool call so JARVIS knows when one of
   his own integrations is down: degraded tools ride into the system prompt as

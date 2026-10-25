@@ -18,6 +18,7 @@ Failure modes:
 
 from __future__ import annotations
 
+import contextlib
 import os
 import json
 from concurrent.futures import ThreadPoolExecutor
@@ -29,7 +30,13 @@ from typing import Any, Iterator
 
 from dotenv import load_dotenv
 
+try:
+    import anthropic
+except ImportError:  # the agent disables itself in __init__
+    anthropic = None  # type: ignore[assignment]
+
 from brain import memory_extractor
+from brain import model_select
 from brain.habits import render_habits_block
 from brain.history import append_turn, load_history, load_session_messages, start_new_session
 from brain.intents import routed_offline_reply
@@ -62,10 +69,16 @@ def _api_key() -> str:
 
 
 def _model() -> str:
-    """Read live per request so `update_setting ANTHROPIC_MODEL` takes effect without a restart."""
-    return (os.getenv("ANTHROPIC_MODEL", "") or "").strip() or _DEFAULT_MODEL
+    """Read live per request so `update_setting ANTHROPIC_MODEL` takes effect without a restart.
+
+    Empty or ``auto`` follows the newest model in ANTHROPIC_MODEL_FAMILY
+    (haiku by default); see brain/model_select.py.
+    """
+    return model_select.resolve(os.getenv("ANTHROPIC_MODEL", "") or "", _DEFAULT_MODEL)
 
 _MAX_TOKENS = 1024
+# Newer models can decline (stop_reason "refusal") with no text at all.
+_REFUSAL_REPLY = "I'm afraid that one's off the table for me, sir."
 _MAX_TOOL_TURNS = 6
 _HISTORY_KEEP_TURNS = 20
 
@@ -363,17 +376,31 @@ class JarvisAgent:
 
         for round_no in range(1, _MAX_TOOL_TURNS + 1):
             started = time.monotonic()
-            response = self._client.messages.create(  # type: ignore[union-attr]
-                model=_model(),
+            model = _model()
+            request = dict(
+                model=model,
                 max_tokens=_MAX_TOKENS,
                 system=system,
                 tools=tools,
                 messages=_with_cache_breakpoints(messages, anchor),
             )
+            try:
+                response = self._client.messages.create(  # type: ignore[union-attr]
+                    **request, **model_select.request_kwargs(model),
+                )
+            except anthropic.BadRequestError as exc:
+                if not (model_select.request_kwargs(model) and model_select.is_settings_rejection(exc)):
+                    raise
+                model_select.mark_plain(model)
+                response = self._client.messages.create(**request)  # type: ignore[union-attr]
             _log_round(started, None, getattr(response, "usage", None), round_no)
 
             tool_uses = [b for b in response.content if getattr(b, "type", None) == "tool_use"]
             text_blocks = [b for b in response.content if getattr(b, "type", None) == "text"]
+
+            if response.stop_reason == "refusal":
+                self.last_used_tools = used_tools_this_turn
+                return _REFUSAL_REPLY
 
             if response.stop_reason == "tool_use" and tool_uses:
                 used_tools_this_turn = True
@@ -412,13 +439,24 @@ class JarvisAgent:
             at_round_start = True
             started = time.monotonic()
             first_token_at: float | None = None
-            with self._client.messages.stream(  # type: ignore[union-attr]
-                model=_model(),
+            model = _model()
+            request = dict(
+                model=model,
                 max_tokens=_MAX_TOKENS,
                 system=system,
                 tools=tools,
                 messages=_with_cache_breakpoints(messages, anchor),
-            ) as stream:
+            )
+            with contextlib.ExitStack() as stack:
+                try:
+                    stream = stack.enter_context(self._client.messages.stream(  # type: ignore[union-attr]
+                        **request, **model_select.request_kwargs(model),
+                    ))
+                except anthropic.BadRequestError as exc:
+                    if not (model_select.request_kwargs(model) and model_select.is_settings_rejection(exc)):
+                        raise
+                    model_select.mark_plain(model)
+                    stream = stack.enter_context(self._client.messages.stream(**request))  # type: ignore[union-attr]
                 for delta in stream.text_stream:
                     if delta:
                         first_token_at = first_token_at or time.monotonic()
@@ -440,6 +478,10 @@ class JarvisAgent:
             _log_round(started, first_token_at, getattr(final, "usage", None), round_no)
 
             tool_uses = [b for b in final.content if getattr(b, "type", None) == "tool_use"]
+            if final.stop_reason == "refusal" and not text_parts:
+                self.last_used_tools = used_tools_this_turn
+                yield _REFUSAL_REPLY
+                return _REFUSAL_REPLY
             if final.stop_reason == "tool_use" and tool_uses:
                 used_tools_this_turn = True
                 messages.append(

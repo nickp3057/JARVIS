@@ -23,6 +23,7 @@ import time
 from datetime import date, datetime, timedelta
 from typing import Any
 
+from brain import model_select
 from jarvis_logger import get_logger
 
 log = get_logger(__name__)
@@ -215,10 +216,11 @@ def template_body(items: list[dict[str, Any]]) -> str:
 # --- Composition ------------------------------------------------------------
 
 def _model() -> str:
-    return (
+    return model_select.resolve(
         (os.getenv("STUDY_BRIEF_MODEL", "") or "").strip()
         or (os.getenv("MEMORY_EXTRACT_MODEL", "") or "").strip()
-        or _DEFAULT_MODEL
+        or "auto:haiku",
+        _DEFAULT_MODEL,
     )
 
 
