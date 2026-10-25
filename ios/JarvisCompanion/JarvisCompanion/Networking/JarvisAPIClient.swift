@@ -257,6 +257,9 @@ struct JarvisAPIClient {
         request.timeoutInterval = max(timeout, Self.streamingTimeout)
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue("text/plain", forHTTPHeaderField: "Accept")
+        // Ask the server to mark each model round with U+001E so MessageBubble
+        // can show them as separate bubbles. Older servers ignore it.
+        request.setValue("1", forHTTPHeaderField: "X-Jarvis-Stream-Segments")
         request.httpBody = try JSONEncoder().encode(ChatRequest(message: message, sessionID: sessionID, requestID: requestID))
 
         do {

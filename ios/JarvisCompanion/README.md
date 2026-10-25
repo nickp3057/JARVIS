@@ -111,6 +111,12 @@ The connection banner reports server reachability only. Sending a chat no
 longer changes a known-good connection to “Connecting…”; the typing indicator
 and Stop button communicate per-turn activity independently.
 
+Streamed replies are split into one bubble per model round: the app sends
+`X-Jarvis-Stream-Segments: 1` and the server puts U+001E between rounds (also
+saved in history, so synced transcripts split the same way). `MessageBubble`
+renders each segment as its own bubble; copy/share and the chat-list preview
+join them with plain whitespace. Older servers ignore the header.
+
 For rolling upgrades, a missing `/chat/stream` route falls back to `/chat`
 with the same session and request ID. A missing session is surfaced as an
 error rather than silently starting unrelated context. Old servers can still

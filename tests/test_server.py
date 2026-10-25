@@ -121,6 +121,15 @@ class ServerTests(unittest.TestCase):
         transcript = self.client.get(f"/sessions/{session_id}", headers=self.headers).json()
         self.assertEqual(transcript["messages"][-1]["content"], "Stream: hello")
 
+    def test_stream_segments_are_opt_in(self) -> None:
+        with self.client.stream("POST", "/chat/stream", headers=self.headers, json={"message": "a"}) as response:
+            self.assertEqual(response.headers["x-jarvis-stream-segments"], "0")
+            response.read()
+        headers = {**self.headers, "X-Jarvis-Stream-Segments": "1"}
+        with self.client.stream("POST", "/chat/stream", headers=headers, json={"message": "b"}) as response:
+            self.assertEqual(response.headers["x-jarvis-stream-segments"], "1")
+            response.read()
+
     def test_submit_debug_report_requires_auth_and_persists_context(self) -> None:
         payload = {
             "issue": "The answer ignored my correction.",

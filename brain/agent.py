@@ -19,6 +19,7 @@ Failure modes:
 from __future__ import annotations
 
 import contextlib
+import contextvars
 import os
 import json
 from concurrent.futures import ThreadPoolExecutor
@@ -77,6 +78,13 @@ def _model() -> str:
     return model_select.resolve(os.getenv("ANTHROPIC_MODEL", "") or "", _DEFAULT_MODEL)
 
 _MAX_TOKENS = 1024
+# Marks the start of a new model round in a streamed reply (ASCII record
+# separator). Only emitted when a client opts in via stream_round_breaks
+# (the iOS companion), and replaced by a space before history is sent back
+# to the model.
+ROUND_BREAK = "\x1e"
+stream_round_breaks: contextvars.ContextVar[bool] = contextvars.ContextVar("stream_round_breaks", default=False)
+
 # Newer models can decline (stop_reason "refusal") with no text at all.
 _REFUSAL_REPLY = "I'm afraid that one's off the table for me, sir."
 _MAX_TOOL_TURNS = 6
@@ -131,7 +139,11 @@ def _turn_messages(history: list[dict[str, Any]], turn_context: str) -> list[dic
     """History as sent this turn: per-turn context rides on the newest user
     message instead of the system prompt, so the system prompt and earlier
     history stay byte-identical from turn to turn and can be read from cache."""
-    messages = list(history)
+    messages = [
+        {**m, "content": m["content"].replace(ROUND_BREAK, " ")}
+        if isinstance(m.get("content"), str) and ROUND_BREAK in m["content"] else m
+        for m in history
+    ]
     if turn_context and messages and messages[-1].get("role") == "user":
         messages[-1] = {
             "role": "user",
@@ -468,6 +480,11 @@ class JarvisAgent:
                         # deltas byte-for-byte intact, but separate distinct
                         # model rounds when neither side supplied whitespace.
                         separator = _stream_round_separator(text_parts, delta, at_round_start)
+                        if at_round_start and text_parts and stream_round_breaks.get():
+                            # The companion shows each round as its own
+                            # bubble; the marker is saved too, so history
+                            # replays split the same way.
+                            separator = ROUND_BREAK
                         if separator:
                             text_parts.append(separator)
                             yield separator

@@ -64,7 +64,8 @@ struct ChatConversation: Identifiable, Codable, Equatable {
     }
 
     var preview: String {
-        messages.last?.text ?? "No messages yet"
+        // Round breaks (U+001E) separate bubbles; read as spaces here.
+        messages.last?.text.replacingOccurrences(of: "\u{1E}", with: " ") ?? "No messages yet"
     }
 }
 

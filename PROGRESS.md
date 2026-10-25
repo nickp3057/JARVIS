@@ -699,3 +699,17 @@ through `brain/confirm_gate.py`, and the add runs only on Nick's next "yes" /
 Persona: no text before or between tool calls (speak once, after the last
 result), and never assume which of several matches he means.
 Test: `test_pick_from_several_matches_needs_nicks_yes`.
+
+## 2026-10-25 one bubble per model round in the companion
+
+Nick: everything lands in one run-on chat bubble. `/chat/stream` now accepts
+`X-Jarvis-Stream-Segments: 1` (echoed back); the agent then emits
+`agent.ROUND_BREAK` (U+001E) instead of a space between model rounds, via the
+`stream_round_breaks` contextvar set in the server's producer thread. The
+marker is persisted in that session's history so recovery/sync splits the same
+way, and `_turn_messages` replaces it with a space before history goes back to
+the model. Voice, GUI and old apps are unaffected (default off). iOS:
+`JarvisAPIClient.stream` sends the header; `MessageBubble` renders one bubble
+per segment (header on the first only). Tests: `tests/test_stream_rounds.py`
+(3) + server opt-in test. **Not compiled here (no Xcode on Linux): build in
+Xcode and check a tool turn ("add Gold") shows separate bubbles.**

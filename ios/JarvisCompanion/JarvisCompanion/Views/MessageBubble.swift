@@ -15,13 +15,19 @@ struct MessageBubble: View {
             switch message.role {
             case .user:
                 row(alignment: .trailing) {
-                    bubble(isUser: true)
+                    bubble(isUser: true, text: message.text, showHeader: true)
                 }
             case .jarvis:
                 row(alignment: .leading) {
                     HStack(alignment: .top, spacing: 8) {
                         JarvisCoreMark(size: 30).padding(.top, 7)
-                        bubble(isUser: false)
+                        // One bubble per model round ("Checking." / "Added.")
+                        // instead of one run-on paragraph.
+                        VStack(alignment: .leading, spacing: 6) {
+                            ForEach(Array(segments.enumerated()), id: \.offset) { index, segment in
+                                bubble(isUser: false, text: segment, showHeader: index == 0)
+                            }
+                        }
                     }
                 }
             case .error:
@@ -30,9 +36,9 @@ struct MessageBubble: View {
         }
         .contextMenu {
             Button("Copy", systemImage: "doc.on.doc") {
-                UIPasteboard.general.string = message.text
+                UIPasteboard.general.string = plainText
             }
-            ShareLink(item: message.text) {
+            ShareLink(item: plainText) {
                 Label("Share", systemImage: "square.and.arrow.up")
             }
             if let onReport {
@@ -41,6 +47,20 @@ struct MessageBubble: View {
                 }
             }
         }
+    }
+
+    /// The server separates model rounds with U+001E (record separator).
+    private static let roundBreak = "\u{1E}"
+
+    private var segments: [String] {
+        let parts = message.text.components(separatedBy: Self.roundBreak)
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        return parts.isEmpty ? [""] : parts
+    }
+
+    private var plainText: String {
+        segments.joined(separator: "\n\n")
     }
 
     private func row<Content: View>(
@@ -54,19 +74,21 @@ struct MessageBubble: View {
         }
     }
 
-    private func bubble(isUser: Bool) -> some View {
+    private func bubble(isUser: Bool, text: String, showHeader: Bool) -> some View {
         VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Text(message.role == .user ? "YOU" : "JARVIS")
-                    .font(.caption2.monospaced().weight(.semibold)).tracking(1.5)
-                    .foregroundStyle(JarvisTheme.cyan)
-                Spacer(minLength: 12)
-                Text(message.date, style: .time).font(.caption2).foregroundStyle(.secondary)
+            if showHeader {
+                HStack {
+                    Text(message.role == .user ? "YOU" : "JARVIS")
+                        .font(.caption2.monospaced().weight(.semibold)).tracking(1.5)
+                        .foregroundStyle(JarvisTheme.cyan)
+                    Spacer(minLength: 12)
+                    Text(message.date, style: .time).font(.caption2).foregroundStyle(.secondary)
+                }
             }
             if isUser {
-                Text(message.text).textSelection(.enabled).lineSpacing(4)
+                Text(text).textSelection(.enabled).lineSpacing(4)
             } else {
-                AssistantMessageText(text: message.text)
+                AssistantMessageText(text: text)
             }
         }
             .foregroundStyle(.primary)

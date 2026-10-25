@@ -20,6 +20,7 @@ from brain.history import (
 )
 from app import status_hub
 from brain.debug_reports import create_debug_report
+from brain.agent import stream_round_breaks
 from brain.runtime import JarvisRuntime
 from integrations import media_doctor
 
@@ -185,8 +186,15 @@ def chat(request: ChatRequest, _: None = Depends(authorize)) -> ChatResponse:
 
 
 @app.post("/chat/stream")
-def chat_stream(request: ChatRequest, _: None = Depends(authorize)) -> StreamingResponse:
+def chat_stream(
+    request: ChatRequest,
+    _: None = Depends(authorize),
+    stream_segments: str | None = Header(default=None, alias="X-Jarvis-Stream-Segments"),
+) -> StreamingResponse:
     session_id = _resolve_session(request)
+    # Opt-in: separate model rounds with agent.ROUND_BREAK so the app can
+    # show "checking..." and the result as separate bubbles.
+    segments = (stream_segments or "").strip() == "1"
 
     async def chunks():
         # A synchronous StreamingResponse can resume a generator on different
@@ -204,6 +212,7 @@ def chat_stream(request: ChatRequest, _: None = Depends(authorize)) -> Streaming
                     pass  # Application shutdown; worker still finishes history.
 
         def produce():
+            stream_round_breaks.set(segments)
             try:
                 kwargs = {"request_id": request.request_id} if request.request_id else {}
                 for fragment in runtime().respond_streaming_in_session(session_id, request.message.strip(), **kwargs):
@@ -230,6 +239,7 @@ def chat_stream(request: ChatRequest, _: None = Depends(authorize)) -> Streaming
         media_type="text/plain; charset=utf-8",
         headers={
             "X-Jarvis-Session-ID": session_id,
+            "X-Jarvis-Stream-Segments": "1" if segments else "0",
             # URLSession sniffs up to 512 bytes of text/plain before handing
             # any to the app, so most replies arrived all at once. nosniff
             # turns that off; the others stop proxies from buffering.
