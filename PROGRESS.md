@@ -620,3 +620,30 @@ session-bound, consumed before running, never retried. Wired into the agent
 boundary next to the arr restart gate (which keeps its own tuned code; the
 distinct "approve" verb keeps the two from answering each other). Tests:
 `tests/test_confirm_gate.py` (7).
+
+### 1c — media doctor
+
+`integrations/media_doctor.py` + `integrations/plex.py`. `diagnose(title)`
+walks: Radarr/Sonarr reachable → in library (year-aware; ambiguous titles ask)
+→ monitored → released (Radarr `isAvailable`) → last history event
+(`downloadFailed` / grabbed-then-vanished) → indexers (Prowlarr backoff via
+`nas_stack.indexer_outages`) → queue record → qBittorrent torrent by
+`downloadId` (error/missingFiles, paused, metaDL > stall window, stalledDL
+idle > stall window, missing from client) → import (importBlocked/Pending/
+Failed with Radarr's own status messages) → Plex (`/hubs/search`, skipped
+without `PLEX_TOKEN`). No title sweeps all queue items, services and indexers.
+
+Exposed as the `diagnose_media` / `apply_media_fix` tools and
+`GET /api/status/media/diagnose`. Fixes are proposed only; they run after
+Nick's "yes"/"approve <code>" through `brain/confirm_gate.py`, and "restart
+arr stack" hands off to the existing restart gate. The endpoint is read-only;
+applying from the iOS app currently means asking in chat.
+
+Tests: `tests/test_media_doctor.py` (19, mocked Servarr/qBit/Prowlarr/Plex),
+plus an endpoint auth test in `tests/test_server.py`.
+
+**Verify live on the Optiplex:** `PLEX_TOKEN` presence and that
+`/hubs/search` returns JSON for this Plex version; that Radarr's queue
+`downloadId` matches qBittorrent hashes (it should, case aside); and a real
+`curl -H "Authorization: Bearer …" ':8000/api/status/media/diagnose?title=…'`
+against a known-stuck and a known-finished title.

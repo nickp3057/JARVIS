@@ -80,6 +80,8 @@ Pearson-Stark-Jarvis/
 │   │                        resolver + NL quality-phrase fuzzy matching
 │   ├── radarr.py            find_movie (lookup) / add_movie (confirm-gated)
 │   ├── sonarr.py            find_series (lookup) / add_series (confirm-gated)
+│   ├── media_doctor.py      Traces one title request→arr→indexer→qBit→import→Plex; names the stalled stage; fixes via confirm_gate
+│   ├── plex.py              Minimal Plex client (title search + library rescan) for the media doctor
 │   └── spotify.py           Spotipy wrapper: play/pause/skip/volume/transfer/now-playing
 │
 ├── speech/
@@ -504,6 +506,8 @@ JARVIS_SERVER_HOST=0.0.0.0
 JARVIS_SERVER_PORT=8000
 # Companion dashboard (read-only status hub endpoints)
 PLEX_URL=                   # Plex base URL for /api/links + /api/status/services
+PLEX_TOKEN=                 # X-Plex-Token; enables the media doctor's "is it on Plex" stage and Plex rescan fix
+MEDIA_DOCTOR_STALL_MINUTES=30  # no torrent progress for this long counts as stalled (doctor + download monitor)
 HOME_DASHBOARD_ENTITIES=    # comma-separated HA entity_ids for /api/home/entities
 MEDIA_STORAGE_PATH=         # local mount of the video library; leave blank to
                             # measure the NAS volume via Radarr/Sonarr diskspace
@@ -841,6 +845,17 @@ CALENDAR_ALERT_LEAD_MIN=10  # warn this many minutes before a meeting
   hardcoded IDs. TV defaults to monitoring `future` episodes only. No-match and
   multi-match cases are handled explicitly; unconfigured services degrade to a
   polite line like Home Assistant.
+- **Media doctor** (`integrations/media_doctor.py`) — "why hasn't Dune shown
+  up?" → `diagnose_media` walks Radarr/Sonarr reachability → library →
+  monitored → released → grabbed / indexers (Prowlarr) → qBittorrent torrent
+  (stalled, dead metadata, paused, missing) → import (blocked/failed messages)
+  → Plex, and stops at the first stuck stage in plain English. No title = sweep
+  every queued download. Suggested fixes (re-search, monitor + search, replace
+  a dead release with blocklist, Plex rescan, restart arr stack) are proposed
+  by `apply_media_fix` and run only after Nick's "yes"/"approve <code>"
+  (`brain/confirm_gate.py`; restart uses the arr restart gate). Also
+  `GET /api/status/media/diagnose?title=&kind=movie|show` (read-only JSON:
+  stage, stalled, summary, steps, fixes, candidates).
 - **Reminders & to-dos** (`brain/reminders.py`) — timed reminders ("remind me at
   3pm") and open to-dos, persisted, spoken aloud when due. Tools: add_reminder /
   list_reminders / complete_reminder / delete_reminder.

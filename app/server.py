@@ -21,6 +21,7 @@ from brain.history import (
 from app import status_hub
 from brain.debug_reports import create_debug_report
 from brain.runtime import JarvisRuntime
+from integrations import media_doctor
 
 _runtime: JarvisRuntime | None = None
 _runtime_lock = threading.Lock()
@@ -274,6 +275,15 @@ def study_brief_status(_: None = Depends(authorize)) -> dict[str, object]:
 @app.get("/api/status/media")
 def status_media(_: None = Depends(authorize)) -> dict[str, object]:
     return status_hub.media_status()
+
+
+@app.get("/api/status/media/diagnose")
+def status_media_diagnose(
+    title: str | None = None, kind: str | None = None, _: None = Depends(authorize),
+) -> dict[str, object]:
+    """Read-only trace of one title (or every queued download). Fixes are
+    listed for display; applying one goes through chat and the confirm gate."""
+    return media_doctor.diagnose(title, kind)
 
 
 @app.get("/api/status/storage")

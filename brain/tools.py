@@ -57,6 +57,7 @@ from brain.reminders import _format_due as _format_reminder_due
 from brain.settings import get_setting, list_settings, update_setting
 from brain.vision import describe_screen
 from brain.weather import get_weather
+from integrations import media_doctor
 from integrations import radarr as radarr
 from integrations import qbittorrent as qbittorrent
 from integrations import servarr_common as servarr
@@ -488,6 +489,16 @@ def _tool_complete_reminder(args: dict[str, Any]) -> str:
 
 def _tool_delete_reminder(args: dict[str, Any]) -> str:
     return delete_reminder(args.get("reminder_id", ""))
+
+
+def _tool_diagnose_media(args: dict[str, Any]) -> str:
+    report = media_doctor.diagnose(args.get("title"), args.get("kind"))
+    media_doctor.remember_fixes(args.get("_jarvis_session_id"), report)
+    return media_doctor.render(report)
+
+
+def _tool_apply_media_fix(args: dict[str, Any]) -> str:
+    return media_doctor.propose_fix(args.get("_jarvis_session_id"), args.get("fix_id", ""))
 
 
 def _tool_find_movie(args: dict[str, Any]) -> str:
@@ -1568,6 +1579,36 @@ _CUSTOM_TOOLS: list[dict[str, Any]] = [
     },
     # --- Media library (Radarr / Sonarr) ---------------------------------
     {
+        "name": "diagnose_media",
+        "description": (
+            "Trace why a movie or show hasn't shown up: checks Radarr/Sonarr, library, "
+            "monitoring, release date, search/indexers (Prowlarr), the qBittorrent download, "
+            "import and Plex, and names the exact stage where it stalled. Omit title to sweep "
+            "every queued download for anything stuck. Read-only. Relay the summary line "
+            "plainly; mention suggested fixes by their label."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "title": {"type": "string", "description": "Movie or show title, optionally with a year. Omit for a full sweep."},
+                "kind": {"type": "string", "enum": ["movie", "show"], "description": "Restrict to Radarr (movie) or Sonarr (show)."},
+            },
+        },
+    },
+    {
+        "name": "apply_media_fix",
+        "description": (
+            "Propose one fix from the latest diagnose_media result (fix1, fix2, ...). This never "
+            "changes anything itself: it returns a prompt and the fix runs only if Nick replies "
+            "\"yes\" next or \"approve <code>\". Call only when Nick asks for that fix."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {"fix_id": {"type": "string", "description": "e.g. fix1"}},
+            "required": ["fix_id"],
+        },
+    },
+    {
         "name": "find_movie",
         "description": (
             "Search Radarr for a movie by title. Use this FIRST whenever Nick "
@@ -1858,6 +1899,8 @@ _DISPATCH: dict[str, Callable[[dict[str, Any]], str]] = {
     "list_price_watches": _tool_list_price_watches,
     "check_prices": _tool_check_prices,
     "remove_price_watch": _tool_remove_price_watch,
+    "diagnose_media": _tool_diagnose_media,
+    "apply_media_fix": _tool_apply_media_fix,
     "find_movie": _tool_find_movie,
     "add_movie": _tool_add_movie,
     "find_series": _tool_find_series,

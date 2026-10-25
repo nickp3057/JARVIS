@@ -236,7 +236,8 @@ read-only debug-report tools.
 
 The dashboard endpoints (`/api/status/torrents`, `/api/status/media`,
 `/api/status/storage`, `/api/status/services`, `/api/links`,
-`/api/home/entities`, `/api/now`, `/api/study/brief`) are a second
+`/api/home/entities`, `/api/now`, `/api/study/brief`,
+`/api/status/media/diagnose` — the read-only media doctor) are a second
 non-conversational surface, aggregated in `app.status_hub` directly over the
 integration modules. They keep the thin-client principle: all service
 credentials and URLs stay server-side (read from the same `.env` values the

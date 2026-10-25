@@ -87,6 +87,16 @@ class ServerTests(unittest.TestCase):
             404,
         )
 
+    def test_media_diagnose_is_authenticated_and_read_only(self) -> None:
+        self.assertEqual(self.client.get("/api/status/media/diagnose").status_code, 401)
+        report = {"stage": "download", "stalled": True, "summary": "stuck", "item": None,
+                  "steps": [], "fixes": [], "candidates": []}
+        with patch.object(server.media_doctor, "diagnose", return_value=report) as diagnose:
+            response = self.client.get("/api/status/media/diagnose?title=Dune&kind=movie", headers=self.headers)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["summary"], "stuck")
+        diagnose.assert_called_once_with("Dune", "movie")
+
     def test_capabilities_are_authenticated_and_versioned(self) -> None:
         self.assertEqual(self.client.get("/api/capabilities").status_code, 401)
         response = self.client.get("/api/capabilities", headers=self.headers)

@@ -164,6 +164,16 @@ def torrent_info(filter_name: str = "all") -> tuple[bool, Any]:
     )
 
 
+def torrent_by_hash(torrent_hash: str) -> tuple[bool, dict[str, Any] | None | str]:
+    """One torrent's full record, ``(True, None)`` if qBittorrent lacks it."""
+    ok, payload = _request("/torrents/info", params={"hashes": (torrent_hash or "").lower()})
+    if not ok:
+        return False, str(payload)
+    if not isinstance(payload, list):
+        return False, "Unexpected qBittorrent torrent response."
+    return True, (payload[0] if payload else None)
+
+
 def _bytes(value: Any) -> str:
     try:
         size = float(value or 0)
