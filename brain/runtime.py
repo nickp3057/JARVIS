@@ -992,7 +992,12 @@ class JarvisRuntime:
         announce_completions = os.getenv(
             "QBITTORRENT_ANNOUNCE_COMPLETIONS", "true",
         ).strip().lower() in ("1", "true", "yes", "on")
+        from integrations.media_doctor import no_progress_stall
+
         previous: dict[str, dict[str, Any]] | None = None
+        # Hashes already alerted as stalled; cleared when they move again, so
+        # each stall alerts once instead of every poll.
+        stalled: set[str] = set()
 
         while not self._stop_monitors.is_set():
             success, result = download_snapshot()
@@ -1054,6 +1059,23 @@ class JarvisRuntime:
                             title="Download error",
                             detail=name,
                         )
+            now = time.time()
+            for torrent_hash, item in current.items():
+                if float(item.get("progress", 0) or 0) >= 1:
+                    stalled.discard(torrent_hash)
+                    continue
+                why = no_progress_stall(item, now)
+                if why is None:
+                    stalled.discard(torrent_hash)
+                elif torrent_hash not in stalled:
+                    stalled.add(torrent_hash)
+                    self.record_event(
+                        kind="alert",
+                        source="downloads",
+                        title="Download stalled",
+                        detail=f"{item.get('name', 'Download')}: {why} Ask me to diagnose it.",
+                    )
+            stalled &= set(current)
             previous = current
             if self._stop_monitors.wait(interval):
                 break

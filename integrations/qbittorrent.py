@@ -244,6 +244,11 @@ def download_snapshot() -> tuple[bool, list[dict[str, Any]] | str]:
             "progress": float(item.get("progress", 0) or 0),
             "state": str(item.get("state", "unknown")),
             "eta": int(item.get("eta", -1) or -1),
+            # Stall detection (media_doctor.no_progress_stall) needs these.
+            "num_seeds": int(item.get("num_seeds", 0) or 0),
+            "num_leechs": int(item.get("num_leechs", 0) or 0),
+            "last_activity": float(item.get("last_activity", 0) or 0),
+            "time_active": float(item.get("time_active", 0) or 0),
         }
         for item in payload
     ]

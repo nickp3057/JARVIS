@@ -647,3 +647,13 @@ plus an endpoint auth test in `tests/test_server.py`.
 `downloadId` matches qBittorrent hashes (it should, case aside); and a real
 `curl -H "Authorization: Bearer …" ':8000/api/status/media/diagnose?title=…'`
 against a known-stuck and a known-finished title.
+
+### 1d — stalled-download alert
+
+The runtime download monitor now also records a `Download stalled` alert
+(once per torrent until it moves again) when a torrent sits in
+`stalledDL`/`metaDL` with no data for `MEDIA_DOCTOR_STALL_MINUTES`
+(default 30). Paused torrents don't alert; errors keep their own alert.
+`download_snapshot` carries seeds/peers/last_activity/time_active for this.
+Today these alerts land in the runtime inbox like download errors; Phase 2
+routes them through the event bus to the phone.

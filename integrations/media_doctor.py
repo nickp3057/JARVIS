@@ -138,6 +138,21 @@ def _torrent_verdict(torrent: dict[str, Any], now: float) -> tuple[bool, str]:
     return False, f"downloading at {progress}%, {speed / 1_048_576:.1f} MB/s, ETA {eta_text}."
 
 
+def no_progress_stall(torrent: dict[str, Any], now: float) -> str | None:
+    """Description if a torrent is stuck for lack of peers/data, else None.
+
+    Narrower than ``_torrent_verdict``: paused torrents (Nick's choice) and
+    error states (alerted separately) don't count, so the download monitor
+    can alert on exactly the "it silently stopped moving" case.
+    """
+    if str(torrent.get("state", "")) not in {"stalledDL", "metaDL", "forcedMetaDL"}:
+        return None
+    if not torrent.get("last_activity") and not torrent.get("time_active"):
+        return None  # old snapshot without timing fields: can't judge
+    stalled, description = _torrent_verdict(torrent, now)
+    return description if stalled else None
+
+
 def _plain_duration(seconds: float) -> str:
     seconds = max(0, int(seconds))
     if seconds < 90:

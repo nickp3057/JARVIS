@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import time
 import unittest
 from unittest.mock import Mock, patch
 
@@ -108,6 +109,26 @@ class RuntimeMonitorTests(unittest.TestCase):
         alerts = [call for call in runtime.record_event.call_args_list if call.kwargs.get("kind") == "alert"]
         self.assertEqual(len(alerts), 1)
         runtime.announce.assert_not_called()
+
+    def test_download_monitor_alerts_once_per_stall(self) -> None:
+        runtime = object.__new__(JarvisRuntime)
+        runtime._stop_monitors = _TwoIterationStop()
+        runtime._download_monitor_failed = False
+        runtime.record_event = Mock()
+        runtime.announce = Mock()
+        old = time.time() - 7200
+        stuck = [{"hash": "abc", "name": "Dune", "progress": 0.4, "state": "stalledDL",
+                  "num_seeds": 0, "last_activity": old, "time_active": 9000}]
+        paused = [{"hash": "def", "name": "Paused", "progress": 0.4, "state": "pausedDL",
+                   "last_activity": old, "time_active": 9000}]
+        with patch(
+            "integrations.qbittorrent.download_snapshot",
+            side_effect=[(True, stuck + paused), (True, stuck + paused)],
+        ), patch.dict(os.environ, {"QBITTORRENT_MONITOR_INTERVAL_S": "0"}, clear=False):
+            runtime._download_monitor_loop()
+        stalls = [c for c in runtime.record_event.call_args_list if c.kwargs.get("title") == "Download stalled"]
+        self.assertEqual(len(stalls), 1)
+        self.assertIn("Dune", stalls[0].kwargs["detail"])
 
     def test_download_monitor_reports_one_outage_for_repeated_failures(self) -> None:
         runtime = object.__new__(JarvisRuntime)
