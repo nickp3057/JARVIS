@@ -611,3 +611,12 @@ Audit findings fixed in `integrations/servarr_common.py`, `radarr.py`,
 Tests: `tests/test_servarr_reliability.py` (13). The full suite has the same
 15 environment-only errors as before this change (missing optional deps in
 the cloud container + the known study-brief fixture failure).
+
+### 1b — generic confirm gate
+
+`brain/confirm_gate.py`: tools *propose* a side-effecting fix; it runs only
+on Nick's own next message ("yes") or "approve <code>" within 10 minutes,
+session-bound, consumed before running, never retried. Wired into the agent
+boundary next to the arr restart gate (which keeps its own tuned code; the
+distinct "approve" verb keeps the two from answering each other). Tests:
+`tests/test_confirm_gate.py` (7).

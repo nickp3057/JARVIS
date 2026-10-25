@@ -286,8 +286,14 @@ class JarvisAgent:
             return self._session_id
 
     def _arr_stack_action(self, user_input: str) -> str | None:
+        from brain import confirm_gate
         from brain.arr_stack import conversation_action
         reply = conversation_action(user_input, self._session_id)
+        # Always called so every message disarms a pending bare "yes".
+        gate_reply = confirm_gate.conversation_action(
+            user_input, self._session_id, handled=reply is not None,
+        )
+        reply = reply if reply is not None else gate_reply
         if reply is not None:
             self.last_used_tools = True
             self._last_turn_tools = []
