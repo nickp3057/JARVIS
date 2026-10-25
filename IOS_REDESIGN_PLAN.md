@@ -1,0 +1,69 @@
+# JarvisCompanion redesign — plan (Phase 4, not built)
+
+Written 2026-10-25 from Nick's feedback: the chat bubbles ("chat backs") feel
+off, JARVIS sounds scattered because a whole tool turn lands in one bubble,
+replies didn't stream, and media adds sometimes fail. He leans toward a
+hub-first app with chat as one tab.
+
+## Already fixed on the server/app side (this branch)
+
+- Streaming: `/chat/stream` sends `nosniff`, so short replies type out live.
+- One bubble per model round (`X-Jarvis-Stream-Segments`, U+001E marker).
+- Quieter tool turns (no pre-tool narration) and no guessed media adds
+  (several matches → exact-title "yes" via the confirm gate).
+- Media doctor endpoint and the alert stream exist for the app to use.
+
+Check these on the phone first. Some of the "weird" may already be gone.
+
+## Today's structure
+
+`RootView`: TabView with Chat (default, tab 0), Hub ("Control Room": a
+Today / Media / Home segmented picker over cards), Settings. Chat history is a
+sheet; settings is reachable from three places (tab, chat toolbar, hub
+toolbar).
+
+## Proposed structure: hub-first
+
+| Tab | Content |
+|---|---|
+| **Home** (default) | Status strip (NAS / arr / qBit / HA health from `/api/status/services`), "Needs attention" list from the alert stream, Now card, quick actions, an "Ask JARVIS" field that opens Chat with the text. |
+| **Media** | Downloads (live progress), recently added, and a **Request** flow: search → pick → quality → confirm, calling the same server tools via chat-less endpoints (see below). Each stuck item has a "Why?" button → `/api/status/media/diagnose`. |
+| **Chat** | Conversations list as the root (not a sheet), thread view pushed from it. |
+| **Settings** | Only place for settings (remove the duplicate toolbar buttons). |
+
+### Chat look
+
+- Drop the per-bubble "JARVIS · time" header; show time on long-press or as a
+  group footer. Header-in-every-bubble is the likeliest source of
+  "chat backs feel weird".
+- Flatter JARVIS bubbles (solid panel colour, no drop shadow); keep the
+  accent-tinted user bubble. Consecutive round bubbles group tightly (6 pt),
+  turns separate more (14 pt).
+- Tool activity as a small inline chip ("Searching Radarr…") while a round is
+  silent, driven by a server status line in the stream. Needs one new event
+  type; otherwise reuse the round marker.
+
+### Server work this needs (small, all on jarvis-api)
+
+1. `GET /api/clients/events` already exists. Give the companion a reconnecting
+   SSE reader to power "Needs attention" and live badges.
+2. Media request endpoints so the Media tab doesn't need chat:
+   `GET /api/media/search?q=&kind=` (wraps `find_movie/find_series`, records
+   the same receipt) and `POST /api/media/requests` (wraps `add_*`; an
+   ambiguous pick returns the confirm-gate prompt, approved with
+   `POST /api/confirm {code}`). Same two-step gate, no new write path.
+3. Optional: a `tool_status` line type in `/chat/stream` for the chip above.
+
+### Rough cost
+
+Server endpoints + tests ~$6–8; SwiftUI restructure (tabs, conversation list
+as root, Media tab, SSE reader, bubble restyle) ~$15–25 because it can't be
+compiled here, so it needs careful small steps and Nick building in Xcode
+between them.
+
+## Questions for Nick before building
+
+1. "Chat backs": the bubble backgrounds/borders, or the back navigation?
+   A screenshot settles it.
+2. Should Home be the default tab, or should the app open where you left it?
+3. Media requests from the Media tab without chat: wanted, or is chat fine?

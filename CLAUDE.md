@@ -10,6 +10,7 @@ This repo maintains its own living docs — read them before making changes:
 - `ARCHITECTURE.md` — the target layered architecture (Perception / Memory / Reasoning / Agency / Presence) and the runtime design rule.
 - `FUTURE_SESSIONS.md` — Nick's goals for the self-learning/self-healing direction and the prioritized backlog for future sessions. `SELF_HEALING_HANDOFF.md` is the review checklist for the most recent self-healing work.
 - `OVERNIGHT_HANDOFF.md` — status, evidence and review checklist for the 2026-09-22 overnight overhaul (alerts, confirmation gate, notifications, performance).
+- `IOS_REDESIGN_PLAN.md` — the proposed hub-first JarvisCompanion redesign (Phase 4, planned, not built) and the questions it waits on.
 
 Keep both updated when you change behavior they describe (new tools, new .env vars, new monitors, shipped roadmap items).
 

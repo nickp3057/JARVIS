@@ -748,3 +748,9 @@ http://optiplex:8000/api/clients/events` should print keep-alives; publish a
 test by pausing a torrent past the stall window or setting
 `JARVIS_WATCH_DEVICES` to an unplugged device. Check phone push still arrives
 for an arr incident (APNs if enabled, HA otherwise).
+
+## 2026-10-25 Phase 4 plan
+
+`IOS_REDESIGN_PLAN.md`: hub-first JarvisCompanion (Home / Media / Chat /
+Settings), chat restyle, Media request flow over the existing confirm gate.
+Plan only; waiting on Nick's answers there.
