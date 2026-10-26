@@ -869,6 +869,11 @@ CALENDAR_ALERT_LEAD_MIN=10  # warn this many minutes before a meeting
   (`brain/confirm_gate.py`; restart uses the arr restart gate). Also
   `GET /api/status/media/diagnose?title=&kind=movie|show` (read-only JSON:
   stage, stalled, summary, steps, fixes, candidates).
+- **Companion media requests** (`integrations/media_requests.py`) — chat-free
+  search → request → confirm for the planned Media tab:
+  `GET /api/media/search`, `POST /api/media/requests` (opens a confirm-gate
+  proposal, writes nothing), `POST /api/media/requests/confirm {code}`. Uses
+  the same receipts and `add_movie`/`add_series` as chat.
 - **Reminders & to-dos** (`brain/reminders.py`) — timed reminders ("remind me at
   3pm") and open to-dos, persisted, spoken aloud when due. Tools: add_reminder /
   list_reminders / complete_reminder / delete_reminder.

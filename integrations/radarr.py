@@ -38,6 +38,20 @@ def _lookup(term: str) -> tuple[bool, Any]:
     )
 
 
+def candidates(title: str) -> tuple[bool, list[dict[str, Any]] | str]:
+    """Lookup results for ``title`` (year-aware), or ``(False, reason)``."""
+    ok, payload, year = servarr.ranked_lookup(_lookup, title)
+    if not ok:
+        return False, str(payload)
+    results = [m for m in payload if m.get("tmdbId")]
+    if year is not None:
+        same_year = [m for m in results if m.get("year") == year]
+        if len(same_year) == 1:
+            # 'Dune 2021' names exactly one title: offer only that one.
+            results = same_year
+    return True, results
+
+
 def find_movie(title: str, session_id: str | None = None) -> str:
     """Search Radarr for ``title`` and report candidates without adding anything."""
     title = (title or "").strip()
@@ -46,16 +60,9 @@ def find_movie(title: str, session_id: str | None = None) -> str:
     if not servarr.is_configured(_SERVICE):
         return "Radarr isn't configured, sir."
 
-    ok, payload, year = servarr.ranked_lookup(_lookup, title)
+    ok, results = candidates(title)
     if not ok:
-        return str(payload)
-
-    results = [m for m in payload if m.get("tmdbId")]
-    if year is not None:
-        same_year = [m for m in results if m.get("year") == year]
-        if len(same_year) == 1:
-            # 'Dune 2021' names exactly one title: offer only that one.
-            results = same_year
+        return str(results)
     media_selections.record(_SERVICE, session_id, results[:_MAX_CANDIDATES], "tmdbId")
     if not results:
         return f"No match on Radarr for '{title}', sir. Try the exact title or add a year."

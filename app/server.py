@@ -26,7 +26,7 @@ from brain.agent import stream_round_breaks
 from brain.runtime import JarvisRuntime
 from app import client_tokens
 from brain import event_bus
-from integrations import media_doctor
+from integrations import media_doctor, media_requests
 
 _SSE_KEEPALIVE_S = 15.0
 
@@ -331,6 +331,37 @@ def status_media_diagnose(
     """Read-only trace of one title (or every queued download). Fixes are
     listed for display; applying one goes through chat and the confirm gate."""
     return media_doctor.diagnose(title, kind)
+
+
+class MediaRequest(BaseModel):
+    kind: str = Field(pattern="^(movie|show)$")
+    id: int = Field(gt=0)
+    quality: str | None = Field(default=None, max_length=80)
+
+
+class MediaConfirm(BaseModel):
+    code: str = Field(min_length=4, max_length=4)
+
+
+@app.get("/api/media/search")
+def media_search(q: str, kind: str = "movie", _: None = Depends(authorize)) -> dict[str, object]:
+    """Lookup only; records which titles were shown so only they can be requested."""
+    try:
+        return media_requests.search(q, kind)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@app.post("/api/media/requests")
+def media_request(request: MediaRequest, _: None = Depends(authorize)) -> dict[str, object]:
+    """Step one of two: opens a confirm-gate proposal; nothing is added yet."""
+    return media_requests.request(request.kind, request.id, request.quality)
+
+
+@app.post("/api/media/requests/confirm")
+def media_request_confirm(request: MediaConfirm, _: None = Depends(authorize)) -> dict[str, object]:
+    """Step two: approve the open proposal with its code."""
+    return media_requests.confirm(request.code)
 
 
 @app.get("/api/clients/events")

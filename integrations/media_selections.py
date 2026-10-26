@@ -48,6 +48,22 @@ def validate(service: str, session_id: str | None, media_id: int) -> tuple[bool,
     return True, ""
 
 
+def narrow(service: str, session_id: str | None, media_id: int) -> dict[str, Any] | None:
+    """Keep only ``media_id`` from the session's receipt; return its record.
+
+    For clients where a human tapped one exact result: after this the add is
+    no longer ambiguous."""
+    if not session_id:
+        return None
+    with _lock:
+        receipt = _receipts.get((service, session_id))
+        if receipt is None or media_id not in receipt[1]:
+            return None
+        chosen = receipt[1][media_id]
+        _receipts[(service, session_id)] = (receipt[0], {media_id: chosen})
+    return dict(chosen)
+
+
 def candidate_count(service: str, session_id: str | None) -> int:
     """How many titles the session's latest lookup offered (0 if none)."""
     if not session_id:

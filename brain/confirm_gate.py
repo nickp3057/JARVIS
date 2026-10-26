@@ -66,6 +66,15 @@ def propose(session_id: str | None, description: str, run: Callable[[], str]) ->
             f"within {_TTL_S // 60} minutes, sir. Nothing has been changed yet.")
 
 
+def pending_code(session_id: str | None) -> str | None:
+    """The open proposal's approval code (for non-chat clients that show it)."""
+    if not session_id:
+        return None
+    with _lock:
+        proposal = _live(session_id, time.monotonic())
+    return proposal.code if proposal else None
+
+
 def pending_description(session_id: str | None) -> str | None:
     if not session_id:
         return None

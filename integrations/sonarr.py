@@ -82,6 +82,20 @@ def _lookup(term: str) -> tuple[bool, Any]:
     )
 
 
+def candidates(title: str) -> tuple[bool, list[dict[str, Any]] | str]:
+    """Lookup results for ``title`` (year-aware), or ``(False, reason)``."""
+    ok, payload, year = servarr.ranked_lookup(_lookup, title)
+    if not ok:
+        return False, str(payload)
+    results = [s for s in payload if s.get("tvdbId")]
+    if year is not None:
+        same_year = [s for s in results if s.get("year") == year]
+        if len(same_year) == 1:
+            # 'Dune 2021' names exactly one title: offer only that one.
+            results = same_year
+    return True, results
+
+
 def find_series(title: str, session_id: str | None = None) -> str:
     """Search Sonarr for ``title`` and report candidates without adding anything."""
     title = (title or "").strip()
@@ -90,16 +104,9 @@ def find_series(title: str, session_id: str | None = None) -> str:
     if not servarr.is_configured(_SERVICE):
         return "Sonarr isn't configured, sir."
 
-    ok, payload, year = servarr.ranked_lookup(_lookup, title)
+    ok, results = candidates(title)
     if not ok:
-        return str(payload)
-
-    results = [s for s in payload if s.get("tvdbId")]
-    if year is not None:
-        same_year = [s for s in results if s.get("year") == year]
-        if len(same_year) == 1:
-            # 'Dune 2021' names exactly one title: offer only that one.
-            results = same_year
+        return str(results)
     media_selections.record(_SERVICE, session_id, results[:_MAX_CANDIDATES], "tvdbId")
     if not results:
         return f"No match on Sonarr for '{title}', sir. Try the exact title or add a year."

@@ -47,11 +47,16 @@ toolbar).
 
 1. `GET /api/clients/events` already exists. Give the companion a reconnecting
    SSE reader to power "Needs attention" and live badges.
-2. Media request endpoints so the Media tab doesn't need chat:
-   `GET /api/media/search?q=&kind=` (wraps `find_movie/find_series`, records
-   the same receipt) and `POST /api/media/requests` (wraps `add_*`; an
-   ambiguous pick returns the confirm-gate prompt, approved with
-   `POST /api/confirm {code}`). Same two-step gate, no new write path.
+2. **Built (2026-10-26):** media request endpoints so the Media tab doesn't
+   need chat (`integrations/media_requests.py`, admin token):
+   `GET /api/media/search?q=&kind=movie|show` → `{results: [{kind, id, title,
+   year, in_library, overview, poster}], error?}`;
+   `POST /api/media/requests {kind, id, quality?}` → `{status:
+   "needs_confirmation", code, description}` (or `invalid` / `exists`),
+   nothing written; `POST /api/media/requests/confirm {code}` → `{status:
+   "added"|"failed"|"invalid"|"expired", message}`. Always two-step through
+   `brain/confirm_gate.py`, in its own session namespace so a chat "yes" can't
+   approve it. The app shows the description and sends the code on tap.
 3. Optional: a `tool_status` line type in `/chat/stream` for the chip above.
 
 ### Rough cost

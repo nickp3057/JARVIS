@@ -754,3 +754,13 @@ for an arr incident (APNs if enabled, HA otherwise).
 `IOS_REDESIGN_PLAN.md`: hub-first JarvisCompanion (Home / Media / Chat /
 Settings), chat restyle, Media request flow over the existing confirm gate.
 Plan only; waiting on Nick's answers there.
+
+## 2026-10-26 chat-free media requests API (for the Media tab)
+
+`integrations/media_requests.py` + three admin-token endpoints:
+`GET /api/media/search`, `POST /api/media/requests` (narrows the receipt to
+the tapped id and opens a confirm-gate proposal; nothing written),
+`POST /api/media/requests/confirm {code}` (runs `add_movie`/`add_series`
+once). Own gate namespace (`companion-media`), so chat approvals can't touch
+it. `radarr.candidates` / `sonarr.candidates` split out of `find_*` for reuse.
+Tests: `tests/test_media_requests.py` (6). No app UI uses it yet.
