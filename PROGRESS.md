@@ -804,3 +804,31 @@ With `X-Jarvis-Stream-Segments: 1`, the agent yields
 tools (labels in `agent._TOOL_LABELS`, default "Working on it"). Not added to
 the reply text or history. The app shows it instead of the typing dots.
 Test updated in `tests/test_stream_rounds.py`. **iOS not compiled here.**
+
+## Deploy + verify checklist for this branch (claude/awesome-hamilton-8kdwpb)
+
+Nothing below has been exercised against the real Optiplex/NAS/iPhone; all
+of it is unit-tested with mocks only (and Swift was never compiled).
+
+1. On the Optiplex: reconcile the on-host patches noted earlier in this file,
+   `git pull`, `.venv/bin/pip install -r requirements.txt`, then
+   `sudo systemctl restart jarvis-api`.
+2. `.env`: `ANTHROPIC_MODEL=auto` (if it pins Haiku 4.5), `PLEX_TOKEN`,
+   optionally `JARVIS_WATCH_DEVICES`, `SONARR_LANGUAGE_PROFILE_ID` (v3 only).
+   Check `jarvis.log` for the model switch line.
+3. Chat: a short reply types out live in the app; "add Gold" shows separate
+   bubbles, a "Searching Radarr…" status, then asks for one "yes".
+4. `curl -H "Authorization: Bearer $JARVIS_API_TOKEN"
+   ':8000/api/status/media/diagnose?title=<stuck title>'` names the right
+   stage; repeat for a finished title (Plex stage).
+5. TV token: `.venv/bin/python -m app.client_tokens create tv events:read
+   status:read`; `curl -N` `/api/clients/events` shows keep-alives;
+   `/sessions` with it returns 401.
+6. Alerts: an arr incident still reaches the phone (APNs or HA); a stalled
+   torrent (>30 min) appears in Hub → Today → Needs attention.
+7. Xcode build of JarvisCompanion (MessageBubble, ChatViewModel/ChatView
+   status, HubView, MediaRequestView/Model, MediaDiagnosisView, API client),
+   then: Hub → Media → Request a movie (search, tap, Add), and **Why?** on a
+   queued item.
+8. If a Radarr/Sonarr add still fails, the reply now carries the server's own
+   validation message; send that line.
