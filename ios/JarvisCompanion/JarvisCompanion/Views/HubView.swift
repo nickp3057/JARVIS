@@ -11,6 +11,13 @@ struct HubView: View {
     @State private var isVisible = false
     @State private var showingSettings = false
     @State private var showingMediaRequest = false
+    @State private var diagnosisTarget: DiagnosisTarget?
+
+    struct DiagnosisTarget: Identifiable {
+        let title: String
+        let kind: String
+        var id: String { kind + title }
+    }
     @State private var focus = HubFocus.today
 
     enum HubFocus: String, CaseIterable { case today = "Today", media = "Media", home = "Home" }
@@ -70,6 +77,10 @@ struct HubView: View {
                 }
             }
             .sheet(isPresented: $showingSettings) { SettingsView() }
+            .sheet(item: $diagnosisTarget) { target in
+                MediaDiagnosisView(title: target.title, kind: target.kind,
+                                   makeClient: { try JarvisAPIClient.make(from: settings) })
+            }
             .sheet(isPresented: $showingMediaRequest) {
                 MediaRequestView(makeClient: { try JarvisAPIClient.make(from: settings) })
             }
@@ -550,7 +561,19 @@ struct HubView: View {
             } else {
                 ForEach(section.queue) { item in
                     VStack(alignment: .leading, spacing: 5) {
-                        Text(item.title).font(.subheadline).lineLimit(1)
+                        HStack {
+                            Text(item.title).font(.subheadline).lineLimit(1)
+                            Spacer(minLength: 6)
+                            Button("Why?") {
+                                // Sonarr rows read "Series — Episode"; the
+                                // doctor traces the series.
+                                let base = item.title.components(separatedBy: " — ").first ?? item.title
+                                diagnosisTarget = DiagnosisTarget(title: base, kind: name == "Radarr" ? "movie" : "show")
+                            }
+                            .font(.caption.weight(.semibold))
+                            .buttonStyle(.bordered)
+                            .controlSize(.mini)
+                        }
                         ProgressView(value: min(max(item.progress, 0), 1)).tint(JarvisTheme.blue)
                         HStack {
                             Text(item.status)

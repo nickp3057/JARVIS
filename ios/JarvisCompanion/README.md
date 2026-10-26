@@ -111,6 +111,11 @@ The connection banner reports server reachability only. Sending a chat no
 longer changes a known-good connection to “Connecting…”; the typing indicator
 and Stop button communicate per-turn activity independently.
 
+Each queued Radarr/Sonarr item in Hub → Media has a **Why?** button that
+opens `MediaDiagnosisView` (`GET /api/status/media/diagnose`): the stalled
+stage in plain English plus every stage checked. Read-only; fixes stay in chat
+behind the confirm gate.
+
 Hub → Media → **Request a movie or show** opens `MediaRequestView`: search
 Radarr/Sonarr (`GET /api/media/search`), tap a result to open a server-side
 proposal (`POST /api/media/requests`, nothing added yet), then **Add** in the

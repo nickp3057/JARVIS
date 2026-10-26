@@ -117,6 +117,20 @@ struct JarvisAlert: Decodable, Identifiable, Hashable {
     }
 }
 
+/// The media doctor's trace (`GET /api/status/media/diagnose`).
+struct MediaDiagnosis: Decodable {
+    struct Step: Decodable, Hashable {
+        let stage: String
+        let status: String  // ok | fail | pending | skip
+        let detail: String
+    }
+
+    let stage: String
+    let stalled: Bool
+    let summary: String
+    let steps: [Step]
+}
+
 struct MediaSearchResult: Decodable, Identifiable, Hashable {
     let kind: String
     let id: Int
@@ -471,6 +485,11 @@ struct JarvisAPIClient {
     func confirmMediaRequest(code: String) async throws -> MediaRequestResponse {
         try await postJSON(MediaRequestResponse.self, path: "api/media/requests/confirm",
                            body: MediaConfirmBody(code: code))
+    }
+
+    func diagnoseMedia(title: String, kind: String) async throws -> MediaDiagnosis {
+        try await getJSON(MediaDiagnosis.self, path: "api/status/media/diagnose",
+                          query: [URLQueryItem(name: "title", value: title), URLQueryItem(name: "kind", value: kind)])
     }
 
     func recentAlerts() async throws -> [JarvisAlert] {

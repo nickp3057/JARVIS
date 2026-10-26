@@ -781,3 +781,9 @@ first. Hub → Today shows a "Needs attention" card (warnings/criticals, last
 show it. Alert history is in memory, so it resets on jarvis-api restart.
 Snapshot test has a mocked stalled-download alert. Server test added to
 `tests/test_event_bus.py`. **iOS not compiled here.**
+
+## 2026-10-26 "Why?" on queued downloads
+
+Hub → Media: each queue row has **Why?** → `MediaDiagnosisView` shows the
+media doctor's verdict and checked stages (Sonarr rows trace the series name
+before " — "). Read-only. **iOS not compiled here.**
