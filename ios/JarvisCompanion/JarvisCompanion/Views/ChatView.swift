@@ -278,7 +278,14 @@ struct ChatView: View {
                         .id(message.id)
                     }
 
-                    if model.isAwaitingReply && model.messages.last?.text.isEmpty == true {
+                    if model.isAwaitingReply, let status = model.toolStatus {
+                        Label(status + "…", systemImage: "gearshape.2")
+                            .font(.footnote)
+                            .foregroundStyle(JarvisTheme.amber)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.leading, 38)
+                            .accessibilityLabel("JARVIS is \(status.lowercased())")
+                    } else if model.isAwaitingReply && model.messages.last?.text.isEmpty == true {
                         TypingIndicator()
                     }
 

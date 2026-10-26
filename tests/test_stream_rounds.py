@@ -5,7 +5,7 @@ from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 import brain.agent as agent_mod
-from brain.agent import ROUND_BREAK, JarvisAgent, _turn_messages, stream_round_breaks
+from brain.agent import ROUND_BREAK, TOOL_STATUS, JarvisAgent, _turn_messages, stream_round_breaks
 
 
 class _FakeStream:
@@ -57,7 +57,8 @@ class StreamRoundTests(unittest.TestCase):
 
     def test_companion_gets_and_saves_round_breaks(self) -> None:
         chunks, text = self._run(True)
-        self.assertEqual(chunks, ["Checking.", ROUND_BREAK, "Added."])
+        status = f"{TOOL_STATUS}Searching Radarr{TOOL_STATUS}"
+        self.assertEqual(chunks, ["Checking.", status, ROUND_BREAK, "Added."])
         self.assertEqual(text, f"Checking.{ROUND_BREAK}Added.")
 
     def test_marker_never_reaches_the_model(self) -> None:

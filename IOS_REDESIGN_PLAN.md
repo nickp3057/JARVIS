@@ -60,7 +60,8 @@ toolbar).
    **App side built too (2026-10-26):** Hub → Media → "Request a movie or
    show" sheet (`MediaRequestView` / `MediaRequestModel`), ahead of the full
    tab restructure. Not compiled in the cloud session; build in Xcode.
-3. Optional: a `tool_status` line type in `/chat/stream` for the chip above.
+3. **Built (2026-10-26):** tool status in `/chat/stream` (U+001D-delimited,
+   opt-in with the segments header), shown in place of the typing dots.
 
 ### Rough cost
 

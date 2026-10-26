@@ -84,6 +84,32 @@ _MAX_TOKENS = 1024
 # to the model.
 ROUND_BREAK = "\x1e"
 stream_round_breaks: contextvars.ContextVar[bool] = contextvars.ContextVar("stream_round_breaks", default=False)
+# With round breaks on, the stream also carries "\x1dSearching Radarr\x1d"
+# (ASCII group separator) while tools run: a status the app shows in place of
+# the typing dots and drops once text resumes.
+TOOL_STATUS = "\x1d"
+_TOOL_LABELS = {
+    "find_movie": "Searching Radarr",
+    "add_movie": "Adding to Radarr",
+    "find_series": "Searching Sonarr",
+    "add_series": "Adding to Sonarr",
+    "diagnose_media": "Tracing the media pipeline",
+    "download_status": "Checking downloads",
+    "media_queue": "Checking the media queue",
+    "control_device": "Talking to Home Assistant",
+    "home_status": "Checking the house",
+    "get_weather": "Checking the weather",
+    "todays_agenda": "Checking your calendar",
+    "arr_stack_status": "Checking the NAS",
+}
+
+
+def tool_status_label(tool_uses: list[Any]) -> str:
+    names = [str(getattr(use, "name", "")) for use in tool_uses]
+    for name in names:
+        if name in _TOOL_LABELS:
+            return _TOOL_LABELS[name]
+    return "Working on it"
 
 # Newer models can decline (stop_reason "refusal") with no text at all.
 _REFUSAL_REPLY = "I'm afraid that one's off the table for me, sir."
@@ -507,6 +533,10 @@ class JarvisAgent:
                         "content": [_serialize_content_block(block) for block in final.content],
                     }
                 )
+                if stream_round_breaks.get():
+                    # Transient status for the companion; never saved or
+                    # counted as reply text.
+                    yield TOOL_STATUS + tool_status_label(tool_uses) + TOOL_STATUS
                 messages.append({"role": "user", "content": self._run_tools(tool_uses, tool_context)})
                 continue
 

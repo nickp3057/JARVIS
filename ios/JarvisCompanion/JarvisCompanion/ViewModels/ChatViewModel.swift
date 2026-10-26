@@ -27,7 +27,14 @@ final class ChatViewModel: ObservableObject {
 
     @Published private(set) var messages: [ChatMessage] = []
     @Published private(set) var conversations: [ChatConversation] = []
-    @Published private(set) var isAwaitingReply = false
+    @Published private(set) var isAwaitingReply = false {
+        // A new or finished turn never inherits the last turn's status.
+        didSet { toolStatus = nil; statusBuffer = "" }
+    }
+    /// What JARVIS is doing between reply rounds ("Searching Radarr"), sent
+    /// by the server as U+001D-delimited text that never enters a message.
+    @Published private(set) var toolStatus: String?
+    private var statusBuffer = ""
     @Published private(set) var connectionState: ConnectionState = .unconfigured
     @Published var draft = ""
     @Published var historyError: String?
@@ -527,9 +534,27 @@ final class ChatViewModel: ObservableObject {
     }
 
     private func appendChunk(_ chunk: String, to id: UUID) {
+        // Pull out status markers (possibly split across chunks) first.
+        var input = statusBuffer + chunk
+        statusBuffer = ""
+        var text = ""
+        while let start = input.firstIndex(of: "\u{1D}") {
+            text += input[..<start]
+            let rest = input[input.index(after: start)...]
+            guard let end = rest.firstIndex(of: "\u{1D}") else {
+                statusBuffer = String(input[start...])
+                input = ""
+                break
+            }
+            toolStatus = String(rest[..<end])
+            input = String(rest[rest.index(after: end)...])
+        }
+        text += input
+        guard !text.isEmpty else { return }
+        toolStatus = nil
         guard let index = messages.firstIndex(where: { $0.id == id }) else { return }
         let current = messages[index]
-        messages[index] = ChatMessage(id: current.id, role: .jarvis, text: current.text + chunk, date: current.date, serverID: current.serverID, requestID: current.requestID)
+        messages[index] = ChatMessage(id: current.id, role: .jarvis, text: current.text + text, date: current.date, serverID: current.serverID, requestID: current.requestID)
         // Persist once when the turn completes. Rewriting the entire archive
         // for every streamed character causes visible typing and scrolling
         // stalls on longer conversations.

@@ -796,3 +796,11 @@ now fills it from `SONARR_LANGUAGE_PROFILE_ID` or the first
 `/api/v3/languageprofile` entry; v4 ignores the field. **Verify live:** which
 Sonarr version the NAS runs, and whether a failing add's message (now shown
 verbatim) matches this.
+
+## 2026-10-26 "Searching Radarr…" while tools run
+
+With `X-Jarvis-Stream-Segments: 1`, the agent yields
+`agent.TOOL_STATUS + label + TOOL_STATUS` (U+001D) before running a round's
+tools (labels in `agent._TOOL_LABELS`, default "Working on it"). Not added to
+the reply text or history. The app shows it instead of the typing dots.
+Test updated in `tests/test_stream_rounds.py`. **iOS not compiled here.**

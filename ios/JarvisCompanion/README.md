@@ -127,7 +127,11 @@ Streamed replies are split into one bubble per model round: the app sends
 `X-Jarvis-Stream-Segments: 1` and the server puts U+001E between rounds (also
 saved in history, so synced transcripts split the same way). `MessageBubble`
 renders each segment as its own bubble; copy/share and the chat-list preview
-join them with plain whitespace. Older servers ignore the header.
+join them with plain whitespace. Older servers ignore the header. With the same
+header the server also sends `U+001D<status>U+001D` while tools run ("Searching
+Radarr"); `ChatViewModel.appendChunk` strips it (even when split across
+chunks) into `toolStatus`, which replaces the typing dots until text resumes.
+It is never stored in history.
 
 For rolling upgrades, a missing `/chat/stream` route falls back to `/chat`
 with the same session and request ID. A missing session is surfaced as an
