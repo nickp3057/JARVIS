@@ -832,3 +832,14 @@ of it is unit-tested with mocks only (and Swift was never compiled).
    queued item.
 8. If a Radarr/Sonarr add still fails, the reply now carries the server's own
    validation message; send that line.
+
+## 2026-10-26 Phase 4 built: hub-first tabs + chat restyle
+
+- `RootView`: Home (default) / Media / Chat / Settings. Home and Media are
+  `HubView(isTab: true)` over one `HubViewModel`; polling is reference-counted
+  so tab switches can't leave it stopped.
+- `MessageBubble`: header removed from bubbles (one "JARVIS · time" caption
+  under the turn), flat fills, no shadow, tail only on the last round bubble.
+- Docs: `IOS_REDESIGN_PLAN.md` (built vs left), companion README.
+- Left: conversation list as Chat root; live SSE in the app.
+**Not compiled here — Xcode build + a look at Home/Media/Chat needed.**

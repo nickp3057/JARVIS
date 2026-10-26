@@ -41,10 +41,15 @@ UserDefaults token and remove the insecure copy.
 
 ## Navigation
 
-Chat, Hub, and Settings are peer tabs. The Hub offers Today, Media, and Home
-views so each screen stays focused. The briefing shortcut opens a draft in
-Chat for review, preserving any draft already there. Settings is also reachable
-from Chat and Hub and includes a connection test, secure token entry, study
+Hub-first (1.77+): **Home** (default), **Media**, **Chat**, **Settings** are
+peer tabs. Home and Media are dedicated `HubView`s (`isTab: true`) over one
+shared `HubViewModel`; polling is reference-counted (`retainPolling` /
+`releasePolling`) so switching between them never stops it. Home shows Needs
+attention, Now, the briefing shortcut, quick actions, storage, services and
+links; Media shows the Request button, storage, transfers, queues (with
+**Why?**) and links. The briefing shortcut opens a draft in Chat for review,
+preserving any draft already there. Settings has its own tab (Chat's menu keeps
+a shortcut for first-run setup) and includes a connection test, secure token entry, study
 notification controls, and the current iOS notification permission status.
 
 ## Architecture
@@ -225,7 +230,7 @@ stops or Chat leaves the screen.
 
 ## Control room
 
-The Hub tab opens with two compact telemetry tiles, followed by focused
+The Home tab opens with two compact telemetry tiles, followed by focused
 glass-panel cards. Today shows Now, media storage, a briefing shortcut, and
 service health; Media shows storage, transfers, queues, and service links;
 Home shows allowlisted toggles, service health, and links. It refreshes while visible and

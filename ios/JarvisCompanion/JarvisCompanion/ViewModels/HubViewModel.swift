@@ -287,6 +287,21 @@ final class HubViewModel: ObservableObject {
         }
     }
 
+    /// Visible Hub views (Home and Media tabs share this model). SwiftUI may
+    /// show the next tab before hiding the last, so polling follows a count
+    /// rather than each view's appear/disappear.
+    private var visibleViews = 0
+
+    func retainPolling(start: Bool) {
+        visibleViews += 1
+        if start { startPolling() }
+    }
+
+    func releasePolling() {
+        visibleViews = max(0, visibleViews - 1)
+        if visibleViews == 0 { stopPolling() }
+    }
+
     func stopPolling() {
         pollTask?.cancel()
         pollTask = nil

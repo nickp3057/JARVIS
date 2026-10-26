@@ -19,12 +19,18 @@ struct HubView: View {
         var id: String { kind + title }
     }
     @State private var focus = HubFocus.today
+    @State private var holdsPolling = false
+    /// True when this view is a dedicated tab (Home or Media): no focus
+    /// picker, no settings button (Settings has its own tab), and Home also
+    /// carries the quick actions and links.
+    private let isTab: Bool
 
     enum HubFocus: String, CaseIterable { case today = "Today", media = "Media", home = "Home" }
 
-    init(model: HubViewModel, onAsk: ((String) -> Void)? = nil, initialFocus: HubFocus = .today) {
+    init(model: HubViewModel, onAsk: ((String) -> Void)? = nil, initialFocus: HubFocus = .today, isTab: Bool = false) {
         self.model = model
         self.onAsk = onAsk
+        self.isTab = isTab
         _focus = State(initialValue: initialFocus)
     }
 
@@ -36,18 +42,24 @@ struct HubView: View {
         NavigationStack {
             ScrollView {
                 LazyVStack(spacing: 14) {
-                    header
-                    overview
-                    Picker("Hub focus", selection: $focus) {
-                        ForEach(HubFocus.allCases, id: \.self) { Text($0.rawValue).tag($0) }
-                    }.pickerStyle(.segmented).padding(.vertical, 3)
+                    if !isTab || focus == .today {
+                        header
+                        overview
+                    }
+                    if !isTab {
+                        Picker("Hub focus", selection: $focus) {
+                            ForEach(HubFocus.allCases, id: \.self) { Text($0.rawValue).tag($0) }
+                        }.pickerStyle(.segmented).padding(.vertical, 3)
+                    }
                     switch focus {
                     case .today:
                         if !attentionAlerts.isEmpty { needsAttentionCard }
                         nowCard
-                        storageCard
                         if onAsk != nil { briefingShortcut }
+                        if isTab { quickActionsCard }
+                        storageCard
                         servicesCard
+                        if isTab { linksCard }
                     case .media:
                         requestMediaButton
                         storageCard
@@ -67,13 +79,15 @@ struct HubView: View {
             }
             .refreshable { await model.refreshAll() }
             .background { JarvisBackdrop() }
-            .navigationTitle("Control Room")
+            .navigationTitle(isTab ? (focus == .media ? "Media" : "Home") : "Control Room")
             .navigationBarTitleDisplayMode(.inline)
             .toolbarBackground(JarvisTheme.background, for: .navigationBar)
             .toolbarBackground(.visible, for: .navigationBar)
             .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button("Settings", systemImage: "slider.horizontal.3") { showingSettings = true }
+                if !isTab {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button("Settings", systemImage: "slider.horizontal.3") { showingSettings = true }
+                    }
                 }
             }
             .sheet(isPresented: $showingSettings) { SettingsView() }
@@ -113,14 +127,21 @@ struct HubView: View {
         }
         .task {
             isVisible = true
-            guard !Task.isCancelled, isVisible, scenePhase == .active else { return }
-            model.startPolling()
+            guard !Task.isCancelled, isVisible, !holdsPolling else { return }
+            holdsPolling = true
+            model.retainPolling(start: scenePhase == .active)
         }
         .onChange(of: settings.isConfigured) { _, configured in
             if configured, isVisible { model.startPolling() }
             else { model.stopPolling() }
         }
-        .onDisappear { isVisible = false; model.stopPolling() }
+        .onDisappear {
+            isVisible = false
+            if holdsPolling {
+                holdsPolling = false
+                model.releasePolling()
+            }
+        }
         .onChange(of: scenePhase) { _, phase in
             switch phase {
             case .active:

@@ -15,7 +15,10 @@ struct MessageBubble: View {
             switch message.role {
             case .user:
                 row(alignment: .trailing) {
-                    bubble(isUser: true, text: message.text, showHeader: true)
+                    VStack(alignment: .trailing, spacing: 4) {
+                        bubble(isUser: true, text: message.text, isLast: true)
+                        footer(isUser: true)
+                    }
                 }
             case .jarvis:
                 row(alignment: .leading) {
@@ -23,10 +26,11 @@ struct MessageBubble: View {
                         JarvisCoreMark(size: 30).padding(.top, 7)
                         // One bubble per model round ("Checking." / "Added.")
                         // instead of one run-on paragraph.
-                        VStack(alignment: .leading, spacing: 6) {
+                        VStack(alignment: .leading, spacing: 4) {
                             ForEach(Array(segments.enumerated()), id: \.offset) { index, segment in
-                                bubble(isUser: false, text: segment, showHeader: index == 0)
+                                bubble(isUser: false, text: segment, isLast: index == segments.count - 1)
                             }
+                            footer(isUser: false)
                         }
                     }
                 }
@@ -74,47 +78,48 @@ struct MessageBubble: View {
         }
     }
 
-    private func bubble(isUser: Bool, text: String, showHeader: Bool) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            if showHeader {
-                HStack {
-                    Text(message.role == .user ? "YOU" : "JARVIS")
-                        .font(.caption2.monospaced().weight(.semibold)).tracking(1.5)
-                        .foregroundStyle(JarvisTheme.cyan)
-                    Spacer(minLength: 12)
-                    Text(message.date, style: .time).font(.caption2).foregroundStyle(.secondary)
-                }
-            }
+    /// Flat bubbles; only the last bubble of a turn gets the "tail" corner.
+    /// Who/when sits once under the turn instead of inside every bubble.
+    private func bubble(isUser: Bool, text: String, isLast: Bool) -> some View {
+        Group {
             if isUser {
                 Text(text).textSelection(.enabled).lineSpacing(4)
             } else {
                 AssistantMessageText(text: text)
             }
         }
-            .foregroundStyle(.primary)
-            .padding(.horizontal, 14)
-            .padding(.vertical, 11)
-            .background(
-                isUser
-                    ? LinearGradient(colors: [JarvisTheme.blue.opacity(0.24), JarvisTheme.cyan.opacity(0.12)], startPoint: .topLeading, endPoint: .bottomTrailing)
-                    : JarvisTheme.panelGradient,
-                in: UnevenRoundedRectangle(
-                    topLeadingRadius: 19,
-                    bottomLeadingRadius: isUser ? 19 : 5,
-                    bottomTrailingRadius: isUser ? 5 : 19,
-                    topTrailingRadius: 19
-                )
-            )
-            .overlay {
-                UnevenRoundedRectangle(
-                    topLeadingRadius: 19,
-                    bottomLeadingRadius: isUser ? 19 : 5,
-                    bottomTrailingRadius: isUser ? 5 : 19,
-                    topTrailingRadius: 19
-                )
-                .strokeBorder(JarvisTheme.border)
+        .foregroundStyle(.primary)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+        .background(isUser ? JarvisTheme.blue.opacity(0.28) : JarvisTheme.panel,
+                    in: bubbleShape(isUser: isUser, isLast: isLast))
+        .overlay {
+            if !isUser {
+                bubbleShape(isUser: false, isLast: isLast).strokeBorder(JarvisTheme.border)
             }
-            .shadow(color: .black.opacity(0.14), radius: 8, y: 4)
+        }
+    }
+
+    private func bubbleShape(isUser: Bool, isLast: Bool) -> UnevenRoundedRectangle {
+        UnevenRoundedRectangle(
+            topLeadingRadius: 18,
+            bottomLeadingRadius: !isUser && isLast ? 5 : 18,
+            bottomTrailingRadius: isUser && isLast ? 5 : 18,
+            topTrailingRadius: 18
+        )
+    }
+
+    private func footer(isUser: Bool) -> some View {
+        HStack(spacing: 4) {
+            if !isUser {
+                Text("JARVIS").font(.caption2.monospaced().weight(.semibold)).foregroundStyle(JarvisTheme.cyan)
+                Text("·")
+            }
+            Text(message.date, style: .time)
+        }
+        .font(.caption2)
+        .foregroundStyle(.secondary)
+        .padding(.horizontal, 6)
     }
 
     private var errorNotice: some View {

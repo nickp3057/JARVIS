@@ -1,4 +1,4 @@
-# JarvisCompanion redesign — plan (Phase 4, not built)
+# JarvisCompanion redesign — plan (Phase 4, built 2026-10-26 except where noted)
 
 Written 2026-10-25 from Nick's feedback: the chat bubbles ("chat backs") feel
 off, JARVIS sounds scattered because a whole tool turn lands in one bubble,
@@ -21,6 +21,16 @@ Check these on the phone first. Some of the "weird" may already be gone.
 Today / Media / Home segmented picker over cards), Settings. Chat history is a
 sheet; settings is reachable from three places (tab, chat toolbar, hub
 toolbar).
+
+## Built 2026-10-26 (uncompiled in the cloud session — build in Xcode)
+
+- Tabs: Home (default) / Media / Chat / Settings (`RootView`); Hub focus
+  picker and the Hub's settings button only appear in the legacy non-tab use.
+- Chat restyle: no per-bubble "JARVIS · time" header (one caption under the
+  turn), flat panel/blue fills, no shadow, tail corner only on a turn's last
+  bubble, tight 4 pt spacing between round bubbles.
+- Not done: conversation list as Chat's root (history stays a sheet) and a
+  live SSE reader (the Hub polls `/api/alerts/recent` instead).
 
 ## Proposed structure: hub-first
 
