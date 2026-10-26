@@ -5,7 +5,7 @@ from unittest.mock import Mock, patch
 
 import requests
 
-from integrations import radarr, servarr_common as servarr, media_selections
+from integrations import radarr, servarr_common as servarr, media_selections, sonarr
 
 _ENV = {"RADARR_URL": "http://nas:7878", "RADARR_API_KEY": "k"}
 
@@ -127,6 +127,25 @@ class TitleLookupTests(unittest.TestCase):
             reply = radarr.add_movie(286217, confirmed=True, session_id="s")
         self.assertEqual(call.call_count, 1)
         self.assertIn("Added The Martian", reply)
+
+
+class SonarrLanguageProfileTests(unittest.TestCase):
+    def setUp(self) -> None:
+        media_selections.clear_for_tests()
+
+    @patch("integrations.sonarr.servarr.resolve_root_folder", return_value=("/tv", "/tv"))
+    @patch("integrations.sonarr.servarr.resolve_quality", return_value=(2, "HD-720p"))
+    @patch("integrations.sonarr.servarr.is_configured", return_value=True)
+    @patch("integrations.sonarr._lookup")
+    def test_v3_add_gets_a_language_profile(self, lookup, _configured, _q, _r) -> None:
+        show = {"title": "Severance", "year": 2022, "tvdbId": 371980, "languageProfileId": 0}
+        lookup.side_effect = [(True, [show]), (True, [show])]
+        sonarr.find_series("Severance", session_id="s")
+        with patch.object(sonarr.servarr, "request", return_value=(True, [{"id": 1, "name": "English"}])), \
+             patch.object(sonarr.servarr, "call", return_value=servarr.Result(True, {"id": 5}, "ok")) as call:
+            reply = sonarr.add_series(371980, confirmed=True, session_id="s")
+        self.assertIn("Added Severance", reply)
+        self.assertEqual(call.call_args.kwargs["json"]["languageProfileId"], 1)
 
 
 if __name__ == "__main__":

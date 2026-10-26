@@ -431,6 +431,7 @@ RADARR_DEFAULT_QUALITY=1080p
 SONARR_DEFAULT_QUALITY=1080p
 # future | all | firstSeason | latestSeason | lastSeason | pilot | none
 SONARR_MONITOR_STRATEGY=future
+SONARR_LANGUAGE_PROFILE_ID=       # Sonarr v3 only; blank = first listed profile (v4 ignores it)
 # NL phrase => quality-profile name (exact name from the app); ';'-separated
 RADARR_QUALITY_MAP=4k efficient => UHD Bluray + WEB; 1080p => HD-1080p; 4k => Ultra-HD
 SONARR_QUALITY_MAP=1080p => HD-1080p; 4k => Ultra-HD

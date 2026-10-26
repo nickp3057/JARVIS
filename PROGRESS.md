@@ -787,3 +787,12 @@ Snapshot test has a mocked stalled-download alert. Server test added to
 Hub → Media: each queue row has **Why?** → `MediaDiagnosisView` shows the
 media doctor's verdict and checked stages (Sonarr rows trace the series name
 before " — "). Read-only. **iOS not compiled here.**
+
+## 2026-10-26 Sonarr v3 language profile on adds
+
+Possible cause of "adding shows sometimes fails": Sonarr v3 rejects a series
+POST whose `languageProfileId` is 0 (lookup results carry 0). `add_series`
+now fills it from `SONARR_LANGUAGE_PROFILE_ID` or the first
+`/api/v3/languageprofile` entry; v4 ignores the field. **Verify live:** which
+Sonarr version the NAS runs, and whether a failing add's message (now shown
+verbatim) matches this.

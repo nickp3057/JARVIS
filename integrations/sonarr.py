@@ -66,6 +66,20 @@ def _normalize_monitor(value: str | None) -> str:
     return _MONITOR_ALIASES.get(v.lower(), _default_monitor())
 
 
+def _language_profile_id() -> int | None:
+    """Sonarr v3 rejects adds without languageProfileId > 0; v4 ignores it.
+
+    Uses SONARR_LANGUAGE_PROFILE_ID when set, else the first profile the
+    server lists. None when the endpoint is gone (future versions)."""
+    configured = os.getenv("SONARR_LANGUAGE_PROFILE_ID", "").strip()
+    if configured.isdigit():
+        return int(configured)
+    ok, payload = servarr.request(_SERVICE, "GET", "/api/v3/languageprofile")
+    if ok and isinstance(payload, list) and payload and payload[0].get("id"):
+        return int(payload[0]["id"])
+    return None
+
+
 def _in_library(series: dict[str, Any]) -> bool:
     return bool(series.get("id"))
 
@@ -178,6 +192,7 @@ def add_series(
         return root_detail
 
     monitor_strategy = _normalize_monitor(monitor)
+    language_profile = _language_profile_id()
 
     body = dict(series)
     body.update(
@@ -186,6 +201,7 @@ def add_series(
             "rootFolderPath": root_path,
             "monitored": True,
             "seasonFolder": bool(season_folder),
+            **({"languageProfileId": language_profile} if language_profile and not series.get("languageProfileId") else {}),
             "addOptions": {
                 "searchForMissingEpisodes": True,
                 "monitor": monitor_strategy,
