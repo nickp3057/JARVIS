@@ -1,11 +1,12 @@
 """Alert bus, phone subscriber, scoped client tokens and the SSE stream."""
+import asyncio
 import json
 import os
 import tempfile
 import threading
 import unittest
 from pathlib import Path
-from unittest.mock import Mock, patch
+from unittest.mock import AsyncMock, Mock, patch
 
 from fastapi.testclient import TestClient
 
@@ -111,22 +112,27 @@ class ClientTokenTests(unittest.TestCase):
         self.assertEqual(self.client.get("/api/alerts/recent", headers=events_only).status_code, 403)
 
     def test_event_stream_replays_then_streams_live(self) -> None:
-        tv = {"Authorization": "Bearer " + client_tokens.create("tv", ["events:read"]), "Last-Event-ID": "1"}
+        # Drive the endpoint's generator directly with timeouts: TestClient
+        # can block forever on a never-ending stream (seen on Python 3.11).
         event_bus.publish("x", "old", "seen already", source="s")
         event_bus.publish("x", "missed", "replay me", source="s")
-        received = []
-        with self.client.stream("GET", "/api/clients/events", headers=tv) as response:
-            self.assertEqual(response.headers["content-type"].split(";")[0], "text/event-stream")
-            for line in response.iter_lines():
-                if line.startswith("data: "):
-                    received.append(json.loads(line[6:])["title"])
-                    if len(received) == 1:
-                        threading.Timer(0.1, lambda: event_bus.publish("y", "live", "now", source="s")).start()
-                    else:
-                        break
-        self.assertEqual(received, ["missed", "live"])
-        self.assertEqual([n for n in event_bus._subscribers if n.startswith("sse-")], [])
 
+        async def scenario() -> list[str]:
+            request = Mock(is_disconnected=AsyncMock(return_value=False))
+            response = await server.client_events(request, since=0, last_event_id="1", _=None)
+            self.assertEqual(response.media_type, "text/event-stream")
+            frames = response.body_iterator
+            try:
+                first = await asyncio.wait_for(anext(frames), 5)
+                # Publish from another thread, as monitors do.
+                threading.Timer(0.1, lambda: event_bus.publish("y", "live", "now", source="s")).start()
+                second = await asyncio.wait_for(anext(frames), 5)
+            finally:
+                await frames.aclose()
+            return [json.loads(f.split("data: ", 1)[1])["title"] for f in (first, second)]
+
+        self.assertEqual(asyncio.run(scenario()), ["missed", "live"])
+        self.assertEqual([n for n in event_bus._subscribers if n.startswith("sse-")], [])
 
 if __name__ == "__main__":
     unittest.main()

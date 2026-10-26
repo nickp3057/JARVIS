@@ -40,7 +40,9 @@ class ResolveTests(unittest.TestCase):
         client = Mock()
         client.models.list.return_value = listing
         with patch("anthropic.Anthropic", return_value=client), \
-             patch.object(model_select.time, "time", side_effect=[1000, 2000, 1000 + 25 * 3600]):
+             patch.object(model_select, "time", SimpleNamespace(time=Mock(side_effect=[1000, 2000, 1000 + 25 * 3600]))):
+            # Swap model_select's own clock, not the global time.time: logging
+            # calls time.time() too on Python < 3.13 and would eat the values.
             self.assertEqual(model_select.resolve("", "d"), "claude-haiku-5-5")
             self.assertEqual(model_select.resolve("auto", "d"), "claude-haiku-5-5")
             self.assertEqual(client.models.list.call_count, 1)
