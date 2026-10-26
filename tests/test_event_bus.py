@@ -101,6 +101,15 @@ class ClientTokenTests(unittest.TestCase):
         self.assertEqual(self.client.get("/sessions", headers=tv).status_code, 401)
         self.assertEqual(self.client.post("/chat", headers=tv, json={"message": "hi"}).status_code, 401)
 
+    def test_recent_alerts_newest_first_and_scoped(self) -> None:
+        for title in ("old", "new"):
+            event_bus.publish("x", title, "m", source="s")
+        tv = {"Authorization": "Bearer " + client_tokens.create("tv", ["status:read"])}
+        body = self.client.get("/api/alerts/recent", headers=tv).json()
+        self.assertEqual([a["title"] for a in body["alerts"]], ["new", "old"])
+        events_only = {"Authorization": "Bearer " + client_tokens.create("tv2", ["events:read"])}
+        self.assertEqual(self.client.get("/api/alerts/recent", headers=events_only).status_code, 403)
+
     def test_event_stream_replays_then_streams_live(self) -> None:
         tv = {"Authorization": "Bearer " + client_tokens.create("tv", ["events:read"]), "Last-Event-ID": "1"}
         event_bus.publish("x", "old", "seen already", source="s")

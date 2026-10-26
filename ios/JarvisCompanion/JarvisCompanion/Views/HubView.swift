@@ -36,6 +36,7 @@ struct HubView: View {
                     }.pickerStyle(.segmented).padding(.vertical, 3)
                     switch focus {
                     case .today:
+                        if !attentionAlerts.isEmpty { needsAttentionCard }
                         nowCard
                         storageCard
                         if onAsk != nil { briefingShortcut }
@@ -374,6 +375,40 @@ struct HubView: View {
                 .padding(.vertical, 4)
             } else if model.storage.isLoading {
                 loadingRow
+            }
+        }
+    }
+
+    /// Warnings and criticals from the last day. An older server without
+    /// /api/alerts/recent simply never shows this card.
+    private var attentionAlerts: [JarvisAlert] {
+        Array((model.alerts.value ?? []).filter { $0.severity != "info" }.prefix(5))
+    }
+
+    private var needsAttentionCard: some View {
+        CockpitPanel("Needs attention", symbol: "exclamationmark.triangle", trailing: {
+            StatusPill(text: "\(attentionAlerts.count)", color: JarvisTheme.amber)
+        }) {
+            VStack(spacing: 0) {
+                ForEach(Array(attentionAlerts.enumerated()), id: \.element.id) { index, alert in
+                    VStack(alignment: .leading, spacing: 3) {
+                        HStack {
+                            Circle()
+                                .fill(alert.severity == "critical" ? Color.red : JarvisTheme.amber)
+                                .frame(width: 8, height: 8)
+                            Text(alert.title).font(.subheadline.weight(.medium))
+                            Spacer()
+                            Text(alert.date, style: .relative)
+                                .font(.caption2.monospacedDigit())
+                                .foregroundStyle(.secondary)
+                        }
+                        if !alert.message.isEmpty {
+                            Text(alert.message).font(.caption).foregroundStyle(.secondary).lineLimit(3)
+                        }
+                    }
+                    .padding(.vertical, 8)
+                    if index < attentionAlerts.count - 1 { divider }
+                }
             }
         }
     }

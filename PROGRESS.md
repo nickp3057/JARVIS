@@ -772,3 +772,12 @@ Hub → Media → "Request a movie or show": `MediaRequestView` +
 proposal, "Add" in a confirmation dialog = confirm with the code). Poster,
 year, overview and "already in your library" shown. New files are picked up by
 the project's synchronized folders. **Not compiled here — build in Xcode.**
+
+## 2026-10-26 Hub "Needs attention"
+
+`GET /api/alerts/recent?limit=&hours=` (status:read): bus alerts newest
+first. Hub → Today shows a "Needs attention" card (warnings/criticals, last
+24 h, top 5) polled with the other fast sections; older servers just never
+show it. Alert history is in memory, so it resets on jarvis-api restart.
+Snapshot test has a mocked stalled-download alert. Server test added to
+`tests/test_event_bus.py`. **iOS not compiled here.**

@@ -221,6 +221,11 @@ final class CompanionTests: XCTestCase {
                 {"error":"","label":"Video vault","total_bytes":12000000000000,
                 "used_bytes":7500000000000,"free_bytes":4500000000000,"used_fraction":0.625}
                 """, 0)
+            case "/api/alerts/recent": return (200, """
+                {"alerts":[{"id":2,"kind":"download_stalled","severity":"warning","title":"Download stalled",
+                "message":"Debian installation image: stalled at 32.0% with 0 seed(s); no data for 2.0 h.",
+                "source":"downloads","created_at":\(Date().timeIntervalSince1970 - 600),"push":true}]}
+                """, 0)
             case "/api/home/entities": return (200, """
                 {"error":"","entities":[{"entity_id":"light.office","friendly_name":"Office lights","domain":"light","state":"on"}]}
                 """, 0)

@@ -29,6 +29,8 @@ final class HubViewModel: ObservableObject {
     @Published var storage = Section<StorageStatus>()
     @Published var entities = Section<[HomeEntity]>()
     @Published var links = Section<[ServiceLink]>()
+    /// Recent alerts from the server's alert bus, newest first.
+    @Published var alerts = Section<[JarvisAlert]>()
     /// The study brief as JARVIS Core plans it; Settings shows the schedule.
     @Published var studyBrief = Section<StudyBrief>()
 
@@ -90,7 +92,8 @@ final class HubViewModel: ObservableObject {
         async let e: Void = refreshLinks()
         async let f: Void = refreshNow()
         async let g: Void = refreshStorage()
-        _ = await (a, b, c, d, e, f, g)
+        async let h: Void = refreshAlerts()
+        _ = await (a, b, c, d, e, f, g, h)
     }
 
     func refreshNow() async {
@@ -203,6 +206,10 @@ final class HubViewModel: ObservableObject {
         }
     }
 
+    func refreshAlerts() async {
+        await load(\.alerts) { try await $0.recentAlerts() }
+    }
+
     func refreshLinks() async {
         await load(\.links) { try await $0.serviceLinks().links }
     }
@@ -271,7 +278,8 @@ final class HubViewModel: ObservableObject {
                 async let services: Void = self.refreshServices()
                 async let entities: Void = self.refreshEntities()
                 async let now: Void = self.refreshNow()
-                _ = await (torrents, services, entities, now)
+                async let alerts: Void = self.refreshAlerts()
+                _ = await (torrents, services, entities, now, alerts)
                 tick += 1
                 if tick.isMultiple(of: 3) { await self.refreshMedia() }
                 if tick.isMultiple(of: 6) { await self.refreshStorage() }

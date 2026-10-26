@@ -99,6 +99,24 @@ struct ServerMessage: Decodable {
     }
 }
 
+/// One alert from JARVIS Core's alert bus (`GET /api/alerts/recent`).
+struct JarvisAlert: Decodable, Identifiable, Hashable {
+    let id: Int
+    let kind: String
+    let severity: String  // info | warning | critical
+    let title: String
+    let message: String
+    let source: String
+    let createdAt: Double
+
+    var date: Date { Date(timeIntervalSince1970: createdAt) }
+
+    enum CodingKeys: String, CodingKey {
+        case id, kind, severity, title, message, source
+        case createdAt = "created_at"
+    }
+}
+
 struct MediaSearchResult: Decodable, Identifiable, Hashable {
     let kind: String
     let id: Int
@@ -453,6 +471,11 @@ struct JarvisAPIClient {
     func confirmMediaRequest(code: String) async throws -> MediaRequestResponse {
         try await postJSON(MediaRequestResponse.self, path: "api/media/requests/confirm",
                            body: MediaConfirmBody(code: code))
+    }
+
+    func recentAlerts() async throws -> [JarvisAlert] {
+        struct Envelope: Decodable { let alerts: [JarvisAlert] }
+        return try await getJSON(Envelope.self, path: "api/alerts/recent").alerts
     }
 
     func torrentsStatus() async throws -> TorrentsStatus {

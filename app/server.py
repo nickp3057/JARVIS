@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import threading
+import time
 import hmac
 import json
 import os
@@ -362,6 +363,16 @@ def media_request(request: MediaRequest, _: None = Depends(authorize)) -> dict[s
 def media_request_confirm(request: MediaConfirm, _: None = Depends(authorize)) -> dict[str, object]:
     """Step two: approve the open proposal with its code."""
     return media_requests.confirm(request.code)
+
+
+@app.get("/api/alerts/recent")
+def recent_alerts(limit: int = 10, hours: float = 24, _: None = _status_read) -> dict[str, object]:
+    """Newest-first bus alerts for polling clients (the Hub's Needs attention
+    card). Info-level alerts (e.g. "back online") are included so a client
+    can tell a problem cleared."""
+    cutoff = time.time() - max(0.0, hours) * 3600
+    alerts = [a.to_dict() for a in reversed(event_bus.since(0, limit=200)) if a.created_at >= cutoff]
+    return {"alerts": alerts[: max(1, min(50, limit))]}
 
 
 @app.get("/api/clients/events")
