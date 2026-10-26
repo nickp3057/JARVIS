@@ -57,6 +57,9 @@ toolbar).
    "added"|"failed"|"invalid"|"expired", message}`. Always two-step through
    `brain/confirm_gate.py`, in its own session namespace so a chat "yes" can't
    approve it. The app shows the description and sends the code on tap.
+   **App side built too (2026-10-26):** Hub → Media → "Request a movie or
+   show" sheet (`MediaRequestView` / `MediaRequestModel`), ahead of the full
+   tab restructure. Not compiled in the cloud session; build in Xcode.
 3. Optional: a `tool_status` line type in `/chat/stream` for the chip above.
 
 ### Rough cost

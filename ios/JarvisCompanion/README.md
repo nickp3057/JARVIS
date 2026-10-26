@@ -111,6 +111,13 @@ The connection banner reports server reachability only. Sending a chat no
 longer changes a known-good connection to “Connecting…”; the typing indicator
 and Stop button communicate per-turn activity independently.
 
+Hub → Media → **Request a movie or show** opens `MediaRequestView`: search
+Radarr/Sonarr (`GET /api/media/search`), tap a result to open a server-side
+proposal (`POST /api/media/requests`, nothing added yet), then **Add** in the
+confirmation dialog sends its code (`POST /api/media/requests/confirm`). No
+model in the loop, so no guessed titles; default quality comes from the
+server's `*_DEFAULT_QUALITY`.
+
 Streamed replies are split into one bubble per model round: the app sends
 `X-Jarvis-Stream-Segments: 1` and the server puts U+001E between rounds (also
 saved in history, so synced transcripts split the same way). `MessageBubble`

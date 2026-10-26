@@ -99,6 +99,34 @@ struct ServerMessage: Decodable {
     }
 }
 
+struct MediaSearchResult: Decodable, Identifiable, Hashable {
+    let kind: String
+    let id: Int
+    let title: String
+    let year: Int?
+    let inLibrary: Bool
+    let overview: String
+    let poster: String?
+
+    enum CodingKeys: String, CodingKey {
+        case kind, id, title, year, overview, poster
+        case inLibrary = "in_library"
+    }
+}
+
+struct MediaSearchResponse: Decodable {
+    let results: [MediaSearchResult]
+    let error: String?
+}
+
+/// `status`: needs_confirmation | added | failed | invalid | exists | expired.
+struct MediaRequestResponse: Decodable {
+    let status: String
+    let code: String?
+    let description: String?
+    let message: String?
+}
+
 struct DebugReportMessagePayload: Encodable {
     let id: String
     let role: String
@@ -339,8 +367,13 @@ struct JarvisAPIClient {
     /// Shared GET-and-decode for the read-only dashboard endpoints. They all
     /// return 200 with an `error` field when a backing service is down, so a
     /// thrown error here means the request itself failed, not the service.
-    private func getJSON<T: Decodable>(_ type: T.Type, path: String) async throws -> T {
-        let request = request(path: path)
+    private func getJSON<T: Decodable>(_ type: T.Type, path: String, query: [URLQueryItem] = []) async throws -> T {
+        var request = request(path: path)
+        if !query.isEmpty, let url = request.url,
+           var components = URLComponents(url: url, resolvingAgainstBaseURL: false) {
+            components.queryItems = query
+            request.url = components.url
+        }
         let data: Data
         let response: URLResponse
         do {
@@ -393,6 +426,33 @@ struct JarvisAPIClient {
         _ = try await postJSON(PushRegisterResponse.self, path: "api/push/register",
                                body: PushRegisterRequest(deviceToken: token, environment: environment,
                                                          deviceName: String(name.prefix(80))))
+    }
+
+    // MARK: - Media requests (search -> request -> confirm; see MediaRequestView)
+
+    private struct MediaRequestBody: Encodable {
+        let kind: String
+        let id: Int
+        let quality: String?
+    }
+
+    private struct MediaConfirmBody: Encodable { let code: String }
+
+    func mediaSearch(query: String, kind: String) async throws -> MediaSearchResponse {
+        try await getJSON(MediaSearchResponse.self, path: "api/media/search",
+                          query: [URLQueryItem(name: "q", value: query), URLQueryItem(name: "kind", value: kind)])
+    }
+
+    /// Step one: the server opens a proposal and writes nothing.
+    func requestMedia(kind: String, id: Int, quality: String? = nil) async throws -> MediaRequestResponse {
+        try await postJSON(MediaRequestResponse.self, path: "api/media/requests",
+                           body: MediaRequestBody(kind: kind, id: id, quality: quality))
+    }
+
+    /// Step two: approve that proposal with its code.
+    func confirmMediaRequest(code: String) async throws -> MediaRequestResponse {
+        try await postJSON(MediaRequestResponse.self, path: "api/media/requests/confirm",
+                           body: MediaConfirmBody(code: code))
     }
 
     func torrentsStatus() async throws -> TorrentsStatus {

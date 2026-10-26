@@ -10,6 +10,7 @@ struct HubView: View {
     @Environment(\.dynamicTypeSize) private var typeSize
     @State private var isVisible = false
     @State private var showingSettings = false
+    @State private var showingMediaRequest = false
     @State private var focus = HubFocus.today
 
     enum HubFocus: String, CaseIterable { case today = "Today", media = "Media", home = "Home" }
@@ -40,6 +41,7 @@ struct HubView: View {
                         if onAsk != nil { briefingShortcut }
                         servicesCard
                     case .media:
+                        requestMediaButton
                         storageCard
                         torrentsCard
                         mediaCard
@@ -67,6 +69,9 @@ struct HubView: View {
                 }
             }
             .sheet(isPresented: $showingSettings) { SettingsView() }
+            .sheet(isPresented: $showingMediaRequest) {
+                MediaRequestView(makeClient: { try JarvisAPIClient.make(from: settings) })
+            }
             .overlay {
                 if !settings.isConfigured {
                     ContentUnavailableView {
@@ -469,6 +474,19 @@ struct HubView: View {
             .foregroundStyle(.secondary)
         }
         .padding(.vertical, 11)
+    }
+
+    /// Opens the chat-free search -> pick -> confirm request flow.
+    private var requestMediaButton: some View {
+        Button { showingMediaRequest = true } label: {
+            Label("Request a movie or show", systemImage: "plus.magnifyingglass")
+                .font(.subheadline.weight(.semibold))
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 6)
+        }
+        .buttonStyle(.borderedProminent)
+        .tint(JarvisTheme.blue)
+        .disabled(!settings.isConfigured)
     }
 
     private var mediaCard: some View {

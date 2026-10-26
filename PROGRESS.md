@@ -764,3 +764,11 @@ the tapped id and opens a confirm-gate proposal; nothing written),
 once). Own gate namespace (`companion-media`), so chat approvals can't touch
 it. `radarr.candidates` / `sonarr.candidates` split out of `find_*` for reuse.
 Tests: `tests/test_media_requests.py` (6). No app UI uses it yet.
+
+## 2026-10-26 Request media from the app without chat
+
+Hub → Media → "Request a movie or show": `MediaRequestView` +
+`MediaRequestModel` over the new `/api/media/*` endpoints (search, tap = open
+proposal, "Add" in a confirmation dialog = confirm with the code). Poster,
+year, overview and "already in your library" shown. New files are picked up by
+the project's synchronized folders. **Not compiled here — build in Xcode.**
