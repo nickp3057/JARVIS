@@ -6,7 +6,7 @@ typealias RGB = (Double, Double, Double)
 /// (`JarvisTheme.cyan`: tint, logo, borders), the secondary (`blue`: Nick's
 /// bubbles), and the four surfaces, in dark and light variants.
 enum JarvisPalette: String, CaseIterable, Identifiable {
-    case arc, reactor, markIII
+    case arc, markIII
 
     static let storageKey = "jarvis.palette"
     var id: String { rawValue }
@@ -14,7 +14,6 @@ enum JarvisPalette: String, CaseIterable, Identifiable {
     var name: String {
         switch self {
         case .arc: return "Arc"
-        case .reactor: return "Reactor"
         case .markIII: return "Mark III"
         }
     }
@@ -22,7 +21,6 @@ enum JarvisPalette: String, CaseIterable, Identifiable {
     var blurb: String {
         switch self {
         case .arc: return "The original cyan HUD."
-        case .reactor: return "Brighter ice blue with a violet-blue for your messages."
         case .markIII: return "Hot-rod red and gold on warm charcoal."
         }
     }
@@ -35,7 +33,6 @@ enum JarvisPalette: String, CaseIterable, Identifiable {
     var accent: (RGB, RGB) {
         switch self {
         case .arc: return ((0.25, 0.85, 0.95), (0.0, 0.43, 0.54))
-        case .reactor: return ((0.45, 0.80, 1.0), (0.0, 0.38, 0.75))
         case .markIII: return ((0.97, 0.36, 0.36), (0.72, 0.10, 0.14))
         }
     }
@@ -43,7 +40,6 @@ enum JarvisPalette: String, CaseIterable, Identifiable {
     var secondary: (RGB, RGB) {
         switch self {
         case .arc: return ((0.25, 0.50, 1.0), (0.08, 0.33, 0.85))
-        case .reactor: return ((0.52, 0.45, 1.0), (0.33, 0.22, 0.82))
         case .markIII: return ((0.90, 0.68, 0.28), (0.55, 0.38, 0.02))
         }
     }
@@ -53,9 +49,6 @@ enum JarvisPalette: String, CaseIterable, Identifiable {
         case .arc:
             return (((0.025, 0.045, 0.075), (0.95, 0.965, 0.985)), ((0.008, 0.018, 0.035), (0.90, 0.93, 0.96)),
                     ((0.055, 0.085, 0.125), (1, 1, 1)), ((0.075, 0.12, 0.17), (0.975, 0.985, 1)))
-        case .reactor:
-            return (((0.03, 0.04, 0.09), (0.95, 0.96, 0.99)), ((0.012, 0.016, 0.045), (0.90, 0.92, 0.97)),
-                    ((0.065, 0.08, 0.15), (1, 1, 1)), ((0.09, 0.11, 0.20), (0.975, 0.98, 1)))
         case .markIII:
             return (((0.06, 0.045, 0.045), (0.97, 0.955, 0.95)), ((0.025, 0.018, 0.018), (0.93, 0.91, 0.90)),
                     ((0.10, 0.075, 0.072), (1, 1, 1)), ((0.14, 0.10, 0.095), (1, 0.985, 0.98)))

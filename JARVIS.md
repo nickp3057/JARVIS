@@ -594,8 +594,8 @@ CALENDAR_ALERT_LEAD_MIN=10  # warn this many minutes before a meeting
 ## Recently Shipped
 
 - **Themes and a living reactor mark (1.86 / build 88)** — Settings → Theme:
-  Arc (original cyan), Reactor (brighter ice blue, violet-blue user bubbles),
-  Mark III (red and gold on warm charcoal), each with dark/light variants in
+  Arc (original cyan) and Mark III (red and gold on warm charcoal; a
+  Reactor ice-blue/violet option was tried and removed in 1.87), each with dark/light variants in
   `JarvisPalette`; `RootView` re-identifies on change. `JarvisCoreMark` now
   animates (counter-rotating rings, breathing glow; faster while JARVIS
   thinks, and it leads the typing indicator) via `TimelineView(.animation)`

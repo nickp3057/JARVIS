@@ -60,7 +60,7 @@ toolbar).
 
 ## Themes and motion (1.86, simulator tests pass)
 
-- Settings → Theme: Arc / Reactor / Mark III (`JarvisPalette`). Mark III's red
+- Settings → Theme: Arc / Mark III (`JarvisPalette`; Reactor removed in 1.87, Nick disliked the violet). Mark III's red
   accent sits close to the red "critical" dot; revisit if that confuses.
 - The reactor mark animates at display rate; check smoothness on device with
   Instruments → Animation Hitches (target: no hitches on the Chat empty
