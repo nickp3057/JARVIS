@@ -593,6 +593,16 @@ CALENDAR_ALERT_LEAD_MIN=10  # warn this many minutes before a meeting
 
 ## Recently Shipped
 
+- **Themes and a living reactor mark (1.86 / build 88)** — Settings → Theme:
+  Arc (original cyan), Reactor (brighter ice blue, violet-blue user bubbles),
+  Mark III (red and gold on warm charcoal), each with dark/light variants in
+  `JarvisPalette`; `RootView` re-identifies on change. `JarvisCoreMark` now
+  animates (counter-rotating rings, breathing glow; faster while JARVIS
+  thinks, and it leads the typing indicator) via `TimelineView(.animation)`
+  with transform/opacity-only frames in one `drawingGroup` layer and no
+  per-frame shadow; it stops off screen, with Reduce Motion, and in Low Power
+  Mode.
+
 - **Chat and alert polish (1.85 / build 87)** — The keyboard "Done" bar is
   gone (on iOS 26 it floated over the composer and the send button); dismiss
   by swiping down or tapping the transcript, as in Messages. JARVIS replies

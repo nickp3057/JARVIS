@@ -58,6 +58,15 @@ toolbar).
 - Check on device: light mode on every tab, AX5 Dynamic Type on Home, and
   cyan-on-panel contrast in light mode.
 
+## Themes and motion (1.86, simulator tests pass)
+
+- Settings → Theme: Arc / Reactor / Mark III (`JarvisPalette`). Mark III's red
+  accent sits close to the red "critical" dot; revisit if that confuses.
+- The reactor mark animates at display rate; check smoothness on device with
+  Instruments → Animation Hitches (target: no hitches on the Chat empty
+  state and Home header at 60 Hz). ProMotion 120 Hz would need
+  `CADisableMinimumFrameDurationOnPhone`; deliberately not enabled.
+
 ## Tap-to-chat incident reports (2026-10-27, simulator tests pass)
 
 - Home → Needs attention rows are buttons: a tap shows a spinner, calls

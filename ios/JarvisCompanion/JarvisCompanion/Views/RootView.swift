@@ -11,6 +11,8 @@ struct RootView: View {
     /// Horizontal offset of the visible tab while swiping, and while the new
     /// tab slides in. The tab bar itself never moves.
     @State private var swipeOffset: CGFloat = 0
+    /// Re-identifies the tab content so every palette colour re-resolves.
+    @AppStorage(JarvisPalette.storageKey) private var palette = JarvisPalette.arc.rawValue
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     enum RootTab: Hashable, CaseIterable { case home, media, chat, settings }
@@ -37,6 +39,7 @@ struct RootView: View {
                 .tabItem { Label("Settings", systemImage: "slider.horizontal.3") }
                 .tag(RootTab.settings)
         }
+        .id(palette)
         .tint(JarvisTheme.cyan)
         .simultaneousGesture(DragGesture(minimumDistance: 30).onChanged(track).onEnded(swipe))
         .sensoryFeedback(.selection, trigger: selection)

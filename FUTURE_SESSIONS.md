@@ -77,7 +77,7 @@ Tiers:
    existing three are self-repair ids, `confirm_gate` codes and the arr
    restart token, and stack fixes should converge on self-repair.
 
-Phase 2 (built 2026-10-27, 1.81 / build 83; not yet installed on the NAS):
+Phase 2 (1.81 / build 83; installed on the NAS and live 2026-10-27, 18 containers, 3 arrays, 3 disks):
 `ops/nas/host_health.py` + `install-host-health.sh`, `stack_status.sh`
 includes `host_health`, `integrations/nas_host.py` monitor and incident
 sections.

@@ -256,6 +256,13 @@ final class CompanionTests: XCTestCase {
         await snapshot(SettingsView(embedded: true).dynamicTypeSize(.accessibility2), name: "Settings — large text")
         await snapshot(HubView(model: hub).dynamicTypeSize(.accessibility2), name: "Hub — large text")
         await snapshot(RootView(chat: chat, hub: hub), name: "App — navigation")
+        for palette in JarvisPalette.allCases where palette != .arc {
+            UserDefaults.standard.set(palette.rawValue, forKey: JarvisPalette.storageKey)
+            await snapshot(ChatView(model: chat), name: "Theme \(palette.name) — chat")
+            await snapshot(HubView(model: hub), name: "Theme \(palette.name) — hub")
+            await snapshot(ChatView(model: empty), name: "Theme \(palette.name) — ready")
+        }
+        UserDefaults.standard.removeObject(forKey: JarvisPalette.storageKey)
         hub.stopPolling()
     }
 

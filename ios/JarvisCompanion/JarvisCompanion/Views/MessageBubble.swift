@@ -198,22 +198,26 @@ struct TypingIndicator: View {
     @State private var animating = false
 
     var body: some View {
-        HStack(spacing: 5) {
-            ForEach(0..<3, id: \.self) { index in
-                Circle()
-                    .fill(JarvisTheme.amber)
-                    .frame(width: 7, height: 7)
-                    .opacity(animating ? 1 : 0.25)
-                    .animation(
-                        reduceMotion ? nil : .easeInOut(duration: 0.6)
-                        .repeatForever()
-                        .delay(Double(index) * 0.18),
-                        value: animating
-                    )
+        HStack(spacing: 8) {
+            // The reactor spins fast while JARVIS thinks (still with Reduce Motion).
+            JarvisCoreMark(size: 26, active: true)
+            HStack(spacing: 5) {
+                ForEach(0..<3, id: \.self) { index in
+                    Circle()
+                        .fill(JarvisTheme.amber)
+                        .frame(width: 7, height: 7)
+                        .opacity(animating ? 1 : 0.25)
+                        .animation(
+                            reduceMotion ? nil : .easeInOut(duration: 0.6)
+                            .repeatForever()
+                            .delay(Double(index) * 0.18),
+                            value: animating
+                        )
+                }
             }
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 12)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
         .background(JarvisTheme.panelGradient, in: .rect(cornerRadius: 18))
         .overlay(RoundedRectangle(cornerRadius: 18).strokeBorder(JarvisTheme.border))
         .frame(maxWidth: .infinity, alignment: .leading)

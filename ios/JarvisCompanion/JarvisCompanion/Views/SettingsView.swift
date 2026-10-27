@@ -64,6 +64,9 @@ struct SettingsView: View {
                                 .font(.footnote).foregroundStyle(connectionSucceeded ? JarvisTheme.success : JarvisTheme.amber)
                         }
                     }
+                    CockpitPanel("Theme", symbol: "paintpalette") {
+                        ThemePicker()
+                    }
                     CockpitPanel("Study brief", symbol: "graduationcap") {
                         Toggle("Deliver on this phone", isOn: $settings.studyAlertsEnabled).tint(JarvisTheme.cyan)
                         if settings.studyAlertsEnabled {
@@ -103,7 +106,7 @@ struct SettingsView: View {
                         }
                     }
                     HStack(spacing: 10) {
-                        JarvisCoreMark(size: 36)
+                        JarvisCoreMark(size: 36, animated: false)
                         VStack(alignment: .leading, spacing: 3) {
                             Text("JARVIS Companion").font(.caption.weight(.semibold))
                             Text("Version \(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "—")")
@@ -177,5 +180,45 @@ struct SettingsView: View {
         let calendar = Calendar.current
         let date = calendar.date(bySettingHour: hour, minute: 0, second: 0, of: Date()) ?? Date()
         return date.formatted(date: .omitted, time: .shortened)
+    }
+}
+
+/// Colour theme choice; the whole app re-themes as soon as one is picked.
+struct ThemePicker: View {
+    @AppStorage(JarvisPalette.storageKey) private var palette = JarvisPalette.arc.rawValue
+
+    var body: some View {
+        VStack(spacing: 0) {
+            ForEach(JarvisPalette.allCases) { option in
+                Button { palette = option.rawValue } label: {
+                    HStack(spacing: 12) {
+                        HStack(spacing: -6) {
+                            swatch(option.accent)
+                            swatch(option.secondary)
+                        }
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(option.name).font(.subheadline.weight(.medium)).foregroundStyle(.primary)
+                            Text(option.blurb).font(.caption).foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        if palette == option.rawValue {
+                            Image(systemName: "checkmark").font(.footnote.weight(.semibold)).foregroundStyle(JarvisTheme.cyan)
+                        }
+                    }
+                    .padding(.vertical, 8)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityAddTraits(palette == option.rawValue ? .isSelected : [])
+            }
+        }
+        .sensoryFeedback(.selection, trigger: palette)
+    }
+
+    private func swatch(_ pair: (RGB, RGB)) -> some View {
+        let c = pair.0
+        return Circle().fill(Color(red: c.0, green: c.1, blue: c.2))
+            .frame(width: 22, height: 22)
+            .overlay(Circle().strokeBorder(.white.opacity(0.25)))
     }
 }
