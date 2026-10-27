@@ -8,7 +8,7 @@ This repo maintains its own living docs — read them before making changes:
 
 - `JARVIS.md` — full project context: file map, stack, .env variables, tool list, how a turn works, UI layout, roadmap. The canonical reference.
 - `ARCHITECTURE.md` — the target layered architecture (Perception / Memory / Reasoning / Agency / Presence) and the runtime design rule.
-- `FUTURE_SESSIONS.md` — Nick's goals for the self-learning/self-healing direction and the prioritized backlog for future sessions. `SELF_HEALING_HANDOFF.md` is the review checklist for the most recent self-healing work.
+- `FUTURE_SESSIONS.md` — Nick's goals for the self-learning/self-healing direction, his ever-growing wishlist (integrations, TV companion, loose ends), and the prioritized backlog for future sessions. `SELF_HEALING_HANDOFF.md` is the review checklist for the most recent self-healing work.
 - `OVERNIGHT_HANDOFF.md` — status, evidence and review checklist for the 2026-09-22 overnight overhaul (alerts, confirmation gate, notifications, performance).
 - `IOS_REDESIGN_PLAN.md` — the hub-first JarvisCompanion redesign (Phase 4): what was built, what's left, and open questions.
 

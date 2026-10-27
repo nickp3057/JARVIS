@@ -123,6 +123,59 @@ Survey findings (2026-10-27, read-only):
 - Optiplex logs Google Calendar `invalid_grant` every 2 min: re-auth with
   `python -m integrations.google_calendar --auth`.
 
+## Nick's wishlist (ever-growing — add to it, tick things off)
+
+Nick's running to-do list for the project. When one ships, move it to
+`JARVIS.md` "Recently Shipped" and delete it here. Newest asks at the bottom
+of each group.
+
+### Loose ends (Nick)
+
+- [ ] Reserve the Optiplex's IP on the home router (it drifted 10.0.0.80 →
+  10.0.0.81 on 2026-10-27). Ssh now uses Tailscale, so this is insurance.
+- [ ] Check the iPhone app's server address in Settings; if it's 10.0.0.80,
+  switch it to the Tailscale address `100.69.8.11`.
+
+### Integrations
+
+- [ ] **Charles Schwab** (asked 2026-10-27): read-only Schwab Trader API on
+  Core (OAuth app, token refresh). Endpoint like `/api/portfolio/today`:
+  today's and yesterday's change, uninvested cash. Feeds the phone Home tile
+  and the TV. A quick look, never a trading UI.
+- [ ] **Letterboxd** (asked 2026-10-27): pull Nick's diary/ratings (RSS feed
+  is the easy path, no official API) so JARVIS knows what he's watched and
+  liked, and can tie it into Radarr requests.
+- [ ] **Nick's top 5s** (asked 2026-10-27): his top fives in general (films,
+  albums, etc.) as standing knowledge. Probably durable profile facts or a
+  small dedicated store JARVIS can read and Nick can edit.
+- [ ] **Browser abilities** (asked 2026-10-27): general web search/lookup
+  ("google this") and price watching (track a product URL, alert through
+  `runtime.raise_alert` when it drops below a target). Price watching is a
+  monitor, not a UI poll.
+
+### Companion apps
+
+- [ ] **Speak replies in JARVIS's voice on the phone**: the app's mic is
+  dictation only today; replies are text. Core would synthesize with
+  ElevenLabs and the app plays the audio (opt-in, per reply or always).
+- [ ] **TV companion** (asked 2026-10-27): Nick's TCL TV has been stripped of
+  Google TV and runs only Plex and YouTube. Make it JARVIS-ified with a
+  calm, glanceable home screen, fully drivable with the TV remote (D-pad
+  navigation, play/pause keys):
+  - Stocks: how the portfolio did yesterday/today, any cash sitting idle
+    (needs Schwab above).
+  - Calendar: upcoming assignments/assessments, today's work schedule,
+    birthdays and other events.
+  - Music player with a gentle wake-up: music fades in at alarm time;
+    play/pause from the remote.
+  - Light and basic: no bloat, same JARVIS look and themes as the phone.
+  - Plumbing that already exists: give the TV its own scoped token
+    (`python -m app.client_tokens create tv events:read status:read`, never
+    `JARVIS_API_TOKEN`) and read `/api/clients/events` (SSE) plus the status
+    endpoints. Open questions: Android TV app vs. a web page in a kiosk
+    launcher; where the work schedule and birthdays come from; which music
+    source (Plex music, Spotify, YouTube Music).
+
 ## Nick's stated goal
 
 Make JARVIS the ever-learning, ever-changing, self-adjusting, self-healing
@@ -230,10 +283,6 @@ the monitor. Pair with the health dashboard so restarts are visible.
   local model with a confidence gate and fall back to Claude.
 - **Voice interruption polish**: barge-in while JARVIS speaks.
 - **Session summaries surfaced on the phone** so a chat picks up context.
-- **Charles Schwab glance on Home** (Nick asked 2026-10-27): today's portfolio
-  change as one line/chip on the companion's Home tab. Needs a read-only
-  Schwab Trader API integration on Core (OAuth app, token refresh) and an
-  endpoint like `/api/portfolio/today`; keep it a quick look, not a trading UI.
 
 ## Known debt to clear when convenient
 
