@@ -6,7 +6,7 @@ him. Nothing here was deployed: every change is local commits on `main`,
 unit-tested (`.venv/bin/python -m unittest discover -s tests`), and not
 exercised against the live NAS/Optiplex. The one failing test,
 `test_study_brief.test_composed_briefs_shape`, was failing before this work
-(date-dependent fixture) and is untouched.
+(date-dependent fixture) and was untouched then; fixed 2026-10-27 (the endpoint test now shifts its events relative to today).
 
 Hard constraint honoured throughout: the NAS SSH permission model is
 unchanged (restricted forced-command keys only, no Docker socket, no root).

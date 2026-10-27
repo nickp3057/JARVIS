@@ -287,8 +287,12 @@ class StudyBriefEndpointTests(unittest.TestCase):
         self.assertEqual(body["briefs"], [])
 
     def test_composed_briefs_shape(self) -> None:
+        # The endpoint plans from the real clock, so the fixture must move with
+        # it: the same events, shifted so the quiz is always two days out.
+        shift = (datetime.now().astimezone() + timedelta(days=2)).date() - EVENTS[0]["start"].date()
+        events = [dict(e, start=e["start"] + shift) for e in EVENTS]
         with patch.object(status_hub, "calendar_configured", return_value=True), \
-             patch.object(status_hub, "upcoming_events", return_value=EVENTS) as calendar, \
+             patch.object(status_hub, "upcoming_events", return_value=events) as calendar, \
              patch.object(study_brief, "_get_client", return_value=None):
             body = self.client.get("/api/study/brief", headers=self.headers).json()
             self.client.get("/api/study/brief", headers=self.headers)
