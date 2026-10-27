@@ -14,6 +14,8 @@ struct NowStatus: Codable {
     let calendarError: String
     let academicEvents: [AcademicEvent]
     let supportsAcademicEvents: Bool
+    /// Overdue and due-within-a-week maintenance; empty on an older Core.
+    let maintenance: [MaintenanceTask]
 
     var generatedDate: Date { Date(timeIntervalSince1970: generatedAt) }
 
@@ -23,6 +25,7 @@ struct NowStatus: Codable {
         case nextEvent = "next_event"
         case calendarError = "calendar_error"
         case academicEvents = "academic_events"
+        case maintenance
     }
 
     init(from decoder: Decoder) throws {
@@ -34,6 +37,7 @@ struct NowStatus: Codable {
         calendarError = try values.decodeIfPresent(String.self, forKey: .calendarError) ?? ""
         supportsAcademicEvents = values.contains(.academicEvents)
         academicEvents = try values.decodeIfPresent([AcademicEvent].self, forKey: .academicEvents) ?? []
+        maintenance = try values.decodeIfPresent([MaintenanceTask].self, forKey: .maintenance) ?? []
     }
 }
 
@@ -372,4 +376,149 @@ struct HomeControlResult: Decodable {
 struct TorrentControlResult: Decodable {
     let error: String
     let message: String
+}
+
+/// `/api/maintenance`: a recurring chore with its countdown, computed by
+/// JARVIS Core so every client agrees on "days remaining".
+struct MaintenanceTask: Codable, Identifiable, Hashable {
+    let id: Int
+    let name: String
+    let scheduleType: String
+    let intervalValue: Int?
+    let intervalUnit: String?
+    let fixedMonth: Int?
+    let fixedDay: Int?
+    let notes: String
+    let lastDone: String?
+    let lastNote: String?
+    let logCount: Int
+    let daysSince: Int?
+    let nextDue: String?
+    let daysRemaining: Int?
+    /// "overdue", "due", "soon", "ok", or "log" (log-only task).
+    let status: String
+    let scheduleLabel: String
+
+    var isOverdue: Bool { status == "overdue" }
+    var needsAttention: Bool { status == "overdue" || status == "due" }
+    var lastDoneDate: Date? { lastDone.flatMap(MaintenanceTask.parse) }
+
+    /// Countdown wording shared by the Now feed and the maintenance card.
+    var countdown: String {
+        guard let days = daysRemaining else {
+            guard let since = daysSince else { return "NEVER LOGGED" }
+            switch since {
+            case 0: return "DONE TODAY"
+            case 1: return "1 DAY AGO"
+            default: return "\(since) DAYS AGO"
+            }
+        }
+        switch days {
+        case -1: return "1 DAY OVERDUE"
+        case ..<0: return "\(-days) DAYS OVERDUE"
+        case 0: return lastDone == nil ? "DUE NOW" : "DUE TODAY"
+        case 1: return "TOMORROW"
+        default: return "IN \(days) DAYS"
+        }
+    }
+
+    /// "Last done 12 days ago" / "Never logged".
+    var lastDoneText: String {
+        guard let since = daysSince else { return "Never logged" }
+        switch since {
+        case 0: return "Done today"
+        case 1: return "Done yesterday"
+        default: return "Done \(since) days ago"
+        }
+    }
+
+    /// The server writes local ISO timestamps without a zone.
+    static func parse(_ value: String) -> Date? {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = value.count > 10 ? "yyyy-MM-dd'T'HH:mm:ss" : "yyyy-MM-dd"
+        return formatter.date(from: value)
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case id, name, notes, status
+        case scheduleType = "schedule_type"
+        case intervalValue = "interval_value"
+        case intervalUnit = "interval_unit"
+        case fixedMonth = "fixed_month"
+        case fixedDay = "fixed_day"
+        case lastDone = "last_done"
+        case lastNote = "last_note"
+        case logCount = "log_count"
+        case daysSince = "days_since"
+        case nextDue = "next_due"
+        case daysRemaining = "days_remaining"
+        case scheduleLabel = "schedule_label"
+    }
+}
+
+struct MaintenanceLogEntry: Codable, Identifiable, Hashable {
+    let id: Int
+    let completedAt: String
+    let note: String
+
+    var date: Date? { MaintenanceTask.parse(completedAt) }
+
+    enum CodingKeys: String, CodingKey {
+        case id, note
+        case completedAt = "completed_at"
+    }
+}
+
+/// Body for creating or editing a task. `lastDone` (yyyy-MM-dd) only
+/// applies on create, so a new task can start from when it was last done.
+struct MaintenanceTaskDraft: Encodable {
+    var name = ""
+    var scheduleType = "interval"
+    var intervalValue: Int? = 3
+    var intervalUnit: String? = "months"
+    var fixedMonth: Int?
+    var fixedDay: Int?
+    var notes = ""
+    var lastDone: String?
+
+    init() {}
+
+    init(_ task: MaintenanceTask) {
+        name = task.name
+        scheduleType = task.scheduleType
+        intervalValue = task.intervalValue ?? 3
+        intervalUnit = task.intervalUnit ?? "months"
+        fixedMonth = task.fixedMonth
+        fixedDay = task.fixedDay
+        notes = task.notes
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case name, notes
+        case scheduleType = "schedule_type"
+        case intervalValue = "interval_value"
+        case intervalUnit = "interval_unit"
+        case fixedMonth = "fixed_month"
+        case fixedDay = "fixed_day"
+        case lastDone = "last_done"
+    }
+
+    /// Only the fields that belong to the chosen schedule go over the wire.
+    func encode(to encoder: Encoder) throws {
+        var values = encoder.container(keyedBy: CodingKeys.self)
+        try values.encode(name, forKey: .name)
+        try values.encode(scheduleType, forKey: .scheduleType)
+        try values.encode(notes, forKey: .notes)
+        try values.encodeIfPresent(lastDone, forKey: .lastDone)
+        switch scheduleType {
+        case "interval":
+            try values.encodeIfPresent(intervalValue, forKey: .intervalValue)
+            try values.encodeIfPresent(intervalUnit, forKey: .intervalUnit)
+        case "fixed_calendar":
+            try values.encodeIfPresent(fixedMonth, forKey: .fixedMonth)
+            try values.encodeIfPresent(fixedDay, forKey: .fixedDay)
+        default: break
+        }
+    }
 }

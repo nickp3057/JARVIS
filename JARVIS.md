@@ -54,6 +54,7 @@ Pearson-Stark-Jarvis/
 │   ├── habits.py            Usage-pattern log + derived "what you've noticed" digest
 │   ├── knowledge_vault.py   Authorized Obsidian search, profile mirror, capture + journal
 │   ├── local_model.py       Optional OpenAI-compatible conversational fallback
+│   ├── maintenance.py       Recurring chores: countdowns + completion log (SQLite)
 │   ├── briefing.py          Spoken situational briefing (time, weather, agenda, timers)
 │   ├── personality.py       System prompt builder (humor%, address, tool descriptions)
 │   ├── price_watch.py       Guarded public-page price checks + durable targets
@@ -108,6 +109,7 @@ Pearson-Stark-Jarvis/
 │
 ├── memory/
 │   ├── history.db           SQLite conversation history (auto-created)
+│   ├── maintenance.db       Maintenance tasks + log (auto-created, seeded once)
 │   ├── profile.json         Long-term memory facts (auto-created)
 │   ├── habits.json          Bounded per-turn usage log for habit learning
 │   ├── memory_proposals.json Low-confidence facts awaiting approval
@@ -252,6 +254,15 @@ RMS envelope from ElevenLabs audio drives the orb in real time using a monotonic
 - `watch_price(url, label?, target_price?)` — monitor structured price metadata
   on an exact public product URL; private/local destinations are rejected
 - `list_price_watches` / `check_prices` / `remove_price_watch(id)`
+
+### Household maintenance
+- `log_maintenance(name|task_id, note?, completed_on?)` — "I rotated the
+  mattress"; resets the countdown, optionally backdated
+- `list_maintenance` — every task, last done, next due
+- `add_maintenance_task(name, schedule_type, ...)` — `interval` (every N
+  days/months/years), `fixed_calendar` (month + optional day yearly), or
+  `log_only`; optional `last_done` starts the countdown from then
+- `remove_maintenance_task(name|task_id)`
 
 ### Spotify
 - `play_music(query)` — natural-language play
@@ -592,6 +603,28 @@ CALENDAR_ALERT_LEAD_MIN=10  # warn this many minutes before a meeting
 ---
 
 ## Recently Shipped
+
+- **Maintenance tracker + Home cleanup (1.88 / build 90)** — Recurring chores
+  with a countdown and a log (`brain/maintenance.py`, `memory/maintenance.db`).
+  Seeded once on first run with Rotate mattress (6 months), Replace car scent
+  and Trim bonsai (quarterly); deleted seeds never return. Interval tasks are
+  due N days/months/years after the last completion (never done = due today;
+  month math clamps, so Aug 31 + 6 months = Feb 28). Fixed-calendar tasks are
+  due on a month/day yearly, and doing one up to 30 days early counts for
+  that year. Log-only tasks just show "done N days ago". Days are
+  local calendar days computed on the server. API: `GET/POST /api/maintenance`,
+  `PUT/DELETE /api/maintenance/{id}`, `POST /api/maintenance/{id}/complete`
+  (optional `note`, `completed_on`), `GET /api/maintenance/{id}/history`,
+  `DELETE /api/maintenance/{id}/history/{entry}` (undo a mistaken tap).
+  `/api/now` gains `maintenance` (overdue and due within 7 days), so due chores
+  show in the Now feed next to assessments. Home gets a Maintenance card (the
+  soonest four, a check button to log with an optional note/earlier day,
+  rows open the history; add/edit/delete in the app). Voice/chat tools:
+  `log_maintenance`, `list_maintenance`, `add_maintenance_task`,
+  `remove_maintenance_task`. No push alerts by design. App cleanup: the Launch
+  links card and the Media drive card now live only on Media (Home keeps the
+  free-space tile), the unused "Control Room" hub mode is gone, and switching
+  servers now also clears alerts and repairs.
 
 - **Themes and a living reactor mark (1.86 / build 88)** — Settings → Theme:
   Arc (original cyan) and Mark III (red and gold on warm charcoal; a

@@ -19,12 +19,12 @@ struct RootView: View {
 
     var body: some View {
         TabView(selection: $selection) {
-            HubView(model: hub, onAsk: ask, initialFocus: .today, isTab: true)
+            HubView(model: hub, onAsk: ask, focus: .today)
                 .swipePage(swipeOffset)
                 .tabItem { Label("Home", systemImage: "house") }
                 .tag(RootTab.home)
 
-            HubView(model: hub, onAsk: ask, initialFocus: .media, isTab: true)
+            HubView(model: hub, onAsk: ask, focus: .media)
                 .swipePage(swipeOffset)
                 .tabItem { Label("Media", systemImage: "play.rectangle.on.rectangle") }
                 .tag(RootTab.media)

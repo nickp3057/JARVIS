@@ -80,6 +80,19 @@ toolbar).
 - Not yet: tapping the push notification itself (needs the alert id in the
   APNs payload).
 
+## Maintenance + Home cleanup (1.88, simulator tests pass)
+
+- Home → Maintenance card after Now: the soonest four tasks (overdue red, due
+  today / this week amber), a check button opens "Mark done" (optional note,
+  optional earlier day), the row pushes `MaintenanceDetailView` (countdown,
+  Mark done, swipe-to-delete history, edit/delete menu). "All N tasks" pushes
+  the full list; "Add" opens `MaintenanceEditor`. Views in
+  `Views/MaintenanceViews.swift`.
+- The Now feed lists overdue and due-within-a-week chores under MAINTENANCE.
+- Home no longer repeats Media's Launch links or Media drive cards. The
+  legacy non-tab "Control Room" mode (focus picker, hub settings button,
+  `.home` focus) is removed; `HubView(focus: .today | .media)`.
+
 ## Proposed structure: hub-first
 
 | Tab | Content |

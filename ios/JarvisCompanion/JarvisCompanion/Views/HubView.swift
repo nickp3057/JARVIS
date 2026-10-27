@@ -1,7 +1,7 @@
 import SwiftUI
 
-/// A glanceable mobile counterpart to the desktop cockpit. Each card still
-/// loads independently; the presentation no longer inherits Form/List chrome.
+/// The Home and Media tabs: glanceable cards over one shared HubViewModel.
+/// Each card loads independently, so one dead service never blanks the rest.
 struct HubView: View {
     @EnvironmentObject private var settings: AppSettings
     @ObservedObject var model: HubViewModel
@@ -12,26 +12,25 @@ struct HubView: View {
     @State private var showingSettings = false
     @State private var showingMediaRequest = false
     @State private var diagnosisTarget: DiagnosisTarget?
+    @State private var completingTask: MaintenanceTask?
+    @State private var addingMaintenance = false
 
     struct DiagnosisTarget: Identifiable {
         let title: String
         let kind: String
         var id: String { kind + title }
     }
-    @State private var focus = HubFocus.today
     @State private var holdsPolling = false
-    /// True when this view is a dedicated tab (Home or Media): no focus
-    /// picker, no settings button (Settings has its own tab), and Home also
-    /// carries the quick actions and links.
-    private let isTab: Bool
+    private let focus: HubFocus
 
-    enum HubFocus: String, CaseIterable { case today = "Today", media = "Media", home = "Home" }
+    /// Home carries the day (alerts, Now, maintenance, quick actions);
+    /// Media carries requests, the drive, transfers, the arr queues and links.
+    enum HubFocus { case today, media }
 
-    init(model: HubViewModel, onAsk: ((String) -> Void)? = nil, initialFocus: HubFocus = .today, isTab: Bool = false) {
+    init(model: HubViewModel, onAsk: ((String) -> Void)? = nil, focus: HubFocus = .today) {
         self.model = model
         self.onAsk = onAsk
-        self.isTab = isTab
-        _focus = State(initialValue: initialFocus)
+        self.focus = focus
     }
 
     private var columns: [GridItem] {
@@ -42,34 +41,22 @@ struct HubView: View {
         NavigationStack {
             ScrollView {
                 LazyVStack(spacing: 14) {
-                    if !isTab || focus == .today {
-                        header
-                        overview
-                    }
-                    if !isTab {
-                        Picker("Hub focus", selection: $focus) {
-                            ForEach(HubFocus.allCases, id: \.self) { Text($0.rawValue).tag($0) }
-                        }.pickerStyle(.segmented).padding(.vertical, 3)
-                    }
                     switch focus {
                     case .today:
+                        header
+                        overview
                         if !attentionAlerts.isEmpty { needsAttentionCard }
                         if !visibleRepairs.isEmpty { repairsCard }
                         nowCard
+                        if model.maintenance.value != nil { maintenanceCard }
                         if onAsk != nil { briefingShortcut }
-                        if isTab { quickActionsCard }
-                        storageCard
+                        quickActionsCard
                         servicesCard
-                        if isTab { linksCard }
                     case .media:
                         requestMediaButton
                         storageCard
                         torrentsCard
                         mediaCard
-                        linksCard
-                    case .home:
-                        quickActionsCard
-                        servicesCard
                         linksCard
                     }
                 }
@@ -80,16 +67,16 @@ struct HubView: View {
             }
             .refreshable { await model.refreshAll() }
             .background { JarvisBackdrop() }
-            .navigationTitle(isTab ? (focus == .media ? "Media" : "Home") : "Control Room")
-            .navigationBarTitleDisplayMode(isTab ? .large : .inline)
-            .toolbar {
-                if !isTab {
-                    ToolbarItem(placement: .topBarTrailing) {
-                        Button("Settings", systemImage: "slider.horizontal.3") { showingSettings = true }
-                    }
+            .navigationTitle(focus == .media ? "Media" : "Home")
+            .navigationDestination(for: MaintenanceRoute.self) { route in
+                switch route {
+                case .all: MaintenanceListView(model: model)
+                case .task(let id): MaintenanceDetailView(model: model, taskID: id)
                 }
             }
             .sheet(isPresented: $showingSettings) { SettingsView() }
+            .sheet(item: $completingTask) { MaintenanceCompleteSheet(model: model, task: $0) }
+            .sheet(isPresented: $addingMaintenance) { MaintenanceEditor(model: model, task: nil) }
             .sheet(item: $diagnosisTarget) { target in
                 MediaDiagnosisView(title: target.title, kind: target.kind,
                                    makeClient: { try JarvisAPIClient.make(from: settings) })
@@ -276,22 +263,13 @@ struct HubView: View {
                             .font(.caption).foregroundStyle(.secondary)
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .padding(.vertical, 8)
-                        if !snapshot.academicEvents.isEmpty || !snapshot.timers.isEmpty || !snapshot.reminders.isEmpty { divider }
+                        if !snapshot.academicEvents.isEmpty || !snapshot.maintenance.isEmpty
+                            || !snapshot.timers.isEmpty || !snapshot.reminders.isEmpty { divider }
                     }
 
                     if !snapshot.academicEvents.isEmpty {
-                        HStack {
-                            Text("UPCOMING ASSESSMENTS")
-                                .font(.caption.weight(.semibold))
-                                .foregroundStyle(.secondary)
-                            Spacer()
-                            if !typeSize.isAccessibilitySize {
-                                Text(settings.studyAlertsEnabled ? "COUNTDOWN" : "ALERTS OFF")
-                                    .font(.caption)
-                                    .foregroundStyle(JarvisTheme.cyan)
-                            }
-                        }
-                        .padding(.top, 9)
+                        feedHeading("UPCOMING ASSESSMENTS",
+                                    detail: settings.studyAlertsEnabled ? "COUNTDOWN" : "ALERTS OFF")
                         ForEach(Array(snapshot.academicEvents.enumerated()), id: \.element.id) { index, event in
                             nowRow(symbol: "graduationcap.fill", tint: JarvisTheme.blue) {
                                 VStack(alignment: .leading, spacing: 3) {
@@ -302,6 +280,26 @@ struct HubView: View {
                                 }
                             }
                             if index < snapshot.academicEvents.count - 1 { divider }
+                        }
+                        if !snapshot.maintenance.isEmpty || !snapshot.timers.isEmpty || !snapshot.reminders.isEmpty { divider }
+                    }
+
+                    if !snapshot.maintenance.isEmpty {
+                        feedHeading("MAINTENANCE")
+                        ForEach(Array(snapshot.maintenance.enumerated()), id: \.element.id) { index, task in
+                            NavigationLink(value: MaintenanceRoute.task(task.id)) {
+                                nowRow(symbol: task.symbol, tint: task.isOverdue ? .red : JarvisTheme.amber) {
+                                    VStack(alignment: .leading, spacing: 3) {
+                                        Text(task.name).font(.subheadline.weight(.medium)).lineLimit(2)
+                                        Text(task.countdown)
+                                            .font(.caption.monospacedDigit().weight(.semibold))
+                                            .foregroundStyle(task.tint)
+                                    }
+                                }
+                                .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                            if index < snapshot.maintenance.count - 1 { divider }
                         }
                         if !snapshot.timers.isEmpty || !snapshot.reminders.isEmpty { divider }
                     }
@@ -342,8 +340,8 @@ struct HubView: View {
                         if index < snapshot.reminders.count - 1 { divider }
                     }
 
-                    if snapshot.nextEvent == nil && snapshot.academicEvents.isEmpty && snapshot.timers.isEmpty && snapshot.reminders.isEmpty
-                        && snapshot.calendarError.isEmpty {
+                    if snapshot.nextEvent == nil && snapshot.academicEvents.isEmpty && snapshot.maintenance.isEmpty
+                        && snapshot.timers.isEmpty && snapshot.reminders.isEmpty && snapshot.calendarError.isEmpty {
                         quietState("Nothing needs your attention.", symbol: "checkmark.circle")
                     }
                 }
@@ -354,6 +352,65 @@ struct HubView: View {
             } else if model.now.isLoading {
                 loadingRow
             }
+        }
+    }
+
+    private func feedHeading(_ title: String, detail: String? = nil) -> some View {
+        HStack {
+            Text(title)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+            Spacer()
+            if let detail, !typeSize.isAccessibilitySize {
+                Text(detail)
+                    .font(.caption)
+                    .foregroundStyle(JarvisTheme.cyan)
+            }
+        }
+        .padding(.top, 9)
+    }
+
+    /// The soonest few; overdue and due ones read in the warning colours.
+    /// The check button logs a completion; the row opens the history.
+    private var maintenanceCard: some View {
+        let tasks = model.maintenance.value ?? []
+        let attention = tasks.filter(\.needsAttention).count
+        return CockpitPanel("Maintenance", symbol: "hammer", trailing: {
+            if attention > 0 {
+                StatusPill(text: "\(attention) due", color: tasks.contains(where: \.isOverdue) ? .red : JarvisTheme.amber)
+            }
+        }) {
+            if let error = model.maintenance.failureText { errorRow(error) }
+            if tasks.isEmpty { quietState("Nothing tracked yet.", symbol: "hammer") }
+            VStack(spacing: 0) {
+                ForEach(Array(tasks.prefix(4).enumerated()), id: \.element.id) { index, task in
+                    HStack(spacing: 8) {
+                        NavigationLink(value: MaintenanceRoute.task(task.id)) {
+                            MaintenanceRow(task: task).contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        Button { completingTask = task } label: {
+                            Image(systemName: "checkmark")
+                                .font(.caption.weight(.bold))
+                                .frame(width: 44, height: 44)
+                                .background(JarvisTheme.cyan.opacity(0.11), in: .circle)
+                        }
+                        .accessibilityLabel("Mark \(task.name) done")
+                    }
+                    .padding(.vertical, 5)
+                    if index < min(tasks.count, 4) - 1 { divider }
+                }
+            }
+            HStack {
+                Button("Add", systemImage: "plus") { addingMaintenance = true }
+                Spacer()
+                if tasks.count > 4 {
+                    NavigationLink("All \(tasks.count) tasks", value: MaintenanceRoute.all)
+                }
+            }
+            .font(.footnote.weight(.semibold))
+            .tint(JarvisTheme.cyan)
+            .padding(.top, 4)
         }
     }
 

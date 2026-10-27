@@ -33,7 +33,7 @@ from urllib.parse import urlsplit, urlunsplit
 
 import requests
 
-from brain import study_brief
+from brain import maintenance, study_brief
 from brain.reminders import active_reminders
 from brain.timers import active_timers
 from integrations import google_calendar
@@ -171,6 +171,12 @@ def _now_uncached() -> dict[str, Any]:
                     "kind": str(academic.get("kind") or "assessment"),
                 })
 
+    try:
+        maintenance_due = maintenance.due_within()
+    except Exception as exc:  # noqa: BLE001 - the snapshot must still render
+        log.warning("Maintenance feed unavailable: %s", exc)
+        maintenance_due = []
+
     return {
         "generated_at": now,
         "timers": timers,
@@ -178,6 +184,7 @@ def _now_uncached() -> dict[str, Any]:
         "next_event": next_event,
         "calendar_error": calendar_error,
         "academic_events": academic_events,
+        "maintenance": maintenance_due,
     }
 
 

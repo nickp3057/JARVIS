@@ -28,7 +28,7 @@ from brain.runtime import JarvisRuntime
 from app import client_tokens
 from brain import event_bus
 from integrations import media_doctor, media_requests
-from brain import incident_reports, self_repair
+from brain import incident_reports, maintenance, self_repair
 
 _SSE_KEEPALIVE_S = 15.0
 
@@ -70,6 +70,7 @@ _COMPANION_CAPABILITIES: dict[str, object] = {
         "media": True,
         "home_entities": True,
         "service_links": True,
+        "maintenance": True,
     },
     "actions": {
         "home_on_off": True,
@@ -416,6 +417,96 @@ def repair_apply(proposal_id: str, _: None = Depends(authorize)) -> dict[str, ob
 @app.post("/api/repairs/{proposal_id}/reject")
 def repair_reject(proposal_id: str, _: None = Depends(authorize)) -> dict[str, object]:
     return {"message": self_repair.reject(proposal_id)}
+
+
+# --- Maintenance (recurring chores with a countdown and a log) -------------
+
+
+class MaintenanceTaskRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=120)
+    schedule_type: str = Field(pattern="^(interval|fixed_calendar|log_only)$")
+    interval_value: int | None = Field(default=None, ge=1, le=3650)
+    interval_unit: str | None = Field(default=None, pattern="^(days|months|years)$")
+    fixed_month: int | None = Field(default=None, ge=1, le=12)
+    fixed_day: int | None = Field(default=None, ge=1, le=31)
+    notes: str = Field(default="", max_length=2_000)
+    last_done: str | None = Field(default=None, max_length=10)
+
+
+class MaintenanceCompleteRequest(BaseModel):
+    note: str = Field(default="", max_length=1_000)
+    completed_on: str | None = Field(default=None, max_length=10)
+
+
+def _maintenance_changed() -> None:
+    # The Now feed lists due tasks; show a completion on the next poll.
+    status_hub.invalidate("now")
+
+
+@app.get("/api/maintenance")
+def maintenance_list(_: None = Depends(authorize)) -> dict[str, object]:
+    return {"tasks": maintenance.list_tasks()}
+
+
+@app.post("/api/maintenance")
+def maintenance_create(request: MaintenanceTaskRequest, _: None = Depends(authorize)) -> dict[str, object]:
+    try:
+        task = maintenance.create_task(request.model_dump())
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    _maintenance_changed()
+    return {"task": task}
+
+
+@app.put("/api/maintenance/{task_id}")
+def maintenance_update(task_id: int, request: MaintenanceTaskRequest, _: None = Depends(authorize)) -> dict[str, object]:
+    try:
+        task = maintenance.update_task(task_id, request.model_dump(exclude={"last_done"}))
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    if task is None:
+        raise HTTPException(status_code=404, detail="Unknown maintenance task")
+    _maintenance_changed()
+    return {"task": task}
+
+
+@app.delete("/api/maintenance/{task_id}")
+def maintenance_delete(task_id: int, _: None = Depends(authorize)) -> Response:
+    if not maintenance.delete_task(task_id):
+        raise HTTPException(status_code=404, detail="Unknown maintenance task")
+    _maintenance_changed()
+    return Response(status_code=204)
+
+
+@app.post("/api/maintenance/{task_id}/complete")
+def maintenance_complete(
+    task_id: int, request: MaintenanceCompleteRequest | None = None, _: None = Depends(authorize)
+) -> dict[str, object]:
+    body = request or MaintenanceCompleteRequest()
+    try:
+        task = maintenance.complete_task(task_id, body.note, body.completed_on)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    if task is None:
+        raise HTTPException(status_code=404, detail="Unknown maintenance task")
+    _maintenance_changed()
+    return {"task": task}
+
+
+@app.get("/api/maintenance/{task_id}/history")
+def maintenance_history(task_id: int, _: None = Depends(authorize)) -> dict[str, object]:
+    entries = maintenance.history(task_id)
+    if entries is None:
+        raise HTTPException(status_code=404, detail="Unknown maintenance task")
+    return {"task": maintenance.get_task(task_id), "history": entries}
+
+
+@app.delete("/api/maintenance/{task_id}/history/{entry_id}")
+def maintenance_delete_entry(task_id: int, entry_id: int, _: None = Depends(authorize)) -> Response:
+    if not maintenance.delete_log_entry(task_id, entry_id):
+        raise HTTPException(status_code=404, detail="Unknown log entry")
+    _maintenance_changed()
+    return Response(status_code=204)
 
 
 @app.get("/api/clients/events")

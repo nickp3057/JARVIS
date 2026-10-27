@@ -31,6 +31,8 @@ final class HubViewModel: ObservableObject {
     @Published var links = Section<[ServiceLink]>()
     /// Recent alerts from the server's alert bus, newest first.
     @Published var alerts = Section<[JarvisAlert]>()
+    /// Recurring chores, soonest due first (server-sorted).
+    @Published var maintenance = Section<[MaintenanceTask]>()
     /// The study brief as JARVIS Core plans it; Settings shows the schedule.
     @Published var studyBrief = Section<StudyBrief>()
 
@@ -106,7 +108,8 @@ final class HubViewModel: ObservableObject {
         async let g: Void = refreshStorage()
         async let h: Void = refreshAlerts()
         async let i: Void = refreshRepairs()
-        _ = await (a, b, c, d, e, f, g, h, i)
+        async let j: Void = refreshMaintenance()
+        _ = await (a, b, c, d, e, f, g, h, i, j)
     }
 
     func refreshNow() async {
@@ -188,6 +191,7 @@ final class HubViewModel: ObservableObject {
         connectionIdentity = settings.connectionIdentity
         now = Section(); services = Section(); torrents = Section(); media = Section()
         storage = Section(); entities = Section(); links = Section(); studyBrief = Section()
+        alerts = Section(); repairs = Section(); maintenance = Section()
         nowSnapshotIsStale = false
         if let data = snapshotDefaults.data(forKey: nowSnapshotKey),
            let cached = try? JSONDecoder().decode(NowStatus.self, from: data) {
@@ -242,6 +246,67 @@ final class HubViewModel: ObservableObject {
             }
             await refreshRepairs()
         }
+    }
+
+    // MARK: - Maintenance
+
+    /// An older Core without /api/maintenance just never shows the card.
+    func refreshMaintenance() async {
+        await load(\.maintenance) { try await $0.maintenanceTasks() }
+    }
+
+    /// Log a completion. Returns false (and surfaces why) on failure so a
+    /// sheet can stay open with the note intact.
+    @discardableResult
+    func completeMaintenance(_ task: MaintenanceTask, note: String, on day: Date?) async -> Bool {
+        await maintenanceAction {
+            _ = try await $0.completeMaintenanceTask(
+                id: task.id, note: note, completedOn: day.map(Self.dayString))
+        }
+    }
+
+    @discardableResult
+    func saveMaintenance(_ draft: MaintenanceTaskDraft, editing task: MaintenanceTask?) async -> Bool {
+        await maintenanceAction { client in
+            if let task { _ = try await client.updateMaintenanceTask(id: task.id, draft) }
+            else { _ = try await client.createMaintenanceTask(draft) }
+        }
+    }
+
+    @discardableResult
+    func deleteMaintenance(_ task: MaintenanceTask) async -> Bool {
+        await maintenanceAction { try await $0.deleteMaintenanceTask(id: task.id) }
+    }
+
+    @discardableResult
+    func deleteMaintenanceEntry(_ entry: MaintenanceLogEntry, of task: MaintenanceTask) async -> Bool {
+        await maintenanceAction { try await $0.deleteMaintenanceEntry(taskID: task.id, entryID: entry.id) }
+    }
+
+    func maintenanceHistory(for task: MaintenanceTask) async throws -> [MaintenanceLogEntry] {
+        try await client().maintenanceHistory(id: task.id)
+    }
+
+    /// Any change also moves the Now feed, which lists due tasks.
+    private func maintenanceAction(_ work: (JarvisAPIClient) async throws -> Void) async -> Bool {
+        do {
+            try await work(client())
+        } catch {
+            actionError = error.localizedDescription
+            return false
+        }
+        async let tasks: Void = refreshMaintenance()
+        async let now: Void = refreshNow()
+        _ = await (tasks, now)
+        return true
+    }
+
+    nonisolated static func dayString(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.dateFormat = "yyyy-MM-dd"
+        return formatter.string(from: date)
     }
 
     func refreshLinks() async {
@@ -338,7 +403,11 @@ final class HubViewModel: ObservableObject {
                 _ = await (torrents, services, entities, now, alerts, repairs)
                 tick += 1
                 if tick.isMultiple(of: 3) { await self.refreshMedia() }
-                if tick.isMultiple(of: 6) { await self.refreshStorage() }
+                if tick.isMultiple(of: 6) {
+                    async let storage: Void = self.refreshStorage()
+                    async let maintenance: Void = self.refreshMaintenance()
+                    _ = await (storage, maintenance)
+                }
             }
         }
     }

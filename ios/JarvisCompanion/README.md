@@ -1,7 +1,7 @@
 # Jarvis Companion (iOS)
 
 A native SwiftUI companion for JARVIS Core, with synchronized Chat, native
-dictation, and a Control Room dashboard. Layered navy telemetry, cyan glass
+dictation, and Home and Media dashboards. Layered navy telemetry, cyan glass
 panels, and amber activity share the desktop cockpit aesthetic; text scales
 with Dynamic Type.
 

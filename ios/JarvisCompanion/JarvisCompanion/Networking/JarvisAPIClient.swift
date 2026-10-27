@@ -448,7 +448,13 @@ struct JarvisAPIClient {
     private func postJSON<Body: Encodable, T: Decodable>(
         _ type: T.Type, path: String, body: Body
     ) async throws -> T {
-        var request = request(path: path, method: "POST")
+        try await sendJSON(type, path: path, method: "POST", body: body)
+    }
+
+    private func sendJSON<Body: Encodable, T: Decodable>(
+        _ type: T.Type, path: String, method: String, body: Body
+    ) async throws -> T {
+        var request = request(path: path, method: method)
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try JSONEncoder().encode(body)
         let data: Data
@@ -552,6 +558,60 @@ struct JarvisAPIClient {
     /// background and reports the verified outcome as an alert.
     func repairAction(id: String, action: String) async throws -> RepairActionResult {
         try await postJSON(RepairActionResult.self, path: "api/repairs/\(id)/\(action)", body: EmptyBody())
+    }
+
+    // MARK: - Maintenance
+
+    private struct MaintenanceEnvelope: Decodable { let task: MaintenanceTask }
+
+    func maintenanceTasks() async throws -> [MaintenanceTask] {
+        struct Envelope: Decodable { let tasks: [MaintenanceTask] }
+        return try await getJSON(Envelope.self, path: "api/maintenance").tasks
+    }
+
+    func createMaintenanceTask(_ draft: MaintenanceTaskDraft) async throws -> MaintenanceTask {
+        try await postJSON(MaintenanceEnvelope.self, path: "api/maintenance", body: draft).task
+    }
+
+    func updateMaintenanceTask(id: Int, _ draft: MaintenanceTaskDraft) async throws -> MaintenanceTask {
+        try await sendJSON(MaintenanceEnvelope.self, path: "api/maintenance/\(id)", method: "PUT", body: draft).task
+    }
+
+    private struct MaintenanceCompleteBody: Encodable {
+        let note: String
+        let completedOn: String?
+        enum CodingKeys: String, CodingKey { case note, completedOn = "completed_on" }
+    }
+
+    /// `completedOn` (yyyy-MM-dd) backdates the completion; nil means now.
+    func completeMaintenanceTask(id: Int, note: String, completedOn: String?) async throws -> MaintenanceTask {
+        try await postJSON(MaintenanceEnvelope.self, path: "api/maintenance/\(id)/complete",
+                           body: MaintenanceCompleteBody(note: note, completedOn: completedOn)).task
+    }
+
+    func maintenanceHistory(id: Int) async throws -> [MaintenanceLogEntry] {
+        struct Envelope: Decodable { let history: [MaintenanceLogEntry] }
+        return try await getJSON(Envelope.self, path: "api/maintenance/\(id)/history").history
+    }
+
+    func deleteMaintenanceTask(id: Int) async throws {
+        try await delete(path: "api/maintenance/\(id)")
+    }
+
+    func deleteMaintenanceEntry(taskID: Int, entryID: Int) async throws {
+        try await delete(path: "api/maintenance/\(taskID)/history/\(entryID)")
+    }
+
+    private func delete(path: String) async throws {
+        let request = request(path: path, method: "DELETE")
+        let data: Data
+        let response: URLResponse
+        do {
+            (data, response) = try await session.data(for: request)
+        } catch let error as URLError {
+            throw JarvisAPIError.transport(error)
+        }
+        _ = try validate(response, data: data)
     }
 
     func torrentsStatus() async throws -> TorrentsStatus {

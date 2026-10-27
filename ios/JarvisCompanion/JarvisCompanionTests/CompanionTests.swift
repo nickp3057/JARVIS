@@ -206,13 +206,21 @@ final class CompanionTests: XCTestCase {
                 {"name":"Ubuntu 26.04 LTS","hash":"abc","state":"downloading","progress":0.68,"dl_speed":8388608,"up_speed":0,"eta":180,"size":4000000000},
                 {"name":"Debian installation image","hash":"def","state":"stoppedDL","progress":0.32,"dl_speed":0,"up_speed":0,"eta":0,"size":2000000000}]}
                 """, 0)
+            case "/api/maintenance/1/history": return (200, """
+                {"task":null,"history":[{"id":2,"task_id":1,"completed_at":"2026-07-20T12:00:00","note":"Wired the lower branch"},
+                {"id":1,"task_id":1,"completed_at":"2026-04-18T12:00:00","note":""}]}
+                """, 0)
+            case "/api/maintenance": return (200, """
+                {"tasks":[{"id":1,"name":"Trim bonsai","schedule_type":"interval","interval_value":3,"interval_unit":"months","fixed_month":null,"fixed_day":null,"notes":"","created_at":"2026-10-01T09:00:00","last_done":"2026-07-20T12:00:00","last_note":"","log_count":2,"days_since":99,"next_due":"2026-10-20","days_remaining":-7,"status":"overdue","schedule_label":"Every quarter"},{"id":2,"name":"Rotate mattress","schedule_type":"interval","interval_value":6,"interval_unit":"months","fixed_month":null,"fixed_day":null,"notes":"","created_at":"2026-10-01T09:00:00","last_done":"2026-06-01T12:00:00","last_note":"","log_count":1,"days_since":148,"next_due":"2026-12-01","days_remaining":35,"status":"ok","schedule_label":"Every 6 months"}]}
+                """, 0)
             case "/api/now": return (200, """
                 {"generated_at":\(Date().timeIntervalSince1970),"timers":[
                 {"id":"tea","label":"Tea","state":"running","remaining_seconds":245,"expires_at":\(Date().timeIntervalSince1970 + 245)}],
                 "reminders":[{"id":"r1","text":"Call Mum","due_at":null,"is_due":false}],
                 "next_event":{"id":"e1","title":"Design review","start_at":1789362000,"all_day":false,"location":"Studio"},
                 "calendar_error":"","academic_events":[
-                {"id":"quiz-1","title":"Biology quiz","start_at":1789531200,"all_day":true,"location":"","days_left":2}]}
+                {"id":"quiz-1","title":"Biology quiz","start_at":1789531200,"all_day":true,"location":"","days_left":2}],
+                "maintenance":[{"id":1,"name":"Trim bonsai","schedule_type":"interval","interval_value":3,"interval_unit":"months","fixed_month":null,"fixed_day":null,"notes":"","created_at":"2026-10-01T09:00:00","last_done":"2026-07-20T12:00:00","last_note":"","log_count":2,"days_since":99,"next_due":"2026-10-20","days_remaining":-7,"status":"overdue","schedule_label":"Every quarter"}]}
                 """, 0)
             case "/api/status/media": return (200, """
                 {"radarr":{"error":"","queue":[],"recent":[]},"sonarr":{"error":"","queue":[],"recent":[]}}
@@ -249,9 +257,10 @@ final class CompanionTests: XCTestCase {
         let client = JarvisAPIClient(baseURL: URL(string: "http://localhost:8000")!, token: "test", session: session)
         let hub = HubViewModel(settings: settings, clientFactory: { client })
         await hub.refreshAll()
-        await snapshot(HubView(model: hub), name: "Control room")
-        await snapshot(HubView(model: hub, initialFocus: .media), name: "Hub — media")
-        await snapshot(HubView(model: hub, initialFocus: .home), name: "Hub — home")
+        await snapshot(HubView(model: hub), name: "Hub — home")
+        await snapshot(HubView(model: hub, focus: .media), name: "Hub — media")
+        await snapshot(NavigationStack { MaintenanceListView(model: hub) }, name: "Maintenance — all")
+        await snapshot(NavigationStack { MaintenanceDetailView(model: hub, taskID: 1) }, name: "Maintenance — detail")
         await snapshot(SettingsView(embedded: true), name: "Settings")
         await snapshot(SettingsView(embedded: true).dynamicTypeSize(.accessibility2), name: "Settings — large text")
         await snapshot(HubView(model: hub).dynamicTypeSize(.accessibility2), name: "Hub — large text")
@@ -329,6 +338,33 @@ final class CompanionTests: XCTestCase {
                        "Biology quiz is tomorrow.")
         XCTAssertEqual(AcademicNotificationScheduler.body(title: "Biology quiz", daysLeft: 4),
                        "Biology quiz is in 4 days.")
+    }
+
+    func testMaintenanceCountdownAndDraftEncoding() throws {
+        func task(_ remaining: String, since: String = "null", last: String = "\"2026-07-20T12:00:00\"") throws -> MaintenanceTask {
+            let json = """
+            {"id":1,"name":"Trim bonsai","schedule_type":"interval","interval_value":3,"interval_unit":"months",
+            "fixed_month":null,"fixed_day":null,"notes":"","last_done":\(last),"last_note":"","log_count":1,
+            "days_since":\(since),"next_due":null,"days_remaining":\(remaining),"status":"ok","schedule_label":"Every quarter"}
+            """
+            return try JSONDecoder().decode(MaintenanceTask.self, from: Data(json.utf8))
+        }
+        XCTAssertEqual(try task("-7").countdown, "7 DAYS OVERDUE")
+        XCTAssertEqual(try task("-1").countdown, "1 DAY OVERDUE")
+        XCTAssertEqual(try task("0").countdown, "DUE TODAY")
+        XCTAssertEqual(try task("0", last: "null").countdown, "DUE NOW")
+        XCTAssertEqual(try task("12").countdown, "IN 12 DAYS")
+        XCTAssertEqual(try task("null", since: "4").countdown, "4 DAYS AGO")
+        XCTAssertEqual(try task("null", since: "4").lastDoneText, "Done 4 days ago")
+        XCTAssertNotNil(try task("0").lastDoneDate)
+
+        var draft = MaintenanceTaskDraft()
+        draft.name = "Flush water heater"
+        draft.scheduleType = "fixed_calendar"
+        draft.fixedMonth = 4
+        let body = try JSONSerialization.jsonObject(with: JSONEncoder().encode(draft)) as? [String: Any]
+        XCTAssertEqual(body?["fixed_month"] as? Int, 4)
+        XCTAssertNil(body?["interval_value"], "Only the chosen schedule's fields are sent")
     }
 
     func testStudyBriefGroupsEventsAndExcludesFinishedTimedAssessments() {

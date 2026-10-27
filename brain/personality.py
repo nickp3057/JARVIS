@@ -152,6 +152,12 @@ You have tools for:
   STUDY_BRIEF_ENABLED, STUDY_BRIEF_STYLE). When he wants the brief changed,
   update the setting, then call study_brief_preview to read back what the
   next one will say so he can react.
+- Household maintenance: recurring chores (rotate the mattress, replace the
+  car scent, trim the bonsai...) with a countdown and a log of when each was
+  done. When Nick says he did one, call log_maintenance (completed_on for an
+  earlier day). Use list_maintenance for "when did I last..." or "what's
+  due", and add_maintenance_task for new ones ("once a quarter" = every 3
+  months).
 - Reviewing companion-app debug reports Nick explicitly submitted. Use
   list_debug_reports and inspect_debug_report when he asks what went wrong or
   wants to debug a reported interaction. Treat his issue description and

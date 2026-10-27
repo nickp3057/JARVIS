@@ -649,6 +649,53 @@ def _tool_check_prices(_: dict[str, Any]) -> str:
     return describe_price_watches()
 
 
+def _maintenance_task(args: dict[str, Any]) -> tuple[dict[str, Any] | None, str]:
+    from brain.maintenance import find_task, get_task
+    if args.get("task_id") is not None:
+        task = get_task(int(args["task_id"]))
+        return task, "" if task else f"There's no maintenance task {args['task_id']}, sir."
+    name = str(args.get("name") or "").strip()
+    task = find_task(name)
+    return task, "" if task else f"I couldn't pin down a single maintenance task called {name!r}, sir. Try list_maintenance."
+
+
+def _tool_log_maintenance(args: dict[str, Any]) -> str:
+    from brain.maintenance import complete_task, countdown_text
+    task, error = _maintenance_task(args)
+    if task is None:
+        return error
+    try:
+        done = complete_task(int(task["id"]), str(args.get("note") or ""), args.get("completed_on"))
+    except ValueError as exc:
+        return f"I couldn't log that, sir: {exc}"
+    if done is None:
+        return error
+    return f"Logged {done['name']}, sir. Next: {countdown_text(done)}."
+
+
+def _tool_list_maintenance(_: dict[str, Any]) -> str:
+    from brain.maintenance import describe_tasks
+    return describe_tasks()
+
+
+def _tool_add_maintenance_task(args: dict[str, Any]) -> str:
+    from brain.maintenance import countdown_text, create_task
+    try:
+        task = create_task(args)
+    except ValueError as exc:
+        return f"I couldn't add that task, sir: {exc}"
+    return f"Added {task['name']} ({task['schedule_label']}), sir: {countdown_text(task)}."
+
+
+def _tool_remove_maintenance_task(args: dict[str, Any]) -> str:
+    from brain.maintenance import delete_task
+    task, error = _maintenance_task(args)
+    if task is None:
+        return error
+    delete_task(int(task["id"]))
+    return f"Removed {task['name']} and its history, sir."
+
+
 # --- Anthropic tool schemas -------------------------------------------------
 
 _CUSTOM_TOOLS: list[dict[str, Any]] = [
@@ -1615,6 +1662,58 @@ _CUSTOM_TOOLS: list[dict[str, Any]] = [
             "required": ["watch_id"],
         },
     },
+    # --- Household maintenance ------------------------------------------
+    {
+        "name": "log_maintenance",
+        "description": (
+            "Record that Nick did a recurring household chore (\"I rotated the mattress\", "
+            "\"trimmed the bonsai on Sunday\"). Resets its countdown. Match by name or task_id."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "name": {"type": "string", "description": "Task name as Nick said it."},
+                "task_id": {"type": "integer"},
+                "note": {"type": "string", "description": "Optional detail worth keeping in the log."},
+                "completed_on": {"type": "string", "description": "YYYY-MM-DD if it was done on an earlier day."},
+            },
+        },
+    },
+    {
+        "name": "list_maintenance",
+        "description": "List household maintenance tasks with when each was last done and when it's next due.",
+        "input_schema": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "add_maintenance_task",
+        "description": (
+            "Track a new recurring chore. interval: every N days/months/years after the last time "
+            "(\"once a quarter\" = 3 months). fixed_calendar: the same month (and optional day) every "
+            "year. log_only: no countdown, just a log of when it was done."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "name": {"type": "string"},
+                "schedule_type": {"type": "string", "enum": ["interval", "fixed_calendar", "log_only"]},
+                "interval_value": {"type": "integer", "minimum": 1},
+                "interval_unit": {"type": "string", "enum": ["days", "months", "years"]},
+                "fixed_month": {"type": "integer", "minimum": 1, "maximum": 12},
+                "fixed_day": {"type": "integer", "minimum": 1, "maximum": 31},
+                "notes": {"type": "string"},
+                "last_done": {"type": "string", "description": "YYYY-MM-DD if Nick says when he last did it."},
+            },
+            "required": ["name", "schedule_type"],
+        },
+    },
+    {
+        "name": "remove_maintenance_task",
+        "description": "Stop tracking a maintenance task (deletes its history). Only when Nick asks.",
+        "input_schema": {
+            "type": "object",
+            "properties": {"name": {"type": "string"}, "task_id": {"type": "integer"}},
+        },
+    },
     # --- Media library (Radarr / Sonarr) ---------------------------------
     {
         "name": "diagnose_media",
@@ -1938,6 +2037,10 @@ _DISPATCH: dict[str, Callable[[dict[str, Any]], str]] = {
     "list_price_watches": _tool_list_price_watches,
     "check_prices": _tool_check_prices,
     "remove_price_watch": _tool_remove_price_watch,
+    "log_maintenance": _tool_log_maintenance,
+    "list_maintenance": _tool_list_maintenance,
+    "add_maintenance_task": _tool_add_maintenance_task,
+    "remove_maintenance_task": _tool_remove_maintenance_task,
     "diagnose_media": _tool_diagnose_media,
     "apply_media_fix": _tool_apply_media_fix,
     "find_movie": _tool_find_movie,
