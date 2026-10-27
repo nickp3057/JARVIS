@@ -80,9 +80,7 @@ struct HubView: View {
             .refreshable { await model.refreshAll() }
             .background { JarvisBackdrop() }
             .navigationTitle(isTab ? (focus == .media ? "Media" : "Home") : "Control Room")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbarBackground(JarvisTheme.background, for: .navigationBar)
-            .toolbarBackground(.visible, for: .navigationBar)
+            .navigationBarTitleDisplayMode(isTab ? .large : .inline)
             .toolbar {
                 if !isTab {
                     ToolbarItem(placement: .topBarTrailing) {
@@ -156,11 +154,10 @@ struct HubView: View {
         HStack(spacing: 12) {
             VStack(alignment: .leading, spacing: 6) {
                 Text(Date.now, format: .dateTime.weekday(.wide).month(.abbreviated).day())
-                    .font(.caption2.monospaced().weight(.semibold))
-                    .tracking(1.8)
+                    .font(.caption.weight(.semibold))
                     .foregroundStyle(JarvisTheme.cyan)
                 Text("A little ahead of everything.")
-                    .font(.title.weight(.semibold)).tracking(-0.6)
+                    .font(.title.weight(.semibold))
                 Text("Your day. Your home. Your JARVIS.")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
@@ -190,8 +187,8 @@ struct HubView: View {
                 .background(tint.opacity(0.11), in: .circle)
             VStack(alignment: .leading, spacing: 2) {
                 Text(value).font(.title3.monospacedDigit().weight(.semibold)).lineLimit(1).minimumScaleFactor(0.7)
-                Text(title.uppercased())
-                    .font(.caption2.monospaced())
+                Text(title)
+                    .font(.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(typeSize.isAccessibilitySize ? nil : 1)
             }
@@ -284,12 +281,12 @@ struct HubView: View {
                     if !snapshot.academicEvents.isEmpty {
                         HStack {
                             Text("UPCOMING ASSESSMENTS")
-                                .font(.caption2.monospaced().weight(.semibold))
+                                .font(.caption.weight(.semibold))
                                 .foregroundStyle(.secondary)
                             Spacer()
                             if !typeSize.isAccessibilitySize {
                                 Text(settings.studyAlertsEnabled ? "COUNTDOWN" : "ALERTS OFF")
-                                    .font(.caption2.monospaced())
+                                    .font(.caption)
                                     .foregroundStyle(JarvisTheme.cyan)
                             }
                         }
@@ -350,7 +347,7 @@ struct HubView: View {
                     }
                 }
                 Text("Updated \(snapshot.generatedDate, style: .relative)")
-                    .font(.caption2.monospaced())
+                    .font(.caption)
                     .foregroundStyle(.tertiary)
                     .frame(maxWidth: .infinity, alignment: .trailing)
             } else if model.now.isLoading {
@@ -390,8 +387,8 @@ struct HubView: View {
                             .font(.title2.monospacedDigit().weight(.semibold))
                         Text("available").font(.caption).foregroundStyle(.secondary)
                         Spacer()
-                        Text(storage.label.uppercased())
-                            .font(.caption2.monospaced())
+                        Text(storage.label)
+                            .font(.caption)
                             .foregroundStyle(.secondary)
                     }
                     ProgressView(value: min(max(storage.usedFraction, 0), 1))
@@ -509,8 +506,8 @@ struct HubView: View {
             HStack(spacing: 10) {
                 VStack(alignment: .leading, spacing: 3) {
                     Text(torrent.name).font(.subheadline.weight(.medium)).lineLimit(1)
-                    Text(torrent.isPaused ? "PAUSED" : torrent.state.uppercased())
-                        .font(.caption2.monospaced().weight(.semibold))
+                    Text(torrent.isPaused ? "Paused" : torrent.state.capitalized)
+                        .font(.caption.weight(.semibold))
                         .foregroundStyle(torrent.isPaused ? JarvisTheme.amber : JarvisTheme.cyan)
                 }
                 Spacer()
@@ -574,7 +571,7 @@ struct HubView: View {
                 Label(name, systemImage: symbol).font(.subheadline.weight(.semibold))
                 Spacer()
                 Text("\(section.queue.count) QUEUED")
-                    .font(.caption2.monospaced())
+                    .font(.caption)
                     .foregroundStyle(.secondary)
             }
             if !section.error.isEmpty {
@@ -642,8 +639,8 @@ struct HubView: View {
                                     .frame(width: 24)
                                 VStack(alignment: .leading, spacing: 2) {
                                     Text(entity.friendlyName).font(.subheadline.weight(.medium))
-                                    Text(entity.state.uppercased())
-                                        .font(.caption2.monospaced()).foregroundStyle(.secondary)
+                                    Text(entity.state.capitalized)
+                                        .font(.caption).foregroundStyle(.secondary)
                                 }
                             }
                         }
@@ -690,7 +687,7 @@ struct HubView: View {
     private var loadingRow: some View {
         HStack(spacing: 10) {
             ProgressView().tint(JarvisTheme.cyan)
-            Text("UPDATING TELEMETRY").font(.caption2.monospaced()).foregroundStyle(.secondary)
+            Text("Updating…").font(.caption).foregroundStyle(.secondary)
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, 16)

@@ -105,7 +105,7 @@ struct SettingsView: View {
                     HStack(spacing: 10) {
                         JarvisCoreMark(size: 36)
                         VStack(alignment: .leading, spacing: 3) {
-                            Text("JARVIS COMPANION").font(.caption2.monospaced().weight(.semibold)).tracking(1)
+                            Text("JARVIS Companion").font(.caption.weight(.semibold))
                             Text("Version \(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "—")")
                                 .font(.caption).foregroundStyle(.secondary)
                         }

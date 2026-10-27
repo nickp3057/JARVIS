@@ -44,13 +44,10 @@ struct ChatView: View {
                 }
                 .contentShape(Rectangle())
                 .onTapGesture { composerFocused = false }
-                Rectangle().fill(JarvisTheme.border).frame(height: 1)
-                composer
+                .safeAreaInset(edge: .bottom, spacing: 0) { composer }
             }
             .background { JarvisBackdrop() }
             .navigationTitle(model.messages.isEmpty ? "JARVIS" : model.activeTitle)
-            .toolbarBackground(JarvisTheme.background, for: .navigationBar)
-            .toolbarBackground(.visible, for: .navigationBar)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
@@ -81,6 +78,13 @@ struct ChatView: View {
                     } label: {
                         Image(systemName: "ellipsis.circle")
                     }
+                }
+                // Lives in the keyboard's own accessory bar, so showing it never
+                // changes the composer's layout.
+                ToolbarItemGroup(placement: .keyboard) {
+                    Spacer()
+                    Button("Done") { composerFocused = false }
+                        .fontWeight(.semibold)
                 }
             }
             .sheet(isPresented: $showingSettings, onDismiss: model.refreshConnectionStatus) {
@@ -161,9 +165,8 @@ struct ChatView: View {
                     Image(systemName: model.connectionState.symbol).font(.caption.weight(.semibold))
                 }
                 VStack(alignment: .leading, spacing: 1) {
-                    Text(model.connectionState.label.uppercased())
-                        .font(.caption2.monospaced().weight(.semibold))
-                        .tracking(1)
+                    Text(model.connectionState.label)
+                        .font(.caption.weight(.semibold))
                     if case .offline(let detail) = model.connectionState {
                         Text(detail).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
                     }
@@ -325,6 +328,7 @@ struct ChatView: View {
             }
             .scrollDismissesKeyboard(.interactively)
             .defaultScrollAnchor(.bottom)
+            .keepsBottomOnResize()
             .onChange(of: model.messages.count) { if followReply { scrollToBottom(proxy) } }
             .onChange(of: model.messages.last?.text) {
                 if followReply { proxy.scrollTo(bottomID, anchor: .bottom) }
@@ -333,7 +337,13 @@ struct ChatView: View {
                 if replying { followReply = true }
                 if followReply { scrollToBottom(proxy) }
             }
-            .onChange(of: composerFocused) { if followReply { scrollToBottom(proxy) } }
+            .onChange(of: composerFocused) {
+                // iOS 18+ keeps the bottom pinned while the keyboard resizes the
+                // transcript; earlier systems need one nudge, un-animated so it
+                // doesn't fight the keyboard's own animation.
+                guard #unavailable(iOS 18), followReply else { return }
+                proxy.scrollTo(bottomID, anchor: .bottom)
+            }
         }
     }
 
@@ -362,11 +372,10 @@ struct ChatView: View {
             VStack(spacing: 22) {
                 JarvisCoreMark(size: 120).padding(.top, 14)
                 VStack(spacing: 10) {
-                    Text("AT YOUR SERVICE")
-                        .font(.caption.monospaced().weight(.semibold))
-                        .tracking(3).foregroundStyle(JarvisTheme.cyan)
+                    Text("At your service")
+                        .font(.caption.weight(.semibold)).foregroundStyle(JarvisTheme.cyan)
                     Text(settings.isConfigured ? "A thought away, sir." : "Let’s get connected.")
-                        .font(.largeTitle.weight(.semibold)).tracking(-0.8)
+                        .font(.largeTitle.weight(.semibold))
                         .multilineTextAlignment(.center)
                     Text(settings.isConfigured
                          ? "One secure link to your home, plans, media, and memory."
@@ -411,60 +420,46 @@ struct ChatView: View {
         .buttonStyle(CockpitButtonStyle())
     }
 
+    /// One rounded field with the mic and send buttons inside it. Every control
+    /// is 44 pt, bottom-aligned, so single- and multi-line input sit on the same
+    /// grid and the row never shifts when the keyboard or focus changes.
     private var composer: some View {
-        VStack(spacing: 7) {
+        VStack(spacing: 6) {
             if voiceInput.isListening {
                 HStack(spacing: 7) {
                     Image(systemName: "waveform").symbolEffect(.variableColor.iterative, isActive: !reduceMotion)
-                    Text("LISTENING — TAP THE MIC WHEN YOU’RE DONE")
+                    Text("Listening — tap the mic when you’re done")
                 }
-                .font(.caption2.monospaced().weight(.semibold))
+                .font(.caption.weight(.semibold))
                 .foregroundStyle(JarvisTheme.amber)
                 .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 6)
             }
-            HStack(alignment: .bottom, spacing: 9) {
-                if composerFocused {
-                    Button { composerFocused = false } label: {
-                        Image(systemName: "keyboard.chevron.compact.down")
-                            .font(.system(size: 16, weight: .semibold))
-                            .foregroundStyle(JarvisTheme.cyan)
-                            .frame(width: 46, height: 46)
-                            .background(JarvisTheme.cyan.opacity(0.10), in: .circle)
-                    }
-                    .accessibilityLabel("Done")
-                    .accessibilityHint("Hides the keyboard")
-                    .transition(.scale.combined(with: .opacity))
-                }
-                HStack(alignment: .bottom, spacing: 8) {
-                    TextField("Message JARVIS", text: $model.draft, axis: .vertical)
-                        .lineLimit(1...5)
-                        .textFieldStyle(.plain)
-                        .focused($composerFocused)
-                        .submitLabel(.return)
-                        .onChange(of: model.draft) { model.draftChanged() }
+            HStack(alignment: .bottom, spacing: 0) {
+                TextField("Message JARVIS", text: $model.draft, axis: .vertical)
+                    .lineLimit(1...5)
+                    .textFieldStyle(.plain)
+                    .focused($composerFocused)
+                    .submitLabel(.return)
+                    .onChange(of: model.draft) { model.draftChanged() }
+                    .padding(.leading, 16)
+                    .padding(.vertical, 11)
+                    .frame(minHeight: 44)
 
-                    Button {
-                        voiceInput.toggle(existingText: model.draft) { transcript in
-                            model.draft = transcript
-                            model.draftChanged()
-                        }
-                    } label: {
-                        Image(systemName: voiceInput.isListening ? "mic.fill" : "mic")
-                            .font(.system(size: 17, weight: .semibold))
-                            .foregroundStyle(voiceInput.isListening ? JarvisTheme.amber : JarvisTheme.cyan)
-                            .frame(width: 44, height: 44)
-                            .background((voiceInput.isListening ? JarvisTheme.amber : JarvisTheme.cyan).opacity(0.10), in: .circle)
+                Button {
+                    voiceInput.toggle(existingText: model.draft) { transcript in
+                        model.draft = transcript
+                        model.draftChanged()
                     }
-                    .disabled(model.isAwaitingReply)
-                    .accessibilityLabel(voiceInput.isListening || voiceInput.isStarting ? "Stop dictation" : "Dictate message")
+                } label: {
+                    Image(systemName: voiceInput.isListening ? "mic.fill" : "mic")
+                        .font(.system(size: 17, weight: .semibold))
+                        .foregroundStyle(voiceInput.isListening ? JarvisTheme.amber : JarvisTheme.cyan)
+                        .frame(width: 44, height: 44)
+                        .contentShape(.rect)
                 }
-                .padding(.leading, 14)
-                .padding(.trailing, 7)
-                .padding(.vertical, 7)
-                .background(JarvisTheme.panelGradient, in: .rect(cornerRadius: 22))
-                .overlay(RoundedRectangle(cornerRadius: 22).strokeBorder(
-                    voiceInput.isListening ? JarvisTheme.amber.opacity(0.55) : JarvisTheme.border
-                ))
+                .disabled(model.isAwaitingReply)
+                .accessibilityLabel(voiceInput.isListening || voiceInput.isStarting ? "Stop dictation" : "Dictate message")
 
                 Button {
                     if model.isAwaitingReply {
@@ -475,27 +470,46 @@ struct ChatView: View {
                     }
                 } label: {
                     Image(systemName: model.isAwaitingReply ? "stop.fill" : "arrow.up")
-                        .font(.system(size: 16, weight: .bold))
+                        .font(.system(size: 15, weight: .bold))
                         .foregroundStyle(JarvisTheme.backgroundDeep)
-                        .frame(width: 46, height: 46)
+                        .frame(width: 34, height: 34)
                         .background(model.isAwaitingReply ? JarvisTheme.amber : JarvisTheme.cyan, in: .circle)
-                        .shadow(color: (model.isAwaitingReply ? JarvisTheme.amber : JarvisTheme.cyan).opacity(0.24), radius: 8)
+                        .frame(width: 44, height: 44)
+                        .contentShape(.rect)
                 }
                 .disabled(!model.isAwaitingReply && !model.canSend)
                 .opacity(!model.isAwaitingReply && !model.canSend ? 0.45 : 1)
                 .accessibilityLabel(model.isAwaitingReply ? "Stop generating" : "Send")
+                .sensoryFeedback(.impact(flexibility: .soft), trigger: model.isAwaitingReply)
             }
+            .padding(4)
+            .background(JarvisTheme.panelGradient, in: .rect(cornerRadius: 26))
+            .overlay(RoundedRectangle(cornerRadius: 26).strokeBorder(
+                voiceInput.isListening ? JarvisTheme.amber.opacity(0.55) : JarvisTheme.border
+            ))
         }
-        .padding(.horizontal, 16)
-        .padding(.top, 9)
-        .padding(.bottom, 10)
-        .background(.ultraThinMaterial)
-        .animation(reduceMotion ? nil : .easeOut(duration: 0.18), value: composerFocused)
+        .frame(maxWidth: 760)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .frame(maxWidth: .infinity)
+        .background(.bar)
     }
 
     private func scrollToBottom(_ proxy: ScrollViewProxy) {
         withAnimation(reduceMotion ? nil : .easeOut(duration: 0.2)) {
             proxy.scrollTo(bottomID, anchor: .bottom)
+        }
+    }
+}
+
+private extension View {
+    /// iOS 18+: stay pinned to the newest message when the scroll view resizes
+    /// (keyboard, composer growth). No-op on iOS 17, handled by an explicit scroll.
+    @ViewBuilder func keepsBottomOnResize() -> some View {
+        if #available(iOS 18, *) {
+            defaultScrollAnchor(.bottom, for: .sizeChanges)
+        } else {
+            self
         }
     }
 }

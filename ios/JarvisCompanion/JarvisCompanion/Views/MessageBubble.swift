@@ -112,7 +112,7 @@ struct MessageBubble: View {
     private func footer(isUser: Bool) -> some View {
         HStack(spacing: 4) {
             if !isUser {
-                Text("JARVIS").font(.caption2.monospaced().weight(.semibold)).foregroundStyle(JarvisTheme.cyan)
+                Text("JARVIS").font(.caption2.weight(.semibold)).foregroundStyle(JarvisTheme.cyan)
                 Text("·")
             }
             Text(message.date, style: .time)

@@ -1,16 +1,29 @@
 import SwiftUI
 
-/// Shared cockpit palette. Keep text scalable and reserve amber for activity.
+/// Shared cockpit palette. Every colour is adaptive (dark = the original
+/// cockpit look, light = a tuned daylight variant with AA-contrast accents),
+/// so the app follows the system appearance. Keep text scalable and reserve
+/// amber for activity.
 enum JarvisTheme {
-    static let background = Color(red: 0.025, green: 0.045, blue: 0.075)
-    static let backgroundDeep = Color(red: 0.008, green: 0.018, blue: 0.035)
-    static let panel = Color(red: 0.055, green: 0.085, blue: 0.125)
-    static let panelRaised = Color(red: 0.075, green: 0.12, blue: 0.17)
-    static let cyan = Color(red: 0.25, green: 0.85, blue: 0.95)
-    static let blue = Color(red: 0.25, green: 0.50, blue: 1.0)
-    static let amber = Color(red: 1, green: 0.73, blue: 0.30)
+    private static func adaptive(
+        dark: (Double, Double, Double),
+        light: (Double, Double, Double)
+    ) -> Color {
+        Color(UIColor { traits in
+            let c = traits.userInterfaceStyle == .dark ? dark : light
+            return UIColor(red: c.0, green: c.1, blue: c.2, alpha: 1)
+        })
+    }
+
+    static let background = adaptive(dark: (0.025, 0.045, 0.075), light: (0.95, 0.965, 0.985))
+    static let backgroundDeep = adaptive(dark: (0.008, 0.018, 0.035), light: (0.90, 0.93, 0.96))
+    static let panel = adaptive(dark: (0.055, 0.085, 0.125), light: (1, 1, 1))
+    static let panelRaised = adaptive(dark: (0.075, 0.12, 0.17), light: (0.975, 0.985, 1))
+    static let cyan = adaptive(dark: (0.25, 0.85, 0.95), light: (0.0, 0.43, 0.54))
+    static let blue = adaptive(dark: (0.25, 0.50, 1.0), light: (0.08, 0.33, 0.85))
+    static let amber = adaptive(dark: (1, 0.73, 0.30), light: (0.69, 0.40, 0.0))
     static let border = cyan.opacity(0.18)
-    static let success = Color(red: 0.30, green: 0.88, blue: 0.62)
+    static let success = adaptive(dark: (0.30, 0.88, 0.62), light: (0.0, 0.48, 0.28))
 
     static let panelGradient = LinearGradient(
         colors: [panelRaised.opacity(0.94), panel.opacity(0.88)],
@@ -19,8 +32,8 @@ enum JarvisTheme {
     )
 }
 
-/// A quiet HUD field shared by Chat and the Control Room. It keeps the app
-/// visually related to the desktop cockpit without competing with the text.
+/// A quiet gradient field shared by every screen. It keeps the app related to
+/// the desktop cockpit without competing with the text.
 struct JarvisBackdrop: View {
     var body: some View {
         ZStack {
@@ -35,20 +48,6 @@ struct JarvisBackdrop: View {
                 startRadius: 10,
                 endRadius: 330
             )
-            GeometryReader { geometry in
-                Path { path in
-                    let step: CGFloat = 34
-                    stride(from: 0, through: geometry.size.width, by: step).forEach { x in
-                        path.move(to: CGPoint(x: x, y: 0))
-                        path.addLine(to: CGPoint(x: x, y: geometry.size.height))
-                    }
-                    stride(from: 0, through: geometry.size.height, by: step).forEach { y in
-                        path.move(to: CGPoint(x: 0, y: y))
-                        path.addLine(to: CGPoint(x: geometry.size.width, y: y))
-                    }
-                }
-                .stroke(JarvisTheme.cyan.opacity(0.025), lineWidth: 0.5)
-            }
         }
         .ignoresSafeArea()
         .accessibilityHidden(true)
@@ -86,9 +85,8 @@ struct CockpitHeader: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text(eyebrow.uppercased())
-                .font(.caption2.monospaced().weight(.semibold))
-                .tracking(2)
+            Text(eyebrow)
+                .font(.footnote.weight(.semibold))
                 .foregroundStyle(JarvisTheme.cyan)
             Text(title).font(.largeTitle.weight(.semibold))
             Text(subtitle).font(.subheadline).foregroundStyle(.secondary)
@@ -122,9 +120,10 @@ struct CockpitPanel<Content: View, Trailing: View>: View {
                 Image(systemName: symbol)
                     .foregroundStyle(JarvisTheme.cyan)
                     .frame(width: 22)
-                Text(title.uppercased())
-                    .font(.caption.monospaced().weight(.semibold))
-                    .tracking(1.4)
+                    .accessibilityHidden(true)
+                Text(title)
+                    .font(.subheadline.weight(.semibold))
+                    .accessibilityAddTraits(.isHeader)
                 Spacer()
                 trailing()
             }
@@ -142,7 +141,6 @@ struct CockpitPanel<Content: View, Trailing: View>: View {
                     )
                 )
         }
-        .shadow(color: .black.opacity(0.18), radius: 12, y: 6)
     }
 }
 
@@ -162,15 +160,14 @@ struct StatusPill: View {
 
     var body: some View {
         HStack(spacing: 6) {
-            Circle().fill(color).frame(width: 6, height: 6)
-            Text(text.uppercased())
+            Circle().fill(color).frame(width: 6, height: 6).accessibilityHidden(true)
+            Text(text)
         }
-        .font(.caption2.monospaced().weight(.semibold))
+        .font(.caption.weight(.semibold))
         .foregroundStyle(color)
-        .padding(.horizontal, 9)
+        .padding(.horizontal, 10)
         .padding(.vertical, 5)
-        .background(color.opacity(0.10), in: .capsule)
-        .overlay(Capsule().strokeBorder(color.opacity(0.22)))
+        .background(color.opacity(0.12), in: .capsule)
     }
 }
 

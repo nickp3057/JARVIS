@@ -8,8 +8,9 @@ struct RootView: View {
     @ObservedObject var chat: ChatViewModel
     @ObservedObject var hub: HubViewModel
     @State private var selection = RootTab.home
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-    enum RootTab: Hashable { case home, media, chat, settings }
+    enum RootTab: Hashable, CaseIterable { case home, media, chat, settings }
 
     var body: some View {
         TabView(selection: $selection) {
@@ -30,13 +31,25 @@ struct RootView: View {
                 .tag(RootTab.settings)
         }
         .tint(JarvisTheme.cyan)
-        .preferredColorScheme(.dark)
-        .toolbarBackground(JarvisTheme.background, for: .tabBar)
-        .toolbarBackground(.visible, for: .tabBar)
+        .simultaneousGesture(DragGesture(minimumDistance: 30).onEnded(swipe))
+        .sensoryFeedback(.selection, trigger: selection)
         .onChange(of: settings.studyAlertsEnabled) { Task { await hub.updateNotificationPreferences() } }
         .onChange(of: selection) { _, tab in
             if tab == .chat { chat.refreshConnectionStatus() }
         }
+    }
+
+    /// Horizontal swipe moves to the neighbouring tab. It must be clearly
+    /// horizontal and must not start at the left edge (that's the system back
+    /// gesture inside pushed screens).
+    private func swipe(_ drag: DragGesture.Value) {
+        let dx = drag.translation.width, dy = drag.translation.height
+        guard drag.startLocation.x > 24, abs(dx) > 60, abs(dx) > 2.5 * abs(dy) else { return }
+        let tabs = RootTab.allCases
+        guard let index = tabs.firstIndex(of: selection) else { return }
+        let next = dx < 0 ? index + 1 : index - 1
+        guard tabs.indices.contains(next) else { return }
+        withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.25)) { selection = tabs[next] }
     }
 
     /// Hub "ask" shortcuts drop the prompt into Chat's composer and switch there.
