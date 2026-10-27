@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="login_description">Picks your Plex profile and enters its PIN on the TV.</string>
+</resources>

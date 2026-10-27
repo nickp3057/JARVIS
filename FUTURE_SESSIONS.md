@@ -165,23 +165,34 @@ of each group.
   it. Same JARVIS as the phone: one Core, one look, one voice. Planned in
   its own session; this is the agreed checklist to start from.
 
+  **v1 shipped 2026-10-27** (`tv/`, see JARVIS.md "JARVIS TV"): native
+  launcher (the existing `com.tvhome`, decision 1), TCL G10 / Android 12
+  (decision 4), glance + app row + live alert banners + the no-sound fix.
+  Waiting on Nick: run `tv/provision.sh` at home (the token is a write on the
+  Optiplex). Next: theme choice synced from the phone (today it's
+  `JARVIS_THEME` in Core's `.env`; the phone keeps its own local pick),
+  media (continue watching / recently added), then v2.
+
   **Foundation**
-  - [ ] Boots straight into JARVIS; the remote's Home button always returns
+  - [x] Boots straight into JARVIS; the remote's Home button always returns
     to it. Plex and YouTube open from it and Back comes home.
-  - [ ] Talks only to Core, with its own scoped token
+  - [x] Talks only to Core, with its own scoped token
     (`python -m app.client_tokens create tv events:read status:read`, plus
     any write scopes it truly needs; never `JARVIS_API_TOKEN`), over LAN
     with Tailscale fallback, and reads the live SSE feed
     (`/api/clients/events`) instead of polling.
-  - [ ] Works offline: last-known snapshot with a quiet "Core unreachable"
+  - [x] Works offline: last-known snapshot with a quiet "Core unreachable"
     note, never a blank screen. Plex/YouTube tiles always work.
-  - [ ] Escape hatch: a hidden way back to stock Android settings.
+  - [x] Escape hatch: a hidden way back to stock Android settings (the
+    Settings tile; `tv/restore.sh` brings back the stock launcher).
   - [ ] Updates itself from Core (or a one-command sideload) so it never
     needs a cable or the Play Store.
 
   **One JARVIS (cohesion with the phone)**
   - [ ] Same themes (Arc / Mark III / Hot Rod), same reactor mark, same
     fonts and wording; the theme choice lives on Core so phone and TV match.
+    (Palettes and reactor done; the choice is `JARVIS_THEME` on Core and the
+    phone doesn't write it yet.)
   - [ ] Same persona: greetings, alerts and briefings in JARVIS's voice
     (ElevenLabs through Core), same phrasing as the phone.
   - [ ] Same data, same rules: to-dos, assessments (next 14 days),
@@ -189,13 +200,17 @@ of each group.
     so checking something off anywhere clears it everywhere.
 
   **Home screen (glance from the couch)**
-  - [ ] Big clock, date, greeting, weather.
+  - [x] Big clock, date, greeting, weather.
   - [ ] Today: work shift, next assessment(s), birthdays, calendar events.
+    (Next event, assessments within 14 days, timers and maintenance done;
+    work shift and birthdays wait on decision 2.)
   - [ ] Money: portfolio today and yesterday, idle cash (needs Schwab).
-  - [ ] To-dos count and list; "things need you" alerts.
+  - [x] To-dos count and list; "things need you" alerts (plus live banners
+    over any app from the SSE stream).
   - [ ] Media: Plex continue-watching / recently added, downloads in
-    progress (from Core's media status).
+    progress (from Core's media status). (Downloads done, in Needs you.)
   - [ ] App row: Plex, YouTube, Music, House, Settings. Nothing else.
+    (Plex, YouTube, HDMI inputs, Settings today; Music and House are v2/v3.)
 
   **Mornings**
   - [ ] Wake-up: the TV turns on (HDMI-CEC / wake-on-LAN via HA), music
@@ -207,7 +222,7 @@ of each group.
   - [ ] Remote's play/pause works anywhere in the launcher.
 
   **Remote and voice**
-  - [ ] Everything reachable with the D-pad; clear focus highlight; Back
+  - [x] Everything reachable with the D-pad; clear focus highlight; Back
     always steps out; no dead ends.
   - [ ] Remote mic (if the TCL remote has one) talks to JARVIS like Chat.
 

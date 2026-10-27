@@ -72,6 +72,7 @@ _COMPANION_CAPABILITIES: dict[str, object] = {
         "service_links": True,
         "maintenance": True,
         "todos": True,
+        "glance": True,
     },
     "actions": {
         "home_on_off": True,
@@ -318,6 +319,13 @@ def status_torrents(_: None = _status_read) -> dict[str, object]:
 @app.get("/api/now")
 def now_status(_: None = _status_read) -> dict[str, object]:
     return status_hub.now_status()
+
+
+@app.get("/api/glance")
+def glance_status(_: None = _status_read) -> dict[str, object]:
+    """Ambient-screen snapshot (the TV launcher): greeting, theme, weather,
+    Now feed, downloads and the last day's alerts in one call."""
+    return status_hub.glance_status()
 
 
 @app.get("/api/study/brief")

@@ -66,6 +66,8 @@ _STORAGE_TTL_S = 30.0
 # dumps (no server-side sort/limit exists), which can be megabytes on a big
 # library. Additions are rare, so they refresh far less often than the queue.
 _RECENT_TTL_S = 120.0
+_WEATHER_TTL_S = 600.0
+_THEMES = ("arc", "markIII", "hotRod")
 
 # Strip an API path suffix if one leaked into a base URL (e.g. ".../api/v2").
 _API_SUFFIX_RE = re.compile(r"/api(/v\d+)?/?$", re.IGNORECASE)
@@ -187,6 +189,55 @@ def _now_uncached() -> dict[str, Any]:
         "maintenance": maintenance_due,
     }
 
+
+
+# --- Glance (ambient screens: the TV launcher) -----------------------------
+
+def weather_status() -> dict[str, Any]:
+    """Current weather for ambient clients; Open-Meteo is asked every 10 min."""
+    return _cached("weather", _WEATHER_TTL_S, _weather_uncached)
+
+
+def _weather_uncached() -> dict[str, Any]:
+    from dataclasses import asdict
+    from brain.weather import get_weather_snapshot
+    return asdict(get_weather_snapshot())
+
+
+def glance_status() -> dict[str, Any]:
+    """One snapshot for a screen across the room: who to greet and how to look,
+    weather, the Now feed, downloads in flight and alerts from the last day.
+    Every section degrades on its own; the call itself never fails."""
+    from brain import event_bus
+    theme = os.getenv("JARVIS_THEME", "arc").strip()
+    with ThreadPoolExecutor(max_workers=3) as pool:
+        now = pool.submit(now_status)
+        weather = pool.submit(weather_status)
+        torrents = pool.submit(torrents_status)
+        sections = {}
+        for key, future in (("now", now), ("weather", weather), ("torrents", torrents)):
+            try:
+                sections[key] = future.result()
+            except Exception as exc:  # noqa: BLE001 - glance must still render
+                log.warning("Glance section %s unavailable: %s", key, exc)
+                sections[key] = {"error": str(exc)}
+    downloads = [
+        {"name": t["name"], "progress": t["progress"], "eta": t["eta"]}
+        for t in sections["torrents"].get("torrents", [])
+        if t.get("progress", 1) < 1
+        and not str(t.get("state", "")).startswith(("paused", "stopped", "error", "missing"))
+    ]
+    cutoff = time.time() - 24 * 3600
+    alerts = [a.to_dict() for a in reversed(event_bus.since(0, limit=200)) if a.created_at >= cutoff]
+    return {
+        "generated_at": time.time(),
+        "address": (os.getenv("ADDRESS") or "sir").strip() or "sir",
+        "theme": theme if theme in _THEMES else "arc",
+        "weather": sections["weather"],
+        "now": sections["now"],
+        "downloads": downloads[:5],
+        "alerts": alerts[:5],
+    }
 
 _CALENDAR_TTL_S = 300.0
 _CALENDAR_PARTIAL_TTL_S = 30.0

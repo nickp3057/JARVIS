@@ -111,6 +111,26 @@ class ClientTokenTests(unittest.TestCase):
         events_only = {"Authorization": "Bearer " + client_tokens.create("tv2", ["events:read"])}
         self.assertEqual(self.client.get("/api/alerts/recent", headers=events_only).status_code, 403)
 
+    def test_glance_for_tv_degrades_per_section(self) -> None:
+        event_bus.publish("x", "Disk filling", "m", source="s")
+        torrents = {"torrents": [
+            {"name": "Dune", "progress": 0.4, "eta": 60, "state": "downloading"},
+            {"name": "Paused", "progress": 0.1, "eta": -1, "state": "pausedDL"},
+            {"name": "Done", "progress": 1.0, "eta": 0, "state": "uploading"},
+        ]}
+        tv = {"Authorization": "Bearer " + client_tokens.create("tv", ["status:read"])}
+        with patch.dict(os.environ, {"JARVIS_THEME": "hotRod", "ADDRESS": "sir"}), \
+             patch.object(server.status_hub, "now_status", return_value={"reminders": []}), \
+             patch.object(server.status_hub, "weather_status", side_effect=RuntimeError("offline")), \
+             patch.object(server.status_hub, "torrents_status", return_value=torrents):
+            body = self.client.get("/api/glance", headers=tv).json()
+        self.assertEqual((body["theme"], body["address"]), ("hotRod", "sir"))
+        self.assertEqual(body["weather"], {"error": "offline"})
+        self.assertEqual([d["name"] for d in body["downloads"]], ["Dune"])
+        self.assertEqual([a["title"] for a in body["alerts"]], ["Disk filling"])
+        events_only = {"Authorization": "Bearer " + client_tokens.create("tv2", ["events:read"])}
+        self.assertEqual(self.client.get("/api/glance", headers=events_only).status_code, 403)
+
     def test_event_stream_replays_then_streams_live(self) -> None:
         # Drive the endpoint's generator directly with timeouts: TestClient
         # can block forever on a never-ending stream (seen on Python 3.11).

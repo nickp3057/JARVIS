@@ -22,3 +22,5 @@ memory/push_devices.json
 memory/arr_stack_alerts.json
 memory/model_cache.json
 memory/client_tokens.json
+tv/launcher/out/
+tv/launcher/src/com/tvhome/Config.java

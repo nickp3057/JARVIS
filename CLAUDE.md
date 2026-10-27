@@ -43,6 +43,9 @@ python -m app.main --server   # authenticated HTTP API for the iOS companion
 
 # One-time: create a Desktop shortcut for the GUI
 python create_shortcut.py
+
+# JARVIS TV (Android launcher for the TCL TV; see JARVIS.md "JARVIS TV")
+TV=10.0.0.46:5555 tv/launcher/deploy.sh
 ```
 
 Server API tests use the standard-library runner: `.venv/bin/python -m unittest tests.test_server -v`. There is no linter, formatter, or CI configured. Verify desktop changes by running `python -m app.main --text` and exercising the relevant tool/command manually, or `--voice`/GUI mode when the change touches speech or UI. Type-check iOS sources with the device SDK when a matching Simulator runtime is unavailable.
@@ -67,5 +70,7 @@ controlled by `JARVIS_SERVER_HOST` and `JARVIS_SERVER_PORT`. Non-companion clien
 **Memory has three layers, don't conflate them**: `brain/history.py` (SQLite, short-term conversation transcript, session-scoped) vs. `brain/memory.py` (JSON `memory/profile.json`, durable cross-session facts via `remember_fact`/`forget_fact`, injected each turn by `render_memory_block()` into the `<turn_context>` block on the newest user message, not the system prompt, so history stays cacheable, capped at `MEMORY_MAX_FACTS`) vs. `brain/habits.py` (derived usage patterns, never written by the model). `brain/memory_extractor.py` is the background worker that fills the second layer automatically after every turn. It and `brain/study_brief.py` (composes the daily quiz countdown text) are the only places that should call the model outside a conversation turn. Notes Nick dictates go to the Obsidian vault via `capture_note`, not to profile facts. Behavioural directives ("stop doing X") are a separate store, `brain/standing_orders.py`, injected as orders every turn; numeric/on-off knobs go through `brain/settings.py`.
 
 **Background monitors** run on the runtime and feed a proactive event inbox (Home Assistant state polling, weather refresh, calendar alerts) — see `ARCHITECTURE.md`'s "Runtime Monitor Settings" for the relevant `.env` toggles. New sensors/proactive behavior should be added as a monitor here, not polled from the UI. Monitors raise alerts with `runtime.raise_alert` (→ `brain/event_bus.py`), never by calling `brain/notifications.py` directly; the phone (APNs, HA fallback) and `GET /api/clients/events` SSE streams are bus subscribers.
+
+**JARVIS TV** (`tv/`) is a thin client like the phone: it reads Core's `/api/glance` and `/api/clients/events` with its own scoped token and never holds `JARVIS_API_TOKEN`. When you change TV behaviour, bump `versionCode`/`versionName` in `tv/launcher/AndroidManifest.xml`.
 
 **Personality is centralized**: `brain/personality.py` builds the system prompt (tone, address form, humor level, tool descriptions) from `.env` settings — this is the one place that defines how JARVIS "sounds," so persona changes belong there, not scattered across tool reply strings.

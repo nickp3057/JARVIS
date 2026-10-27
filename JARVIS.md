@@ -115,6 +115,14 @@ Pearson-Stark-Jarvis/
 │   ├── memory_proposals.json Low-confidence facts awaiting approval
 │   └── obsidian/            Default vault: Jarvis Memory/{Profile.md,Journal/,Notes/}
 │
+├── tv/                    JARVIS TV: the TCL Google TV's home screen (see "JARVIS TV")
+│   ├── launcher/            Hand-built Android app com.tvhome (no Gradle): build.sh, deploy.sh
+│   │   └── src/com/tvhome/  HomeActivity (glance + app row), Jarvis (Core client), AlertStream
+│   │                        + Banner (live alerts over any app), NightlyRefresh (no-sound fix),
+│   │                        RemoteBridgeService (voice -> Plex, boot cleanup), SelfAdb
+│   ├── provision.sh         Creates the TV's scoped token on the Optiplex and hands it to the TV
+│   └── restore.sh           Undo: stock Google TV launcher and the removed TCL apps
+│
 ├── ios/
 │   └── JarvisCompanion/     Xcode project for the iOS companion app
 │
@@ -539,6 +547,7 @@ LINK_REMOTE_HOSTS=          # lan=tailscale host pairs; /api/links adds remote_u
 PLEX_TOKEN=                 # X-Plex-Token; enables the media doctor's "is it on Plex" stage and Plex rescan fix
 MEDIA_DOCTOR_STALL_MINUTES=30  # no torrent progress for this long counts as stalled (doctor + download monitor)
 HOME_DASHBOARD_ENTITIES=    # comma-separated HA entity_ids for /api/home/entities
+JARVIS_THEME=arc            # arc | markIII | hotRod: the TV's look, served in /api/glance
 MEDIA_STORAGE_PATH=         # local mount of the video library; leave blank to
                             # measure the NAS volume via Radarr/Sonarr diskspace
 MEDIA_STORAGE_LABEL=Media storage # friendly Hub label; no key required
@@ -603,6 +612,27 @@ CALENDAR_ALERT_LEAD_MIN=10  # warn this many minutes before a meeting
 ---
 
 ## Recently Shipped
+
+- **JARVIS TV: JARVIS is the TV's home screen (iOS 1.94 / build 96)** — The
+  TCL TV's custom launcher (`com.tvhome`, previously outside the repo in
+  `~/tcl-tv-cleanup`) now lives in `tv/` and is JARVIS: reactor mark,
+  "Good evening, sir.", weather, clock, then three glance panels (Today:
+  timers, next event, assessments within 14 days, maintenance due; To-dos;
+  Needs you: the last day's warning/critical alerts and downloads in flight)
+  over the app row (Plex, YouTube, HDMI inputs, Settings as the escape hatch).
+  It boots straight into JARVIS now instead of jumping to Plex. Data comes
+  from one new scoped endpoint, `GET /api/glance` (`status:read`), built from
+  the same `status_hub` sections the phone uses plus weather (10-minute
+  cache), `ADDRESS` and the theme (`JARVIS_THEME`, same palettes as the
+  phone's `JarvisTheme.swift`). The TV follows `/api/clients/events` and
+  shows fresh warnings/criticals as a non-focusable banner over any app,
+  Plex included. It keeps the last snapshot for offline ("CORE UNREACHABLE ·
+  LAST SEEN ...") and rescans its /24 when the Optiplex's DHCP address moves.
+  Also fixes **no sound after the TV sat unused**: "off" on this TV is TCL's
+  suspend-to-RAM (`tcl_sys_pms_str_enabled=1`; TCL's quirk table lists
+  NO_SOUND_AFTER_STR_RESUME), so `NightlyRefresh` reboots it at 4am with
+  `svc power reboot quiescent` only when the screen is off; quiescent boots
+  stay dark (verified on the TV). See "JARVIS TV" below.
 
 - **Home tiles, Hot Rod theme, switch fix (1.91 / build 93)** — Tab order is
   Media, Hub, Home, Chat, Settings (Home in the middle, still the default).
@@ -1216,6 +1246,38 @@ python create_shortcut.py
 ```
 
 ---
+
+## JARVIS TV
+
+The TCL Google TV in Nick's room ("Nick's Room TV", G10, Android 12,
+1920x1080 UI at density 320) runs `tv/launcher` as its HOME app. adb over
+Wi-Fi on port 5555, Mac key authorized; its DHCP address drifts (10.0.0.44
+until 2026-10, 10.0.0.46 since), so scripts take `TV=host:5555`. Find it
+with a port-5555 scan of 10.0.0.0/24 if it moves; a router DHCP reservation
+for the TV and the Optiplex would end the drift.
+
+```bash
+TV=10.0.0.46:5555 tv/launcher/deploy.sh   # build, install, re-apply TCL permissions, start
+TV=10.0.0.46:5555 tv/provision.sh         # Nick, at home: scoped token + Core URL to the TV
+```
+
+- Build needs Android build-tools 34 / platform 31 under
+  `/opt/homebrew/share/android-commandlinetools` and javac. Signing key and
+  Plex token/PIN stay outside git in `~/tcl-tv-cleanup` (`TV_SECRETS`); the
+  installed app only upgrades with that same key. d8 34 can't read the
+  constructors javac 24 writes for inner (non-static) classes, so nested
+  classes in the launcher are static.
+- The token is `nicks-room-tv` with `events:read status:read` only; it can't
+  chat or control anything. Until provisioned, the footer reads "NOT LINKED
+  TO CORE".
+- TCL quirks: reinstalling resets `appops APP_AUTO_START` (deploy.sh re-applies
+  it); the firmware restores some removed apps every boot (BootCleanup removes
+  them again through self-adb). The launcher's own adb key is approved on the
+  TV; self-adb is what runs the nightly reboot.
+- Sound fix test hooks (DUMP-guarded, adb only):
+  `adb shell am broadcast -n com.tvhome/.NightlyRefresh --el in_ms 120000 [--ez dry_run true]`
+  arms a one-off refresh (skips the 12 h uptime gate). Outcomes log under
+  `TvHomeRefresh` (the TV's log buffer only holds minutes).
 
 ## Nick's Preferences & Context
 
