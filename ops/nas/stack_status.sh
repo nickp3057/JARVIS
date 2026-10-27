@@ -7,7 +7,7 @@ import json
 from pathlib import Path
 import time
 wd = Path('/volume1/docker/watchdog')
-out = {'observed_at': int(time.time()), 'recovery': None, 'watchdog_actions': {}, 'log_tail': {}, 'errors': []}
+out = {'observed_at': int(time.time()), 'recovery': None, 'watchdog_actions': {}, 'log_tail': {}, 'host_health': None, 'errors': []}
 try:
     out['recovery'] = json.loads((wd / 'recovery-status.json').read_text()[:8192])
 except FileNotFoundError:
@@ -21,6 +21,15 @@ for name in ('.last_action', '.rotate_cooldown'):
         out['watchdog_actions'][name] = 0
     except (OSError, ValueError):
         out['errors'].append(name + ' unavailable')
+# Written every 5 min by root cron (host_health.py): containers, RAID, SMART,
+# volumes, temperatures, updater. Absent until that installer has run.
+try:
+    out['host_health'] = json.loads((wd / 'host-health.json').read_text()[:262144])
+except FileNotFoundError:
+    out['host_health'] = None
+except (OSError, ValueError):
+    out['host_health'] = None
+    out['errors'].append('Host health unavailable')
 for name in ('watchdog.log', 'indexer_watchdog.log'):
     try:
         with (wd / name).open('rb') as f:

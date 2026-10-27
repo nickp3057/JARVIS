@@ -347,6 +347,19 @@ and `/api/now` endpoints. Everything else stays admin-only
 - `DEVICE_WATCH_INTERVAL_S`: poll interval, default 60.
 - `ARR_STACK_INDEXER_ALERT_AFTER_S`: one indexer must be down this long before
   it pushes, default 1200 (20 minutes).
+- NAS host monitor (`integrations/nas_host.py`, runtime `_nas_host_monitor_loop`):
+  reads the `host_health` block the read-only status key returns (written by
+  root cron `ops/nas/host_health.py`, every 5 min; SMART every 30 min with
+  `-n standby` so sleeping disks stay asleep). Alerts as `nas_host` on a
+  degraded RAID, failed SMART, bad sectors, new kernel disk errors, a restart
+  loop (first sight), or after `NAS_HOST_CONFIRM_CHECKS` polls a stopped or
+  unhealthy container, a full volume, hot disk/CPU, or a stale snapshot.
+  Two clean polls give one quiet "recovered". An unreachable NAS is left to
+  the arr monitor. Settings: `NAS_HOST_MONITOR_ENABLED` (true; also needs the
+  status key), `NAS_HOST_MONITOR_INTERVAL_S` (300), `NAS_HOST_CONFIRM_CHECKS`
+  (2), `NAS_HOST_IGNORE_CONTAINERS` (the gluetun-namespace arr containers),
+  `NAS_VOLUME_ALERT_PCT` (90), `NAS_DISK_TEMP_ALERT_C` (55),
+  `NAS_CPU_TEMP_ALERT_C` (85), `NAS_CONTAINER_RESTARTS_ALERT` (3 per hour).
 
 ## Memory Learning Settings
 - `MEMORY_AUTO_EXTRACT`: true/false, defaults to true. Background post-turn

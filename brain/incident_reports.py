@@ -24,7 +24,7 @@ from typing import Any, Callable
 import requests
 
 from brain import debug_reports, event_bus, self_repair
-from integrations import home_assistant, media_doctor, nas_stack, qbittorrent
+from integrations import home_assistant, media_doctor, nas_host, nas_stack, qbittorrent
 from integrations import servarr_common as servarr
 from jarvis_logger import get_logger
 
@@ -35,9 +35,9 @@ _DEADLINE_S = 25.0
 _LOG_LINES = 8
 _RELATED_WINDOW_S = 2 * 3600
 _API_KEYS = ('qbittorrent-api', 'radarr-api', 'sonarr-api', 'prowlarr-api')
-# Known gaps until the NAS writes host-health.json (see FUTURE_SESSIONS.md).
-_GAPS = ('Container state, restart counts, image updates and disk/SMART health are not visible to '
-         'JARVIS yet (needs the NAS host-health.json).')
+# Shown when the NAS has no host-health.json yet (ops/nas/install-host-health.sh).
+_GAPS = ('Container state, restart counts, image updates and disk/SMART health are not visible: '
+         'the NAS host-health snapshot is not installed or not readable.')
 
 
 def find_alert(alert_id: int, created_at: float | None = None) -> event_bus.Alert | None:
@@ -157,7 +157,7 @@ def _gather(deadline: float) -> dict[str, Any]:
 # --- analysis ---------------------------------------------------------------
 
 def suspected_causes(health: dict | None, status: tuple[bool, Any] | None, watchdog_tail: list[str],
-                     now: float | None = None) -> list[str]:
+                     now: float | None = None, alert_at: float | None = None) -> list[str]:
     """Ranked, plain-English guesses from fixed rules. Never empty."""
     now = time.time() if now is None else now
     issues = (health or {}).get('issues') or {}
@@ -206,6 +206,9 @@ def suspected_causes(health: dict | None, status: tuple[bool, Any] | None, watch
     for service in ('radarr', 'sonarr'):
         if service + '-health' in issues:
             causes.append(issues[service + '-health'])
+    host = nas_host.from_status(status)
+    if host:
+        causes += nas_host.causes(host[0], host[1], now if alert_at is None else alert_at)
     if not causes:
         causes.append('Nothing is failing right now; the condition behind this alert seems to have cleared.')
     return causes
@@ -247,7 +250,8 @@ def _recent_changes(alert: event_bus.Alert, status: tuple[bool, Any] | None, now
                if a.id != alert.id and abs(a.created_at - alert.created_at) <= _RELATED_WINDOW_S
                and (a.kind == alert.kind or a.source == alert.source)]
     lines += [f'Related alert {_clock(a.created_at)} [{a.severity}] {a.title}: {a.message[:200]}' for a in related[-6:]]
-    lines.append(_GAPS)
+    if nas_host.from_status(status) is None:
+        lines.append(_GAPS)
     return lines
 
 
@@ -266,7 +270,8 @@ def build(alert: event_bus.Alert, *, session_id: str | None = None) -> dict[str,
         None if evidence['status'] is None else (False, str(evidence['status'])))
     tails = (status[1].get('log_tail') or {}) if status and status[0] and isinstance(status[1], dict) else {}
     watchdog_tail = [str(x) for x in tails.get('watchdog.log', [])] + [str(x) for x in tails.get('indexer_watchdog.log', [])]
-    causes = suspected_causes(health, status, watchdog_tail, now)
+    causes = suspected_causes(health, status, watchdog_tail, now, alert.created_at)
+    host = nas_host.from_status(status)
 
     if health is None:
         health_lines = [f"health poll unavailable ({evidence['health']})"]
@@ -279,6 +284,8 @@ def build(alert: event_bus.Alert, *, session_id: str | None = None) -> dict[str,
         {'title': 'Suspected cause (rule-based, verify before acting)', 'lines': causes},
         {'title': 'Live health now', 'lines': health_lines},
         {'title': 'Media pipeline', 'lines': _lines(evidence['media'])},
+        {'title': 'NAS host (containers, disks, RAID, volumes)',
+         'lines': nas_host.describe(*host) if host else ['not available']},
         {'title': 'Recent changes', 'lines': _recent_changes(alert, status, now)},
         {'title': 'NAS watchdog log (tail)', 'lines': watchdog_tail[-12:] or ['not available']},
         {'title': 'App warnings and errors', 'lines': app_logs or ['No recent warnings or errors in the app logs.']},

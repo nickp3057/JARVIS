@@ -102,6 +102,41 @@ Tradeoff: one extra key to manage, but no HTTP listener and no chance that a
 status poll invokes the recovery capability. OpenSSH forced-command options
 are documented at <https://man.openbsd.org/sshd.8#AUTHORIZED_KEYS_FILE_FORMAT>.
 
+## Host health snapshot (2026-10-27)
+
+`host_health.py` runs from root cron every 5 minutes and writes
+`/volume1/docker/watchdog/host-health.json` (mode 644): `docker ps -a` +
+`docker inspect` for every container (state, health, restart count/policy,
+start time, OOM), `/proc/mdstat`, `smartctl -j -n standby -H -A -i` per disk
+(every 30 min; a sleeping disk is skipped, never woken), volume usage, the
+thermal zones, the last `hwmon.log` fan line, disk-error lines from the tail
+of `kern.log`, and `updater_status.txt`. It changes nothing on the host.
+`stack_status.sh` adds the file to its JSON as `host_health`, so the
+read-only status key gains output, not privilege (no new key, sudo rule,
+Docker access or account change).
+
+Install (on the NAS, as an admin):
+
+```bash
+# from the Mac
+ssh nas 'mkdir -p ~/jarvis-ops' && scp -O ops/nas/host_health.py ops/nas/stack_status.sh ops/nas/install-host-health.sh nas:jarvis-ops/
+# on the NAS
+cd ~/jarvis-ops && sudo bash install-host-health.sh --preview   # diffs + the cron line, read-only
+sudo bash install-host-health.sh --apply
+```
+
+`--apply` fails closed unless the live `stack_status.sh` is a reviewed
+version, takes `stack.lock`, backs up both scripts and the root crontab to
+`watchdog/backups/<stamp>-host-health/`, installs root-owned 755 copies, adds
+the cron line once, runs the collector, prints a one-line summary, and warns
+if `Jarvis` cannot read the result. Rollback: copy the backed-up
+`stack_status.sh` back, `sudo crontab <backup>/root.cron`, and remove
+`host_health.py` and `host-health.json`.
+
+Note on `ls -l` showing `rwxrwxrwx+` under `/volume1/docker`: those mode bits
+are not the real rule. UGOS's `ugacl` ACLs (see "Share ACL" below) override
+them; check with `ugacltool get <path>`.
+
 ## Shell reset (UGOS reverts Jarvis to nologin)
 
 Symptom: every restricted SSH call fails with exit 1 and

@@ -83,6 +83,7 @@ Pearson-Stark-Jarvis/
 │   │                        resolver + NL quality-phrase fuzzy matching
 │   ├── radarr.py            find_movie (lookup) / add_movie (confirm-gated)
 │   ├── sonarr.py            find_series (lookup) / add_series (confirm-gated)
+│   ├── nas_host.py          NAS host-health snapshot (containers, RAID, SMART, volumes, temps): debounced alerts + incident-report lines
 │   ├── media_doctor.py      Traces one title request→arr→indexer→qBit→import→Plex; names the stalled stage; fixes via confirm_gate
 │   ├── plex.py              Minimal Plex client (title search + library rescan) for the media doctor
 │   └── spotify.py           Spotipy wrapper: play/pause/skip/volume/transfer/now-playing
@@ -580,6 +581,19 @@ CALENDAR_ALERT_LEAD_MIN=10  # warn this many minutes before a meeting
 ---
 
 ## Recently Shipped
+
+- **NAS host health (1.81 / build 83)** — Root cron on the NAS
+  (`ops/nas/host_health.py`, installed by `ops/nas/install-host-health.sh`)
+  writes `host-health.json` every 5 minutes: every container's state, health,
+  restart count and start time; `/proc/mdstat`; SMART health, temperature and
+  sector counts (every 30 min, never waking a sleeping disk); volume usage;
+  CPU temperature; fan readings; recent kernel disk errors; the image
+  updater's last run. `stack_status.sh` returns it, so the read-only status
+  key gains output, not privilege. JARVIS's new NAS host monitor
+  (`integrations/nas_host.py`) raises debounced `nas_host` alerts, and
+  incident reports gain a "NAS host" section plus suspects such as "the
+  updater applied a new gluetun image 13 h before this alert". See
+  ARCHITECTURE.md "Runtime Monitor Settings" for the `NAS_HOST_*` settings.
 
 - **Tap-to-chat incident reports (1.80 / build 82)** — Tapping a row in the
   companion's "Needs attention" card calls `POST /api/alerts/{id}/report`.

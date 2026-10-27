@@ -133,6 +133,7 @@ class JarvisRuntime:
         self._download_monitor_started = False
         self._download_monitor_failed = False
         self._device_watch_started = False
+        self._nas_host_started = False
         # The phone is one subscriber of the alert bus (companion push, HA
         # fallback); client event streams subscribe in app/server.py.
         event_bus.subscribe("phone", self._deliver_alert_to_phone)
@@ -230,6 +231,10 @@ class JarvisRuntime:
         if nas_stack.enabled("ARR_STACK_MONITOR_ENABLED") and self._arr_monitor_thread is None:
             self._arr_monitor_thread = threading.Thread(target=self._arr_stack_monitor_loop, daemon=True)
             self._arr_monitor_thread.start()
+        from integrations import nas_host
+        if nas_host.monitor_enabled() and not self._nas_host_started:
+            self._nas_host_started = True
+            threading.Thread(target=self._nas_host_monitor_loop, daemon=True).start()
         if os.getenv("JARVIS_HEALTHCHECKS_URL", "").strip() and not self._deadman_started:
             self._deadman_started = True
             threading.Thread(target=self._deadman_loop, daemon=True).start()
@@ -361,6 +366,28 @@ class JarvisRuntime:
                             self.raise_alert("device_online", f"{name} back online", f"{name} is reachable again.",
                                              source="home", severity="info", push=False)
             if self._stop_monitors.wait(float(os.getenv("DEVICE_WATCH_INTERVAL_S", "60"))):
+                break
+
+    def _nas_host_monitor_loop(self) -> None:
+        """Containers, RAID, SMART, volumes and temperatures from the NAS's
+        host-health snapshot, read through the read-only status key.
+
+        Debounce and recovery live in ``integrations.nas_host.HostWatch``. An
+        unreachable NAS is not judged here; the arr monitor reports that.
+        """
+        from integrations import nas_host, nas_stack
+        watch = nas_host.HostWatch()
+        while not self._stop_monitors.is_set():
+            try:
+                alerts = watch.step(nas_stack.watchdog_status())
+            except Exception:  # noqa: BLE001 - a bad snapshot must not kill the monitor
+                log.exception("NAS host monitor poll failed")
+                alerts = []
+            if not self._in_startup_grace():
+                for alert in alerts:
+                    self.raise_alert("nas_host", alert.title, alert.message, source="nas-host",
+                                     severity=alert.severity, push=alert.push)
+            if self._stop_monitors.wait(nas_stack.seconds("NAS_HOST_MONITOR_INTERVAL_S", 300, 60)):
                 break
 
     def _deadman_loop(self) -> None:

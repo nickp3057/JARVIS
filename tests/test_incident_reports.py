@@ -105,6 +105,22 @@ class BuildTests(unittest.TestCase):
         self.assertEqual(stored['messages'], [])
         self.assertEqual(stored['app_context']['alert_id'], str(alert.id))
 
+    def test_host_health_replaces_the_gap_note(self):
+        alert = event_bus.publish('arr_stack', 'Jarvis — arr stack', 'qBittorrent unreachable', source='arr-stack')
+        now = time.time()
+        evidence = self._evidence(now)
+        evidence['status'][1]['host_health'] = {
+            'generated_at': now - 60, 'errors': [],
+            'containers': [{'name': 'gluetun', 'state': 'running', 'health': 'unhealthy', 'restart_count': 4}],
+            'updater': {'last_run': 'today 05:00', 'mtime': now - 3 * 3600, 'applied': ['gluetun']},
+        }
+        with patch.object(incident_reports, '_gather', return_value=evidence):
+            result = incident_reports.build(alert)
+        text = debug_reports.describe_debug_report(result['report_id'])
+        self.assertIn('Container gluetun: running, unhealthy', text)
+        self.assertNotIn('not visible', text)
+        self.assertTrue(any('applied new versions of gluetun' in c for c in result['suspected_causes']))
+
     def test_gather_survives_a_failing_source(self):
         with patch.object(incident_reports.nas_stack, 'poll_health', side_effect=RuntimeError('boom')), \
              patch.object(incident_reports.nas_stack, 'status_configured', return_value=False), \

@@ -77,6 +77,12 @@ Tiers:
    existing three are self-repair ids, `confirm_gate` codes and the arr
    restart token, and stack fixes should converge on self-repair.
 
+Phase 2 (built 2026-10-27, 1.81 / build 83; not yet installed on the NAS):
+`ops/nas/host_health.py` + `install-host-health.sh`, `stack_status.sh`
+includes `host_health`, `integrations/nas_host.py` monitor and incident
+sections. Next: Tier 2 safe fixes as self-repair action kinds, then the app
+Approve button.
+
 Phase 1 (shipped, 1.80 / build 82): `brain/incident_reports.py`,
 `POST /api/alerts/{id}/report`, tappable Needs attention rows. Next small
 steps: put the bus alert id in the APNs payload so tapping the push opens
@@ -93,10 +99,10 @@ Survey findings (2026-10-27, read-only):
   configs live on volume1, a 2 TB Seagate ST2000DM001.
 - `hwmon.log` warns every 10 min (`f1=660,f2=-1`); probably a missing
   second-fan sensor.
-- **Security:** `watchdog/dht_watchdog.sh`, `stack_status.sh` and
-  `qbit_creds.env` are mode `rwxrwxrwx+` (the others are 755). Root cron runs
-  `dht_watchdog.sh`; `stack_status.sh` is the Jarvis forced command. Check
-  the ACL (`sudo getfacl`) and restore root-only write.
+- `watchdog/dht_watchdog.sh`, `stack_status.sh` and `qbit_creds.env` show
+  mode `rwxrwxrwx+`, but on `/volume1` UGOS's `ugacl` overrides mode bits
+  (admin-group allow, Jarvis read-only; see `ops/nas/README.md` "Share ACL"),
+  so this is not a write hole for non-admins. Retracted as a security issue.
 - Optiplex logs Google Calendar `invalid_grant` every 2 min: re-auth with
   `python -m integrations.google_calendar --auth`.
 
