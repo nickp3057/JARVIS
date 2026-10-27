@@ -1290,8 +1290,12 @@ TV=10.0.0.46:5555 tv/provision.sh         # Nick, at home: scoped token + Core U
 - `--ez clear true` to `.ProvisionReceiver` unlinks the TV from Core.
 - Verified 2026-10-27 against a mock Core on the Mac: glance renders, the
   SSE banner shows over Plex without stealing focus, offline footer reads
-  "CORE UNREACHABLE · LAST SEEN ...". Not yet verified against the real Core
-  (needs `tv/provision.sh` and the Optiplex pulling `/api/glance`).
+  "CORE UNREACHABLE · LAST SEEN ...". Provisioned against the real Core the
+  same evening (token `nicks-room-tv`): live calendar, assessments, weather,
+  alerts and downloads render. The TV replays the stream from 0 on every
+  connect and dedupes in memory, because bus ids restart with Core.
+- Run `tv/provision.sh` from a normal shell; in zsh a leading `! ` negates
+  the command, so `! cd … && tv/provision.sh` silently skips the script.
 
 ## Nick's Preferences & Context
 

@@ -15,12 +15,15 @@ import java.nio.charset.StandardCharsets;
  * Follows Core's live alert stream (GET /api/clients/events, server-sent
  * events): every alert refreshes the home screen, and fresh warnings and
  * criticals show as a banner over whatever is on screen, Plex included.
- * Reconnects with Last-Event-ID so nothing is missed; alerts replayed from
- * history (older than two minutes) are not bannered again.
+ * Each connection replays Core's recent history (ids restart at 1 whenever
+ * Core restarts, so a remembered id can't be trusted); only alerts under two
+ * minutes old count, and each one only once.
  */
 final class AlertStream {
     private static final String TAG = "TvHomeAlerts";
     private static final long FRESH_MS = 2 * 60 * 1000;
+    /** "id@created_at" of fresh alerts already handled, across reconnects. */
+    private static final java.util.Set<String> SEEN = new java.util.HashSet<>();
 
     private AlertStream() {}
 
@@ -56,15 +59,14 @@ final class AlertStream {
     }
 
     private static void follow(Context c) throws Exception {
-        long lastId = Jarvis.prefs(c).getLong("last_alert_id", 0);
         // Core keeps a keep-alive every 15 s, so 45 s of silence means it's gone.
-        HttpURLConnection conn = Jarvis.open(Jarvis.base(c), "/api/clients/events?since=" + lastId,
+        HttpURLConnection conn = Jarvis.open(Jarvis.base(c), "/api/clients/events?since=0",
                 Jarvis.token(c), 45_000);
         conn.setRequestProperty("Accept", "text/event-stream");
         try {
             int code = conn.getResponseCode();
             if (code != 200) throw new java.io.IOException("HTTP " + code);
-            Log.i(TAG, "following " + Jarvis.base(c) + " from alert " + lastId);
+            Log.i(TAG, "following " + Jarvis.base(c));
             BufferedReader in = new BufferedReader(
                     new InputStreamReader(conn.getInputStream(), StandardCharsets.UTF_8));
             StringBuilder data = new StringBuilder();
@@ -84,10 +86,12 @@ final class AlertStream {
 
     private static void handle(Context c, JSONObject alert) {
         long id = alert.optLong("id");
-        if (id <= Jarvis.prefs(c).getLong("last_alert_id", 0)) return; // already seen
-        Jarvis.prefs(c).edit().putLong("last_alert_id", id).apply();
         long age = System.currentTimeMillis() - (long) (alert.optDouble("created_at") * 1000);
         if (age >= FRESH_MS) return;
+        synchronized (SEEN) {
+            if (!SEEN.add(id + "@" + alert.optDouble("created_at"))) return;
+            if (SEEN.size() > 500) SEEN.clear();
+        }
         new Thread(() -> {
             try {
                 Jarvis.refresh(c);
