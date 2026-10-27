@@ -253,7 +253,9 @@ thread and report through `self_repair.set_notifier`, which the runtime
 points at `raise_alert("repair", ...)`.
 
 The dashboard endpoints (`/api/status/torrents`, `/api/status/media`,
-`/api/status/storage`, `/api/status/services`, `/api/links`,
+`/api/status/storage`, `/api/status/services`, `/api/links` (each link has
+`url` plus `remote_url` from `LINK_REMOTE_HOSTS`; the app picks by probing
+the home address),
 `/api/home/entities`, `/api/now`, `/api/study/brief`,
 `/api/status/media/diagnose` — the read-only media doctor) are a second
 non-conversational surface, aggregated in `app.status_hub` directly over the

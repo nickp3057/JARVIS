@@ -82,6 +82,17 @@ Phase 2 (built 2026-10-27, 1.81 / build 83; not yet installed on the NAS):
 includes `host_health`, `integrations/nas_host.py` monitor and incident
 sections.
 
+Download retry (built 2026-10-27, 1.84 / build 86): stall alerts carry
+`context.torrent_hash`; the runtime stages a `retry_download` repair for the
+owning Radarr/Sonarr queue item. **Coordination with Nick's separate "revamp
+automatic search" session:** the retry deliberately owns nothing about search
+quality. It only does remove + blocklist + `skipRedownload=false`, so the
+*arr's own profiles, indexers and custom formats (whatever that session sets
+up) choose the replacement. If that session adds its own stalled-download
+handler (e.g. Cleanuparr/Decluttarr, or Radarr's own failed-download
+handling), keep JARVIS proposal-only (it already is) and consider raising
+`MEDIA_DOCTOR_STALL_MINUTES` so the two don't both act on the same torrent.
+
 Tier 2 + 3 approval (built 2026-10-27, 1.83 / build 85): `brain/stack_fixes.py`
 allowlist, `stack_fix` self-repair kind that only runs on Nick's chat
 "yes"/code or the app's Approve tap, Home → Repairs card. Next: per-container

@@ -524,6 +524,7 @@ JARVIS_SERVER_HOST=0.0.0.0
 JARVIS_SERVER_PORT=8000
 # Companion dashboard (read-only status hub endpoints)
 PLEX_URL=                   # Plex base URL for /api/links + /api/status/services
+LINK_REMOTE_HOSTS=          # lan=tailscale host pairs; /api/links adds remote_url (e.g. 10.0.0.147=100.97.179.53)
 PLEX_TOKEN=                 # X-Plex-Token; enables the media doctor's "is it on Plex" stage and Plex rescan fix
 MEDIA_DOCTOR_STALL_MINUTES=30  # no torrent progress for this long counts as stalled (doctor + download monitor)
 HOME_DASHBOARD_ENTITIES=    # comma-separated HA entity_ids for /api/home/entities
@@ -591,6 +592,19 @@ CALENDAR_ALERT_LEAD_MIN=10  # warn this many minutes before a meeting
 ---
 
 ## Recently Shipped
+
+- **One-tap download retry + links that work away from home (1.84 / build 86)**
+  — A stall alert now carries its torrent hash; the runtime matches it to the
+  Radarr/Sonarr queue item and stages a `retry_download` repair ("Retry The
+  Croods (2013)") on Home → Repairs. Nothing runs until Nick approves (tap,
+  or "yes" when JARVIS proposes it in chat via `propose_stack_fix` with a
+  title). The retry removes the release from qBittorrent, blocklists it, lets
+  the *arr search again with its own settings, and checks ~90 s later whether
+  a replacement was grabbed. Stall incident reports gain a "This download"
+  section. `/api/links` adds `remote_url` from `LINK_REMOTE_HOSTS`; the app
+  probes the home address on each Hub refresh and opens it when it answers,
+  otherwise the Tailscale URL (Launch card shows "Home network" / "Via
+  Tailscale"). New Local Network usage string for that probe.
 
 - **One-tap stack fixes (1.83 / build 85)** — JARVIS can propose four
   allowlisted fixes after diagnosing a failure (`propose_stack_fix`, see

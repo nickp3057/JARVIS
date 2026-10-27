@@ -315,7 +315,8 @@ def set_notifier(callback: Callable[[str, str, str], None] | None) -> None:
     _notifier = callback
 
 
-def propose_stack_fix(name: str, rationale: str, session_id: str | None = None) -> str:
+def propose_stack_fix(name: str, rationale: str, session_id: str | None = None, *,
+                      params: dict[str, Any] | None = None, key: str | None = None) -> str:
     """Stage an allowlisted stack fix; in chat, open the confirm gate for it.
 
     Nothing runs here. The fix runs only when Nick replies "yes"/the code
@@ -325,17 +326,20 @@ def propose_stack_fix(name: str, rationale: str, session_id: str | None = None) 
     fix = stack_fixes.FIXES.get(name)
     if fix is None:
         return f"'{name}' is not an allowlisted stack fix, sir. Options: {', '.join(stack_fixes.FIXES)}."
-    proposal = _new_proposal("nas_stack", name, {"kind": "stack_fix", "name": name},
-                             (rationale or "").strip()[:500] or fix.label)
+    # ``key`` scopes "one pending proposal" (e.g. one retry per torrent).
+    tool = f"{name}:{key}" if key else name
+    action = {"kind": "stack_fix", "name": name, **({"params": params} if params else {})}
+    label = stack_fixes.describe(name, params)
+    proposal = _new_proposal("nas_stack", tool, action, (rationale or "").strip()[:500] or label)
     with _LOCK:
-        items = [p for p in _load() if not (p.get("status") == "pending" and p.get("tool") == name)]
+        items = [p for p in _load() if not (p.get("status") == "pending" and p.get("tool") == tool)]
         items.append(proposal)
         _save(items)
-    staged = f"Staged repair {proposal['id']}: {fix.label}. It also shows in the app with an Approve button."
+    staged = f"Staged repair {proposal['id']}: {label}. It also shows in the app with an Approve button."
     if not session_id:
         return staged + " Nothing has been changed yet."
     return staged + " " + confirm_gate.propose(
-        session_id, f"{fix.label} [repair {proposal['id']}]",
+        session_id, f"{label} [repair {proposal['id']}]",
         lambda: apply(proposal["id"], confirmed=True, approved_by="chat"),
     )
 
@@ -349,7 +353,7 @@ def public_proposals(hours: float = 24) -> list[dict[str, Any]]:
     for p in reversed(items):
         if p.get("status") not in {"pending", "running"} and float(p.get("finished_at") or p.get("created_at") or 0) < cutoff:
             continue
-        out.append({"id": p["id"], "kind": p["action"].get("kind"), "label": _describe_action(p["action"]),
+        out.append({"id": p["id"], "kind": p["action"].get("kind"), "target": p.get("tool"), "label": _describe_action(p["action"]),
                     "rationale": p.get("rationale", ""), "status": p.get("status"), "result": p.get("result", ""),
                     "created_at": p.get("created_at"), "finished_at": p.get("finished_at")})
     return out[:20]
@@ -359,8 +363,7 @@ def _describe_action(action: dict[str, Any]) -> str:
     kind = action.get("kind")
     if kind == "stack_fix":
         from brain import stack_fixes
-        fix = stack_fixes.FIXES.get(str(action.get("name")))
-        return fix.label if fix else f"stack fix '{action.get('name')}'"
+        return stack_fixes.describe(str(action.get("name")), action.get("params"))
     if kind == "set_setting":
         return f"set {action.get('key')} in .env" + (f" to {action.get('value')!r}" if action.get("value") is not None else "")
     if kind == "run_command":
@@ -394,11 +397,11 @@ def _finish(proposal_id: str, status: str, outcome: str) -> None:
 def _run_stack_fix(proposal: dict[str, Any], approved_by: str) -> None:
     from brain import stack_fixes
     name = proposal["action"]["name"]
-    ok, outcome = stack_fixes.run(name)
+    ok, outcome = stack_fixes.run(name, proposal["action"].get("params"))
     _finish(proposal["id"], "applied" if ok else "failed", outcome)
     log.info("Stack fix %s (%s, approved via %s): %s", proposal["id"], name, approved_by, outcome)
     if _notifier is not None:
-        title = f"Repair {'done' if ok else 'failed'}: {stack_fixes.FIXES[name].label.split(',')[0]}"
+        title = f"Repair {'done' if ok else 'failed'}: {stack_fixes.describe(name, proposal['action'].get('params')).split(':')[0].split(',')[0]}"
         try:
             _notifier(title[:120], outcome, "info" if ok else "warning")
         except Exception:  # noqa: BLE001 - delivery problems must not hide the result

@@ -15,17 +15,17 @@ from __future__ import annotations
 
 import os
 import time
-from typing import Callable, NamedTuple
+from typing import Any, Callable, NamedTuple
 import uuid
 
 import requests
 
-from integrations import home_assistant, nas_stack, plex
+from integrations import home_assistant, media_doctor, nas_stack, plex
 
 
 class Fix(NamedTuple):
     label: str
-    run: Callable[[], tuple[bool, str]]  # (succeeded and verified, plain-English outcome)
+    run: Callable[[dict[str, Any]], tuple[bool, str]]  # params -> (succeeded and verified, outcome)
 
 
 def _sleep(seconds: float) -> None:
@@ -89,20 +89,38 @@ def _arr_recovery() -> tuple[bool, str]:
     return started, reply
 
 
+def _retry_download(params: dict[str, Any]) -> tuple[bool, str]:
+    if not params.get('service') or params.get('queue_id') is None:
+        return False, 'No queue item recorded for this retry.'
+    return media_doctor.retry_release(params, wait_s=float(os.getenv('STACK_FIX_RETRY_VERIFY_S', '90')), sleep=_sleep)
+
+
 FIXES: dict[str, Fix] = {
-    'restart_home_assistant': Fix('Restart Home Assistant (homeassistant.restart), then wait until it answers', _restart_home_assistant),
-    'retest_indexers': Fix('Re-test every Prowlarr indexer, then check none is still backed off', _retest_indexers),
-    'refresh_plex': Fix('Rescan the Plex movie and TV libraries', _refresh_plex),
+    'restart_home_assistant': Fix('Restart Home Assistant (homeassistant.restart), then wait until it answers',
+                                  lambda _: _restart_home_assistant()),
+    'retest_indexers': Fix('Re-test every Prowlarr indexer, then check none is still backed off', lambda _: _retest_indexers()),
+    'refresh_plex': Fix('Rescan the Plex movie and TV libraries', lambda _: _refresh_plex()),
     'arr_recovery': Fix('Recreate gluetun and the arr containers (the NAS recovery chain; active downloads disconnect), '
-                        'then report each service up / starting / failed', _arr_recovery),
+                        'then report each service up / starting / failed', lambda _: _arr_recovery()),
+    # Params come from the Radarr/Sonarr queue record (media_doctor.retry_params).
+    'retry_download': Fix('Retry a stuck download: remove and blocklist the release, search again, '
+                          'then check a new one was grabbed', _retry_download),
 }
 
 
-def run(name: str) -> tuple[bool, str]:
+def describe(name: str, params: dict[str, Any] | None = None) -> str:
+    """The label Nick sees; a retry names the title."""
+    if name == 'retry_download' and params and params.get('label'):
+        return f"Retry {params['label']}: blocklist the stuck release and search for another"
+    fix = FIXES.get(name)
+    return fix.label if fix else f"stack fix '{name}'"
+
+
+def run(name: str, params: dict[str, Any] | None = None) -> tuple[bool, str]:
     fix = FIXES.get(name)
     if fix is None:
         return False, f"'{name}' is not an allowlisted stack fix."
     try:
-        return fix.run()
+        return fix.run(params or {})
     except Exception as exc:  # noqa: BLE001 - report, never crash the worker
         return False, f'{fix.label} failed: {exc.__class__.__name__}: {str(exc)[:200]}'

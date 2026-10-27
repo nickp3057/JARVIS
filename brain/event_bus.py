@@ -43,6 +43,8 @@ class Alert:
     # Push only alerts that should buzz the phone; info still reaches streams.
     push: bool = True
     grouping: dict[str, Any] = field(default_factory=dict)  # thread_id / collapse_id / passive
+    # What the alert is about, for tap-to-chat reports (e.g. torrent_hash).
+    context: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         data = asdict(self)
@@ -72,7 +74,7 @@ def unsubscribe(name: str) -> None:
 
 def publish(kind: str, title: str, message: str, *, source: str, severity: str = "warning",
             push: bool = True, dedupe_key: str | None = None, cooldown_s: float = 0.0,
-            **grouping: Any) -> Alert | None:
+            context: dict[str, Any] | None = None, **grouping: Any) -> Alert | None:
     """Publish an alert to every subscriber; None if deduplicated."""
     global _next_id
     severity = severity if severity in SEVERITIES else "warning"
@@ -83,7 +85,7 @@ def publish(kind: str, title: str, message: str, *, source: str, severity: str =
         if dedupe_key:
             _last_sent[dedupe_key] = now
         alert = Alert(_next_id, kind, severity, title, (message or "").strip(), source, now, push,
-                      {k: v for k, v in grouping.items() if v})
+                      {k: v for k, v in grouping.items() if v}, dict(context or {}))
         _next_id += 1
         _history.append(alert)
         subscribers = list(_subscribers.items())

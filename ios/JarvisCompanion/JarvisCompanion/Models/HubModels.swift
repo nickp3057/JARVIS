@@ -292,13 +292,39 @@ struct ServiceLinks: Decodable {
 struct ServiceLink: Decodable, Identifiable {
     let name: String
     let url: String
+    /// Tailscale address for the same service ("" when the server has no
+    /// LINK_REMOTE_HOSTS mapping for its host, or an older Core).
+    let remoteURL: String
     let iconHint: String
 
     var id: String { name }
 
     enum CodingKeys: String, CodingKey {
         case name, url
+        case remoteURL = "remote_url"
         case iconHint = "icon_hint"
+    }
+
+    init(name: String, url: String, remoteURL: String = "", iconHint: String) {
+        self.name = name
+        self.url = url
+        self.remoteURL = remoteURL
+        self.iconHint = iconHint
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        name = try c.decode(String.self, forKey: .name)
+        url = try c.decode(String.self, forKey: .url)
+        remoteURL = try c.decodeIfPresent(String.self, forKey: .remoteURL) ?? ""
+        iconHint = try c.decode(String.self, forKey: .iconHint)
+    }
+
+    /// The home URL when the home network answers, Tailscale otherwise
+    /// (including while that is still unknown: Tailscale works anywhere).
+    func destination(onHomeNetwork: Bool?) -> URL? {
+        if remoteURL.isEmpty || onHomeNetwork == true { return URL(string: url) }
+        return URL(string: remoteURL)
     }
 }
 

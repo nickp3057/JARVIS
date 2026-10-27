@@ -729,13 +729,17 @@ struct HubView: View {
     }
 
     private var linksCard: some View {
-        CockpitPanel("Launch", symbol: "arrow.up.right.square") {
+        CockpitPanel("Launch", symbol: "arrow.up.right.square", trailing: {
+            if model.links.value?.contains(where: { !$0.remoteURL.isEmpty }) == true, let home = model.onHomeNetwork {
+                StatusPill(text: home ? "Home network" : "Via Tailscale", color: home ? JarvisTheme.success : JarvisTheme.cyan)
+            }
+        }) {
             if let error = model.links.failureText { errorRow(error) }
             if let links = model.links.value {
                 if links.isEmpty { quietState("No service links configured.", symbol: "link") }
                 LazyVGrid(columns: columns, spacing: 10) {
                     ForEach(links) { link in
-                        if let url = URL(string: link.url) {
+                        if let url = link.destination(onHomeNetwork: model.onHomeNetwork) {
                             Link(destination: url) {
                                 HStack(spacing: 9) {
                                     Image(systemName: Self.icon(for: link.iconHint))

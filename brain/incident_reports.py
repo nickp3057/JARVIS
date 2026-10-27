@@ -126,7 +126,19 @@ def _media_sweep() -> list[str]:
     return [line for line in lines if line]
 
 
-def _gather(deadline: float) -> dict[str, Any]:
+def _download_lines(torrent_hash: str) -> list[str]:
+    """The arr queue item behind a stalled torrent, traced by the media doctor."""
+    found = media_doctor.find_queue_record(torrent_hash)
+    if found is None:
+        return ['No Radarr/Sonarr queue item owns this torrent (added by hand, or already removed).']
+    service, record, label = found
+    report = media_doctor._inspect_queue_record(service, record, label, [], time.time())
+    lines = [f"{label} in {service.title()}: {report['summary']}", f"Release: {record.get('title', '?')}"]
+    lines += [f"{s['stage']}: {s['detail']}" for s in report['steps']]
+    return lines
+
+
+def _gather(deadline: float, alert: event_bus.Alert | None = None) -> dict[str, Any]:
     jobs: dict[str, Callable[[], Any]] = {
         'health': nas_stack.poll_health,
         'status': nas_stack.watchdog_status if nas_stack.status_configured() else (lambda: None),
@@ -137,6 +149,9 @@ def _gather(deadline: float) -> dict[str, Any]:
         'qbit_log': _qbit_logs,
         'ha_log': _ha_logs,
     }
+    torrent_hash = str((alert.context if alert else {}).get('torrent_hash') or '')
+    if torrent_hash:
+        jobs['download'] = lambda: _download_lines(torrent_hash)
     pool = ThreadPoolExecutor(max_workers=len(jobs), thread_name_prefix='incident')
     futures = {name: pool.submit(job) for name, job in jobs.items()}
     wait(futures.values(), timeout=max(1.0, deadline - time.monotonic()))
@@ -264,7 +279,7 @@ def _lines(value: Any) -> list[str]:
 def build(alert: event_bus.Alert, *, session_id: str | None = None) -> dict[str, Any]:
     """Gather, analyse and store one incident report; return what the app shows."""
     now = time.time()
-    evidence = _gather(time.monotonic() + _DEADLINE_S)
+    evidence = _gather(time.monotonic() + _DEADLINE_S, alert)
     health = evidence['health'] if isinstance(evidence['health'], dict) else None
     status = evidence['status'] if isinstance(evidence['status'], tuple) else (
         None if evidence['status'] is None else (False, str(evidence['status'])))
@@ -280,8 +295,17 @@ def build(alert: event_bus.Alert, *, session_id: str | None = None) -> dict[str,
         health_lines.append(f"qBittorrent DHT nodes: {health.get('dht_nodes')}, connection {health.get('connection_status')}")
     app_logs = (_lines(evidence['radarr_log']) + _lines(evidence['sonarr_log']) + _lines(evidence['prowlarr_log'])
                 + _lines(evidence['qbit_log']) + _lines(evidence['ha_log']))
+    if 'download' in evidence:
+        target = 'retry_download:' + str(alert.context.get('torrent_hash', '')).lower()[:16]
+        retry = [r for r in self_repair.public_proposals() if r['status'] == 'pending' and r.get('target') == target]
+        download = _lines(evidence['download'])
+        if retry:
+            download.append(f"Retry staged as repair {retry[0]['id']} (Home → Repairs → Approve, or say yes when I propose it).")
+        causes.insert(0, 'This download is stuck in qBittorrent (no seeders/peers for the release, usually). '
+                         'Blocklisting that release and searching again is the usual fix.')
     sections = [
         {'title': 'Suspected cause (rule-based, verify before acting)', 'lines': causes},
+        *([{'title': 'This download', 'lines': download}] if 'download' in evidence else []),
         {'title': 'Live health now', 'lines': health_lines},
         {'title': 'Media pipeline', 'lines': _lines(evidence['media'])},
         {'title': 'NAS host (containers, disks, RAID, volumes)',

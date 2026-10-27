@@ -453,6 +453,68 @@ def render(report: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+def find_queue_record(torrent_hash: str) -> tuple[str, dict[str, Any], str] | None:
+    """(service, queue record, label) for the Radarr/Sonarr item behind a
+    qBittorrent hash, or None if neither queue has it."""
+    wanted = (torrent_hash or "").strip().upper()
+    if not wanted:
+        return None
+    for service in _SERVICES:
+        if not servarr.is_configured(service):
+            continue
+        ok, queue = servarr.get_queue(service, page_size=200)
+        for record in (queue.get("records", []) if ok and isinstance(queue, dict) else []):
+            if str(record.get("downloadId") or "").upper() == wanted:
+                return service, record, servarr._queue_title(service, record)
+    return None
+
+
+def find_stalled_by_title(title: str) -> tuple[str, dict[str, Any], str] | None:
+    """The queue item whose label best matches ``title`` (for "retry The Croods")."""
+    wanted = servarr._normalize(title)
+    if not wanted:
+        return None
+    for service in _SERVICES:
+        if not servarr.is_configured(service):
+            continue
+        ok, queue = servarr.get_queue(service, page_size=200)
+        for record in (queue.get("records", []) if ok and isinstance(queue, dict) else []):
+            label = servarr._queue_title(service, record)
+            if wanted in servarr._normalize(label) or wanted in servarr._normalize(str(record.get("title", ""))):
+                return service, record, label
+    return None
+
+
+def retry_params(service: str, record: dict[str, Any], label: str) -> dict[str, Any]:
+    """What ``retry_release`` needs, taken from one queue record."""
+    return {"service": service, "queue_id": record.get("id"), "label": label,
+            "release": str(record.get("title") or "")[:200], "movie_id": record.get("movieId"),
+            "episode_id": record.get("episodeId"), "series_id": record.get("seriesId")}
+
+
+def retry_release(params: dict[str, Any], wait_s: float = 90.0, sleep: Callable[[float], None] = time.sleep) -> tuple[bool, str]:
+    """Remove the stuck release, blocklist it, let the arr search again, then
+    check whether it grabbed a replacement. The arr's own search settings
+    (profiles, indexers, custom formats) decide what it picks."""
+    service, queue_id, label = params["service"], params["queue_id"], params["label"]
+    ok, payload = servarr.request(
+        service, "DELETE", f"/api/v3/queue/{queue_id}",
+        params={"removeFromClient": "true", "blocklist": "true", "skipRedownload": "false"},
+    )
+    if not ok:
+        return False, f"{service.title()} would not remove the stuck release of {label}: {str(payload)[:200]}"
+    sleep(wait_s)
+    ok, queue = servarr.get_queue(service, page_size=200)
+    key, value = (("movieId", params.get("movie_id")) if service == "radarr"
+                  else ("episodeId", params.get("episode_id")) if params.get("episode_id")
+                  else ("seriesId", params.get("series_id")))
+    for record in (queue.get("records", []) if ok and isinstance(queue, dict) else []):
+        if value is not None and record.get(key) == value and record.get("id") != queue_id:
+            return True, f"Retried {label}: blocklisted the dead release and grabbed {record.get('title', 'a new one')}."
+    return False, (f"Blocklisted the dead release of {label} and searched again, but nothing new was grabbed yet: "
+                   f"{service.title()} found no other acceptable release right now. It keeps checking on its normal schedule.")
+
+
 def _run_fix(fix: dict[str, Any]) -> Callable[[], str]:
     params = fix["params"]
     fix_id = fix["id"]

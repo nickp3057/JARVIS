@@ -552,6 +552,28 @@ final class CompanionTests: XCTestCase {
         XCTAssertTrue(hub.busyRepairs.isEmpty)
     }
 
+    func testLinksUseHomeAddressOnlyWhenItAnswers() async throws {
+        MockProtocol.handler = { _ in (200, """
+            {"links":[{"name":"Radarr","url":"http://10.0.0.147:7878","remote_url":"http://100.97.179.53:7878","icon_hint":"movie"},
+            {"name":"Plex","url":"http://plex.local:32400","icon_hint":"play"}]}
+            """, 0) }
+        let client = JarvisAPIClient(baseURL: URL(string: "http://localhost:8000")!, token: "test", session: session)
+        var home = false
+        let hub = HubViewModel(settings: settings, clientFactory: { client }, homeProbe: { url in
+            XCTAssertEqual(url.absoluteString, "http://10.0.0.147:7878")
+            return home
+        })
+        await hub.refreshLinks()
+        let radarr = try XCTUnwrap(hub.links.value?.first)
+        XCTAssertEqual(hub.onHomeNetwork, false)
+        XCTAssertEqual(radarr.destination(onHomeNetwork: hub.onHomeNetwork)?.absoluteString, "http://100.97.179.53:7878")
+        // No mapping (or an older Core): always the one URL it has.
+        XCTAssertEqual(hub.links.value?.last?.destination(onHomeNetwork: false)?.absoluteString, "http://plex.local:32400")
+        home = true
+        await hub.refreshLinks()
+        XCTAssertEqual(radarr.destination(onHomeNetwork: hub.onHomeNetwork)?.absoluteString, "http://10.0.0.147:7878")
+    }
+
     func testSimulatorPushEnvironmentIsSandbox() {
         #if targetEnvironment(simulator)
         XCTAssertEqual(PushRegistrar.apsEnvironment(), "sandbox")

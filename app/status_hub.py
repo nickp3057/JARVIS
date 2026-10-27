@@ -29,6 +29,8 @@ from concurrent.futures import ThreadPoolExecutor
 from threading import Lock
 from typing import Any, Callable
 
+from urllib.parse import urlsplit, urlunsplit
+
 import requests
 
 from brain import study_brief
@@ -419,13 +421,35 @@ def _service_candidates() -> list[tuple[str, str, str]]:
     ]
 
 
+def _remote_hosts() -> dict[str, str]:
+    """``LINK_REMOTE_HOSTS``: ``lan-host=tailscale-host,...`` (e.g.
+    ``10.0.0.147=100.97.179.53``), so links also work away from home."""
+    pairs = (item.split("=", 1) for item in os.getenv("LINK_REMOTE_HOSTS", "").split(",") if "=" in item)
+    return {lan.strip().lower(): remote.strip() for lan, remote in pairs if lan.strip() and remote.strip()}
+
+
+def _remote_url(url: str, hosts: dict[str, str]) -> str:
+    parts = urlsplit(url)
+    remote = hosts.get((parts.hostname or "").lower())
+    if not remote:
+        return ""
+    netloc = remote + (f":{parts.port}" if parts.port else "")
+    return urlunsplit((parts.scheme, netloc, parts.path, parts.query, parts.fragment))
+
+
 def _link_targets() -> list[dict[str, str]]:
-    """Configured services only; entries with an unset var are omitted."""
-    return [
-        {"name": name, "url": _API_SUFFIX_RE.sub("", url), "icon_hint": icon}
-        for name, url, icon in _service_candidates()
-        if url
-    ]
+    """Configured services only; entries with an unset var are omitted.
+
+    ``remote_url`` (Tailscale) is "" when no mapping covers the host; the app
+    uses ``url`` when the home network answers and ``remote_url`` otherwise."""
+    hosts = _remote_hosts()
+    out = []
+    for name, url, icon in _service_candidates():
+        if not url:
+            continue
+        url = _API_SUFFIX_RE.sub("", url)
+        out.append({"name": name, "url": url, "remote_url": _remote_url(url, hosts), "icon_hint": icon})
+    return out
 
 
 def services_status() -> dict[str, Any]:

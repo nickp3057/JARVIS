@@ -312,11 +312,12 @@ class JarvisRuntime:
         return event_bus.publish("arr_stack", title, message, source=source, severity=severity, **grouping) is not None
 
     def raise_alert(self, kind: str, title: str, detail: str, *, source: str, severity: str = "warning",
-                    push: bool = True, dedupe_key: str | None = None, cooldown_s: float = 0.0) -> None:
+                    push: bool = True, dedupe_key: str | None = None, cooldown_s: float = 0.0,
+                    context: dict | None = None) -> None:
         """Inbox event plus bus alert: the one call for a new proactive alert."""
         self.record_event(kind="alert", source=source, title=title, detail=detail)
         event_bus.publish(kind, title, detail, source=source, severity=severity, push=push,
-                          dedupe_key=dedupe_key, cooldown_s=cooldown_s)
+                          dedupe_key=dedupe_key, cooldown_s=cooldown_s, context=context)
 
     def _deliver_alert_to_phone(self, alert: "event_bus.Alert") -> None:
         """Bus subscriber: companion push first, Home Assistant as fallback.
@@ -1157,13 +1158,34 @@ class JarvisRuntime:
                     stalled.discard(torrent_hash)
                 elif torrent_hash not in stalled:
                     stalled.add(torrent_hash)
+                    staged = self._stage_download_retry(torrent_hash, why)
                     self.raise_alert("download_stalled", "Download stalled",
-                                     f"{item.get('name', 'Download')}: {why} Ask me to diagnose it.",
-                                     source="downloads")
+                                     f"{item.get('name', 'Download')}: {why} "
+                                     + ("A retry is ready in Repairs." if staged else "Ask me to diagnose it."),
+                                     source="downloads",
+                                     context={"torrent_hash": torrent_hash, "name": str(item.get("name", ""))[:200]})
             stalled &= set(current)
             previous = current
             if self._stop_monitors.wait(interval):
                 break
+
+
+    def _stage_download_retry(self, torrent_hash: str, why: str) -> bool:
+        """Stage (never run) a one-tap retry for the arr item behind a stalled
+        torrent. False when no Radarr/Sonarr queue item owns it."""
+        try:
+            from integrations import media_doctor
+            from brain import self_repair
+            found = media_doctor.find_queue_record(torrent_hash)
+            if found is None:
+                return False
+            params = media_doctor.retry_params(*found)
+            self_repair.propose_stack_fix("retry_download", f"{found[2]}: {why}", params=params,
+                                          key=torrent_hash.lower()[:16])
+            return True
+        except Exception:  # noqa: BLE001 - a lookup failure must not stop the alert
+            log.exception("Could not stage a download retry")
+            return False
 
 
 def _watched_devices() -> list[str]:

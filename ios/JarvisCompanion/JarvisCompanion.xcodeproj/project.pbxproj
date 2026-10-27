@@ -303,11 +303,12 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = JarvisCompanion.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 85;
+				CURRENT_PROJECT_VERSION = 86;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = Jarvis;
 				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
+				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "JARVIS checks whether your home servers answer directly, so service links open on your home network instead of over Tailscale.";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "JARVIS uses the microphone only while you dictate a message.";
 				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "JARVIS converts your dictated message into text for the chat composer.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
@@ -319,7 +320,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.83;
+				MARKETING_VERSION = 1.84;
 				PRODUCT_BUNDLE_IDENTIFIER = com.nickolaspearson.JarvisCompanion;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
@@ -335,11 +336,12 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = JarvisCompanion.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 85;
+				CURRENT_PROJECT_VERSION = 86;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = Jarvis;
 				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
+				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "JARVIS checks whether your home servers answer directly, so service links open on your home network instead of over Tailscale.";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "JARVIS uses the microphone only while you dictate a message.";
 				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "JARVIS converts your dictated message into text for the chat composer.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
@@ -351,7 +353,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.83;
+				MARKETING_VERSION = 1.84;
 				PRODUCT_BUNDLE_IDENTIFIER = com.nickolaspearson.JarvisCompanion;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;

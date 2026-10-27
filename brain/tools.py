@@ -420,8 +420,15 @@ def _tool_apply_repair(args: dict[str, Any]) -> str:
 
 
 def _tool_propose_stack_fix(args: dict[str, Any]) -> str:
-    return self_repair.propose_stack_fix(str(args.get("fix") or ""), str(args.get("reason") or ""),
-                                         args.get("_jarvis_session_id"))
+    fix = str(args.get("fix") or "")
+    if fix == "retry_download":
+        found = media_doctor.find_stalled_by_title(str(args.get("title") or ""))
+        if found is None:
+            return f"Nothing called '{args.get('title', '')}' is in the Radarr or Sonarr queue, sir."
+        record_hash = str(found[1].get("downloadId") or found[2]).lower()[:16]
+        return self_repair.propose_stack_fix(fix, str(args.get("reason") or ""), args.get("_jarvis_session_id"),
+                                             params=media_doctor.retry_params(*found), key=record_hash)
+    return self_repair.propose_stack_fix(fix, str(args.get("reason") or ""), args.get("_jarvis_session_id"))
 
 
 def _tool_reject_repair(args: dict[str, Any]) -> str:
@@ -1429,15 +1436,18 @@ _CUSTOM_TOOLS: list[dict[str, Any]] = [
         "name": "propose_stack_fix",
         "description": (
             "Propose one allowlisted NAS-stack fix after diagnosing a failure (e.g. from an incident "
-            "report): restart_home_assistant, retest_indexers, refresh_plex, or arr_recovery (recreates "
-            "gluetun + the arr containers; active downloads disconnect). Never runs anything: it stages a "
+            "report): restart_home_assistant, retest_indexers, refresh_plex, arr_recovery (recreates "
+            "gluetun + the arr containers; active downloads disconnect), or retry_download (a stuck download, "
+            "e.g. metadata with no peers: blocklist that release and search again; pass title). Never runs anything: it stages a "
             "repair and asks Nick, who approves by replying yes / the code, or with the Approve button "
             "in the app. The verified result arrives later as an alert. Say why in reason."
         ),
         "input_schema": {
             "type": "object",
             "properties": {
-                "fix": {"type": "string", "enum": ["restart_home_assistant", "retest_indexers", "refresh_plex", "arr_recovery"]},
+                "fix": {"type": "string", "enum": ["restart_home_assistant", "retest_indexers", "refresh_plex", "arr_recovery",
+                                                   "retry_download"]},
+                "title": {"type": "string", "description": "retry_download only: the movie/show title in the queue."},
                 "reason": {"type": "string", "description": "One sentence: the evidence that this fix addresses."},
             },
             "required": ["fix", "reason"],

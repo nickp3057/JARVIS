@@ -39,6 +39,9 @@ final class HubViewModel: ObservableObject {
     @Published var pendingEntityStates: [String: Bool] = [:]
     /// Torrent hashes with a control call in flight.
     @Published var busyTorrents: Set<String> = []
+    /// Whether the services' home (LAN) addresses answer from here; nil
+    /// until probed. Decides between each link's home and Tailscale URL.
+    @Published private(set) var onHomeNetwork: Bool?
     /// Pending and recent self-repair proposals (server-staged fixes).
     @Published var repairs = Section<[RepairProposal]>()
     /// Repair ids with an Approve/Dismiss call in flight.
@@ -51,6 +54,7 @@ final class HubViewModel: ObservableObject {
 
     private let settings: AppSettings
     private let makeClient: () throws -> JarvisAPIClient
+    private let homeProbe: (URL) async -> Bool
     private var pollTask: Task<Void, Never>?
     private let snapshotDefaults: UserDefaults
     private let academicNotifications: AcademicNotificationScheduling?
@@ -66,9 +70,11 @@ final class HubViewModel: ObservableObject {
         settings: AppSettings,
         clientFactory: (() throws -> JarvisAPIClient)? = nil,
         snapshotDefaults: UserDefaults = .standard,
-        academicNotifications: AcademicNotificationScheduling? = nil
+        academicNotifications: AcademicNotificationScheduling? = nil,
+        homeProbe: ((URL) async -> Bool)? = nil
     ) {
         self.settings = settings
+        self.homeProbe = homeProbe ?? HubViewModel.answers
         self.makeClient = clientFactory ?? { try JarvisAPIClient.make(from: settings) }
         self.snapshotDefaults = snapshotDefaults
         self.academicNotifications = academicNotifications
@@ -240,6 +246,27 @@ final class HubViewModel: ObservableObject {
 
     func refreshLinks() async {
         await load(\.links) { try await $0.serviceLinks().links }
+        await probeHomeNetwork()
+    }
+
+    /// One quick request to a link's home address: any HTTP answer means the
+    /// phone is on the home network (or a route to it). Runs with each full
+    /// refresh (appear, pull-to-refresh), not on the 5 s poll.
+    func probeHomeNetwork() async {
+        guard let link = links.value?.first(where: { !$0.remoteURL.isEmpty }),
+              let url = URL(string: link.url) else { return }
+        onHomeNetwork = await homeProbe(url)
+    }
+
+    nonisolated static func answers(_ url: URL) async -> Bool {
+        let config = URLSessionConfiguration.ephemeral
+        config.timeoutIntervalForRequest = 1.5
+        config.waitsForConnectivity = false
+        let session = URLSession(configuration: config)
+        defer { session.invalidateAndCancel() }
+        var request = URLRequest(url: url)
+        request.httpMethod = "HEAD"
+        return (try? await session.data(for: request)) != nil
     }
 
     /// Fetch one section, keeping stale data on screen when a refresh fails.
