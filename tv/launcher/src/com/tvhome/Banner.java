@@ -41,7 +41,7 @@ final class Banner {
             bg.setStroke(px(d, 1), Theme.alpha(tone, 160));
             card.setBackground(bg);
 
-            ReactorView mark = new ReactorView(c, tone);
+            ReactorView mark = new ReactorView(c, tone, theme.success);
             LinearLayout.LayoutParams markLp = new LinearLayout.LayoutParams(px(d, 36), px(d, 36));
             markLp.setMargins(0, 0, px(d, 14), 0);
             markLp.gravity = Gravity.CENTER_VERTICAL;

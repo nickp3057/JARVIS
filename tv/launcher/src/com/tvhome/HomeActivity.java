@@ -5,26 +5,21 @@ import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
-import android.content.pm.ApplicationInfo;
-import android.content.pm.PackageManager;
 import android.graphics.Color;
 import android.graphics.Typeface;
-import android.graphics.drawable.Drawable;
 import android.graphics.drawable.GradientDrawable;
-import android.media.tv.TvContract;
-import android.media.tv.TvInputInfo;
-import android.media.tv.TvInputManager;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
 import android.provider.Settings;
+import android.text.SpannableString;
 import android.text.TextUtils;
 import android.text.format.DateFormat;
+import android.text.style.ForegroundColorSpan;
 import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.FrameLayout;
-import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.TextClock;
 import android.widget.TextView;
@@ -32,23 +27,18 @@ import android.widget.TextView;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
-import java.util.ArrayList;
 import java.util.Calendar;
-import java.util.Comparator;
 import java.util.Date;
-import java.util.List;
 import java.util.Locale;
 
 /**
  * JARVIS on the TV: what the TV boots into and what Home returns to. A glance
  * from the couch (greeting, weather, today, to-dos, what needs attention)
- * from Core's /api/glance, in the phone's theme, over a row of the only apps
- * that matter: Plex, YouTube, the HDMI inputs and Settings (the escape hatch
- * to stock Android). Shows the last snapshot when Core is unreachable.
+ * from Core's /api/glance, in the phone's theme, over Plex and Settings (the
+ * escape hatch to stock Android). YouTube and the inputs are on the remote. Shows the last snapshot when Core is unreachable.
  */
 public class HomeActivity extends Activity {
     private static final String PLEX = "com.plexapp.android";
-    private static final String YOUTUBE = "com.google.android.youtube.tv";
     private static final long REFRESH_MS = 60_000;
     private static final int MAX_LINES = 5;
 
@@ -104,6 +94,13 @@ public class HomeActivity extends Activity {
         super.onPause();
     }
 
+    // Home while already home: back to the first tile.
+    @Override
+    protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        if (firstTile != null) firstTile.requestFocus();
+    }
+
     // Back on the home screen does nothing; it is the bottom of the stack.
     @Override
     public void onBackPressed() {}
@@ -150,9 +147,8 @@ public class HomeActivity extends Activity {
         LinearLayout apps = new LinearLayout(this);
         apps.setClipChildren(false);
         root.addView(apps);
-        addAppTile(apps, PLEX);
-        addAppTile(apps, YOUTUBE);
-        addInputTiles(apps);
+        // YouTube and the HDMI inputs have their own buttons on the remote.
+        addPlexTile(apps);
         addTextTile(apps, "Settings", null, () -> startSafely(new Intent(Settings.ACTION_SETTINGS)));
 
         footer = label("", 10, theme.dim);
@@ -169,9 +165,9 @@ public class HomeActivity extends Activity {
         LinearLayout h = new LinearLayout(this);
         h.setGravity(Gravity.CENTER_VERTICAL);
 
-        ReactorView mark = new ReactorView(this, theme.reactor);
-        LinearLayout.LayoutParams markLp = new LinearLayout.LayoutParams(dp(64), dp(64));
-        markLp.setMargins(0, 0, dp(18), 0);
+        ReactorView mark = new ReactorView(this, theme.reactor, theme.success);
+        LinearLayout.LayoutParams markLp = new LinearLayout.LayoutParams(dp(104), dp(104));
+        markLp.setMargins(0, 0, dp(20), 0);
         h.addView(mark, markLp);
 
         LinearLayout words = new LinearLayout(this);
@@ -413,41 +409,39 @@ public class HomeActivity extends Activity {
 
     // --- App row --------------------------------------------------------------
 
-    private void addInputTiles(LinearLayout row) {
-        TvInputManager tim = getSystemService(TvInputManager.class);
-        if (tim == null) return;
-        List<TvInputInfo> list = new ArrayList<>(tim.getTvInputList());
-        list.sort(Comparator.comparing(i -> i.loadLabel(this).toString()));
-        for (TvInputInfo info : list) {
-            if (info.getType() != TvInputInfo.TYPE_HDMI) continue;
-            CharSequence custom = info.loadCustomLabel(this);
-            CharSequence label = custom != null ? custom : info.loadLabel(this);
-            CharSequence sub = custom != null ? info.loadLabel(this) : null;
-            final String id = info.getId();
-            addTextTile(row, label.toString(), sub, () -> launchInput(id));
-        }
-    }
-
-    private void addAppTile(LinearLayout row, String pkg) {
-        PackageManager pm = getPackageManager();
-        if (pm.getLeanbackLaunchIntentForPackage(pkg) == null
-                && pm.getLaunchIntentForPackage(pkg) == null) return;
-        Drawable art;
-        try {
-            ApplicationInfo ai = pm.getApplicationInfo(pkg, 0);
-            art = ai.loadBanner(pm);
-            if (art == null) art = ai.loadIcon(pm);
-        } catch (PackageManager.NameNotFoundException e) {
-            return;
-        }
-        ImageView img = new ImageView(this);
-        img.setImageDrawable(art);
-        img.setScaleType(ImageView.ScaleType.FIT_CENTER);
+    /** Plex in JARVIS's colours: the wordmark with the chevron "x" in the accent. */
+    private void addPlexTile(LinearLayout row) {
+        if (getPackageManager().getLeanbackLaunchIntentForPackage(PLEX) == null
+                && getPackageManager().getLaunchIntentForPackage(PLEX) == null) return;
         FrameLayout tile = tileFrame();
-        tile.addView(img, new FrameLayout.LayoutParams(
+        GradientDrawable bg = new GradientDrawable(GradientDrawable.Orientation.TL_BR,
+                new int[] {theme.raised, theme.deep});
+        bg.setCornerRadius(dp(12));
+        bg.setStroke(dp(1), Theme.alpha(theme.accent, 70));
+        tile.setBackground(bg);
+
+        LinearLayout inner = new LinearLayout(this);
+        inner.setOrientation(LinearLayout.VERTICAL);
+        inner.setGravity(Gravity.CENTER);
+        SpannableString word = new SpannableString("plex");
+        word.setSpan(new ForegroundColorSpan(theme.accent), 3, 4, 0);
+        TextView mark = label("", 34, theme.text);
+        mark.setText(word);
+        mark.setTypeface(Typeface.create("sans-serif-black", Typeface.BOLD));
+        mark.setShadowLayer(dp(10), 0, 0, Theme.alpha(theme.accent, 110));
+        mark.setIncludeFontPadding(false);
+        mark.setGravity(Gravity.CENTER);
+        mark.setPadding(dp(12), 0, dp(12), 0); // room for the glow
+        inner.addView(mark);
+        TextView sub = label("LIBRARY", 9, Theme.alpha(theme.accent, 180));
+        sub.setLetterSpacing(0.3f);
+        sub.setGravity(Gravity.CENTER);
+        sub.setPadding(0, dp(4), 0, 0);
+        inner.addView(sub);
+        tile.addView(inner, new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
-        tile.setOnClickListener(v -> launchPackage(pkg));
-        addTile(row, tile, dp(156), dp(90));
+        tile.setOnClickListener(v -> launchPackage(PLEX));
+        addTile(row, tile, dp(200), dp(90));
     }
 
     private void addTextTile(LinearLayout row, String text, CharSequence sub, Runnable action) {
@@ -516,11 +510,6 @@ public class HomeActivity extends Activity {
         Intent i = getPackageManager().getLeanbackLaunchIntentForPackage(pkg);
         if (i == null) i = getPackageManager().getLaunchIntentForPackage(pkg);
         if (i != null) startSafely(i);
-    }
-
-    private void launchInput(String inputId) {
-        startSafely(new Intent(Intent.ACTION_VIEW,
-                TvContract.buildChannelUriForPassthroughInput(inputId)));
     }
 
     private void startSafely(Intent i) {

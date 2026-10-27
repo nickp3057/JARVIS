@@ -117,7 +117,7 @@ Pearson-Stark-Jarvis/
 │
 ├── tv/                    JARVIS TV: the TCL Google TV's home screen (see "JARVIS TV")
 │   ├── launcher/            Hand-built Android app com.tvhome (no Gradle): build.sh, deploy.sh
-│   │   └── src/com/tvhome/  HomeActivity (glance + app row), Jarvis (Core client), AlertStream
+│   │   └── src/com/tvhome/  HomeActivity (glance + Plex/Settings), ReactorView (phone's mark), Jarvis (Core client), AlertStream
 │   │                        + Banner (live alerts over any app), NightlyRefresh (no-sound fix),
 │   │                        RemoteBridgeService (voice -> Plex, boot cleanup), SelfAdb
 │   ├── provision.sh         Creates the TV's scoped token on the Optiplex and hands it to the TV
@@ -619,7 +619,10 @@ CALENDAR_ALERT_LEAD_MIN=10  # warn this many minutes before a meeting
   "Good evening, sir.", weather, clock, then three glance panels (Today:
   timers, next event, assessments within 14 days, maintenance due; To-dos;
   Needs you: the last day's warning/critical alerts and downloads in flight)
-  over the app row (Plex, YouTube, HDMI inputs, Settings as the escape hatch).
+  over the app row: a JARVIS-coloured Plex tile and Settings (the escape
+  hatch); YouTube and the HDMI inputs stay on the remote's own buttons. The
+  reactor is a port of the phone's `JarvisCoreMark` (same rings, tick dial and
+  timings).
   It boots straight into JARVIS now instead of jumping to Plex. Data comes
   from one new scoped endpoint, `GET /api/glance` (`status:read`), built from
   the same `status_hub` sections the phone uses plus weather (10-minute

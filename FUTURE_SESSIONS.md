@@ -210,7 +210,8 @@ of each group.
   - [ ] Media: Plex continue-watching / recently added, downloads in
     progress (from Core's media status). (Downloads done, in Needs you.)
   - [ ] App row: Plex, YouTube, Music, House, Settings. Nothing else.
-    (Plex, YouTube, HDMI inputs, Settings today; Music and House are v2/v3.)
+    (Plex and Settings today; Nick dropped YouTube and the inputs, the
+    remote has buttons for them. Music and House are v2/v3.)
 
   **Mornings**
   - [ ] Wake-up: the TV turns on (HDMI-CEC / wake-on-LAN via HA), music
