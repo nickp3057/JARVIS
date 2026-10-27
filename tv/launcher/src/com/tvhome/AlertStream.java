@@ -84,6 +84,7 @@ final class AlertStream {
 
     private static void handle(Context c, JSONObject alert) {
         long id = alert.optLong("id");
+        if (id <= Jarvis.prefs(c).getLong("last_alert_id", 0)) return; // already seen
         Jarvis.prefs(c).edit().putLong("last_alert_id", id).apply();
         long age = System.currentTimeMillis() - (long) (alert.optDouble("created_at") * 1000);
         if (age >= FRESH_MS) return;

@@ -15,23 +15,30 @@ import java.util.Calendar;
  * Fixes "no sound after the TV sat unused for a long time". The TV never
  * really powers off: "off" is TCL's suspend-to-RAM, and after a long stretch
  * of it the Realtek audio path can resume silent (TCL's own quirk table lists
- * NO_SOUND_AFTER_STR_RESUME). So at 4am, only if the screen is off, reboot in
- * quiescent mode: the TV restarts in ~20 s and stays dark (verified
- * 2026-10-27), and the next power-on is a fresh boot with working audio.
- * If the screen is on (someone's watching), it skips until tomorrow.
+ * NO_SOUND_AFTER_STR_RESUME). So reboot in quiescent mode while the screen
+ * is off: the TV restarts in ~20 s and stays dark (verified 2026-10-27), and
+ * the next power-on is a fresh boot with working audio. Two triggers:
+ *  - a minute after the TV is switched off, if it has been up 20 h or more
+ *    (RemoteBridgeService watches SCREEN_OFF); this is the reliable one;
+ *  - a 4am alarm. TCL's AlarmManager turns every app's wakeup alarm into a
+ *    non-wakeup one (ro.feature.alarm_wakeup_control), so it only runs when
+ *    something else wakes the CPU in standby, possibly late.
+ * Either way it never reboots while the screen is on.
  *
  * Test from the Mac (permission DUMP, so only adb can send it):
  *   adb shell am broadcast -n com.tvhome/.NightlyRefresh --el in_ms 120000 [--ez dry_run true]
+ * (in_ms 0 runs it now; tests skip the uptime gate but never the screen check)
  */
 public class NightlyRefresh extends BroadcastReceiver {
     private static final String TAG = "TvHomeRefresh";
     private static final int HOUR = 4;
     private static final long MIN_UPTIME_MS = 12 * 3600 * 1000L;
+    static final long SCREEN_OFF_UPTIME_MS = 20 * 3600 * 1000L;
 
     @Override
     public void onReceive(Context context, Intent intent) {
         long inMs = intent.getLongExtra("in_ms", -1);
-        if (inMs >= 0) {
+        if (inMs > 0) {
             schedule(context, System.currentTimeMillis() + inMs,
                     intent.getBooleanExtra("dry_run", false), true);
             return;
@@ -40,7 +47,7 @@ public class NightlyRefresh extends BroadcastReceiver {
         new Thread(() -> {
             try {
                 run(context, intent.getBooleanExtra("dry_run", false),
-                        intent.getBooleanExtra("test", false));
+                        inMs == 0 || intent.getBooleanExtra("test", false));
             } finally {
                 scheduleNext(context);
                 result.finish();
@@ -49,20 +56,25 @@ public class NightlyRefresh extends BroadcastReceiver {
     }
 
     private static void run(Context c, boolean dryRun, boolean test) {
+        refreshIfOff(c, "4am", test ? 0 : MIN_UPTIME_MS, dryRun);
+    }
+
+    /** Blocking. Quiescent reboot if the screen is off and uptime is at least {@code minUptimeMs}. */
+    static void refreshIfOff(Context c, String why, long minUptimeMs, boolean dryRun) {
         boolean screenOn = c.getSystemService(PowerManager.class).isInteractive();
         long uptime = SystemClock.elapsedRealtime();
         String verdict;
         if (screenOn) {
-            verdict = "skipped: screen on";
-        } else if (uptime < MIN_UPTIME_MS && !test) {
-            verdict = "skipped: booted " + uptime / 60_000 + " min ago";
+            verdict = why + " skipped: screen on";
+        } else if (uptime < minUptimeMs) {
+            verdict = why + " skipped: up " + uptime / 60_000 + " min";
         } else if (dryRun) {
-            verdict = "dry run: would reboot";
+            verdict = why + " dry run: would reboot";
         } else {
-            verdict = "rebooting quiescent";
+            verdict = why + ": rebooting quiescent after " + uptime / 3_600_000 + " h up";
         }
         record(c, verdict);
-        if (!verdict.startsWith("rebooting")) return;
+        if (!verdict.contains("rebooting")) return;
         try (SelfAdb adb = SelfAdb.connect(c, 30_000)) {
             adb.shell("svc power reboot quiescent");
         } catch (Exception e) {

@@ -4,8 +4,10 @@ import android.app.Notification;
 import android.app.NotificationChannel;
 import android.app.NotificationManager;
 import android.app.Service;
+import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
+import android.content.IntentFilter;
 import android.net.Uri;
 import android.os.IBinder;
 import android.util.Log;
@@ -80,12 +82,30 @@ public class RemoteBridgeService extends Service {
             new Thread(() -> PlexAutoLogin.run(this), "login").start();
             AlertStream.start(this);
             NightlyRefresh.scheduleNext(this);
+            registerReceiver(new ScreenOffReceiver(), new IntentFilter(Intent.ACTION_SCREEN_OFF));
         }
         if (reader == null || !reader.isAlive()) {
             reader = new Thread(this::readLog, "logcat");
             reader.start();
         }
         return START_STICKY;
+    }
+
+    /** A minute after the TV is switched off, refresh it if it has been up long (NightlyRefresh). */
+    private static final class ScreenOffReceiver extends BroadcastReceiver {
+        @Override
+        public void onReceive(Context context, Intent intent) {
+            Context app = context.getApplicationContext();
+            new Thread(() -> {
+                try {
+                    Thread.sleep(60_000);
+                } catch (InterruptedException e) {
+                    return;
+                }
+                NightlyRefresh.refreshIfOff(app, "screen off",
+                        NightlyRefresh.SCREEN_OFF_UPTIME_MS, false);
+            }, "screen-off").start();
+        }
     }
 
     @Override

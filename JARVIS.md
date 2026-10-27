@@ -630,9 +630,14 @@ CALENDAR_ALERT_LEAD_MIN=10  # warn this many minutes before a meeting
   LAST SEEN ...") and rescans its /24 when the Optiplex's DHCP address moves.
   Also fixes **no sound after the TV sat unused**: "off" on this TV is TCL's
   suspend-to-RAM (`tcl_sys_pms_str_enabled=1`; TCL's quirk table lists
-  NO_SOUND_AFTER_STR_RESUME), so `NightlyRefresh` reboots it at 4am with
-  `svc power reboot quiescent` only when the screen is off; quiescent boots
-  stay dark (verified on the TV). See "JARVIS TV" below.
+  NO_SOUND_AFTER_STR_RESUME), so `NightlyRefresh` reboots it with
+  `svc power reboot quiescent`, only while the screen is off: a minute after
+  it's switched off if it has been up 20 h+, and from a 4am alarm. A plain
+  reboot turns the screen on; a quiescent one stays dark (both verified on
+  the TV, ~20 s). TCL converts every app's wakeup alarm to non-wakeup
+  (`ro.feature.alarm_wakeup_control`), so the 4am alarm only runs if
+  something else wakes the CPU; the screen-off trigger is the reliable one.
+  See "JARVIS TV" below.
 
 - **Home tiles, Hot Rod theme, switch fix (1.91 / build 93)** — Tab order is
   Media, Hub, Home, Chat, Settings (Home in the middle, still the default).
@@ -1275,9 +1280,15 @@ TV=10.0.0.46:5555 tv/provision.sh         # Nick, at home: scoped token + Core U
   them again through self-adb). The launcher's own adb key is approved on the
   TV; self-adb is what runs the nightly reboot.
 - Sound fix test hooks (DUMP-guarded, adb only):
-  `adb shell am broadcast -n com.tvhome/.NightlyRefresh --el in_ms 120000 [--ez dry_run true]`
-  arms a one-off refresh (skips the 12 h uptime gate). Outcomes log under
+  `adb shell am broadcast -n com.tvhome/.NightlyRefresh --el in_ms 0 [--ez dry_run true]`
+  runs a refresh now (skips the uptime gate, never the screen-off check);
+  `in_ms > 0` arms a one-off alarm instead. Outcomes log under
   `TvHomeRefresh` (the TV's log buffer only holds minutes).
+- `--ez clear true` to `.ProvisionReceiver` unlinks the TV from Core.
+- Verified 2026-10-27 against a mock Core on the Mac: glance renders, the
+  SSE banner shows over Plex without stealing focus, offline footer reads
+  "CORE UNREACHABLE · LAST SEEN ...". Not yet verified against the real Core
+  (needs `tv/provision.sh` and the Optiplex pulling `/api/glance`).
 
 ## Nick's Preferences & Context
 

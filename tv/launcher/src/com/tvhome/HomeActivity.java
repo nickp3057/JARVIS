@@ -447,7 +447,7 @@ public class HomeActivity extends Activity {
         tile.addView(img, new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
         tile.setOnClickListener(v -> launchPackage(pkg));
-        addTile(row, tile, dp(160), dp(90));
+        addTile(row, tile, dp(156), dp(90));
     }
 
     private void addTextTile(LinearLayout row, String text, CharSequence sub, Runnable action) {
@@ -468,7 +468,7 @@ public class HomeActivity extends Activity {
         tile.addView(inner, new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
         tile.setOnClickListener(v -> action.run());
-        addTile(row, tile, dp(120), dp(90));
+        addTile(row, tile, dp(108), dp(90));
     }
 
     private FrameLayout tileFrame() {
@@ -487,7 +487,7 @@ public class HomeActivity extends Activity {
 
     private void addTile(LinearLayout row, View tile, int w, int h) {
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(w, h);
-        lp.setMargins(0, 0, dp(16), 0);
+        lp.setMargins(0, 0, dp(14), 0);
         row.addView(tile, lp);
         if (firstTile == null) firstTile = tile;
     }
