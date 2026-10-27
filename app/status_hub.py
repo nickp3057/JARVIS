@@ -572,14 +572,29 @@ def home_control(entity_id: str, action: str) -> dict[str, Any]:
         return {"error": message, "entity_id": entity_id, "state": None}
 
     invalidate("entities")
+    return {"error": "", "entity_id": entity_id, "state": _settled_state(entity_id, action)}
+
+
+# Home Assistant acknowledges a service call before the device reports back,
+# so an immediate read still shows the old state (the app's switch then
+# bounced back). Poll briefly for the requested state before answering.
+_CONTROL_SETTLE_SECONDS = 2.0
+_CONTROL_POLL_SECONDS = 0.25
+
+
+def _settled_state(entity_id: str, action: str) -> str | None:
+    deadline = time.monotonic() + _CONTROL_SETTLE_SECONDS
     state = None
-    ok, states = get_states()
-    if ok and isinstance(states, list):
-        for entity in states:
-            if str(entity.get("entity_id", "")) == entity_id:
-                state = str(entity.get("state", "unknown"))
-                break
-    return {"error": "", "entity_id": entity_id, "state": state}
+    while True:
+        ok, states = get_states()
+        if ok and isinstance(states, list):
+            for entity in states:
+                if str(entity.get("entity_id", "")) == entity_id:
+                    state = str(entity.get("state", "unknown"))
+                    break
+        if state == action or time.monotonic() >= deadline:
+            return state
+        time.sleep(_CONTROL_POLL_SECONDS)
 
 
 def torrent_control(torrent_hash: str, action: str, confirmed: bool) -> dict[str, Any]:

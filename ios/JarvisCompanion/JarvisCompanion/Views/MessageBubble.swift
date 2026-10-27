@@ -128,7 +128,7 @@ struct MessageBubble: View {
                     .foregroundStyle(.primary)
             } icon: {
                 Image(systemName: "exclamationmark.triangle.fill")
-                    .foregroundStyle(.orange)
+                    .foregroundStyle(JarvisTheme.amber)
             }
 
             if let onRetry {
@@ -149,7 +149,7 @@ struct MessageBubble: View {
         .background(JarvisTheme.panelGradient, in: .rect(cornerRadius: 16))
         .overlay(
             RoundedRectangle(cornerRadius: 16)
-                .strokeBorder(.orange.opacity(0.35), lineWidth: 1)
+                .strokeBorder(JarvisTheme.amber.opacity(0.35), lineWidth: 1)
         )
     }
 }

@@ -2,11 +2,12 @@ import SwiftUI
 
 typealias RGB = (Double, Double, Double)
 
-/// The app's colour themes, chosen in Settings. Each one supplies the accent
-/// (`JarvisTheme.cyan`: tint, logo, borders), the secondary (`blue`: Nick's
-/// bubbles), and the four surfaces, in dark and light variants.
+/// The app's colour themes, chosen in Settings. Each one supplies every
+/// colour the app uses: the accent (`JarvisTheme.cyan`: headings, borders),
+/// the reactor (`reactor`: the mark and the control tint), the secondary (`blue`: Nick's bubbles), the three status colours
+/// (warning, critical, nominal), and the four surfaces, dark and light.
 enum JarvisPalette: String, CaseIterable, Identifiable {
-    case arc, markIII
+    case arc, markIII, hotRod
 
     static let storageKey = "jarvis.palette"
     var id: String { rawValue }
@@ -15,13 +16,15 @@ enum JarvisPalette: String, CaseIterable, Identifiable {
         switch self {
         case .arc: return "Arc"
         case .markIII: return "Mark III"
+        case .hotRod: return "Hot Rod"
         }
     }
 
     var blurb: String {
         switch self {
         case .arc: return "The original cyan HUD."
-        case .markIII: return "Hot-rod red and gold on warm charcoal."
+        case .markIII: return "Gold HUD, hot-rod red, arc-reactor glow."
+        case .hotRod: return "Mark III's gold and red, with arc-reactor cyan on the reactor and controls."
         }
     }
 
@@ -33,14 +36,47 @@ enum JarvisPalette: String, CaseIterable, Identifiable {
     var accent: (RGB, RGB) {
         switch self {
         case .arc: return ((0.25, 0.85, 0.95), (0.0, 0.43, 0.54))
-        case .markIII: return ((0.97, 0.36, 0.36), (0.72, 0.10, 0.14))
+        case .markIII, .hotRod: return ((1.0, 0.77, 0.32), (0.55, 0.37, 0.0))
+        }
+    }
+
+    /// The reactor mark and interactive tint (tab bar, toggles, buttons).
+    /// The accent everywhere except Hot Rod, where it's reactor cyan.
+    var reactor: (RGB, RGB) {
+        switch self {
+        case .arc, .markIII: return accent
+        case .hotRod: return ((0.35, 0.88, 1.0), (0.0, 0.45, 0.62))
         }
     }
 
     var secondary: (RGB, RGB) {
         switch self {
         case .arc: return ((0.25, 0.50, 1.0), (0.08, 0.33, 0.85))
-        case .markIII: return ((0.90, 0.68, 0.28), (0.55, 0.38, 0.02))
+        case .markIII, .hotRod: return ((0.86, 0.14, 0.16), (0.70, 0.07, 0.10))
+        }
+    }
+
+    /// Due soon, stalled, needs a look.
+    var warning: (RGB, RGB) {
+        switch self {
+        case .arc: return ((1, 0.73, 0.30), (0.69, 0.40, 0.0))
+        case .markIII, .hotRod: return ((1.0, 0.50, 0.18), (0.76, 0.30, 0.0))
+        }
+    }
+
+    /// Overdue, down, failed.
+    var critical: (RGB, RGB) {
+        switch self {
+        case .arc: return ((1.0, 0.36, 0.38), (0.78, 0.10, 0.14))
+        case .markIII, .hotRod: return ((1.0, 0.22, 0.27), (0.80, 0.03, 0.09))
+        }
+    }
+
+    /// Nominal. Mark III glows reactor blue-white against the gold.
+    var success: (RGB, RGB) {
+        switch self {
+        case .arc: return ((0.30, 0.88, 0.62), (0.0, 0.48, 0.28))
+        case .markIII, .hotRod: return ((0.55, 0.90, 1.0), (0.0, 0.45, 0.62))
         }
     }
 
@@ -49,29 +85,20 @@ enum JarvisPalette: String, CaseIterable, Identifiable {
         case .arc:
             return (((0.025, 0.045, 0.075), (0.95, 0.965, 0.985)), ((0.008, 0.018, 0.035), (0.90, 0.93, 0.96)),
                     ((0.055, 0.085, 0.125), (1, 1, 1)), ((0.075, 0.12, 0.17), (0.975, 0.985, 1)))
-        case .markIII:
-            return (((0.06, 0.045, 0.045), (0.97, 0.955, 0.95)), ((0.025, 0.018, 0.018), (0.93, 0.91, 0.90)),
-                    ((0.10, 0.075, 0.072), (1, 1, 1)), ((0.14, 0.10, 0.095), (1, 0.985, 0.98)))
+        case .markIII, .hotRod:
+            return (((0.075, 0.035, 0.035), (0.97, 0.955, 0.95)), ((0.025, 0.012, 0.014), (0.93, 0.91, 0.90)),
+                    ((0.12, 0.065, 0.06), (1, 1, 1)), ((0.17, 0.09, 0.08), (1, 0.985, 0.98)))
         }
     }
 }
 
-/// Shared cockpit palette. Every colour is adaptive (dark = the original
-/// cockpit look, light = a tuned daylight variant with AA-contrast accents),
-/// so the app follows the system appearance. Keep text scalable and reserve
-/// amber for activity. Palette colours resolve from `JarvisPalette.current`
-/// each render; `RootView` re-identifies the hierarchy when it changes.
+/// Shared cockpit palette. Every colour comes from the chosen
+/// `JarvisPalette` (never a system red/orange/green) and is adaptive (dark =
+/// the cockpit look, light = AA-contrast daylight variants), so the app
+/// follows both the theme and the system appearance. Colours resolve from
+/// `JarvisPalette.current` each render; `RootView` re-identifies the
+/// hierarchy when it changes.
 enum JarvisTheme {
-    private static func adaptive(
-        dark: (Double, Double, Double),
-        light: (Double, Double, Double)
-    ) -> Color {
-        Color(UIColor { traits in
-            let c = traits.userInterfaceStyle == .dark ? dark : light
-            return UIColor(red: c.0, green: c.1, blue: c.2, alpha: 1)
-        })
-    }
-
     private static func themed(_ role: @escaping (JarvisPalette) -> (RGB, RGB)) -> Color {
         Color(UIColor { traits in
             let pair = role(JarvisPalette.current)
@@ -86,10 +113,14 @@ enum JarvisTheme {
     static let panelRaised = themed { $0.surfaces.raised }
     /// The accent. Named for the original palette; it follows the theme.
     static let cyan = themed { $0.accent }
+    /// The reactor mark and control tint; the accent except on Hot Rod.
+    static let reactor = themed { $0.reactor }
     static let blue = themed { $0.secondary }
-    static let amber = adaptive(dark: (1, 0.73, 0.30), light: (0.69, 0.40, 0.0))
+    /// The warning colour (amber on Arc, molten orange on Mark III).
+    static let amber = themed { $0.warning }
+    static let critical = themed { $0.critical }
+    static let success = themed { $0.success }
     static let border = cyan.opacity(0.18)
-    static let success = adaptive(dark: (0.30, 0.88, 0.62), light: (0.0, 0.48, 0.28))
 
     static let panelGradient = LinearGradient(
         colors: [panelRaised.opacity(0.94), panel.opacity(0.88)],
@@ -114,65 +145,77 @@ struct JarvisBackdrop: View {
                 startRadius: 10,
                 endRadius: 330
             )
+            RadialGradient(
+                colors: [JarvisTheme.blue.opacity(0.07), .clear],
+                center: .bottomLeading,
+                startRadius: 10,
+                endRadius: 420
+            )
         }
         .ignoresSafeArea()
         .accessibilityHidden(true)
     }
 }
 
-/// The JARVIS reactor mark. When `animated`, the rings counter-rotate and
-/// the glow breathes; `active` (JARVIS is thinking) spins faster and pulses.
+/// The JARVIS reactor mark. When `animated`, the rings counter-rotate and a
+/// tick dial drifts; the glow holds steady (he doesn't breathe), a touch
+/// brighter while `active` (JARVIS is thinking). Drawn in the palette's
+/// reactor colour.
 ///
-/// Built for a steady 60 fps: a `TimelineView(.animation)` follows the
-/// display, each frame changes only rotation and opacity, the rings render as
-/// one Metal-backed layer (`drawingGroup`), and there is no per-frame blur
-/// (the glow is a radial gradient, not a shadow). It stops entirely when off
-/// screen, with Reduce Motion, or in Low Power Mode, and then draws the
-/// original still pose.
+/// Each moving part gets one `repeatForever` animation, scoped with
+/// `.animation(_:body:)` so it never leaks into layout, instead of rebuilding
+/// the whole mark every frame. Leaving the screen stops it at rest and it
+/// starts again from there, so tab switches and scrolling never make it
+/// jump. Reduce Motion, Low Power Mode, or `animated: false` draw the still
+/// pose.
 struct JarvisCoreMark: View {
     var size: CGFloat = 112
     var animated = true
     var active = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var onScreen = false
+    @State private var running = false
 
-    private var still: Bool {
-        !animated || !onScreen || reduceMotion || ProcessInfo.processInfo.isLowPowerModeEnabled
+    private var moving: Bool {
+        running && animated && !reduceMotion && !ProcessInfo.processInfo.isLowPowerModeEnabled
+    }
+
+    private func spin(_ seconds: Double) -> Animation? {
+        moving ? .linear(duration: seconds).repeatForever(autoreverses: false) : nil
     }
 
     var body: some View {
-        TimelineView(.animation(minimumInterval: nil, paused: still)) { context in
-            mark(at: still ? 0 : context.date.timeIntervalSinceReferenceDate)
-        }
-        .frame(width: size, height: size)
-        .onAppear { onScreen = true }
-        .onDisappear { onScreen = false }
-        .accessibilityHidden(true)
-    }
-
-    private func mark(at t: Double) -> some View {
-        let speed = active ? 3.0 : 1.0
-        let outer = (t * speed * 360 / 16).truncatingRemainder(dividingBy: 360)
-        let inner = (t * speed * 360 / 10).truncatingRemainder(dividingBy: 360)
-        let breathe = t == 0 ? 0.5 : 0.5 + 0.5 * sin(t * 2 * .pi / (active ? 1.2 : 4.5))
-        return ZStack {
-            ZStack {
-                Circle().fill(RadialGradient(colors: [JarvisTheme.cyan.opacity(0.14 + 0.16 * breathe), .clear],
-                                             center: .center, startRadius: 4, endRadius: size / 2))
-                Circle().stroke(JarvisTheme.cyan.opacity(0.15), lineWidth: 1).padding(2)
-                Circle().trim(from: 0.05, to: 0.82)
-                    .stroke(JarvisTheme.cyan.opacity(0.6), style: StrokeStyle(lineWidth: max(1.5, size / 56), lineCap: .round))
-                    .rotationEffect(.degrees(-60 + outer)).padding(size * 0.13)
-                Circle().trim(from: 0.12, to: 0.92)
-                    .stroke(JarvisTheme.cyan.opacity(0.3), lineWidth: 1)
-                    .rotationEffect(.degrees(90 - inner)).padding(size * 0.21)
+        let dial = Double.pi * size * 0.92
+        ZStack {
+            Circle().fill(RadialGradient(colors: [JarvisTheme.reactor.opacity(active ? 0.30 : 0.22), .clear],
+                                         center: .center, startRadius: 4, endRadius: size / 2))
+            Circle().fill(RadialGradient(colors: [JarvisTheme.success.opacity(0.16), .clear],
+                                         center: .center, startRadius: 0, endRadius: size * 0.22))
+            Circle().stroke(JarvisTheme.reactor.opacity(0.15), lineWidth: 1).padding(2)
+            if size >= 60 {
+                // HUD dial: sixty ticks drifting slowly the other way.
+                Circle()
+                    .stroke(JarvisTheme.reactor.opacity(0.28),
+                            style: StrokeStyle(lineWidth: size * 0.025, dash: [1, dial / 60 - 1]))
+                    .padding(size * 0.04)
+                    .animation(spin(40)) { $0.rotationEffect(.degrees(moving ? -360 : 0)) }
             }
-            .drawingGroup()
+            Circle().trim(from: 0.05, to: 0.82)
+                .stroke(JarvisTheme.reactor.opacity(0.6), style: StrokeStyle(lineWidth: max(1.5, size / 56), lineCap: .round))
+                .padding(size * 0.13)
+                .animation(spin(16)) { $0.rotationEffect(.degrees(-60 + (moving ? 360 : 0))) }
+            Circle().trim(from: 0.12, to: 0.92)
+                .stroke(JarvisTheme.reactor.opacity(0.3), lineWidth: 1)
+                .padding(size * 0.21)
+                .animation(spin(10)) { $0.rotationEffect(.degrees(90 - (moving ? 360 : 0))) }
             Image(systemName: "waveform")
                 .font(.system(size: size * 0.25, weight: .light))
-                .foregroundStyle(JarvisTheme.cyan)
-                .opacity(active ? 0.7 + 0.3 * breathe : 1)
+                .foregroundStyle(JarvisTheme.reactor)
         }
+        .frame(width: size, height: size)
+        .compositingGroup()
+        .onAppear { running = true }
+        .onDisappear { running = false }
+        .accessibilityHidden(true)
     }
 }
 

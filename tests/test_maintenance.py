@@ -177,6 +177,18 @@ class EndpointTests(MaintenanceTestCase):
         self.assertEqual(self.client.post("/api/maintenance/999/complete",
                                           headers=self.headers).status_code, 404)
 
+    def test_todo_add_and_done_deletes(self) -> None:
+        import brain.reminders as reminders
+        with patch.object(reminders, "_REMINDERS_FILE", Path(self.tempdir.name) / "reminders.json"), \
+                patch.object(reminders, "_store", reminders._ReminderStore()):
+            self.assertEqual(self.client.post("/api/todos", headers=self.headers, json={"text": "  "}).status_code, 422)
+            todo = self.client.post("/api/todos", headers=self.headers, json={"text": "Buy filters"}).json()["todo"]
+            self.assertEqual(todo["text"], "Buy filters")
+            self.assertEqual([r.text for r in reminders.active_reminders()], ["Buy filters"])
+            self.assertEqual(self.client.post(f"/api/todos/{todo['id']}/done", headers=self.headers).status_code, 204)
+            self.assertEqual(reminders.active_reminders(include_done=True), [])
+            self.assertEqual(self.client.post(f"/api/todos/{todo['id']}/done", headers=self.headers).status_code, 404)
+
     def test_now_feed_lists_due_tasks(self) -> None:
         status_hub.clear_cache()
         with patch.object(status_hub, "calendar_configured", return_value=False):

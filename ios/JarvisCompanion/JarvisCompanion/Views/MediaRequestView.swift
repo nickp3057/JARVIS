@@ -36,7 +36,7 @@ struct MediaRequestView: View {
                     if let notice = model.notice {
                         Label(notice, systemImage: model.noticeIsError ? "exclamationmark.triangle" : "checkmark.circle")
                             .font(.footnote)
-                            .foregroundStyle(model.noticeIsError ? Color.orange : JarvisTheme.cyan)
+                            .foregroundStyle(model.noticeIsError ? JarvisTheme.amber : JarvisTheme.cyan)
                     }
                 }
                 Section {

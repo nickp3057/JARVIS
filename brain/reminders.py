@@ -174,6 +174,11 @@ def complete_reminder(reminder_id: str) -> str:
 def delete_reminder(reminder_id: str) -> str:
     return _store.delete(reminder_id)
 
+def remove_reminder(reminder_id: str) -> bool:
+    """Delete outright (the companion's to-do check: done means gone)."""
+    return _store.delete(reminder_id).startswith("Deleted")
+
+
 def active_reminders(include_done: bool = False) -> list[Reminder]:
     return _store.list_items(include_done)
 

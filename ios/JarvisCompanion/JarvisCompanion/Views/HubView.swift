@@ -1,19 +1,24 @@
 import SwiftUI
 
-/// The Home and Media tabs: glanceable cards over one shared HubViewModel.
-/// Each card loads independently, so one dead service never blanks the rest.
+/// The Home, Hub and Media tabs: glanceable cards over one shared
+/// HubViewModel. Each card loads independently, so one dead service never
+/// blanks the rest.
 struct HubView: View {
     @EnvironmentObject private var settings: AppSettings
     @ObservedObject var model: HubViewModel
     var onAsk: ((String) -> Void)? = nil
+    /// Home's chips jump to another tab (Hub for alerts; Media's Services or
+    /// drive card); RootView switches tabs.
+    var onNavigate: ((HubFocus) -> Void)? = nil
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.dynamicTypeSize) private var typeSize
     @State private var isVisible = false
     @State private var showingSettings = false
     @State private var showingMediaRequest = false
     @State private var diagnosisTarget: DiagnosisTarget?
-    @State private var completingTask: MaintenanceTask?
-    @State private var addingMaintenance = false
+    /// The Media card just jumped to, outlined briefly so the eye lands on it.
+    @State private var highlightedCard: String?
+    @State private var todoSheet: TodoSheet.Mode?
 
     struct DiagnosisTarget: Identifiable {
         let title: String
@@ -23,13 +28,17 @@ struct HubView: View {
     @State private var holdsPolling = false
     private let focus: HubFocus
 
-    /// Home carries the day (alerts, Now, maintenance, quick actions);
-    /// Media carries requests, the drive, transfers, the arr queues and links.
-    enum HubFocus { case today, media }
+    /// Home is JARVIS himself: the reactor, a quick look, the next
+    /// assessment and the to-do list. Hub is the house and the day in full
+    /// (alerts, repairs, Now, maintenance, switches). Media carries the
+    /// machinery: requests, the drive, transfers, queues, links, services.
+    enum HubFocus { case home, hub, media }
 
-    init(model: HubViewModel, onAsk: ((String) -> Void)? = nil, focus: HubFocus = .today) {
+    init(model: HubViewModel, onAsk: ((String) -> Void)? = nil,
+         onNavigate: ((HubFocus) -> Void)? = nil, focus: HubFocus = .home) {
         self.model = model
         self.onAsk = onAsk
+        self.onNavigate = onNavigate
         self.focus = focus
     }
 
@@ -39,35 +48,40 @@ struct HubView: View {
 
     var body: some View {
         NavigationStack {
-            ScrollView {
-                LazyVStack(spacing: 14) {
-                    switch focus {
-                    case .today:
-                        header
-                        overview
-                        if !attentionAlerts.isEmpty { needsAttentionCard }
-                        if !visibleRepairs.isEmpty { repairsCard }
-                        nowCard
-                        if model.maintenance.value != nil { maintenanceCard }
-                        if onAsk != nil { briefingShortcut }
-                        quickActionsCard
-                        servicesCard
-                    case .media:
-                        requestMediaButton
-                        storageCard
-                        torrentsCard
-                        mediaCard
-                        linksCard
+            ScrollViewReader { proxy in
+                ScrollView {
+                    LazyVStack(spacing: 16) {
+                        switch focus {
+                        case .home:
+                            hero
+                            homeTiles
+                        case .hub:
+                            if !attentionAlerts.isEmpty { needsAttentionCard }
+                            if !visibleRepairs.isEmpty { repairsCard }
+                            nowCard
+                            if model.maintenance.value != nil { maintenanceCard }
+                            quickActionsCard
+                        case .media:
+                            requestMediaButton
+                            storageCard.highlight(highlightedCard == "storage").id("storage")
+                            torrentsCard
+                            mediaCard
+                            linksCard
+                            servicesCard.highlight(highlightedCard == "services").id("services")
+                        }
                     }
+                    .frame(maxWidth: 760)
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 28)
+                    .frame(maxWidth: .infinity)
                 }
-                .frame(maxWidth: 760)
-                .padding(.horizontal, 16)
-                .padding(.bottom, 28)
-                .frame(maxWidth: .infinity)
+                .onAppear { jump(proxy) }
+                .onChange(of: model.mediaScrollTarget) { jump(proxy) }
             }
             .refreshable { await model.refreshAll() }
             .background { JarvisBackdrop() }
-            .navigationTitle(focus == .media ? "Media" : "Home")
+            .navigationTitle(focus == .media ? "Media" : focus == .hub ? "Hub" : "Home")
+            .toolbar(focus == .home ? .hidden : .automatic, for: .navigationBar)
             .navigationDestination(for: MaintenanceRoute.self) { route in
                 switch route {
                 case .all: MaintenanceListView(model: model)
@@ -75,8 +89,7 @@ struct HubView: View {
                 }
             }
             .sheet(isPresented: $showingSettings) { SettingsView() }
-            .sheet(item: $completingTask) { MaintenanceCompleteSheet(model: model, task: $0) }
-            .sheet(isPresented: $addingMaintenance) { MaintenanceEditor(model: model, task: nil) }
+            .sheet(item: $todoSheet) { TodoSheet(model: model, startAdding: $0 == .add) }
             .sheet(item: $diagnosisTarget) { target in
                 MediaDiagnosisView(title: target.title, kind: target.kind,
                                    makeClient: { try JarvisAPIClient.make(from: settings) })
@@ -138,87 +151,223 @@ struct HubView: View {
         }
     }
 
-    private var header: some View {
-        HStack(spacing: 12) {
-            VStack(alignment: .leading, spacing: 6) {
-                Text(Date.now, format: .dateTime.weekday(.wide).month(.abbreviated).day())
-                    .font(.caption.weight(.semibold))
+    /// The Media tab scrolls to the card a Home chip asked for, then
+    /// outlines it for a moment.
+    private func jump(_ proxy: ScrollViewProxy) {
+        guard focus == .media, let target = model.mediaScrollTarget else { return }
+        model.mediaScrollTarget = nil
+        Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(150))
+            withAnimation(.easeInOut(duration: 0.45)) { proxy.scrollTo(target, anchor: .top) }
+            withAnimation(.easeOut(duration: 0.25)) { highlightedCard = target }
+            try? await Task.sleep(for: .seconds(1.4))
+            withAnimation(.easeOut(duration: 0.6)) { highlightedCard = nil }
+        }
+    }
+
+    /// The reactor is the centrepiece; tapping it starts a briefing.
+    private var hero: some View {
+        VStack(spacing: 16) {
+            Button { onAsk?("Give me a briefing on my day and anything that needs my attention.") } label: {
+                JarvisCoreMark(size: typeSize.isAccessibilitySize ? 150 : 220)
+            }
+            .buttonStyle(CockpitButtonStyle())
+            .disabled(onAsk == nil)
+            .accessibilityLabel("Brief me")
+            .accessibilityHint("Starts a briefing with JARVIS")
+            .padding(.top, 6)
+
+            VStack(spacing: 6) {
+                Text(Self.greeting(at: .now))
+                    .font(.largeTitle.weight(.semibold))
+                    .multilineTextAlignment(.center)
+                Text(Date.now, format: .dateTime.weekday(.wide).month(.wide).day())
+                    .font(.subheadline.weight(.medium))
                     .foregroundStyle(JarvisTheme.cyan)
-                Text("A little ahead of everything.")
-                    .font(.title.weight(.semibold))
-                Text("Your day. Your home. Your JARVIS.")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
             }
-            Spacer(minLength: 0)
-            if !typeSize.isAccessibilitySize { JarvisCoreMark(size: 66) }
-        }
-        .padding(.top, 18)
-        .padding(.bottom, 2)
-    }
 
-    private var overview: some View {
-        LazyVGrid(columns: columns, spacing: 10) {
-            metric("Systems", value: serviceSummary, symbol: "server.rack",
-                   tint: offlineServiceCount == 0 ? JarvisTheme.success : JarvisTheme.amber)
-            metric("Media free", value: storageFreeSummary,
-                   symbol: "externaldrive", tint: JarvisTheme.cyan)
-        }
-    }
-
-    private func metric(_ title: String, value: String, symbol: String, tint: Color) -> some View {
-        HStack(spacing: 12) {
-            Image(systemName: symbol)
-                .font(.system(size: 18, weight: .medium))
-                .foregroundStyle(tint)
-                .frame(width: 36, height: 36)
-                .background(tint.opacity(0.11), in: .circle)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(value).font(.title3.monospacedDigit().weight(.semibold)).lineLimit(1).minimumScaleFactor(0.7)
-                Text(title)
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 8) { systemsChip; storageChip }
+                VStack(spacing: 8) { systemsChip; storageChip }
+            }
+            if attentionCount > 0 { attentionChip }
+            if onAsk != nil {
+                Text("Tap the reactor for a briefing")
                     .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(typeSize.isAccessibilitySize ? nil : 1)
+                    .foregroundStyle(.tertiary)
             }
-            Spacer(minLength: 0)
         }
-        .padding(13)
-        .frame(maxWidth: .infinity, minHeight: 72)
-        .background(JarvisTheme.panelGradient, in: .rect(cornerRadius: 18))
-        .overlay(RoundedRectangle(cornerRadius: 18).strokeBorder(JarvisTheme.border))
+        .frame(maxWidth: .infinity)
+        .padding(.bottom, 8)
     }
 
-    private var serviceSummary: String {
-        guard let services = model.services.value, !services.isEmpty else { return "—" }
-        return "\(services.filter(\.up).count)/\(services.count)"
+    static func greeting(at date: Date, calendar: Calendar = .current) -> String {
+        switch calendar.component(.hour, from: date) {
+        case 5..<12: return "Good morning, sir."
+        case 12..<17: return "Good afternoon, sir."
+        case 17..<22: return "Good evening, sir."
+        default: return "Burning the midnight oil, sir?"
+        }
+    }
+
+    private var systemsChip: some View {
+        let services = model.services.value ?? []
+        let down = services.filter { !$0.up }.count
+        let text: String
+        let tint: Color
+        if services.isEmpty {
+            (text, tint) = ("Checking systems…", Color.secondary)
+        } else if down == 0 {
+            (text, tint) = ("All \(services.count) systems nominal", JarvisTheme.success)
+        } else {
+            (text, tint) = ("\(down) of \(services.count) systems down", JarvisTheme.critical)
+        }
+        return heroChip(text, symbol: down == 0 ? "checkmark.shield" : "exclamationmark.shield", tint: tint) {
+            openMedia("services")
+        }
+    }
+
+    @ViewBuilder
+    private var storageChip: some View {
+        if let storage = model.storage.value, storage.error.isEmpty {
+            heroChip("\(Self.bytes(storage.freeBytes)) free", symbol: "externaldrive",
+                     tint: storage.usedFraction > 0.9 ? JarvisTheme.amber : JarvisTheme.cyan) {
+                openMedia("storage")
+            }
+        }
+    }
+
+    private func heroChip(_ text: String, symbol: String, tint: Color, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Label(text, systemImage: symbol)
+                .font(.footnote.weight(.semibold).monospacedDigit())
+                .foregroundStyle(tint)
+                .padding(.horizontal, 13)
+                .padding(.vertical, 8)
+                .background(tint.opacity(0.11), in: .capsule)
+                .overlay(Capsule().strokeBorder(tint.opacity(0.28)))
+        }
+        .buttonStyle(CockpitButtonStyle())
+        .disabled(onNavigate == nil)
+    }
+
+    /// Alerts and fixes awaiting approval, shown on Home as one chip.
+    private var attentionCount: Int {
+        attentionAlerts.count + visibleRepairs.filter(\.isPending).count
+    }
+
+    private var attentionChip: some View {
+        let critical = attentionAlerts.contains { $0.severity == "critical" }
+        return heroChip(attentionCount == 1 ? "1 thing needs you" : "\(attentionCount) things need you",
+                        symbol: "exclamationmark.triangle",
+                        tint: critical ? JarvisTheme.critical : JarvisTheme.amber) {
+            onNavigate?(.hub)
+        }
     }
 
     private var offlineServiceCount: Int {
         model.services.value?.filter { !$0.up }.count ?? 0
     }
 
-    private var storageFreeSummary: String {
-        guard let storage = model.storage.value, storage.error.isEmpty else { return "—" }
-        return Self.bytes(storage.freeBytes)
+    private func openMedia(_ card: String) {
+        model.mediaScrollTarget = card
+        onNavigate?(.media)
     }
 
-    private var briefingShortcut: some View {
-        Button { onAsk?("Give me a briefing on my day and anything that needs my attention.") } label: {
-            HStack(spacing: 14) {
-                Image(systemName: "waveform").font(.title2).foregroundStyle(JarvisTheme.cyan)
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Bring me up to speed").font(.subheadline.weight(.semibold))
-                    Text("Start a briefing with JARVIS").font(.caption).foregroundStyle(.secondary)
-                }
-                Spacer()
-                Image(systemName: "arrow.up.right").foregroundStyle(JarvisTheme.cyan)
-            }.padding(18).background(JarvisTheme.panelGradient, in: .rect(cornerRadius: 20))
-                .overlay(RoundedRectangle(cornerRadius: 20).strokeBorder(JarvisTheme.border))
-        }.buttonStyle(CockpitButtonStyle())
+    // MARK: - Home: next up and to-dos
+
+    /// The soonest assessment day, every assessment on it.
+    private var nextAssessments: [AcademicEvent] {
+        let events = model.now.value?.academicEvents ?? []
+        guard let soonest = events.map(\.daysLeft).min() else { return [] }
+        return events.filter { $0.daysLeft == soonest }
+    }
+
+    /// Next up and the to-do count, side by side (stacked at accessibility
+    /// sizes).
+    private var homeTiles: some View {
+        let layout = typeSize.isAccessibilitySize
+            ? AnyLayout(VStackLayout(spacing: 12))
+            : AnyLayout(HStackLayout(alignment: .top, spacing: 12))
+        return layout {
+            nextUpTile
+            todoTile
+        }
+        .fixedSize(horizontal: false, vertical: true)
+    }
+
+    private var nextUpTile: some View {
+        let events = nextAssessments
+        return VStack(alignment: .leading, spacing: 6) {
+            tileHeading("Next up", symbol: "graduationcap")
+            if let first = events.first {
+                Text(first.title)
+                    .font(.subheadline.weight(.semibold))
+                    .lineLimit(2)
+                Text(Self.sentenceCase(Self.academicCountdown(first.daysLeft))
+                     + (events.count > 1 ? " · +\(events.count - 1) more" : ""))
+                    .font(.caption.weight(.semibold).monospacedDigit())
+                    .foregroundStyle(first.daysLeft <= 1 ? JarvisTheme.amber : .secondary)
+            } else {
+                Text(model.now.value == nil ? "…" : "Nothing due")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer(minLength: 0)
+        }
+        .homeTile()
+        .accessibilityElement(children: .combine)
+    }
+
+    private var todoTile: some View {
+        let count = TodoSheet.items(model).count
+        return Button { todoSheet = .list } label: {
+            VStack(alignment: .leading, spacing: 2) {
+                tileHeading("To do", symbol: "checklist")
+                Text("\(count)")
+                    .font(.system(size: 34, weight: .semibold, design: .rounded).monospacedDigit())
+                    .foregroundStyle(count == 0 ? .secondary : .primary)
+                    .contentTransition(.numericText())
+                Spacer(minLength: 0)
+            }
+            .homeTile()
+        }
+        .buttonStyle(CockpitButtonStyle())
+        .accessibilityLabel("To do, \(count)")
+        .overlay(alignment: .topTrailing) {
+            Button { todoSheet = .add } label: {
+                Image(systemName: "plus")
+                    .font(.footnote.weight(.bold))
+                    .foregroundStyle(JarvisTheme.cyan)
+                    .frame(width: 30, height: 30)
+                    .background(JarvisTheme.cyan.opacity(0.14), in: .circle)
+                    .frame(width: 44, height: 44)
+            }
+            .padding(4)
+            .accessibilityLabel("Add a to-do")
+        }
+        .animation(.snappy, value: count)
+    }
+
+    private func tileHeading(_ title: String, symbol: String) -> some View {
+        Label(title, systemImage: symbol)
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(JarvisTheme.cyan)
+            .padding(.bottom, 2)
+    }
+
+    private static func sentenceCase(_ text: String) -> String {
+        text.prefix(1).uppercased() + text.dropFirst().lowercased()
+    }
+
+    /// The next few assessments, two weeks out at most; the rest can wait.
+    private var upcomingAssessments: [AcademicEvent] {
+        Array((model.now.value?.academicEvents ?? []).filter { $0.daysLeft <= 14 }.prefix(7))
     }
 
     private var nowCard: some View {
-        CockpitPanel("Now", symbol: "clock.badge", trailing: {
+        let assessments = upcomingAssessments
+        return CockpitPanel("Now", symbol: "clock.badge", trailing: {
             if let snapshot = model.now.value {
                 StatusPill(
                     text: model.nowSnapshotIsStale ? "Stale" : "Live",
@@ -263,14 +412,13 @@ struct HubView: View {
                             .font(.caption).foregroundStyle(.secondary)
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .padding(.vertical, 8)
-                        if !snapshot.academicEvents.isEmpty || !snapshot.maintenance.isEmpty
-                            || !snapshot.timers.isEmpty || !snapshot.reminders.isEmpty { divider }
+                        if !assessments.isEmpty || !snapshot.timers.isEmpty || !snapshot.reminders.isEmpty { divider }
                     }
 
-                    if !snapshot.academicEvents.isEmpty {
+                    if !assessments.isEmpty {
                         feedHeading("UPCOMING ASSESSMENTS",
                                     detail: settings.studyAlertsEnabled ? "COUNTDOWN" : "ALERTS OFF")
-                        ForEach(Array(snapshot.academicEvents.enumerated()), id: \.element.id) { index, event in
+                        ForEach(Array(assessments.enumerated()), id: \.element.id) { index, event in
                             nowRow(symbol: "graduationcap.fill", tint: JarvisTheme.blue) {
                                 VStack(alignment: .leading, spacing: 3) {
                                     Text(event.title).font(.subheadline.weight(.medium)).lineLimit(2)
@@ -279,27 +427,7 @@ struct HubView: View {
                                         .foregroundStyle(event.daysLeft <= 1 ? JarvisTheme.amber : .secondary)
                                 }
                             }
-                            if index < snapshot.academicEvents.count - 1 { divider }
-                        }
-                        if !snapshot.maintenance.isEmpty || !snapshot.timers.isEmpty || !snapshot.reminders.isEmpty { divider }
-                    }
-
-                    if !snapshot.maintenance.isEmpty {
-                        feedHeading("MAINTENANCE")
-                        ForEach(Array(snapshot.maintenance.enumerated()), id: \.element.id) { index, task in
-                            NavigationLink(value: MaintenanceRoute.task(task.id)) {
-                                nowRow(symbol: task.symbol, tint: task.isOverdue ? .red : JarvisTheme.amber) {
-                                    VStack(alignment: .leading, spacing: 3) {
-                                        Text(task.name).font(.subheadline.weight(.medium)).lineLimit(2)
-                                        Text(task.countdown)
-                                            .font(.caption.monospacedDigit().weight(.semibold))
-                                            .foregroundStyle(task.tint)
-                                    }
-                                }
-                                .contentShape(Rectangle())
-                            }
-                            .buttonStyle(.plain)
-                            if index < snapshot.maintenance.count - 1 { divider }
+                            if index < assessments.count - 1 { divider }
                         }
                         if !snapshot.timers.isEmpty || !snapshot.reminders.isEmpty { divider }
                     }
@@ -307,7 +435,7 @@ struct HubView: View {
                     ForEach(Array(snapshot.timers.enumerated()), id: \.element.id) { index, timer in
                         nowRow(
                             symbol: timer.state == "alarming" ? "alarm.waves.left.and.right.fill" : "timer",
-                            tint: timer.state == "alarming" ? .red : JarvisTheme.cyan
+                            tint: timer.state == "alarming" ? JarvisTheme.critical : JarvisTheme.cyan
                         ) {
                             VStack(alignment: .leading, spacing: 3) {
                                 Text(timer.label).font(.subheadline.weight(.medium)).lineLimit(1)
@@ -317,7 +445,7 @@ struct HubView: View {
                                             ? max(0, Int(timer.expiresAt - context.date.timeIntervalSince1970))
                                             : timer.remainingSeconds, state: timer.state))
                                     .font(.caption.monospacedDigit().weight(.medium))
-                                    .foregroundStyle(timer.state == "alarming" ? .red : .secondary)
+                                    .foregroundStyle(timer.state == "alarming" ? JarvisTheme.critical : .secondary)
                                 }
                             }
                         }
@@ -340,7 +468,7 @@ struct HubView: View {
                         if index < snapshot.reminders.count - 1 { divider }
                     }
 
-                    if snapshot.nextEvent == nil && snapshot.academicEvents.isEmpty && snapshot.maintenance.isEmpty
+                    if snapshot.nextEvent == nil && assessments.isEmpty
                         && snapshot.timers.isEmpty && snapshot.reminders.isEmpty && snapshot.calendarError.isEmpty {
                         quietState("Nothing needs your attention.", symbol: "checkmark.circle")
                     }
@@ -370,48 +498,38 @@ struct HubView: View {
         .padding(.top, 9)
     }
 
-    /// The soonest few; overdue and due ones read in the warning colours.
-    /// The check button logs a completion; the row opens the history.
+    /// One line: how many are due and what's next. Tap in to manage.
     private var maintenanceCard: some View {
         let tasks = model.maintenance.value ?? []
         let attention = tasks.filter(\.needsAttention).count
-        return CockpitPanel("Maintenance", symbol: "hammer", trailing: {
-            if attention > 0 {
-                StatusPill(text: "\(attention) due", color: tasks.contains(where: \.isOverdue) ? .red : JarvisTheme.amber)
-            }
-        }) {
-            if let error = model.maintenance.failureText { errorRow(error) }
-            if tasks.isEmpty { quietState("Nothing tracked yet.", symbol: "hammer") }
-            VStack(spacing: 0) {
-                ForEach(Array(tasks.prefix(4).enumerated()), id: \.element.id) { index, task in
-                    HStack(spacing: 8) {
-                        NavigationLink(value: MaintenanceRoute.task(task.id)) {
-                            MaintenanceRow(task: task).contentShape(Rectangle())
-                        }
-                        .buttonStyle(.plain)
-                        Button { completingTask = task } label: {
-                            Image(systemName: "checkmark")
-                                .font(.caption.weight(.bold))
-                                .frame(width: 44, height: 44)
-                                .background(JarvisTheme.cyan.opacity(0.11), in: .circle)
-                        }
-                        .accessibilityLabel("Mark \(task.name) done")
+        return NavigationLink(value: MaintenanceRoute.all) {
+            CockpitPanel("Maintenance", symbol: "hammer", trailing: {
+                if attention > 0 {
+                    StatusPill(text: "\(attention) due", color: tasks.contains(where: \.isOverdue) ? JarvisTheme.critical : JarvisTheme.amber)
+                }
+                Image(systemName: "chevron.right")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.tertiary)
+            }) {
+                if let error = model.maintenance.failureText {
+                    errorRow(error)
+                } else if let next = tasks.first {
+                    HStack {
+                        Text("Next: \(next.name)").lineLimit(1)
+                        Spacer()
+                        Text(next.countdown)
+                            .font(.footnote.monospacedDigit().weight(.semibold))
+                            .foregroundStyle(next.tint)
                     }
-                    .padding(.vertical, 5)
-                    if index < min(tasks.count, 4) - 1 { divider }
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                } else {
+                    Text("Nothing tracked yet.").font(.footnote).foregroundStyle(.secondary)
                 }
             }
-            HStack {
-                Button("Add", systemImage: "plus") { addingMaintenance = true }
-                Spacer()
-                if tasks.count > 4 {
-                    NavigationLink("All \(tasks.count) tasks", value: MaintenanceRoute.all)
-                }
-            }
-            .font(.footnote.weight(.semibold))
-            .tint(JarvisTheme.cyan)
-            .padding(.top, 4)
+            .foregroundStyle(.primary)
         }
+        .buttonStyle(CockpitButtonStyle())
     }
 
     private func nowRow<Content: View>(
@@ -482,7 +600,7 @@ struct HubView: View {
                         VStack(alignment: .leading, spacing: 3) {
                             HStack {
                                 Circle()
-                                    .fill(alert.severity == "critical" ? Color.red : JarvisTheme.amber)
+                                    .fill(alert.severity == "critical" ? JarvisTheme.critical : JarvisTheme.amber)
                                     .frame(width: 8, height: 8)
                                 Text(alert.title).font(.subheadline.weight(.medium))
                                 Spacer()
@@ -577,7 +695,7 @@ struct HubView: View {
         CockpitPanel("Services", symbol: "dot.radiowaves.left.and.right", trailing: {
             if let services = model.services.value, !services.isEmpty {
                 StatusPill(text: offlineServiceCount == 0 ? "Nominal" : "\(offlineServiceCount) down",
-                           color: offlineServiceCount == 0 ? JarvisTheme.success : JarvisTheme.amber)
+                           color: offlineServiceCount == 0 ? JarvisTheme.success : JarvisTheme.critical)
             }
         }) {
             if let error = model.services.failureText { errorRow(error) }
@@ -586,9 +704,9 @@ struct HubView: View {
                     ForEach(Array(services.enumerated()), id: \.element.id) { index, service in
                         HStack(spacing: 11) {
                             Circle()
-                                .fill(service.up ? JarvisTheme.success : .red)
+                                .fill(service.up ? JarvisTheme.success : JarvisTheme.critical)
                                 .frame(width: 8, height: 8)
-                                .shadow(color: (service.up ? JarvisTheme.success : .red).opacity(0.55), radius: 4)
+                                .shadow(color: (service.up ? JarvisTheme.success : JarvisTheme.critical).opacity(0.55), radius: 4)
                             Text(service.name).font(.subheadline.weight(.medium))
                             Spacer()
                             Text(serviceDetail(service))
@@ -751,6 +869,7 @@ struct HubView: View {
         .padding(.vertical, 4)
     }
 
+    /// Small tap-to-toggle tiles, three across. Lit means on.
     private var quickActionsCard: some View {
         CockpitPanel("Home", symbol: "house.lodge") {
             if let error = model.entities.failureText { errorRow(error) }
@@ -758,31 +877,44 @@ struct HubView: View {
                 if entities.isEmpty && model.entities.serverError.isEmpty {
                     quietState("No quick actions configured.", symbol: "slider.horizontal.3")
                 }
-                VStack(spacing: 0) {
-                    ForEach(Array(entities.enumerated()), id: \.element.id) { index, entity in
-                        Toggle(isOn: Binding(
-                            get: { model.pendingEntityStates[entity.entityID] ?? entity.isOn },
-                            set: { model.toggle(entity, to: $0) }
-                        )) {
-                            HStack(spacing: 11) {
-                                Image(systemName: Self.homeIcon(for: entity.domain))
-                                    .foregroundStyle(entity.isOn ? JarvisTheme.amber : .secondary)
-                                    .frame(width: 24)
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(entity.friendlyName).font(.subheadline.weight(.medium))
-                                    Text(entity.state.capitalized)
-                                        .font(.caption).foregroundStyle(.secondary)
-                                }
-                            }
-                        }
-                        .tint(JarvisTheme.cyan)
-                        .padding(.vertical, 9)
-                        .disabled(!entity.isToggleable || model.pendingEntityStates[entity.entityID] != nil || model.entities.failureText != nil)
-                        if index < entities.count - 1 { divider }
-                    }
+                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8),
+                                          count: typeSize.isAccessibilitySize ? 2 : 3), spacing: 8) {
+                    ForEach(entities) { entityTile($0) }
                 }
             } else if model.entities.isLoading { loadingRow }
         }
+    }
+
+    private func entityTile(_ entity: HomeEntity) -> some View {
+        let pending = model.pendingEntityStates[entity.entityID]
+        let on = pending ?? entity.isOn
+        let tint = on ? JarvisTheme.amber : Color.secondary
+        return Button { model.toggle(entity, to: !on) } label: {
+            VStack(alignment: .leading, spacing: 6) {
+                HStack {
+                    Image(systemName: Self.homeIcon(for: entity.domain))
+                        .font(.subheadline)
+                        .foregroundStyle(tint)
+                    Spacer(minLength: 0)
+                    if pending != nil { ProgressView().controlSize(.mini) }
+                }
+                Text(entity.friendlyName)
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(.primary)
+                    .lineLimit(2, reservesSpace: true)
+                    .multilineTextAlignment(.leading)
+            }
+            .padding(10)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background((on ? JarvisTheme.amber.opacity(0.14) : JarvisTheme.cyan.opacity(0.05)), in: .rect(cornerRadius: 12))
+            .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(on ? JarvisTheme.amber.opacity(0.4) : JarvisTheme.border))
+        }
+        .buttonStyle(CockpitButtonStyle())
+        .disabled(!entity.isToggleable || pending != nil || model.entities.failureText != nil)
+        .animation(.easeOut(duration: 0.2), value: on)
+        .accessibilityLabel(entity.friendlyName)
+        .accessibilityValue(entity.state.capitalized)
+        .accessibilityAddTraits(on ? .isSelected : [])
     }
 
     private var linksCard: some View {
@@ -897,5 +1029,27 @@ struct HubView: View {
         if minutes < 60 { return "\(prefix)\(minutes)m remaining" }
         let hours = minutes / 60
         return "\(prefix)\(hours)h \(minutes % 60)m remaining"
+    }
+}
+
+private extension View {
+    /// The half-width Home tiles: a smaller CockpitPanel.
+    func homeTile() -> some View {
+        padding(14)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            .frame(minHeight: 96)
+            .background(JarvisTheme.panelGradient, in: .rect(cornerRadius: 20))
+            .overlay(RoundedRectangle(cornerRadius: 20).strokeBorder(JarvisTheme.border))
+    }
+
+    /// A brief accent outline around a card Home jumped to.
+    func highlight(_ on: Bool) -> some View {
+        overlay {
+            RoundedRectangle(cornerRadius: 20)
+                .strokeBorder(JarvisTheme.cyan, lineWidth: 2)
+                .shadow(color: JarvisTheme.cyan.opacity(0.6), radius: 8)
+                .opacity(on ? 1 : 0)
+                .allowsHitTesting(false)
+        }
     }
 }

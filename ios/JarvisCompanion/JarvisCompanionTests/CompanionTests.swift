@@ -258,6 +258,7 @@ final class CompanionTests: XCTestCase {
         let hub = HubViewModel(settings: settings, clientFactory: { client })
         await hub.refreshAll()
         await snapshot(HubView(model: hub), name: "Hub — home")
+        await snapshot(HubView(model: hub, focus: .hub), name: "Hub — hub")
         await snapshot(HubView(model: hub, focus: .media), name: "Hub — media")
         await snapshot(NavigationStack { MaintenanceListView(model: hub) }, name: "Maintenance — all")
         await snapshot(NavigationStack { MaintenanceDetailView(model: hub, taskID: 1) }, name: "Maintenance — detail")

@@ -1,8 +1,8 @@
 import SwiftUI
 
-/// Top-level shell, hub-first: Home (default) and Media are dedicated Hub
-/// tabs over one shared HubViewModel, Chat keeps its whole NavigationStack,
-/// and Settings is the only place settings live.
+/// Top-level shell: Media, Hub and Home (default, in the middle) are HubView tabs over one
+/// shared HubViewModel, Chat keeps its whole NavigationStack, and Settings is
+/// the only place settings live.
 struct RootView: View {
     @EnvironmentObject private var settings: AppSettings
     @ObservedObject var chat: ChatViewModel
@@ -15,19 +15,25 @@ struct RootView: View {
     @AppStorage(JarvisPalette.storageKey) private var palette = JarvisPalette.arc.rawValue
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-    enum RootTab: Hashable, CaseIterable { case home, media, chat, settings }
+    /// Tab-bar (and swipe) order: Home sits in the middle.
+    enum RootTab: Hashable, CaseIterable { case media, hub, home, chat, settings }
 
     var body: some View {
         TabView(selection: $selection) {
-            HubView(model: hub, onAsk: ask, focus: .today)
-                .swipePage(swipeOffset)
-                .tabItem { Label("Home", systemImage: "house") }
-                .tag(RootTab.home)
-
             HubView(model: hub, onAsk: ask, focus: .media)
                 .swipePage(swipeOffset)
                 .tabItem { Label("Media", systemImage: "play.rectangle.on.rectangle") }
                 .tag(RootTab.media)
+
+            HubView(model: hub, onAsk: ask, onNavigate: navigate, focus: .hub)
+                .swipePage(swipeOffset)
+                .tabItem { Label("Hub", systemImage: "square.grid.2x2") }
+                .tag(RootTab.hub)
+
+            HubView(model: hub, onAsk: ask, onNavigate: navigate, focus: .home)
+                .swipePage(swipeOffset)
+                .tabItem { Label("Home", systemImage: "house") }
+                .tag(RootTab.home)
 
             ChatView(model: chat)
                 .swipePage(swipeOffset)
@@ -40,7 +46,7 @@ struct RootView: View {
                 .tag(RootTab.settings)
         }
         .id(palette)
-        .tint(JarvisTheme.cyan)
+        .tint(JarvisTheme.reactor)
         .simultaneousGesture(DragGesture(minimumDistance: 30).onChanged(track).onEnded(swipe))
         .sensoryFeedback(.selection, trigger: selection)
         .onChange(of: settings.studyAlertsEnabled) { Task { await hub.updateNotificationPreferences() } }
@@ -81,6 +87,17 @@ struct RootView: View {
         selection = next
         guard !reduceMotion else { return }
         swipeOffset = dx < 0 ? 140 : -140
+        withAnimation(.spring(duration: 0.35, bounce: 0.12)) { swipeOffset = 0 }
+    }
+
+    /// Home's chips: slide over to Hub or Media (which scrolls to the card).
+    private func navigate(_ focus: HubView.HubFocus) {
+        let target: RootTab = focus == .media ? .media : focus == .hub ? .hub : .home
+        guard target != selection, let from = RootTab.allCases.firstIndex(of: selection),
+              let to = RootTab.allCases.firstIndex(of: target) else { return }
+        selection = target
+        guard !reduceMotion else { return }
+        swipeOffset = to > from ? 140 : -140
         withAnimation(.spring(duration: 0.35, bounce: 0.12)) { swipeOffset = 0 }
     }
 

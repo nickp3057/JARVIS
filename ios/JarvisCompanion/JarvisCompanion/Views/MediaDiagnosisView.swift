@@ -38,7 +38,7 @@ struct MediaDiagnosisView: View {
                         }
                     }
                 } else if let error {
-                    Label(error, systemImage: "wifi.exclamationmark").foregroundStyle(.orange)
+                    Label(error, systemImage: "wifi.exclamationmark").foregroundStyle(JarvisTheme.amber)
                 } else {
                     HStack { ProgressView(); Text("Tracing \(title)…").foregroundStyle(.secondary) }
                 }
@@ -70,7 +70,7 @@ struct MediaDiagnosisView: View {
     private func color(_ status: String) -> Color {
         switch status {
         case "ok": return JarvisTheme.cyan
-        case "fail": return .red
+        case "fail": return JarvisTheme.critical
         case "pending": return JarvisTheme.amber
         default: return .secondary
         }

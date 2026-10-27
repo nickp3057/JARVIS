@@ -5,7 +5,7 @@ import SwiftUI
 extension MaintenanceTask {
     var tint: Color {
         switch status {
-        case "overdue": return .red
+        case "overdue": return JarvisTheme.critical
         case "due", "soon": return JarvisTheme.amber
         default: return .secondary
         }
@@ -26,16 +26,21 @@ enum MaintenanceRoute: Hashable {
     case task(Int)
 }
 
-/// Every task, pushed from the Home card's "All tasks".
+/// Every task, pushed from the Hub's Maintenance card. Swipe right to log one done.
 struct MaintenanceListView: View {
     @ObservedObject var model: HubViewModel
     @State private var editing = false
+    @State private var completing: MaintenanceTask?
 
     var body: some View {
         List {
             if let tasks = model.maintenance.value {
                 ForEach(tasks) { task in
                     NavigationLink(value: MaintenanceRoute.task(task.id)) { MaintenanceRow(task: task) }
+                        .swipeActions(edge: .leading) {
+                            Button("Done", systemImage: "checkmark") { completing = task }
+                                .tint(JarvisTheme.success)
+                        }
                 }
             }
         }
@@ -48,6 +53,7 @@ struct MaintenanceListView: View {
             }
         }
         .sheet(isPresented: $editing) { MaintenanceEditor(model: model, task: nil) }
+        .sheet(item: $completing) { MaintenanceCompleteSheet(model: model, task: $0) }
         .refreshable { await model.refreshMaintenance() }
     }
 }
@@ -109,6 +115,7 @@ struct MaintenanceDetailView: View {
                     Button { completing = true } label: {
                         Label("Mark done", systemImage: "checkmark.circle.fill")
                             .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(JarvisTheme.backgroundDeep)
                             .frame(maxWidth: .infinity)
                     }
                     .buttonStyle(.borderedProminent)

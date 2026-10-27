@@ -50,6 +50,11 @@ final class HubViewModel: ObservableObject {
     @Published private(set) var busyRepairs: Set<String> = []
     /// The alert whose incident report is being gathered (Needs attention tap).
     @Published private(set) var reportingAlertID: Int?
+    /// To-dos checked off on Home: hidden at once, deleted on the server.
+    @Published private(set) var finishedTodoIDs: Set<String> = []
+    /// A Media-tab card ("services", "storage") a Home chip asked to show;
+    /// the Media tab scrolls to it and clears this.
+    @Published var mediaScrollTarget: String?
     /// Transient, user-visible outcome of the last quick action that failed.
     @Published var actionError: String?
     @Published private(set) var nowSnapshotIsStale = false
@@ -245,6 +250,38 @@ final class HubViewModel: ObservableObject {
                 actionError = error.localizedDescription
             }
             await refreshRepairs()
+        }
+    }
+
+    // MARK: - To-dos
+
+    @discardableResult
+    func addTodo(_ text: String) async -> Bool {
+        let text = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return false }
+        do {
+            _ = try await client().addTodo(text)
+        } catch {
+            actionError = error.localizedDescription
+            return false
+        }
+        await refreshNow()
+        return true
+    }
+
+    /// Checked means gone: hide it now, delete it on the server, and bring
+    /// it back only if that fails.
+    func completeTodo(id: String) {
+        guard !finishedTodoIDs.contains(id) else { return }
+        finishedTodoIDs.insert(id)
+        Task {
+            do {
+                try await client().completeTodo(id: id)
+                await refreshNow()
+            } catch {
+                finishedTodoIDs.remove(id)
+                actionError = error.localizedDescription
+            }
         }
     }
 
@@ -459,24 +496,33 @@ final class HubViewModel: ObservableObject {
     // MARK: - Quick actions
 
     /// Optimistically flip an entity, then reconcile with the state the
-    /// server reports back. Any failure reverts the toggle and surfaces why.
+    /// server reports back (Core waits up to two seconds for Home Assistant
+    /// to settle) and once more a few seconds later. Any failure reverts the
+    /// toggle and surfaces why.
     func toggle(_ entity: HomeEntity, to turnOn: Bool) {
         guard pendingEntityStates[entity.entityID] == nil else { return }
         pendingEntityStates[entity.entityID] = turnOn
         Task {
-            defer { pendingEntityStates[entity.entityID] = nil }
             do {
                 let result = try await client().homeControl(
                     entityID: entity.entityID, turnOn: turnOn
                 )
                 if result.error.isEmpty {
                     applyEntityState(entity.entityID, state: result.state ?? (turnOn ? "on" : "off"))
-                } else {
+                }
+                pendingEntityStates[entity.entityID] = nil
+                guard result.error.isEmpty else {
                     actionError = result.error
+                    return
                 }
             } catch {
+                pendingEntityStates[entity.entityID] = nil
                 actionError = error.localizedDescription
+                return
             }
+            // Some devices report in after Core answers; re-read once they have.
+            try? await Task.sleep(for: .seconds(3))
+            await refreshEntities()
         }
     }
 

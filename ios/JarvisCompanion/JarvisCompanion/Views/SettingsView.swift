@@ -195,6 +195,7 @@ struct ThemePicker: View {
                         HStack(spacing: -6) {
                             swatch(option.accent)
                             swatch(option.secondary)
+                            if option.reactor.0 != option.accent.0 { swatch(option.reactor) }
                         }
                         VStack(alignment: .leading, spacing: 2) {
                             Text(option.name).font(.subheadline.weight(.medium)).foregroundStyle(.primary)

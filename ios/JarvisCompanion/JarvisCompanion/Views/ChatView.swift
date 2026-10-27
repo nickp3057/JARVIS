@@ -372,20 +372,13 @@ struct ChatView: View {
                     Text(settings.isConfigured ? "A thought away, sir." : "Let’s get connected.")
                         .font(.largeTitle.weight(.semibold))
                         .multilineTextAlignment(.center)
-                    Text(settings.isConfigured
-                         ? "One secure link to your home, plans, media, and memory."
-                         : "Connect to JARVIS Core to bring your assistant along.")
-                        .font(.subheadline).foregroundStyle(.secondary)
-                        .multilineTextAlignment(.center)
-                }
-                if settings.isConfigured {
-                    VStack(spacing: 10) {
-                        suggestion("Bring me up to speed", symbol: "sun.horizon", prompt: "Give me a briefing.")
-                        suggestion("Check on the house", symbol: "house", prompt: "What’s the status of my home?")
-                        suggestion("What’s downloading?", symbol: "arrow.down.circle", prompt: "Show my download status.")
+                    if !settings.isConfigured {
+                        Text("Connect to JARVIS Core to bring your assistant along.")
+                            .font(.subheadline).foregroundStyle(.secondary)
+                            .multilineTextAlignment(.center)
                     }
-                    .padding(.top, 8)
-                } else {
+                }
+                if !settings.isConfigured {
                     Button("Connect to JARVIS", systemImage: "network") { showingSettings = true }
                         .buttonStyle(.borderedProminent).foregroundStyle(JarvisTheme.background)
                 }
@@ -395,24 +388,6 @@ struct ChatView: View {
             .frame(maxWidth: .infinity)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-    }
-
-    private func suggestion(_ title: String, symbol: String, prompt: String) -> some View {
-        Button {
-            model.draft = prompt
-            composerFocused = true
-        } label: {
-            HStack(spacing: 14) {
-                Image(systemName: symbol).foregroundStyle(JarvisTheme.cyan).frame(width: 22)
-                Text(title).font(.subheadline).foregroundStyle(.primary)
-                Spacer()
-                Image(systemName: "arrow.up.left").font(.caption).foregroundStyle(.secondary)
-            }
-            .padding(16)
-            .background(JarvisTheme.panelGradient, in: .rect(cornerRadius: 18))
-            .overlay(RoundedRectangle(cornerRadius: 18).strokeBorder(JarvisTheme.border))
-        }
-        .buttonStyle(CockpitButtonStyle())
     }
 
     /// One rounded field with the mic and send buttons inside it. Every control
@@ -548,13 +523,13 @@ private struct DebugReportSheet: View {
                 if let sentReportID {
                     Section {
                         Label("Saved as report \(sentReportID)", systemImage: "checkmark.circle.fill")
-                            .foregroundStyle(.green)
+                            .foregroundStyle(JarvisTheme.success)
                     }
                 }
                 if let errorText {
                     Section {
                         Label(errorText, systemImage: "exclamationmark.triangle.fill")
-                            .foregroundStyle(.orange)
+                            .foregroundStyle(JarvisTheme.amber)
                     }
                 }
             }

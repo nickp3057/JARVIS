@@ -297,7 +297,7 @@ Two guarded quick-action routes extend that surface with bounded writes:
 `POST /api/home/control` (on/off only, and only for entities on the
 `HOME_DASHBOARD_ENTITIES` allowlist — the allowlist is the security boundary
 for the app's home surface, not just a display filter; anything else is a
-400) and `POST /api/torrents/control` (pause/resume only). Both delegate to
+400; it waits up to two seconds for Home Assistant to report the new state) and `POST /api/torrents/control` (pause/resume only). Both delegate to
 the integrations' existing guarded paths — `call_discovered_service` with its
 blocked-domain and confirmation gates, and `manage_torrent` with its
 exact-hash and explicit-confirmation gates; `delete_files` is never passed

@@ -560,6 +560,29 @@ struct JarvisAPIClient {
         try await postJSON(RepairActionResult.self, path: "api/repairs/\(id)/\(action)", body: EmptyBody())
     }
 
+    // MARK: - To-dos (open reminders; done deletes)
+
+    private struct TodoBody: Encodable { let text: String }
+
+    func addTodo(_ text: String) async throws -> NowReminder {
+        struct Envelope: Decodable { let todo: NowReminder }
+        return try await postJSON(Envelope.self, path: "api/todos", body: TodoBody(text: text)).todo
+    }
+
+    func completeTodo(id: String) async throws {
+        var request = request(path: "api/todos/\(id)/done", method: "POST")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = Data("{}".utf8)
+        let data: Data
+        let response: URLResponse
+        do {
+            (data, response) = try await session.data(for: request)
+        } catch let error as URLError {
+            throw JarvisAPIError.transport(error)
+        }
+        _ = try validate(response, data: data)
+    }
+
     // MARK: - Maintenance
 
     private struct MaintenanceEnvelope: Decodable { let task: MaintenanceTask }

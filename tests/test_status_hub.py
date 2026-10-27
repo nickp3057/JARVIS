@@ -369,6 +369,21 @@ class QuickActionEndpointTests(unittest.TestCase):
         # entities prime + control readback + entities refetch after invalidation
         self.assertEqual(get.call_count, 3)
 
+    def test_home_control_waits_for_home_assistant_to_settle(self) -> None:
+        # HA acknowledges before the light reports in: the first read is stale.
+        stale = [{"entity_id": "light.desk", "state": "off"}]
+        settled = [{"entity_id": "light.desk", "state": "on"}]
+        with patch.object(status_hub, "get_states", side_effect=[(True, stale), (True, settled)]), \
+                patch.object(status_hub, "call_discovered_service",
+                             return_value="Turn On command sent to light.desk."), \
+                patch.object(status_hub.time, "sleep"):
+            response = self.client.post(
+                "/api/home/control",
+                headers=self.headers,
+                json={"entity_id": "light.desk", "action": "on"},
+            )
+        self.assertEqual(response.json()["state"], "on")
+
     def test_home_control_service_failure_degrades_to_error_field(self) -> None:
         with patch.object(
             status_hub, "call_discovered_service",

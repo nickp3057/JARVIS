@@ -71,6 +71,7 @@ _COMPANION_CAPABILITIES: dict[str, object] = {
         "home_entities": True,
         "service_links": True,
         "maintenance": True,
+        "todos": True,
     },
     "actions": {
         "home_on_off": True,
@@ -417,6 +418,33 @@ def repair_apply(proposal_id: str, _: None = Depends(authorize)) -> dict[str, ob
 @app.post("/api/repairs/{proposal_id}/reject")
 def repair_reject(proposal_id: str, _: None = Depends(authorize)) -> dict[str, object]:
     return {"message": self_repair.reject(proposal_id)}
+
+
+# --- To-dos (open reminders; checking one off deletes it) -------------------
+
+
+class TodoRequest(BaseModel):
+    text: str = Field(min_length=1, max_length=300)
+
+
+@app.post("/api/todos")
+def todo_create(request: TodoRequest, _: None = Depends(authorize)) -> dict[str, object]:
+    from brain.reminders import add_reminder
+    text = request.text.strip()
+    if not text:
+        raise HTTPException(status_code=422, detail="A to-do needs some text")
+    item = add_reminder(text)
+    status_hub.invalidate("now")
+    return {"todo": {"id": item.id, "text": item.text, "due_at": None, "is_due": False}}
+
+
+@app.post("/api/todos/{todo_id}/done")
+def todo_done(todo_id: str, _: None = Depends(authorize)) -> Response:
+    from brain.reminders import remove_reminder
+    if not remove_reminder(todo_id):
+        raise HTTPException(status_code=404, detail="Unknown to-do")
+    status_hub.invalidate("now")
+    return Response(status_code=204)
 
 
 # --- Maintenance (recurring chores with a countdown and a log) -------------

@@ -60,7 +60,7 @@ toolbar).
 
 ## Themes and motion (1.86, simulator tests pass)
 
-- Settings → Theme: Arc / Mark III (`JarvisPalette`; Reactor removed in 1.87, Nick disliked the violet). Mark III's red
+- Settings → Theme: Arc / Mark III / Hot Rod (`JarvisPalette`; Reactor removed in 1.87, Nick disliked the violet; Hot Rod added in 1.91). Mark III's red
   accent sits close to the red "critical" dot; revisit if that confuses.
 - The reactor mark animates at display rate; check smoothness on device with
   Instruments → Animation Hitches (target: no hitches on the Chat empty
@@ -92,6 +92,36 @@ toolbar).
 - Home no longer repeats Media's Launch links or Media drive cards. The
   legacy non-tab "Control Room" mode (focus picker, hub settings button,
   `.home` focus) is removed; `HubView(focus: .today | .media)`.
+
+## Home as JARVIS (1.89, simulator tests pass)
+
+- Home: hero reactor (220 pt, tap = briefing prompt in Chat), greeting by
+  time of day, date, and chips for systems and free space. The chips call
+  `onOpenMedia`; `HubViewModel.mediaScrollTarget` tells the Media tab which
+  card to scroll to and outline. Home hides its navigation bar; pushed
+  maintenance screens keep theirs.
+- Home now holds only: hero, Needs attention, Repairs, Now, Maintenance,
+  quick actions. Services moved to the bottom of Media.
+- Theme: status colours are palette roles; Mark III is gold accent / red
+  secondary / orange warning / reactor-blue success.
+
+## Home / Hub split (1.90, simulator tests pass)
+
+- Tabs: Home / Hub / Media / Chat / Settings (`RootTab`). `HubView(focus:)`
+  is `.home`, `.hub` or `.media`; Home's chips call `onNavigate`.
+- Home: hero, Next up (soonest assessment day), To do (open reminders + due
+  maintenance; quick-add field; check = gone, optimistic via
+  `finishedTodoIDs`). Hub: Needs attention, Repairs, Now, Maintenance, Home
+  switches.
+- 1.91: tabs reordered Media / Hub / Home / Chat / Settings. Next up and
+  To do became half-width tiles (To do = count + "+", list in `TodoSheet`).
+  Hub's Now caps assessments at seven within 14 days and drops maintenance;
+  the Maintenance card is a one-line link into `MaintenanceListView` (swipe
+  right = done). Home switches are three-across tap tiles. Reactor glow no
+  longer pulses. Chat's suggested prompts removed. Third theme Hot Rod
+  (Mark III + cyan `reactor` role for the mark and control tint).
+- Not yet: Charles Schwab "today" glance on Home (Nick wants it eventually;
+  needs a Schwab API integration on Core first).
 
 ## Proposed structure: hub-first
 

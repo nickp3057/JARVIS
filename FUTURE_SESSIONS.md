@@ -230,6 +230,10 @@ the monitor. Pair with the health dashboard so restarts are visible.
   local model with a confidence gate and fall back to Claude.
 - **Voice interruption polish**: barge-in while JARVIS speaks.
 - **Session summaries surfaced on the phone** so a chat picks up context.
+- **Charles Schwab glance on Home** (Nick asked 2026-10-27): today's portfolio
+  change as one line/chip on the companion's Home tab. Needs a read-only
+  Schwab Trader API integration on Core (OAuth app, token refresh) and an
+  endpoint like `/api/portfolio/today`; keep it a quick look, not a trading UI.
 
 ## Known debt to clear when convenient
 

@@ -604,6 +604,50 @@ CALENDAR_ALERT_LEAD_MIN=10  # warn this many minutes before a meeting
 
 ## Recently Shipped
 
+- **Home tiles, Hot Rod theme, switch fix (1.91 / build 93)** — Tab order is
+  Media, Hub, Home, Chat, Settings (Home in the middle, still the default).
+  Home's Next up and To do are now two half-width tiles: Next up shows the
+  soonest assessment and its countdown ("+N more" if several share the day);
+  To do is just the count with a + that opens the list sheet (`TodoSheet`)
+  straight into the add field. Hub's Now card lists at most the next seven
+  assessments within 14 days and no longer repeats maintenance; the
+  Maintenance card is one tappable line ("N due", next task) that opens the
+  full list, where swiping right logs a task done. Home switches are small
+  three-across tap tiles. `POST /api/home/control` now waits up to two
+  seconds for Home Assistant to report the requested state before
+  answering (it used to read back the stale state, so the app's switch
+  bounced), and the app re-reads entities three seconds after a toggle.
+  The reactor's glow no longer breathes (the rings still turn). Chat's empty
+  state dropped the suggested prompts. New theme: Hot Rod, Mark III's gold
+  and red with arc-reactor cyan for the reactor and control tint (the new
+  `reactor` palette role).
+
+- **Home / Hub split, to-dos, smoother reactor, new icon (1.90 / build 92)** —
+  Five tabs: Home, Hub, Media, Chat, Settings. Home is a quick look: the
+  reactor, greeting, chips for systems, free space and "N things need you"
+  (opens Hub). Below that, the next assessment day (every assessment on the
+  soonest day) and a To do list with quick add. To-dos are JARVIS's open
+  reminders (so "remind me to..." lands there too). The app adds them with
+  `POST /api/todos {text}`, and `POST /api/todos/{id}/done` deletes one for
+  good (`reminders.remove_reminder`). Due and overdue maintenance chores also
+  appear as to-dos; checking one logs it. Hub holds everything Home used to:
+  alerts, repairs, Now, maintenance and switches. The reactor animates with
+  scoped `repeatForever` animations instead of a per-frame `TimelineView`,
+  and no longer jumps when it scrolls or tab-switches back into view. The app
+  icon is now the blue reactor wheel.
+
+- **Home as JARVIS, fully themed colours (1.89 / build 91)** — Home opens on
+  a large reactor (tap it for a briefing) with a time-of-day greeting ("Good
+  evening, sir.") and two live chips: systems and free space. Each chip
+  slides to Media, scrolls to the Services or Media drive card, and outlines
+  it briefly. The briefing card and metric tiles are gone, and Services now
+  sits at the bottom of Media. Every status colour now comes from the theme
+  (`JarvisPalette.warning/critical/success`, used through `JarvisTheme.amber`, `.critical` and `.success`;
+  no system red/orange/green left). Mark III was reworked: a gold HUD accent,
+  hot-rod red for Nick's bubbles, molten-orange warnings, red criticals, and
+  arc-reactor blue-white for "nominal". The reactor gains a slowly drifting
+  60-tick HUD dial and a hot core.
+
 - **Maintenance tracker + Home cleanup (1.88 / build 90)** — Recurring chores
   with a countdown and a log (`brain/maintenance.py`, `memory/maintenance.db`).
   Seeded once on first run with Rotate mattress (6 months), Replace car scent
@@ -870,7 +914,8 @@ CALENDAR_ALERT_LEAD_MIN=10  # warn this many minutes before a meeting
   turns an allowlisted entity on or off (entity must be in
   `HOME_DASHBOARD_ENTITIES` — the allowlist is the security boundary, not a
   display filter; non-allowlisted entities and unsupported actions are 400s)
-  and returns the resulting state; it delegates to the guarded
+  and returns the resulting state (polling up to two seconds for Home
+  Assistant to report the requested state); it delegates to the guarded
   `call_discovered_service` path. `POST /api/torrents/control` pauses or
   resumes one torrent via `manage_torrent`, preserving its exact-hash and
   explicit-confirmation gates; `delete_files` is never passed. Successful
