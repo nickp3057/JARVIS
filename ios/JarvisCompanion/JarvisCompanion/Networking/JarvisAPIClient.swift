@@ -117,6 +117,18 @@ struct JarvisAlert: Decodable, Identifiable, Hashable {
     }
 }
 
+/// `POST /api/alerts/{id}/report`: a stored incident report plus the chat
+/// prompt that opens it.
+struct IncidentReport: Decodable {
+    let reportID: String
+    let prompt: String
+
+    enum CodingKeys: String, CodingKey {
+        case prompt
+        case reportID = "report_id"
+    }
+}
+
 /// The media doctor's trace (`GET /api/status/media/diagnose`).
 struct MediaDiagnosis: Decodable {
     struct Step: Decodable, Hashable {
@@ -495,6 +507,21 @@ struct JarvisAPIClient {
     func recentAlerts() async throws -> [JarvisAlert] {
         struct Envelope: Decodable { let alerts: [JarvisAlert] }
         return try await getJSON(Envelope.self, path: "api/alerts/recent").alerts
+    }
+
+    private struct IncidentReportBody: Encodable {
+        let createdAt: Double
+
+        enum CodingKeys: String, CodingKey {
+            case createdAt = "created_at"
+        }
+    }
+
+    /// Gathers logs, health and recent changes for one alert on the server.
+    /// `created_at` lets the server reject an id from before its restart.
+    func incidentReport(for alert: JarvisAlert) async throws -> IncidentReport {
+        try await postJSON(IncidentReport.self, path: "api/alerts/\(alert.id)/report",
+                           body: IncidentReportBody(createdAt: alert.createdAt))
     }
 
     func torrentsStatus() async throws -> TorrentsStatus {

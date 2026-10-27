@@ -45,6 +45,7 @@ Pearson-Stark-Jarvis/
 │   ├── automation_workshop.py Staged HA automation drafts, diffs, apply + rollback
 │   ├── clipboard_tool.py    Read/write clipboard via PowerShell Get/Set-Clipboard
 │   ├── debug_reports.py     Durable user-submitted companion failure reports
+│   ├── incident_reports.py  Tap-to-chat incident report: live health, NAS watchdog logs, app log warnings, recent changes, rule-based suspected cause
 │   ├── history.py           SQLite conversation history with session support
 │   ├── intents.py           Keyword intent router (fallback if brain offline)
 │   ├── memory.py            JSON long-term memory, correction history, inspection
@@ -579,6 +580,22 @@ CALENDAR_ALERT_LEAD_MIN=10  # warn this many minutes before a meeting
 ---
 
 ## Recently Shipped
+
+- **Tap-to-chat incident reports (1.80 / build 82)** — Tapping a row in the
+  companion's "Needs attention" card calls `POST /api/alerts/{id}/report`.
+  `brain/incident_reports.py` gathers, in parallel under a 25 s deadline:
+  `nas_stack.poll_health()`, the read-only NAS status key (recovery record,
+  watchdog log tails), a `media_doctor` sweep, warning/error lines from the
+  Radarr/Sonarr/Prowlarr/qBittorrent/HA log APIs, and recent changes
+  (watchdog actions, recoveries, JARVIS repairs, related bus alerts). It
+  ranks suspected causes with fixed rules (no model call), stores everything
+  as a `debug_reports` entry with `source="incident"` and evidence
+  `sections`, and returns a prompt that lands in Chat's composer for review.
+  `inspect_debug_report` reads it; fixes still go through the existing gates
+  (media doctor/confirm gate, arr restart, self-repair). A stale alert id
+  (server restarted) or older Core falls back to a prompt built from the
+  alert text. No NAS permission change. Capability flag
+  `chat.incident_reports`.
 
 - **Overnight overhaul: alerts, confirmation gate, notifications, efficiency
   (1.35–1.43 / builds 37–45)** — Arr alerts now need 3 consecutive failing

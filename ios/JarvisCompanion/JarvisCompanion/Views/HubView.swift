@@ -420,25 +420,49 @@ struct HubView: View {
         }) {
             VStack(spacing: 0) {
                 ForEach(Array(attentionAlerts.enumerated()), id: \.element.id) { index, alert in
-                    VStack(alignment: .leading, spacing: 3) {
-                        HStack {
-                            Circle()
-                                .fill(alert.severity == "critical" ? Color.red : JarvisTheme.amber)
-                                .frame(width: 8, height: 8)
-                            Text(alert.title).font(.subheadline.weight(.medium))
-                            Spacer()
-                            Text(alert.date, style: .relative)
-                                .font(.caption2.monospacedDigit())
-                                .foregroundStyle(.secondary)
+                    Button { openIncident(alert) } label: {
+                        VStack(alignment: .leading, spacing: 3) {
+                            HStack {
+                                Circle()
+                                    .fill(alert.severity == "critical" ? Color.red : JarvisTheme.amber)
+                                    .frame(width: 8, height: 8)
+                                Text(alert.title).font(.subheadline.weight(.medium))
+                                Spacer()
+                                if model.reportingAlertID == alert.id {
+                                    ProgressView().controlSize(.small)
+                                } else {
+                                    Text(alert.date, style: .relative)
+                                        .font(.caption2.monospacedDigit())
+                                        .foregroundStyle(.secondary)
+                                }
+                                if onAsk != nil {
+                                    Image(systemName: "chevron.right")
+                                        .font(.caption2.weight(.semibold))
+                                        .foregroundStyle(.tertiary)
+                                }
+                            }
+                            if !alert.message.isEmpty {
+                                Text(alert.message).font(.caption).foregroundStyle(.secondary).lineLimit(3)
+                            }
                         }
-                        if !alert.message.isEmpty {
-                            Text(alert.message).font(.caption).foregroundStyle(.secondary).lineLimit(3)
-                        }
+                        .padding(.vertical, 8)
+                        .contentShape(Rectangle())
                     }
-                    .padding(.vertical, 8)
+                    .buttonStyle(.plain)
+                    .disabled(onAsk == nil || model.reportingAlertID != nil)
+                    .accessibilityHint(onAsk == nil ? "" : "Opens Chat with a diagnostic report")
                     if index < attentionAlerts.count - 1 { divider }
                 }
             }
+        }
+    }
+
+    /// Tap-to-chat: JARVIS gathers logs and recent changes for the alert,
+    /// and the report's prompt lands in Chat's composer for review.
+    private func openIncident(_ alert: JarvisAlert) {
+        guard let onAsk else { return }
+        Task {
+            if let prompt = await model.incidentPrompt(for: alert) { onAsk(prompt) }
         }
     }
 

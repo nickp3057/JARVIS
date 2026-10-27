@@ -491,6 +491,39 @@ final class CompanionTests: XCTestCase {
         XCTAssertEqual(json, ["device_token": String(repeating: "a", count: 64), "environment": "sandbox", "device_name": "iPhone"])
     }
 
+    func testTappedAlertUsesServerReportOrFallsBackToAlertText() async throws {
+        let alert = try JSONDecoder().decode(JarvisAlert.self, from: Data("""
+            {"id":7,"kind":"arr_stack","severity":"critical","title":"Jarvis — arr stack",
+            "message":"Radarr unreachable","source":"arr-stack","created_at":1793000000.5}
+            """.utf8))
+        var sentBody = ""
+        var status = 200
+        MockProtocol.handler = { request in
+            XCTAssertEqual(request.url?.path, "/api/alerts/7/report")
+            XCTAssertEqual(request.httpMethod, "POST")
+            if let stream = request.httpBodyStream {
+                stream.open()
+                var buffer = [UInt8](repeating: 0, count: 1024)
+                let count = stream.read(&buffer, maxLength: buffer.count)
+                sentBody = String(decoding: buffer.prefix(max(0, count)), as: UTF8.self)
+                stream.close()
+            }
+            return status == 200
+                ? (200, #"{"report_id":"abc123","prompt":"Incident report abc123: Jarvis — arr stack"}"#, 0)
+                : (404, #"{"detail":"Alert not found"}"#, 0)
+        }
+        let client = JarvisAPIClient(baseURL: URL(string: "http://localhost:8000")!, token: "test", session: session)
+        let hub = HubViewModel(settings: settings, clientFactory: { client })
+        let prompt = await hub.incidentPrompt(for: alert)
+        XCTAssertEqual(prompt, "Incident report abc123: Jarvis — arr stack")
+        XCTAssertTrue(sentBody.contains("1793000000.5"))
+        XCTAssertNil(hub.reportingAlertID)
+        status = 404
+        let fallback = await hub.incidentPrompt(for: alert)
+        XCTAssertEqual(fallback, HubViewModel.fallbackPrompt(for: alert))
+        XCTAssertTrue(fallback?.contains("Radarr unreachable") == true)
+    }
+
     func testSimulatorPushEnvironmentIsSandbox() {
         #if targetEnvironment(simulator)
         XCTAssertEqual(PushRegistrar.apsEnvironment(), "sandbox")

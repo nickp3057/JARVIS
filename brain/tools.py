@@ -1085,7 +1085,12 @@ _CUSTOM_TOOLS: list[dict[str, Any]] = [
         "name": "inspect_debug_report",
         "description": (
             "Inspect one companion debug report, including Nick's issue description, "
-            "app context, focused response, and submitted conversation transcript."
+            "app context, focused response, and submitted conversation transcript. "
+            "Incident reports (opened by tapping a failure in the app) instead carry the alert, "
+            "live health, NAS watchdog logs, app warnings, recent changes and a rule-based suspected "
+            "cause: read it, confirm or correct the cause from the evidence, then propose a fix through "
+            "the usual gated tools (diagnose_media/apply_media_fix, the arr restart, or a self-repair). "
+            "Never restart anything without Nick's explicit approval."
         ),
         "input_schema": {
             "type": "object",

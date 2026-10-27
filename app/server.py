@@ -28,6 +28,7 @@ from brain.runtime import JarvisRuntime
 from app import client_tokens
 from brain import event_bus
 from integrations import media_doctor, media_requests
+from brain import incident_reports
 
 _SSE_KEEPALIVE_S = 15.0
 
@@ -57,6 +58,7 @@ _COMPANION_CAPABILITIES: dict[str, object] = {
         "request_receipts": True,
         "server_history": True,
         "debug_reports": True,
+        "incident_reports": True,
     },
     "dashboard": {
         "now": True,
@@ -373,6 +375,25 @@ def recent_alerts(limit: int = 10, hours: float = 24, _: None = _status_read) ->
     cutoff = time.time() - max(0.0, hours) * 3600
     alerts = [a.to_dict() for a in reversed(event_bus.since(0, limit=200)) if a.created_at >= cutoff]
     return {"alerts": alerts[: max(1, min(50, limit))]}
+
+
+class IncidentReportRequest(BaseModel):
+    created_at: float | None = None
+    session_id: str | None = Field(default=None, max_length=100)
+
+
+@app.post("/api/alerts/{alert_id}/report")
+def alert_report(alert_id: int, request: IncidentReportRequest, _: None = Depends(authorize)) -> dict[str, object]:
+    """Tap-to-chat: gather logs, health and recent changes for one alert,
+    store them as an incident debug report, and return the chat prompt.
+    Read-only; fixes are proposed in the chat that follows."""
+    alert = incident_reports.find_alert(alert_id, request.created_at)
+    if alert is None:
+        raise HTTPException(status_code=404, detail="Alert not found (the server may have restarted)")
+    try:
+        return incident_reports.build(alert, session_id=request.session_id)
+    except (OSError, ValueError) as exc:
+        raise HTTPException(status_code=500, detail=f"Could not build incident report: {exc}") from exc
 
 
 @app.get("/api/clients/events")

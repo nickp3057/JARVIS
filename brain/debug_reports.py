@@ -50,8 +50,13 @@ def create_debug_report(
     focus_message_id: str | None = None,
     app_context: dict[str, str] | None = None,
     source: str = "ios_companion",
+    sections: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
-    """Persist one bounded report and return its public metadata."""
+    """Persist one bounded report and return its public metadata.
+
+    ``sections`` (``[{"title": str, "lines": [str]}]``) carry gathered
+    evidence, e.g. an incident report's logs and health checks; a report
+    with sections needs no transcript."""
     clean_issue = issue.strip()
     if not clean_issue:
         raise ValueError("Issue description is required.")
@@ -68,7 +73,13 @@ def create_debug_report(
             "content": content[:20_000],
             "created_at": str(message.get("created_at", ""))[:100],
         })
-    if not clean_messages:
+    clean_sections = [
+        {"title": str(section.get("title", ""))[:200],
+         "lines": [str(line)[:2_000] for line in list(section.get("lines") or [])[:60]]}
+        for section in (sections or [])[:20]
+        if isinstance(section, dict) and section.get("title")
+    ]
+    if not clean_messages and not clean_sections:
         raise ValueError("At least one transcript message is required.")
 
     report = {
@@ -81,6 +92,7 @@ def create_debug_report(
         "focus_message_id": (focus_message_id or "")[:100] or None,
         "issue": clean_issue[:4_000],
         "messages": clean_messages,
+        "sections": clean_sections,
         "app_context": {
             str(key)[:100]: str(value)[:500]
             for key, value in list((app_context or {}).items())[:20]
@@ -132,12 +144,17 @@ def describe_debug_report(report_id: str) -> str:
         f"Status: {report.get('status', 'open')}",
         f"Source: {report.get('source', 'unknown')}",
         f"Session: {report.get('session_id') or 'not bound'}",
-        f"Issue reported by Nick: {report.get('issue', '')}",
+        (f"Alert: {report.get('issue', '')}" if report.get("source") == "incident"
+         else f"Issue reported by Nick: {report.get('issue', '')}"),
     ]
     context = report.get("app_context") or {}
     if context:
         lines.append("App context: " + ", ".join(f"{key}={value}" for key, value in context.items()))
-    lines.append("Transcript:")
+    for section in report.get("sections") or []:
+        lines.append(f"{section.get('title', '')}:")
+        lines.extend(f"  {line}" for line in section.get("lines", []))
+    if report.get("messages"):
+        lines.append("Transcript:")
     for message in report.get("messages", []):
         marker = " [FOCUS]" if message.get("id") == report.get("focus_message_id") else ""
         lines.append(f"{message.get('role', 'unknown')}{marker}: {message.get('content', '')}")

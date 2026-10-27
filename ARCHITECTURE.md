@@ -234,6 +234,16 @@ stores user-approved diagnostic evidence without asking a model to analyze it
 at submission time. Later review still happens through the normal runtime and
 read-only debug-report tools.
 
+`POST /api/alerts/{id}/report` (admin token) is the tap-to-chat entry for
+a failure. It takes the bus alert id plus its `created_at` (bus ids restart
+at 1 with jarvis-api, so a mismatch is a 404 and the app falls back to the
+alert text), gathers read-only evidence through `brain/incident_reports.py`,
+stores it as an incident debug report, and returns `{report_id, prompt,
+suspected_causes, sections}`. The prompt goes into Chat's composer; nothing
+is sent or fixed until Nick sends it and approves a proposed fix through the
+existing gates. Suspected causes are deterministic rules, keeping model calls
+outside conversation turns limited to the memory extractor and study brief.
+
 The dashboard endpoints (`/api/status/torrents`, `/api/status/media`,
 `/api/status/storage`, `/api/status/services`, `/api/links`,
 `/api/home/entities`, `/api/now`, `/api/study/brief`,

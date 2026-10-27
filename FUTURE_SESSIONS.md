@@ -36,6 +36,70 @@ Progress, evidence, decisions and review notes live in `OVERNIGHT_HANDOFF.md` �
    status hub endpoints. Don't change Claude model choice; flag waste.
 7. **Setup TODO audit.** List everything Nick must do himself.
 
+## Run the NAS stack (2026-10-27) — Phase 1 shipped, rest planned
+
+Goal: a failure on the NAS shows up in JarvisCompanion; Nick taps it, Chat
+opens with a detailed pre-filled report (logs, recent changes, suspected
+cause), they talk it through, JARVIS proposes or runs the fix. Same hard
+constraint as above: the NAS SSH permission model does not widen without
+Nick saying so.
+
+Nick's decisions (2026-10-27):
+- JARVIS **never** restarts a container or runs the arr recovery without
+  asking. Every restart is a one-tap proposal. The NAS's own root-cron
+  DHT/indexer watchdogs keep auto-acting as today.
+- Notifications keep the current `arr_incidents` policy (debounce, watchdog
+  hold, one push per incident); the push should open the report.
+- Approved for after Phase 1: a NAS-side `host-health.json` read addition.
+
+Tiers:
+1. **Read, always allowed.** Today: Radarr/Sonarr/Prowlarr/qBit/HA HTTP
+   health and log APIs, the read-only status key (`stack_status.sh`), media
+   doctor. **Phase 2 (approved):** root cron already on the NAS writes
+   `/volume1/docker/watchdog/host-health.json` every 5 min (`docker ps`
+   state/health/restart counts for every container incl. Plex, pihole,
+   immich, tautulli; `updater_status.txt`; `/proc/mdstat`; SMART health and
+   temperatures; fan readings from `hwmon.log`; recent `kern.log` disk
+   errors), and `stack_status.sh` includes it. The key gains output, not
+   privilege. Write the scripts locally under `ops/nas/`, hand Nick the
+   install commands; then add those sections to incident reports and new
+   monitors (disk, container restart loop, pihole) via `raise_alert`.
+2. **Safe fixes, allowlisted, always proposed (never automatic).** Within
+   today's permissions: arr API actions (re-search, replace release,
+   re-test indexers), qBit resume, Plex library refresh, HA restart via HA's
+   API, the full arr recovery via the existing recovery key. Each as a
+   `brain/self_repair.py` action kind with a post-fix `poll_health()`
+   verify. Per-container restart needs a new `recover_stack.sh` verb, i.e.
+   a permission change: ask first.
+3. **Everything else.** JARVIS stages a `self_repair` proposal; the app shows
+   it with an Approve button (`POST /api/repairs/{id}/apply` →
+   `self_repair.apply(confirmed=True)`). Do not add a fourth gate; the
+   existing three are self-repair ids, `confirm_gate` codes and the arr
+   restart token, and stack fixes should converge on self-repair.
+
+Phase 1 (shipped, 1.80 / build 82): `brain/incident_reports.py`,
+`POST /api/alerts/{id}/report`, tappable Needs attention rows. Next small
+steps: put the bus alert id in the APNs payload so tapping the push opens
+the same report; incident reports for `download_stalled` could also call
+`media_doctor.diagnose(title)` for that title.
+
+Survey findings (2026-10-27, read-only):
+- All seven services up; DHT ~350; status key works from the Optiplex.
+- 2026-10-25 18:00–19:00: VPN DNS timeouts inside gluetun; two DHT-watchdog
+  recoveries failed at verify, then it self-healed ~19:00. The
+  `stack_updater` cron had auto-updated gluetun + tailscale (`:latest`) at
+  05:00 that day — exactly the "recent change" reports can't see yet.
+- Every NAS pool is a single disk (`md1/2/3 [1/1]`): no redundancy. Docker
+  configs live on volume1, a 2 TB Seagate ST2000DM001.
+- `hwmon.log` warns every 10 min (`f1=660,f2=-1`); probably a missing
+  second-fan sensor.
+- **Security:** `watchdog/dht_watchdog.sh`, `stack_status.sh` and
+  `qbit_creds.env` are mode `rwxrwxrwx+` (the others are 755). Root cron runs
+  `dht_watchdog.sh`; `stack_status.sh` is the Jarvis forced command. Check
+  the ACL (`sudo getfacl`) and restore root-only write.
+- Optiplex logs Google Calendar `invalid_grant` every 2 min: re-auth with
+  `python -m integrations.google_calendar --auth`.
+
 ## Nick's stated goal
 
 Make JARVIS the ever-learning, ever-changing, self-adjusting, self-healing

@@ -39,6 +39,8 @@ final class HubViewModel: ObservableObject {
     @Published var pendingEntityStates: [String: Bool] = [:]
     /// Torrent hashes with a control call in flight.
     @Published var busyTorrents: Set<String> = []
+    /// The alert whose incident report is being gathered (Needs attention tap).
+    @Published private(set) var reportingAlertID: Int?
     /// Transient, user-visible outcome of the last quick action that failed.
     @Published var actionError: String?
     @Published private(set) var nowSnapshotIsStale = false
@@ -306,6 +308,29 @@ final class HubViewModel: ObservableObject {
         pollTask?.cancel()
         pollTask = nil
         nowSnapshotIsStale = now.value != nil
+    }
+
+    // MARK: - Incident reports
+
+    /// The chat prompt for a tapped alert: the server's incident report when
+    /// it can build one, otherwise the alert text itself, so a tap always
+    /// lands in Chat (older Core, restarted server, NAS unreachable).
+    func incidentPrompt(for alert: JarvisAlert) async -> String? {
+        guard reportingAlertID == nil else { return nil }
+        reportingAlertID = alert.id
+        defer { reportingAlertID = nil }
+        if let report = try? await client().incidentReport(for: alert) {
+            return report.prompt
+        }
+        return Self.fallbackPrompt(for: alert)
+    }
+
+    static func fallbackPrompt(for alert: JarvisAlert) -> String {
+        let when = alert.date.formatted(date: .abbreviated, time: .shortened)
+        var lines = ["Alert from \(when): \(alert.title)"]
+        if !alert.message.isEmpty { lines.append(alert.message) }
+        lines.append("What's wrong, what's the likely cause, and how do we fix it?")
+        return lines.joined(separator: "\n")
     }
 
     // MARK: - Quick actions

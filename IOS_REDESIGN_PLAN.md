@@ -53,6 +53,16 @@ toolbar).
 - Check on device: light mode on every tab, AX5 Dynamic Type on Home, and
   cyan-on-panel contrast in light mode.
 
+## Tap-to-chat incident reports (2026-10-27, simulator tests pass)
+
+- Home → Needs attention rows are buttons: a tap shows a spinner, calls
+  `POST /api/alerts/{id}/report`, and drops the returned prompt (report id,
+  failing checks, suspected cause) into Chat's composer via `onAsk`. Any
+  failure (older Core, restarted server, NAS down) uses
+  `HubViewModel.fallbackPrompt` built from the alert itself.
+- Not yet: tapping the push notification itself (needs the alert id in the
+  APNs payload) and a one-tap Approve button for staged fixes.
+
 ## Proposed structure: hub-first
 
 | Tab | Content |
