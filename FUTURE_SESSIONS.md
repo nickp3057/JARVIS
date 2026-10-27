@@ -158,23 +158,77 @@ of each group.
 - [ ] **Speak replies in JARVIS's voice on the phone**: the app's mic is
   dictation only today; replies are text. Core would synthesize with
   ElevenLabs and the app plays the audio (opt-in, per reply or always).
-- [ ] **TV companion** (asked 2026-10-27): Nick's TCL TV has been stripped of
-  Google TV and runs only Plex and YouTube. Make it JARVIS-ified with a
-  calm, glanceable home screen, fully drivable with the TV remote (D-pad
-  navigation, play/pause keys):
-  - Stocks: how the portfolio did yesterday/today, any cash sitting idle
-    (needs Schwab above).
-  - Calendar: upcoming assignments/assessments, today's work schedule,
-    birthdays and other events.
-  - Music player with a gentle wake-up: music fades in at alarm time;
-    play/pause from the remote.
-  - Light and basic: no bloat, same JARVIS look and themes as the phone.
-  - Plumbing that already exists: give the TV its own scoped token
-    (`python -m app.client_tokens create tv events:read status:read`, never
-    `JARVIS_API_TOKEN`) and read `/api/clients/events` (SSE) plus the status
-    endpoints. Open questions: Android TV app vs. a web page in a kiosk
-    launcher; where the work schedule and birthdays come from; which music
-    source (Plex music, Spotify, YouTube Music).
+- [ ] **JARVIS TV: JARVIS is the TV's home screen** (asked 2026-10-27).
+  Nick's TCL TV has had Google TV stripped back to Plex and YouTube. Instead
+  of a JARVIS app on it, JARVIS *is* what the TV boots into: an Android TV
+  launcher (registered as the HOME app), with Plex and YouTube launched from
+  it. Same JARVIS as the phone: one Core, one look, one voice. Planned in
+  its own session; this is the agreed checklist to start from.
+
+  **Foundation**
+  - [ ] Boots straight into JARVIS; the remote's Home button always returns
+    to it. Plex and YouTube open from it and Back comes home.
+  - [ ] Talks only to Core, with its own scoped token
+    (`python -m app.client_tokens create tv events:read status:read`, plus
+    any write scopes it truly needs; never `JARVIS_API_TOKEN`), over LAN
+    with Tailscale fallback, and reads the live SSE feed
+    (`/api/clients/events`) instead of polling.
+  - [ ] Works offline: last-known snapshot with a quiet "Core unreachable"
+    note, never a blank screen. Plex/YouTube tiles always work.
+  - [ ] Escape hatch: a hidden way back to stock Android settings.
+  - [ ] Updates itself from Core (or a one-command sideload) so it never
+    needs a cable or the Play Store.
+
+  **One JARVIS (cohesion with the phone)**
+  - [ ] Same themes (Arc / Mark III / Hot Rod), same reactor mark, same
+    fonts and wording; the theme choice lives on Core so phone and TV match.
+  - [ ] Same persona: greetings, alerts and briefings in JARVIS's voice
+    (ElevenLabs through Core), same phrasing as the phone.
+  - [ ] Same data, same rules: to-dos, assessments (next 14 days),
+    maintenance and alerts come from the same Core endpoints the phone uses,
+    so checking something off anywhere clears it everywhere.
+
+  **Home screen (glance from the couch)**
+  - [ ] Big clock, date, greeting, weather.
+  - [ ] Today: work shift, next assessment(s), birthdays, calendar events.
+  - [ ] Money: portfolio today and yesterday, idle cash (needs Schwab).
+  - [ ] To-dos count and list; "things need you" alerts.
+  - [ ] Media: Plex continue-watching / recently added, downloads in
+    progress (from Core's media status).
+  - [ ] App row: Plex, YouTube, Music, House, Settings. Nothing else.
+
+  **Mornings**
+  - [ ] Wake-up: the TV turns on (HDMI-CEC / wake-on-LAN via HA), music
+    fades in gently at alarm time, then a short spoken briefing.
+  - [ ] Alarm time set from the phone or by asking JARVIS; skips days off.
+
+  **Music**
+  - [ ] Simple player: now playing, play/pause/skip, volume.
+  - [ ] Remote's play/pause works anywhere in the launcher.
+
+  **Remote and voice**
+  - [ ] Everything reachable with the D-pad; clear focus highlight; Back
+    always steps out; no dead ends.
+  - [ ] Remote mic (if the TCL remote has one) talks to JARVIS like Chat.
+
+  **House**
+  - [ ] Light/switch tiles like the phone's Hub; timers and reminders pop
+    up as toasts and go off audibly.
+
+  **Evenings and idle**
+  - [ ] Ambient mode: after idle, dim to clock + reactor + next thing.
+  - [ ] Sleep timer; screen off at night, alerts still allowed if critical.
+
+  **Decide at the start of the session**
+  1. Native Android TV launcher (Kotlin + Compose for TV, recommended:
+     can be the HOME app, handle the remote properly, run CEC) vs. a web
+     page in a kiosk launcher (faster to build, weaker remote and wake-up).
+  2. Where the work schedule and birthdays come from (Google Calendar?
+     work app?).
+  3. Music source: Plex music, Spotify or YouTube Music.
+  4. TV model and Android version (launcher and CEC behaviour vary).
+  5. What ships first: suggested v1 = foundation + home screen + app row;
+     v2 = mornings + music; v3 = voice, house, ambient mode.
 
 ## Nick's stated goal
 
