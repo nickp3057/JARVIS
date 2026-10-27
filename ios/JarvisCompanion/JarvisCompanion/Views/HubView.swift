@@ -54,6 +54,7 @@ struct HubView: View {
                     switch focus {
                     case .today:
                         if !attentionAlerts.isEmpty { needsAttentionCard }
+                        if !visibleRepairs.isEmpty { repairsCard }
                         nowCard
                         if onAsk != nil { briefingShortcut }
                         if isTab { quickActionsCard }
@@ -455,6 +456,55 @@ struct HubView: View {
                 }
             }
         }
+    }
+
+    /// Pending fixes first, then the last few outcomes.
+    private var visibleRepairs: [RepairProposal] {
+        let all = model.repairs.value ?? []
+        return Array((all.filter(\.isPending) + all.filter { !$0.isPending && $0.status != "rejected" }).prefix(4))
+    }
+
+    private var repairsCard: some View {
+        let pending = visibleRepairs.filter(\.isPending).count
+        return CockpitPanel("Repairs", symbol: "wrench.and.screwdriver", trailing: {
+            if pending > 0 { StatusPill(text: "\(pending) to approve", color: JarvisTheme.amber) }
+        }) {
+            VStack(spacing: 0) {
+                ForEach(Array(visibleRepairs.enumerated()), id: \.element.id) { index, repair in
+                    repairRow(repair)
+                    if index < visibleRepairs.count - 1 { divider }
+                }
+            }
+        }
+    }
+
+    private func repairRow(_ repair: RepairProposal) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(repair.label).font(.subheadline.weight(.medium))
+            if repair.isPending {
+                if !repair.rationale.isEmpty {
+                    Text(repair.rationale).font(.caption).foregroundStyle(.secondary).lineLimit(3)
+                }
+                HStack {
+                    Button("Dismiss", role: .cancel) { model.resolveRepair(repair, approve: false) }
+                        .buttonStyle(.bordered)
+                    Spacer()
+                    if model.busyRepairs.contains(repair.id) { ProgressView().controlSize(.small) }
+                    Button("Approve") { model.resolveRepair(repair, approve: true) }
+                        .buttonStyle(.borderedProminent)
+                        .accessibilityHint("Runs this fix on your server now")
+                }
+                .controlSize(.small)
+                .disabled(model.busyRepairs.contains(repair.id))
+            } else {
+                Label(repair.status == "running" ? "Running…" : (repair.result.isEmpty ? repair.status.capitalized : repair.result),
+                      systemImage: repair.status == "applied" ? "checkmark.circle" : repair.status == "running" ? "clock" : "exclamationmark.circle")
+                    .font(.caption)
+                    .foregroundStyle(repair.status == "applied" ? JarvisTheme.success : repair.status == "running" ? Color.secondary : JarvisTheme.amber)
+                    .lineLimit(3)
+            }
+        }
+        .padding(.vertical, 8)
     }
 
     /// Tap-to-chat: JARVIS gathers logs and recent changes for the alert,

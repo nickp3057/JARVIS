@@ -39,6 +39,10 @@ final class HubViewModel: ObservableObject {
     @Published var pendingEntityStates: [String: Bool] = [:]
     /// Torrent hashes with a control call in flight.
     @Published var busyTorrents: Set<String> = []
+    /// Pending and recent self-repair proposals (server-staged fixes).
+    @Published var repairs = Section<[RepairProposal]>()
+    /// Repair ids with an Approve/Dismiss call in flight.
+    @Published private(set) var busyRepairs: Set<String> = []
     /// The alert whose incident report is being gathered (Needs attention tap).
     @Published private(set) var reportingAlertID: Int?
     /// Transient, user-visible outcome of the last quick action that failed.
@@ -95,7 +99,8 @@ final class HubViewModel: ObservableObject {
         async let f: Void = refreshNow()
         async let g: Void = refreshStorage()
         async let h: Void = refreshAlerts()
-        _ = await (a, b, c, d, e, f, g, h)
+        async let i: Void = refreshRepairs()
+        _ = await (a, b, c, d, e, f, g, h, i)
     }
 
     func refreshNow() async {
@@ -212,6 +217,27 @@ final class HubViewModel: ObservableObject {
         await load(\.alerts) { try await $0.recentAlerts() }
     }
 
+    /// An older Core without /api/repairs just leaves this empty.
+    func refreshRepairs() async {
+        await load(\.repairs) { try await $0.repairs() }
+    }
+
+    /// Approve (the tap is the approval) or dismiss one staged repair.
+    func resolveRepair(_ repair: RepairProposal, approve: Bool) {
+        guard !busyRepairs.contains(repair.id) else { return }
+        busyRepairs.insert(repair.id)
+        Task {
+            defer { busyRepairs.remove(repair.id) }
+            do {
+                let result = try await client().repairAction(id: repair.id, action: approve ? "apply" : "reject")
+                if approve, result.status == nil || result.status == "pending" { actionError = result.message }
+            } catch {
+                actionError = error.localizedDescription
+            }
+            await refreshRepairs()
+        }
+    }
+
     func refreshLinks() async {
         await load(\.links) { try await $0.serviceLinks().links }
     }
@@ -281,7 +307,8 @@ final class HubViewModel: ObservableObject {
                 async let entities: Void = self.refreshEntities()
                 async let now: Void = self.refreshNow()
                 async let alerts: Void = self.refreshAlerts()
-                _ = await (torrents, services, entities, now, alerts)
+                async let repairs: Void = self.refreshRepairs()
+                _ = await (torrents, services, entities, now, alerts, repairs)
                 tick += 1
                 if tick.isMultiple(of: 3) { await self.refreshMedia() }
                 if tick.isMultiple(of: 6) { await self.refreshStorage() }

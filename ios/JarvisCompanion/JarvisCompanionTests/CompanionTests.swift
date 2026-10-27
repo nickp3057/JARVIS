@@ -524,6 +524,34 @@ final class CompanionTests: XCTestCase {
         XCTAssertTrue(fallback?.contains("Radarr unreachable") == true)
     }
 
+    func testApprovingARepairPostsApplyAndRefreshes() async throws {
+        var applied = false
+        MockProtocol.handler = { request in
+            switch (request.httpMethod ?? "", request.url?.path ?? "") {
+            case ("POST", "/api/repairs/ab12cd34/apply"):
+                applied = true
+                return (200, #"{"message":"Repair ab12cd34 is running","status":"running"}"#, 0)
+            case ("GET", "/api/repairs"):
+                let status = applied ? "running" : "pending"
+                return (200, """
+                    {"repairs":[{"id":"ab12cd34","kind":"stack_fix","label":"Rescan the Plex movie and TV libraries",
+                    "rationale":"New episode missing","status":"\(status)","result":"","created_at":1}]}
+                    """, 0)
+            default: return (404, "{}", 0)
+            }
+        }
+        let client = JarvisAPIClient(baseURL: URL(string: "http://localhost:8000")!, token: "test", session: session)
+        let hub = HubViewModel(settings: settings, clientFactory: { client })
+        await hub.refreshRepairs()
+        let repair = try XCTUnwrap(hub.repairs.value?.first)
+        XCTAssertTrue(repair.isPending)
+        hub.resolveRepair(repair, approve: true)
+        try await waitUntil({ hub.repairs.value?.first?.status == "running" })
+        XCTAssertTrue(applied)
+        XCTAssertNil(hub.actionError)
+        XCTAssertTrue(hub.busyRepairs.isEmpty)
+    }
+
     func testSimulatorPushEnvironmentIsSandbox() {
         #if targetEnvironment(simulator)
         XCTAssertEqual(PushRegistrar.apsEnvironment(), "sandbox")

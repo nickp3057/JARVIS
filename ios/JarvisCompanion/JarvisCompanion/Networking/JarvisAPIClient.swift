@@ -117,6 +117,19 @@ struct JarvisAlert: Decodable, Identifiable, Hashable {
     }
 }
 
+/// One self-repair proposal (`GET /api/repairs`). Pending ones get an
+/// Approve button; the tap is the approval.
+struct RepairProposal: Decodable, Identifiable, Hashable {
+    let id: String
+    let kind: String?
+    let label: String
+    let rationale: String
+    let status: String  // pending | running | applied | failed | rolled_back | rejected
+    let result: String
+
+    var isPending: Bool { status == "pending" }
+}
+
 /// `POST /api/alerts/{id}/report`: a stored incident report plus the chat
 /// prompt that opens it.
 struct IncidentReport: Decodable {
@@ -522,6 +535,23 @@ struct JarvisAPIClient {
     func incidentReport(for alert: JarvisAlert) async throws -> IncidentReport {
         try await postJSON(IncidentReport.self, path: "api/alerts/\(alert.id)/report",
                            body: IncidentReportBody(createdAt: alert.createdAt))
+    }
+
+    func repairs() async throws -> [RepairProposal] {
+        struct Envelope: Decodable { let repairs: [RepairProposal] }
+        return try await getJSON(Envelope.self, path: "api/repairs").repairs
+    }
+
+    private struct EmptyBody: Encodable {}
+    struct RepairActionResult: Decodable {
+        let message: String
+        let status: String?
+    }
+
+    /// `action` is "apply" or "reject". The server runs stack fixes in the
+    /// background and reports the verified outcome as an alert.
+    func repairAction(id: String, action: String) async throws -> RepairActionResult {
+        try await postJSON(RepairActionResult.self, path: "api/repairs/\(id)/\(action)", body: EmptyBody())
     }
 
     func torrentsStatus() async throws -> TorrentsStatus {

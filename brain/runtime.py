@@ -159,6 +159,9 @@ class JarvisRuntime:
         memory_extractor.add_listener(self._on_memory_change)
         from brain import arr_stack
         arr_stack.set_recovery_notifier(self._report_arr_recovery)
+        from brain import self_repair
+        self_repair.set_notifier(lambda title, detail, severity: self.raise_alert(
+            "repair", title, detail, source="self-repair", severity=severity))
         log.info("Runtime online. brain=%s", self.brain_label)
         self.record_event(
             kind="system",

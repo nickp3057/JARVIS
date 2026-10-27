@@ -244,6 +244,14 @@ is sent or fixed until Nick sends it and approves a proposed fix through the
 existing gates. Suspected causes are deterministic rules, keeping model calls
 outside conversation turns limited to the memory extractor and study brief.
 
+`GET /api/repairs` lists pending and recent self-repair proposals;
+`POST /api/repairs/{id}/apply` is Nick's Approve tap (the tap is the
+approval, like torrent pause/resume) and `/reject` dismisses. Stack fixes
+(`brain/stack_fixes.py`) refuse `apply_repair` from the model: they need
+`approved_by` "chat" (confirm gate) or "app". They run on a background
+thread and report through `self_repair.set_notifier`, which the runtime
+points at `raise_alert("repair", ...)`.
+
 The dashboard endpoints (`/api/status/torrents`, `/api/status/media`,
 `/api/status/storage`, `/api/status/services`, `/api/links`,
 `/api/home/entities`, `/api/now`, `/api/study/brief`,

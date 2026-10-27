@@ -11,6 +11,13 @@ when the exact proposal id is applied with ``confirmed=True``:
                       ``SELF_REPAIR_COMMANDS`` (``name=shell command;...``).
                       JARVIS can only pick a name, never compose a command.
 * ``clear_flag``    - drop the fault flag and retry (for transient faults).
+* ``stack_fix``     - one allowlisted NAS-stack fix from ``brain.stack_fixes``
+                      (HA restart, indexer re-test, Plex rescan, arr
+                      recovery). These need Nick's own approval: his "yes" or
+                      code through ``brain.confirm_gate``, or the companion's
+                      Approve tap. The model's ``confirmed=True`` is not
+                      enough, and they run in the background, reporting the
+                      verified outcome through the notifier (an alert).
 
 After a repair the subsystem is re-probed.  If it is still failing, a
 ``set_setting`` repair is rolled back automatically to the previous value.
@@ -27,8 +34,8 @@ import subprocess
 import time
 import uuid
 from pathlib import Path
-from threading import RLock
-from typing import Any
+from threading import RLock, Thread
+from typing import Any, Callable
 from urllib.parse import urlparse
 
 from brain import settings as settings_mod
@@ -42,6 +49,8 @@ _LOCK = RLock()
 _MAX_PROPOSALS = 50
 _PROBE_TIMEOUT_S = 3.0
 _COMMAND_TIMEOUT_S = 90
+# (title, detail, severity) -> None; the runtime points this at raise_alert.
+_notifier: Callable[[str, str, str], None] | None = None
 
 # Subsystem playbooks.  ``tools`` are prefixes/names from brain/tools.py;
 # ``env`` are the settings the subsystem needs; ``url_env`` is probed by TCP;
@@ -301,8 +310,57 @@ def diagnose(tool: str) -> str:
     return "\n".join(lines)
 
 
+def set_notifier(callback: Callable[[str, str, str], None] | None) -> None:
+    global _notifier
+    _notifier = callback
+
+
+def propose_stack_fix(name: str, rationale: str, session_id: str | None = None) -> str:
+    """Stage an allowlisted stack fix; in chat, open the confirm gate for it.
+
+    Nothing runs here. The fix runs only when Nick replies "yes"/the code
+    (confirm gate) or taps Approve in the app (``POST /api/repairs/{id}/apply``)."""
+    from brain import confirm_gate, stack_fixes
+    name = (name or "").strip().lower()
+    fix = stack_fixes.FIXES.get(name)
+    if fix is None:
+        return f"'{name}' is not an allowlisted stack fix, sir. Options: {', '.join(stack_fixes.FIXES)}."
+    proposal = _new_proposal("nas_stack", name, {"kind": "stack_fix", "name": name},
+                             (rationale or "").strip()[:500] or fix.label)
+    with _LOCK:
+        items = [p for p in _load() if not (p.get("status") == "pending" and p.get("tool") == name)]
+        items.append(proposal)
+        _save(items)
+    staged = f"Staged repair {proposal['id']}: {fix.label}. It also shows in the app with an Approve button."
+    if not session_id:
+        return staged + " Nothing has been changed yet."
+    return staged + " " + confirm_gate.propose(
+        session_id, f"{fix.label} [repair {proposal['id']}]",
+        lambda: apply(proposal["id"], confirmed=True, approved_by="chat"),
+    )
+
+
+def public_proposals(hours: float = 24) -> list[dict[str, Any]]:
+    """Pending repairs plus recently finished ones, newest first, for the app."""
+    cutoff = time.time() - hours * 3600
+    with _LOCK:
+        items = _load()
+    out = []
+    for p in reversed(items):
+        if p.get("status") not in {"pending", "running"} and float(p.get("finished_at") or p.get("created_at") or 0) < cutoff:
+            continue
+        out.append({"id": p["id"], "kind": p["action"].get("kind"), "label": _describe_action(p["action"]),
+                    "rationale": p.get("rationale", ""), "status": p.get("status"), "result": p.get("result", ""),
+                    "created_at": p.get("created_at"), "finished_at": p.get("finished_at")})
+    return out[:20]
+
+
 def _describe_action(action: dict[str, Any]) -> str:
     kind = action.get("kind")
+    if kind == "stack_fix":
+        from brain import stack_fixes
+        fix = stack_fixes.FIXES.get(str(action.get("name")))
+        return fix.label if fix else f"stack fix '{action.get('name')}'"
     if kind == "set_setting":
         return f"set {action.get('key')} in .env" + (f" to {action.get('value')!r}" if action.get("value") is not None else "")
     if kind == "run_command":
@@ -322,8 +380,37 @@ def list_proposals(status: str = "pending") -> str:
     return "\n".join(lines)
 
 
-def apply(proposal_id: str, *, confirmed: bool = False, value: Any = None) -> str:
-    """Execute a staged repair.  Requires the exact id and confirmed=True."""
+def _finish(proposal_id: str, status: str, outcome: str) -> None:
+    with _LOCK:
+        items = _load()
+        for p in items:
+            if p.get("id") == proposal_id:
+                p["status"] = status
+                p["result"] = outcome[:500]
+                p["finished_at"] = time.time()
+        _save(items)
+
+
+def _run_stack_fix(proposal: dict[str, Any], approved_by: str) -> None:
+    from brain import stack_fixes
+    name = proposal["action"]["name"]
+    ok, outcome = stack_fixes.run(name)
+    _finish(proposal["id"], "applied" if ok else "failed", outcome)
+    log.info("Stack fix %s (%s, approved via %s): %s", proposal["id"], name, approved_by, outcome)
+    if _notifier is not None:
+        title = f"Repair {'done' if ok else 'failed'}: {stack_fixes.FIXES[name].label.split(',')[0]}"
+        try:
+            _notifier(title[:120], outcome, "info" if ok else "warning")
+        except Exception:  # noqa: BLE001 - delivery problems must not hide the result
+            log.exception("Repair notifier failed")
+
+
+def apply(proposal_id: str, *, confirmed: bool = False, value: Any = None, approved_by: str | None = None) -> str:
+    """Execute a staged repair.  Requires the exact id and confirmed=True.
+
+    ``approved_by`` ("chat" from the confirm gate, "app" from the Approve tap)
+    is required for stack fixes: they only ever follow a message or tap from
+    Nick himself, so the model's apply_repair call alone is refused."""
     if not confirmed:
         return "I need Nick's explicit go-ahead before I apply a repair, sir."
     with _LOCK:
@@ -333,8 +420,17 @@ def apply(proposal_id: str, *, confirmed: bool = False, value: Any = None) -> st
             return f"No repair proposal with id '{proposal_id}', sir."
         if proposal.get("status") != "pending":
             return f"Repair {proposal_id} was already {proposal.get('status')}."
+        if proposal["action"].get("kind") == "stack_fix" and approved_by not in {"chat", "app"}:
+            return (f"Repair {proposal_id} restarts or changes part of the NAS stack, so it needs Nick's own "
+                    "approval: his \"yes\" or code in chat, or the Approve button in the app, sir.")
         proposal["status"] = "running"
         _save(items)
+
+    if proposal["action"]["kind"] == "stack_fix":
+        Thread(target=_run_stack_fix, args=(proposal, approved_by), daemon=True,
+               name=f"stack-fix-{proposal['id']}").start()
+        return (f"Repair {proposal_id} is running: {_describe_action(proposal['action'])}. "
+                "I'll report the verified result when it finishes, sir.")
 
     action = dict(proposal["action"])
     tool = proposal["tool"]
@@ -381,14 +477,7 @@ def apply(proposal_id: str, *, confirmed: bool = False, value: Any = None) -> st
         status = "failed"
         log.warning("Self-repair %s failed: %s", proposal_id, exc)
 
-    with _LOCK:
-        items = _load()
-        for p in items:
-            if p.get("id") == proposal["id"]:
-                p["status"] = status
-                p["result"] = outcome[:500]
-                p["finished_at"] = time.time()
-        _save(items)
+    _finish(proposal["id"], status, outcome)
     verdict = {"applied": "Repair applied", "rolled_back": "Repair rolled back", "failed": "Repair failed"}[status]
     return f"{verdict} for {tool}, sir. {outcome}"
 

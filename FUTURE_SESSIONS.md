@@ -80,8 +80,14 @@ Tiers:
 Phase 2 (built 2026-10-27, 1.81 / build 83; not yet installed on the NAS):
 `ops/nas/host_health.py` + `install-host-health.sh`, `stack_status.sh`
 includes `host_health`, `integrations/nas_host.py` monitor and incident
-sections. Next: Tier 2 safe fixes as self-repair action kinds, then the app
-Approve button.
+sections.
+
+Tier 2 + 3 approval (built 2026-10-27, 1.83 / build 85): `brain/stack_fixes.py`
+allowlist, `stack_fix` self-repair kind that only runs on Nick's chat
+"yes"/code or the app's Approve tap, Home → Repairs card. Next: per-container
+restart (needs a new `recover_stack.sh` verb, i.e. a permission change; ask
+Nick), alert id in the APNs payload so tapping a push opens the report, and
+`download_stalled` reports calling `media_doctor.diagnose(title)`.
 
 Phase 1 (shipped, 1.80 / build 82): `brain/incident_reports.py`,
 `POST /api/alerts/{id}/report`, tappable Needs attention rows. Next small

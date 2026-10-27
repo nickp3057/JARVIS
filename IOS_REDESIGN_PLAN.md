@@ -63,8 +63,11 @@ toolbar).
   failing checks, suspected cause) into Chat's composer via `onAsk`. Any
   failure (older Core, restarted server, NAS down) uses
   `HubViewModel.fallbackPrompt` built from the alert itself.
+- Home → Repairs card (1.83): pending fixes with Approve / Dismiss (the tap is
+  the approval), running ones show a clock, finished ones their verified
+  result. Polls `/api/repairs` with the fast sections.
 - Not yet: tapping the push notification itself (needs the alert id in the
-  APNs payload) and a one-tap Approve button for staged fixes.
+  APNs payload).
 
 ## Proposed structure: hub-first
 

@@ -68,6 +68,7 @@ Pearson-Stark-Jarvis/
 │   ├── arr_stack.py         Arr alert hysteresis/per-indexer tracking, restart confirmation gate, async recovery follow-up
 │   ├── confirm_gate.py      Generic session-bound "yes"/"approve <code>" gate for side-effecting fixes (media doctor)
 │   ├── arr_incidents.py     Arr push policy: watchdog-recovery hold + summary, minimum downtime, grouped incidents, daily indexer digest
+│   ├── stack_fixes.py       Tier-2 allowlist of NAS-stack fixes (HA restart, indexer re-test, Plex rescan, arr recovery), each with a post-fix check
 │   ├── self_repair.py       Governed self-repair: diagnose a subsystem, stage a bounded fix, apply on approval
 │   ├── study_brief.py       Daily quiz/exam countdown: settings, planning, JARVIS-composed text
 │   ├── timers.py            Timer store: set/cancel/pause/resume/dismiss/alarming state
@@ -355,6 +356,15 @@ RMS envelope from ElevenLabs audio drives the orb in real time using a monotonic
   rolled back automatically if the endpoint is still unreachable afterwards),
   `run_command` (a command Nick pre-approved by name in `SELF_REPAIR_COMMANDS`;
   JARVIS can never compose a command), or `clear_flag` (transient fault).
+- `propose_stack_fix(fix, reason)` — stages one allowlisted NAS-stack fix
+  (`brain/stack_fixes.py`): `restart_home_assistant` (then waits until HA
+  answers), `retest_indexers` (Prowlarr test-all, then checks none is backed
+  off), `refresh_plex`, `arr_recovery` (the existing restricted recovery via
+  `arr_stack`, with its own follow-up). It never runs anything: in chat it
+  opens the confirm gate ("yes" / code) and the app shows it on Home →
+  Repairs with Approve / Dismiss. `apply_repair` from the model is refused
+  for stack fixes. They run in the background and report the verified
+  outcome as a `repair` alert. Nothing restarts without Nick (his rule).
 - `list_repair_proposals(status?)` / `reject_repair(proposal_id)`.
 - Stored in `memory/repair_proposals.json` via `brain/self_repair.py`. This is
   the "propose → approve → apply → verify → rollback" loop from the governed
@@ -581,6 +591,15 @@ CALENDAR_ALERT_LEAD_MIN=10  # warn this many minutes before a meeting
 ---
 
 ## Recently Shipped
+
+- **One-tap stack fixes (1.83 / build 85)** — JARVIS can propose four
+  allowlisted fixes after diagnosing a failure (`propose_stack_fix`, see
+  Self-repair above). Approval is Nick's alone: "yes"/code in chat through
+  `confirm_gate`, or Approve on the new Home → Repairs card
+  (`GET /api/repairs`, `POST /api/repairs/{id}/apply|reject`). The model's
+  own `apply_repair` is refused for these. Each runs in the background and
+  reports a verified outcome as an alert; restarts have no rollback, so a
+  failed check says so plainly. Uses only existing permissions.
 
 - **NAS host health (1.81 / build 83)** — Root cron on the NAS
   (`ops/nas/host_health.py`, installed by `ops/nas/install-host-health.sh`)

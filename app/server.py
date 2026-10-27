@@ -28,7 +28,7 @@ from brain.runtime import JarvisRuntime
 from app import client_tokens
 from brain import event_bus
 from integrations import media_doctor, media_requests
-from brain import incident_reports
+from brain import incident_reports, self_repair
 
 _SSE_KEEPALIVE_S = 15.0
 
@@ -74,6 +74,7 @@ _COMPANION_CAPABILITIES: dict[str, object] = {
     "actions": {
         "home_on_off": True,
         "torrent_pause_resume": True,
+        "repairs": True,
     },
 }
 
@@ -394,6 +395,27 @@ def alert_report(alert_id: int, request: IncidentReportRequest, _: None = Depend
         return incident_reports.build(alert, session_id=request.session_id)
     except (OSError, ValueError) as exc:
         raise HTTPException(status_code=500, detail=f"Could not build incident report: {exc}") from exc
+
+
+@app.get("/api/repairs")
+def repairs(_: None = Depends(authorize)) -> dict[str, object]:
+    """Pending and recent self-repair proposals for the Home tab's Repairs card."""
+    return {"repairs": self_repair.public_proposals()}
+
+
+@app.post("/api/repairs/{proposal_id}/apply")
+def repair_apply(proposal_id: str, _: None = Depends(authorize)) -> dict[str, object]:
+    """Nick's Approve tap is the approval. Stack fixes run in the background
+    and report their verified outcome as an alert; poll /api/repairs."""
+    runtime()  # the runtime wires the repair notifier
+    message = self_repair.apply(proposal_id, confirmed=True, approved_by="app")
+    current = next((r for r in self_repair.public_proposals() if r["id"] == proposal_id), None)
+    return {"message": message, "status": current["status"] if current else "unknown"}
+
+
+@app.post("/api/repairs/{proposal_id}/reject")
+def repair_reject(proposal_id: str, _: None = Depends(authorize)) -> dict[str, object]:
+    return {"message": self_repair.reject(proposal_id)}
 
 
 @app.get("/api/clients/events")

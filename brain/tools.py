@@ -419,6 +419,11 @@ def _tool_apply_repair(args: dict[str, Any]) -> str:
     )
 
 
+def _tool_propose_stack_fix(args: dict[str, Any]) -> str:
+    return self_repair.propose_stack_fix(str(args.get("fix") or ""), str(args.get("reason") or ""),
+                                         args.get("_jarvis_session_id"))
+
+
 def _tool_reject_repair(args: dict[str, Any]) -> str:
     return self_repair.reject(str(args.get("proposal_id") or ""))
 
@@ -1089,7 +1094,7 @@ _CUSTOM_TOOLS: list[dict[str, Any]] = [
             "Incident reports (opened by tapping a failure in the app) instead carry the alert, "
             "live health, NAS watchdog logs, app warnings, recent changes and a rule-based suspected "
             "cause: read it, confirm or correct the cause from the evidence, then propose a fix through "
-            "the usual gated tools (diagnose_media/apply_media_fix, the arr restart, or a self-repair). "
+            "the usual gated tools (diagnose_media/apply_media_fix, propose_stack_fix, or a self-repair). "
             "Never restart anything without Nick's explicit approval."
         ),
         "input_schema": {
@@ -1418,6 +1423,24 @@ _CUSTOM_TOOLS: list[dict[str, Any]] = [
                 "value": {"type": "string", "description": "New value for a set_setting repair."},
             },
             "required": ["proposal_id", "confirmed"],
+        },
+    },
+    {
+        "name": "propose_stack_fix",
+        "description": (
+            "Propose one allowlisted NAS-stack fix after diagnosing a failure (e.g. from an incident "
+            "report): restart_home_assistant, retest_indexers, refresh_plex, or arr_recovery (recreates "
+            "gluetun + the arr containers; active downloads disconnect). Never runs anything: it stages a "
+            "repair and asks Nick, who approves by replying yes / the code, or with the Approve button "
+            "in the app. The verified result arrives later as an alert. Say why in reason."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "fix": {"type": "string", "enum": ["restart_home_assistant", "retest_indexers", "refresh_plex", "arr_recovery"]},
+                "reason": {"type": "string", "description": "One sentence: the evidence that this fix addresses."},
+            },
+            "required": ["fix", "reason"],
         },
     },
     {
@@ -1888,6 +1911,7 @@ _DISPATCH: dict[str, Callable[[dict[str, Any]], str]] = {
     "clear_tool_health": _tool_clear_tool_health,
     "diagnose_tool": _tool_diagnose_tool,
     "apply_repair": _tool_apply_repair,
+    "propose_stack_fix": _tool_propose_stack_fix,
     "list_repair_proposals": _tool_list_repair_proposals,
     "reject_repair": _tool_reject_repair,
     "list_standing_orders": _tool_list_standing_orders,
@@ -1973,7 +1997,8 @@ def execute_tool(name: str, args: dict[str, Any], session_id: str | None = None)
 
 def _score_tool(name: str, *, ok: bool, error: str, started: float) -> None:
     """Feed the self-diagnosis ledger; never let bookkeeping break a tool call."""
-    if name in ("system_health", "clear_tool_health", "diagnose_tool", "apply_repair", "list_repair_proposals", "reject_repair"):
+    if name in ("system_health", "clear_tool_health", "diagnose_tool", "apply_repair", "list_repair_proposals", "reject_repair",
+                "propose_stack_fix"):
         return
     try:
         tool_health.record(name, ok=ok, error=error, elapsed_ms=(time.monotonic() - started) * 1000)
