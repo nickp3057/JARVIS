@@ -5,6 +5,7 @@ from pathlib import Path
 import subprocess
 import tempfile
 import threading
+import time
 import unittest
 from unittest.mock import Mock, patch
 
@@ -744,6 +745,27 @@ class TransportTests(unittest.TestCase):
             runtime._deadman_loop()
             ping.assert_not_called()
         runtime.record_event.assert_called_once()
+
+    def test_deadman_waits_for_first_arr_cycle_and_never_raises_an_alert(self):
+        from brain.runtime import JarvisRuntime
+        runtime = object.__new__(JarvisRuntime)
+        runtime._arr_monitor_thread = Mock()
+        runtime._arr_monitor_thread.is_alive.return_value = True
+        runtime._arr_last_cycle = 0
+        runtime._stop_monitors = Mock()
+        runtime._stop_monitors.is_set.return_value = False
+        runtime._stop_monitors.wait.return_value = True
+        runtime.record_event = Mock()
+        runtime.raise_alert = Mock()
+        with patch.dict(os.environ, {'ARR_STACK_MONITOR_ENABLED': 'true'}), patch.object(nas_stack, 'ping_deadman') as ping:
+            runtime._deadman_loop()  # startup: arr monitor alive, first poll not done
+            ping.assert_not_called()
+            runtime.record_event.assert_not_called()
+            runtime._arr_last_cycle = time.monotonic()
+            ping.return_value = False
+            runtime._deadman_loop()  # a real failed ping: inbox line only
+        runtime.record_event.assert_called_once()
+        runtime.raise_alert.assert_not_called()
 
     def test_long_turn_does_not_block_monitor_events(self):
         from collections import deque

@@ -79,13 +79,9 @@ struct ChatView: View {
                         Image(systemName: "ellipsis.circle")
                     }
                 }
-                // Lives in the keyboard's own accessory bar, so showing it never
-                // changes the composer's layout.
-                ToolbarItemGroup(placement: .keyboard) {
-                    Spacer()
-                    Button("Done") { composerFocused = false }
-                        .fontWeight(.semibold)
-                }
+                // No keyboard "Done" bar: on iOS 26 it floats over the composer
+                // (covering half of it and the send button). Like Messages,
+                // swipe down on the transcript or tap it to dismiss.
             }
             .sheet(isPresented: $showingSettings, onDismiss: model.refreshConnectionStatus) {
                 SettingsView().environmentObject(settings)
@@ -286,7 +282,6 @@ struct ChatView: View {
                             .font(.footnote)
                             .foregroundStyle(JarvisTheme.amber)
                             .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(.leading, 38)
                             .accessibilityLabel("JARVIS is \(status.lowercased())")
                     } else if model.isAwaitingReply && model.messages.last?.text.isEmpty == true {
                         TypingIndicator()

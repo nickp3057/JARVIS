@@ -22,16 +22,14 @@ struct MessageBubble: View {
                 }
             case .jarvis:
                 row(alignment: .leading) {
-                    HStack(alignment: .top, spacing: 8) {
-                        JarvisCoreMark(size: 30).padding(.top, 7)
-                        // One bubble per model round ("Checking." / "Added.")
-                        // instead of one run-on paragraph.
-                        VStack(alignment: .leading, spacing: 4) {
-                            ForEach(Array(segments.enumerated()), id: \.offset) { index, segment in
-                                bubble(isUser: false, text: segment, isLast: index == segments.count - 1)
-                            }
-                            footer(isUser: false)
+                    // No avatar: replies use the full width. One bubble per
+                    // model round ("Checking." / "Added.") instead of one
+                    // run-on paragraph.
+                    VStack(alignment: .leading, spacing: 4) {
+                        ForEach(Array(segments.enumerated()), id: \.offset) { index, segment in
+                            bubble(isUser: false, text: segment, isLast: index == segments.count - 1)
                         }
+                        footer(isUser: false)
                     }
                 }
             case .error:
@@ -74,7 +72,7 @@ struct MessageBubble: View {
         HStack {
             if alignment == .trailing { Spacer(minLength: 32) }
             content()
-            if alignment == .leading { Spacer(minLength: 4) }
+            if alignment == .leading { Spacer(minLength: 0) }
         }
     }
 

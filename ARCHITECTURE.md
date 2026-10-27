@@ -453,6 +453,12 @@ nor a root SSH identity reaches Jarvis.
 
 ## Arr monitoring and dead-man heartbeat
 
+Heartbeat (2026-10-27): the loop waits for the arr monitor's first poll
+before judging or pinging (it used to raise "Dead-man heartbeat not
+delivered" on every jarvis-api start), and a missed ping is an inbox line
+only, never a bus/phone alert: Healthchecks.io is what pages Nick when pings
+stop.
+
 `JarvisRuntime` owns the opt-in arr monitor and heartbeat threads. The polling
 loop calls only Python HTTP/SSH integrations: qBit transfer info (with
 sync/maindata fallback when DHT is absent), Radarr/Sonarr v3 health, Prowlarr v1

@@ -47,11 +47,13 @@ toolbar).
 - Chat composer rebuilt (2026-10-27): rides `safeAreaInset` instead of a
   `VStack` row so the keyboard no longer resizes the whole column; one 44 pt
   grid (field, mic, send inside a single rounded box); the animated
-  scroll-on-focus is gone, and "Done" now lives in the keyboard's own accessory
-  bar (`ToolbarItemGroup(placement: .keyboard)`) so it never moves the composer;
-  interactive keyboard dismiss and tap-to-dismiss remain. A clearly horizontal
-  swipe (not from the left edge) moves to the neighbouring tab (`RootView`);
-  it switches on release, it doesn't track the finger like a page view; iOS 18 pins the bottom via `defaultScrollAnchor(for:
+  scroll-on-focus is gone. The keyboard "Done" bar was tried and removed
+  (1.85): on iOS 26 it floats over the composer, covering half of it and the
+  send button. Dismiss is interactive (swipe down) or a tap on the transcript.
+  A clearly horizontal swipe (not from the left edge) moves to the
+  neighbouring tab (`RootView`): the page follows the finger, rubber-bands at
+  the ends, and the new tab slides in (instant with Reduce Motion). JARVIS
+  replies have no avatar and use the full width (1.85); iOS 18 pins the bottom via `defaultScrollAnchor(for:
   .sizeChanges)`, iOS 17 gets one un-animated scroll.
 - Check on device: light mode on every tab, AX5 Dynamic Type on Home, and
   cyan-on-panel contrast in light mode.

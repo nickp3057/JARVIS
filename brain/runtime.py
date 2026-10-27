@@ -395,18 +395,33 @@ class JarvisRuntime:
                 break
 
     def _deadman_loop(self) -> None:
+        """Ping Healthchecks while the arr monitor is alive.
+
+        Healthchecks.io is what pages Nick when pings stop, so a missed ping is
+        only an inbox line here, never a phone/app alert (it used to raise
+        one on every jarvis-api start: this loop checked before the arr
+        monitor's first poll had finished). Until that first poll lands,
+        nothing is judged and no ping is sent."""
         from integrations import nas_stack
         failed = False
+        started = time.monotonic()
         while not self._stop_monitors.is_set():
-            monitor_ok = not nas_stack.enabled("ARR_STACK_MONITOR_ENABLED") or (
-                self._arr_monitor_thread is not None and self._arr_monitor_thread.is_alive()
-                and self._arr_last_cycle > 0
-                and time.monotonic() - self._arr_last_cycle < max(180, nas_stack.seconds("ARR_STACK_MONITOR_INTERVAL_S", 60) * 3)
+            stale_after = max(180, nas_stack.seconds("ARR_STACK_MONITOR_INTERVAL_S", 60) * 3)
+            arr_enabled = nas_stack.enabled("ARR_STACK_MONITOR_ENABLED")
+            alive = self._arr_monitor_thread is not None and self._arr_monitor_thread.is_alive()
+            if arr_enabled and alive and self._arr_last_cycle <= 0 and time.monotonic() - started < stale_after:
+                if self._stop_monitors.wait(15):
+                    break
+                continue
+            monitor_ok = not arr_enabled or (
+                alive and self._arr_last_cycle > 0 and time.monotonic() - self._arr_last_cycle < stale_after
             )
             ok = monitor_ok and nas_stack.ping_deadman()
             if not ok and not failed:
-                self.raise_alert("deadman", "Dead-man heartbeat not delivered",
-                                 "Check arr monitor liveness and Healthchecks configuration/network.", source="deadman")
+                why = "arr monitor stalled" if not monitor_ok else "Healthchecks ping failed"
+                log.warning("Dead-man heartbeat not delivered: %s", why)
+                self.record_event(kind="system", source="deadman", title="Dead-man heartbeat not delivered",
+                                  detail=f"{why}; Healthchecks.io will page if it persists.")
             failed = not ok
             if self._stop_monitors.wait(nas_stack.seconds("JARVIS_HEALTHCHECKS_INTERVAL_S", 300, 60)):
                 break

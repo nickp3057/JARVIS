@@ -593,6 +593,15 @@ CALENDAR_ALERT_LEAD_MIN=10  # warn this many minutes before a meeting
 
 ## Recently Shipped
 
+- **Chat and alert polish (1.85 / build 87)** — The keyboard "Done" bar is
+  gone (on iOS 26 it floated over the composer and the send button); dismiss
+  by swiping down or tapping the transcript, as in Messages. JARVIS replies
+  drop the avatar and use the full width. Swiping between tabs now tracks the
+  finger and slides the new tab in (Reduce Motion: instant). The dead-man
+  heartbeat no longer alerts: it fired on every restart because it checked
+  before the arr monitor's first poll, and Healthchecks.io already pages on a
+  real outage.
+
 - **One-tap download retry + links that work away from home (1.84 / build 86)**
   — A stall alert now carries its torrent hash; the runtime matches it to the
   Radarr/Sonarr queue item and stages a `retry_download` repair ("Retry The
