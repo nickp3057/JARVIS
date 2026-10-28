@@ -197,10 +197,9 @@ of each group.
   open an indexer incident report and check the "Indexer errors" section.
   If 1337x.st gets banned too, every mirror will likely fail: the fix is a
   new gluetun server (Nick at the NAS; drops downloads briefly).
-- **Knaben and Torrent9 are disabled by hand**, not by Prowlarr (no
-  failures logged). Torrent9 has a mirror override to `torrent9.la` and is
-  French-language; Knaben is a meta-search that duplicates 1337x/TPB. Ask
-  Nick whether either should come back as a 1337x backup.
+- **Knaben and Torrent9 stay disabled** (Nick, 2026-10-28: "they can be
+  off"). They were switched off by hand, not by Prowlarr. Don't re-enable
+  or suggest them. The 2026-10-28 change is deployed on the Optiplex.
 - **NAS powers today:** read-only host health (cron JSON), arr recovery
   script, Prowlarr indexer retest, HA restart, Plex refresh, download retry.
   No arbitrary docker, no image updates, no config edits, by design

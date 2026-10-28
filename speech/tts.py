@@ -367,13 +367,21 @@ def speak_stream(
     return spoke_any
 
 
+def alsa_device_args() -> list[str]:
+    """``-D <device>`` for aplay when ``AUDIO_OUTPUT_DEVICE`` is set (the
+    Optiplex's USB mic is ALSA card 0, so the default device can't play)."""
+    device = os.getenv("AUDIO_OUTPUT_DEVICE", "").strip()
+    return ["-D", device] if device else []
+
+
 def _play_posix_blocking(wav_path: Path) -> bool:
     """Linux/macOS playback via aplay (ALSA), with interrupt support."""
     player = "aplay" if sys.platform.startswith("linux") else "afplay"
     t0 = time.perf_counter()
     try:
         proc = subprocess.Popen(
-            [player, "-q", str(wav_path)] if player == "aplay" else [player, str(wav_path)],
+            ([player, "-q", *alsa_device_args(), str(wav_path)] if player == "aplay"
+             else [player, str(wav_path)]),
             stdout=subprocess.DEVNULL,
             stderr=subprocess.PIPE,
         )

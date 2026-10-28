@@ -51,8 +51,10 @@ def _decode_options() -> dict[str, Any]:
 class Transcriber:
     """Wraps a faster-whisper model with lazy load and clean public API."""
 
-    def __init__(self) -> None:
+    def __init__(self, model_size: str | None = None) -> None:
         self._model: Any | None = None
+        # The room voice runs a tiny model for live captions beside the main one.
+        self._model_size = model_size or WHISPER_MODEL_SIZE
 
     def _ensure_loaded(self) -> None:
         if self._model is not None:
@@ -61,12 +63,12 @@ class Transcriber:
 
         log.info(
             "Loading Whisper model %s on %s (%s)",
-            WHISPER_MODEL_SIZE,
+            self._model_size,
             WHISPER_DEVICE,
             WHISPER_COMPUTE_TYPE,
         )
         self._model = WhisperModel(
-            WHISPER_MODEL_SIZE,
+            self._model_size,
             device=WHISPER_DEVICE,
             compute_type=WHISPER_COMPUTE_TYPE,
         )

@@ -451,15 +451,19 @@ class JarvisRuntime:
         """Surface background memory writes in the event inbox."""
         self.record_event(kind="memory", source="memory", title=title, detail=detail)
 
-    def respond(self, user_input: str) -> str:
-        """Run one conversational turn through the best available brain."""
+    def respond(self, user_input: str, *, spoken: bool = False) -> str:
+        """Run one conversational turn through the best available brain.
+        ``spoken``: the reply goes to a speaker (the room voice), so short."""
         task_id = self.start_task("Reasoning", user_input.strip())
         with self._turn_lock:
+            self.agent.spoken_turn = spoken
             try:
                 reply = self.agent.respond(user_input)
             except Exception:
                 self.finish_task(task_id, state="failed", detail="Conversation failed")
                 raise
+            finally:
+                self.agent.spoken_turn = False
         task_state = "action" if self.last_used_tools else "complete"
         self.finish_task(task_id, state=task_state, detail="Reply ready")
         if self.last_used_tools:

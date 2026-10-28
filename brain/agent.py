@@ -266,6 +266,8 @@ class JarvisAgent:
         self._recent_tool_context: dict[str, str] = {}
         # Tools executed during the most recent turn, for background learning.
         self._last_turn_tools: list[tuple[str, dict[str, Any]]] = []
+        # Set by the room voice for one turn: the reply is spoken aloud.
+        self.spoken_turn = False
 
     # --- Public ----------------------------------------------------------
 
@@ -583,6 +585,13 @@ class JarvisAgent:
                 "Use the exact identifiers below for follow-ups. If Nick says yes after one exact "
                 "media match, add it immediately with the default quality; do not reconfirm.\n"
                 f"{context}"
+            )
+        if self.spoken_turn:
+            dynamic += (
+                "\n\n# Spoken reply\n"
+                "This turn came through the room microphone and your reply is played on a speaker. "
+                "Answer in one short sentence (two at most), no lists or markdown. If you only "
+                "carried out a home action and it worked, reply exactly \"Done.\""
             )
         return dynamic if dynamic.strip() else ""
 

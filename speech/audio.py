@@ -73,7 +73,9 @@ class MicStream:
             with self._buffer_lock:
                 self._buffer.append(frame)
 
+        device = os.getenv("MIC_DEVICE", "").strip() or None  # sounddevice name or index
         self._stream = sd.InputStream(
+            device=int(device) if device and device.isdigit() else device,
             samplerate=self.sample_rate,
             channels=1,
             dtype="int16",
