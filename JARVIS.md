@@ -688,6 +688,10 @@ CALENDAR_ALERT_LEAD_MIN=10  # warn this many minutes before a meeting
 
 ## Recently Shipped
 
+- **TV 7.2: the bottom row is all wordmarks** — Wake-up, Continue and
+  Settings use Plex and Spotify's bold lower-case wordmark with one accent
+  character, every wordmark and label on one line, and their small print
+  only shows on the highlighted tile.
 - **Themes trimmed and two added; tiles read like wordmarks (TV 7.1, iOS 3.2
   / build 114)** — Nick kept Arc, Hot Rod, Malibu, Crimson and Mark 85 (his
   favourite) and asked for Spider-Man and Lightning McQueen; Mark III,

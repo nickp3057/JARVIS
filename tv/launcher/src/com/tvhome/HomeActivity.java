@@ -633,10 +633,10 @@ public class HomeActivity extends Activity {
 
     private void fillWake(JSONObject wake) {
         if (wake == null) {
-            wakeTime.setText("Not set");
+            setWordmark(wakeTime, "not set", -1);
             wakeDays.setText("Set it in the app");
         } else {
-            wakeTime.setText(wakeTime(wake.optString("time")));
+            setWordmark(wakeTime, wakeTime(wake.optString("time")), -1);
             String label = wake.optString("label");
             wakeDays.setText(label.isEmpty() ? wake.optString("days") : wake.optString("days") + " · " + label);
         }
@@ -964,70 +964,80 @@ public class HomeActivity extends Activity {
     }
 
     private void wordmarkTile(LinearLayout row, String word, int accentAt, String sub, Runnable open) {
+        TextView mark = wordmark();
+        setWordmark(mark, word, accentAt);
+        wordTile(row, mark, sub, null, open);
+    }
+
+    /**
+     * Every bottom-row tile is built the same way, so the wordmarks sit on one
+     * line and the labels on another: a bold wordmark (one accent letter), its
+     * spaced label, and small print that only shows while the tile is
+     * highlighted (a blank line on the others keeps them level).
+     */
+    private FrameLayout wordTile(LinearLayout row, TextView mark, String sub, TextView detail, Runnable open) {
         FrameLayout tile = tileFrame();
         LinearLayout inner = new LinearLayout(this);
         inner.setOrientation(LinearLayout.VERTICAL);
         inner.setGravity(Gravity.CENTER);
-        SpannableString text = new SpannableString(word);
-        text.setSpan(new ForegroundColorSpan(theme.accent), accentAt, accentAt + 1, 0);
-        TextView mark = label("", 30, theme.text);
-        mark.setText(text);
-        mark.setTypeface(Typeface.create("sans-serif-black", Typeface.BOLD));
-        mark.setShadowLayer(dp(10), 0, 0, Theme.alpha(theme.accent, 110));
-        mark.setIncludeFontPadding(false);
-        mark.setGravity(Gravity.CENTER);
-        mark.setPadding(dp(12), 0, dp(12), 0);
-        inner.addView(mark);
-        TextView s = label(sub, 9, Theme.alpha(theme.accent, 180));
-        s.setLetterSpacing(0.3f);
-        s.setGravity(Gravity.CENTER);
-        s.setPadding(0, dp(4), 0, 0);
-        inner.addView(s);
+        inner.addView(mark, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(38)));
+        inner.addView(tileLabel(sub));
+        if (detail == null) detail = tileInfo();
+        detail.setVisibility(View.INVISIBLE);
+        inner.addView(detail);
+        tile.setTag(detail);
         centreText(inner);
         tile.addView(inner, new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
         tile.setOnClickListener(v -> open.run());
         addTile(row, tile);
+        return tile;
+    }
+
+    /** Bold like the Plex and Spotify wordmarks; shrinks to fit long titles. */
+    private TextView wordmark() {
+        TextView t = label("", 30, theme.text);
+        t.setTypeface(Typeface.create("sans-serif-black", Typeface.BOLD));
+        t.setShadowLayer(dp(10), 0, 0, Theme.alpha(theme.accent, 110));
+        t.setIncludeFontPadding(false);
+        t.setGravity(Gravity.CENTER);
+        t.setPadding(dp(10), 0, dp(10), 0);
+        t.setMaxLines(1);
+        t.setEllipsize(TextUtils.TruncateAt.END);
+        t.setAutoSizeTextTypeUniformWithConfiguration(14, 30, 1, android.util.TypedValue.COMPLEX_UNIT_SP);
+        return t;
+    }
+
+    /**
+     * Lower-case, one character in the accent: {@code accentAt}, or (-1) one
+     * picked from the text itself, so it stays put while the text does.
+     */
+    private void setWordmark(TextView t, String text, int accentAt) {
+        String word = text.toLowerCase(Locale.US);
+        SpannableString span = new SpannableString(word);
+        int at = accentAt;
+        if (at < 0) {
+            List<Integer> letters = new ArrayList<>();
+            for (int i = 0; i < word.length(); i++) if (Character.isLetterOrDigit(word.charAt(i))) letters.add(i);
+            at = letters.isEmpty() ? -1 : letters.get(Math.abs(word.hashCode() % letters.size()));
+        }
+        if (at >= 0 && at < word.length()) span.setSpan(new ForegroundColorSpan(theme.accent), at, at + 1, 0);
+        t.setText(span);
     }
 
     /** The wake-up alarm at a glance; set by asking JARVIS on the phone. */
     private void addWakeTile(LinearLayout row) {
-        FrameLayout tile = tileFrame();
-        LinearLayout inner = new LinearLayout(this);
-        inner.setOrientation(LinearLayout.VERTICAL);
-        inner.setGravity(Gravity.CENTER);
-        inner.setPadding(dp(12), 0, dp(12), 0);
-        wakeTime = tileHeadline("");
-        inner.addView(wakeTime);
-        inner.addView(tileLabel("WAKE-UP"));
+        wakeTime = wordmark();
         wakeDays = tileInfo();
-        inner.addView(wakeDays);
-        centreText(inner);
-        tile.addView(inner, new FrameLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
-        tile.setOnClickListener(v -> showWake());
-        addTile(row, tile);
+        wordTile(row, wakeTime, "WAKE-UP", wakeDays, this::showWake);
     }
 
     /** Plex's Continue Watching: the newest one on the tile, the rest a press away. */
     private void addContinueTile(LinearLayout row) {
-        FrameLayout tile = tileFrame();
-        LinearLayout inner = new LinearLayout(this);
-        inner.setOrientation(LinearLayout.VERTICAL);
-        inner.setGravity(Gravity.CENTER);
-        inner.setPadding(dp(12), 0, dp(12), 0);
-        continueTitle = tileHeadline("");
-        inner.addView(continueTitle);
-        inner.addView(tileLabel("CONTINUE"));
+        continueTitle = wordmark();
         continueDetail = tileInfo();
-        inner.addView(continueDetail);
-        centreText(inner);
-        tile.addView(inner, new FrameLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
-        tile.setOnClickListener(v -> showContinueList());
-        tile.setVisibility(View.GONE); // until Plex answers with something
-        continueTile = tile;
-        addTile(row, tile);
+        continueTile = wordTile(row, continueTitle, "CONTINUE", continueDetail, this::showContinueList);
+        continueTile.setVisibility(View.GONE); // until Plex answers with something
     }
 
     private void showContinue(List<ContinueWatching.Item> items) {
@@ -1038,7 +1048,7 @@ public class HomeActivity extends Activity {
             continueTile.setVisibility(View.GONE);
             return;
         }
-        continueTitle.setText(items.get(0).title);
+        setWordmark(continueTitle, items.get(0).title, -1);
         continueDetail.setText(items.get(0).detail);
         continueTile.setVisibility(View.VISIBLE);
     }
@@ -1088,34 +1098,12 @@ public class HomeActivity extends Activity {
 
     /** Small, in the far corner: JARVIS's settings (Android's are behind them). */
     private void addSettingsTile(LinearLayout row) {
-        FrameLayout tile = tileFrame();
-        LinearLayout inner = new LinearLayout(this);
-        inner.setOrientation(LinearLayout.VERTICAL);
-        inner.setGravity(Gravity.CENTER);
-        inner.addView(tileHeadline("Settings"));
-        inner.addView(tileLabel("JARVIS"));
-        centreText(inner);
-        tile.addView(inner, new FrameLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
-        tile.setOnClickListener(v -> startSafely(new Intent(this, SettingsActivity.class)));
-        addTile(row, tile);
+        TextView mark = wordmark();
+        setWordmark(mark, "settings", -1);
+        wordTile(row, mark, "JARVIS", null, () -> startSafely(new Intent(this, SettingsActivity.class)));
     }
 
-    /**
-     * Bottom-row tiles read like the wordmarks: the big thing on top ("plex",
-     * "8:00am", "Interstellar"), its spaced label under it ("LIBRARY",
-     * "WAKE-UP"), then any small print.
-     */
-    private TextView tileHeadline(String text) {
-        TextView t = label(text, 22, theme.text);
-        t.setTypeface(Typeface.create("sans-serif-light", Typeface.NORMAL));
-        t.setIncludeFontPadding(false);
-        t.setSingleLine(true);
-        t.setEllipsize(TextUtils.TruncateAt.END);
-        return t;
-    }
-
-    /** The wordmarks' sub-label style (LIBRARY, MUSIC). */
+    /** The wordmarks' spaced label (LIBRARY, MUSIC, WAKE-UP). */
     private TextView tileLabel(String text) {
         TextView t = label(text, 9, Theme.alpha(theme.accent, 180));
         t.setLetterSpacing(0.3f);
@@ -1151,6 +1139,11 @@ public class HomeActivity extends Activity {
         tile.setClipToOutline(true);
         tile.setOnFocusChangeListener((v, focused) -> {
             tile.setForeground(focused ? rounded(Color.TRANSPARENT, dp(3), theme.accent) : null);
+            // A wordTile's small print (its tag) only shows while it's highlighted.
+            if (v.getTag() instanceof TextView) {
+                TextView detail = (TextView) v.getTag();
+                detail.setVisibility(focused && detail.length() > 0 ? View.VISIBLE : View.INVISIBLE);
+            }
             v.animate().scaleX(focused ? 1.08f : 1f).scaleY(focused ? 1.08f : 1f)
                     .translationZ(focused ? dp(8) : 0).setDuration(120).start();
         });
