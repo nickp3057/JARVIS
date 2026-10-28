@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 /// Top-level shell: Media, Hub and Home (default, in the middle) are HubView tabs over one
 /// shared HubViewModel, Chat keeps its whole NavigationStack, and Settings is
@@ -7,7 +8,7 @@ struct RootView: View {
     @EnvironmentObject private var settings: AppSettings
     @ObservedObject var chat: ChatViewModel
     @ObservedObject var hub: HubViewModel
-    @State private var selection = RootTab.home
+    @State private var selection = RootView.isPad ? RootTab.room : RootTab.home
     /// Horizontal offset of the visible tab while swiping, and while the new
     /// tab slides in. The tab bar itself never moves.
     @State private var swipeOffset: CGFloat = 0
@@ -17,11 +18,22 @@ struct RootView: View {
     @Environment(\.scenePhase) private var scenePhase
     @ObservedObject private var wakeRinging = WakeRinging.shared
 
-    /// Tab-bar (and swipe) order: Home sits in the middle.
-    enum RootTab: Hashable, CaseIterable { case media, hub, home, chat, settings }
+    /// Tab-bar (and swipe) order: Home sits in the middle. The iPad adds Room
+    /// first (its default): the tablet is mainly a panel for the room.
+    enum RootTab: Hashable, CaseIterable { case room, media, hub, home, chat, settings }
+
+    static let isPad = UIDevice.current.userInterfaceIdiom == .pad
+    private static let tabs = RootTab.allCases.filter { isPad || $0 != .room }
 
     var body: some View {
         TabView(selection: $selection) {
+            if Self.isPad {
+                RoomView(model: hub)
+                    .swipePage(swipeOffset)
+                    .tabItem { Label("Room", systemImage: "lightbulb.2") }
+                    .tag(RootTab.room)
+            }
+
             HubView(model: hub, onAsk: ask, focus: .media)
                 .swipePage(swipeOffset)
                 .tabItem { Label("Media", systemImage: "play.rectangle.on.rectangle") }
@@ -68,7 +80,7 @@ struct RootView: View {
     }
 
     private func neighbour(towards dx: CGFloat) -> RootTab? {
-        let tabs = RootTab.allCases
+        let tabs = Self.tabs
         guard let index = tabs.firstIndex(of: selection) else { return nil }
         let next = dx < 0 ? index + 1 : index - 1
         return tabs.indices.contains(next) ? tabs[next] : nil
@@ -105,8 +117,8 @@ struct RootView: View {
     /// Home's chips: slide over to Hub or Media (which scrolls to the card).
     private func navigate(_ focus: HubView.HubFocus) {
         let target: RootTab = focus == .media ? .media : focus == .hub ? .hub : .home
-        guard target != selection, let from = RootTab.allCases.firstIndex(of: selection),
-              let to = RootTab.allCases.firstIndex(of: target) else { return }
+        guard target != selection, let from = Self.tabs.firstIndex(of: selection),
+              let to = Self.tabs.firstIndex(of: target) else { return }
         selection = target
         guard !reduceMotion else { return }
         swipeOffset = to > from ? 140 : -140

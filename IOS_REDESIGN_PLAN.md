@@ -20,6 +20,10 @@ Check these on the phone first. Some of the "weird" may already be gone.
 - Home tab: a **Scenes** card under the tiles, every saved HA scene as a
   tile, the last one run lit (like picking a Focus). Tap runs it.
 - Tapping the wake-up push opens `WakeRingingView` (Snooze / I'm up).
+- iPad: a **Room** tab (default on iPad) — clock, next alarm/event, TV
+  remote, keep-screen-on, big device tiles, scenes. No camera/security yet
+  (Nick, 2026-10-28). Later: brightness/colour on long-press (needs a Core
+  endpoint beyond on/off), music card, StandBy-style night dimming.
 - Next: an iOS Home Screen / Control Center widget for scenes (needs a
   widget extension target and an App Group for the server address/token).
 

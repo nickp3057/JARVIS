@@ -729,6 +729,14 @@ CALENDAR_ALERT_LEAD_MIN=10  # warn this many minutes before a meeting
   Resume (tested on a movie and an episode). Plex keeps Nick signed in, so
   the PIN auto-entry (`PlexAutoLogin.run`) is removed; `PlexWatch` keeps
   pressing Watch for "play ..." voice requests.
+- **iPad Room tab (iOS 4.7 / build 129)** — the same universal app; on an
+  iPad (`UIDevice` idiom `.pad`) a **Room** tab comes first and is the
+  default: big clock and date, next wake-up (opens the editor) and next
+  calendar item, TV remote, a "Keep screen on" toggle (idle timer off while
+  Room shows), big tiles for the `HOME_DASHBOARD_ENTITIES` lights and
+  switches, and the HA scenes. Side by side in landscape, stacked in
+  portrait (iPad mini). `Views/RoomView.swift`; no new Core endpoints.
+  Checked on the iPad mini simulator against the live Core (2026-10-28).
 - **Scene picker on the Home tab (iOS 4.6 / build 128)** — `GET
   /api/home/scenes` lists every *saved* Home Assistant scene (those with an
   `id` attribute; `scene.create` snapshots like `barn_door_before` stay
