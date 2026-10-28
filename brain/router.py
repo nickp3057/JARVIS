@@ -50,7 +50,6 @@ def _is_home_status(command: str) -> bool:
 
 
 _RULES: tuple[Rule, ...] = (
-    (_contains_any("exit", "quit", "bye"), "exit"),
     (_contains_any("time"), "time"),
     (_contains_any("test home assistant", "ping home assistant"), "ha_test"),
     (_contains_all("list", "lights"), "list_lights"),
@@ -66,14 +65,11 @@ def route_command(command: str) -> str:
     """Return the intent name that best matches ``command``."""
     normalized = command.lower().strip()
 
-    # The exit rule needs exact-word matching so we don't bail out on phrases
-    # like "what time is it goodbye." Keep this list in sync with the rule.
+    # Exit is exact words only, so "what time is it, goodbye" doesn't quit.
     if normalized in {"exit", "quit", "bye"}:
         return "exit"
 
     for predicate, intent in _RULES:
-        if intent == "exit":
-            continue
         if predicate(normalized):
             return intent
 

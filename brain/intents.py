@@ -71,6 +71,19 @@ def _list_domain(title: str, domain: str) -> IntentResult:
         return IntentResult(message=str(result))
 
 
+_DEVICE_GROUPS = (("Lights:", "light"), ("Switches:", "switch"), ("Fans:", "fan"))
+_LIST_INTENTS = {
+    "list_lights": _DEVICE_GROUPS[:1],
+    "list_switches": _DEVICE_GROUPS[1:2],
+    "list_fans": _DEVICE_GROUPS[2:],
+    "list_devices": _DEVICE_GROUPS,
+}
+
+
+def _by_domain(entities: list[str], groups) -> list[tuple[str, list[str]]]:  # noqa: ANN001
+    return [(title, [e for e in entities if e.startswith(f"{domain}.")]) for title, domain in groups]
+
+
 def _format_entity_list(title: str, entities: list[str]) -> str:
     if not entities:
         return f"{title} None found."
@@ -111,27 +124,15 @@ def _handle_list_fans(_: str) -> IntentResult:
 
 
 def _handle_list_devices(_: str) -> IntentResult:
-    success_lights, lights = list_entities("light")
-    success_switches, switches = list_entities("switch")
-    success_fans, fans = list_entities("fan")
-
-    if success_lights and success_switches and success_fans:
-        _print_entity_list("Lights:", lights)  # type: ignore[arg-type]
-        _print_entity_list("Switches:", switches)  # type: ignore[arg-type]
-        _print_entity_list("Fans:", fans)  # type: ignore[arg-type]
-        return IntentResult(
-            message=" ".join(
-                (
-                    _format_entity_list("Lights:", lights),  # type: ignore[arg-type]
-                    _format_entity_list("Switches:", switches),  # type: ignore[arg-type]
-                    _format_entity_list("Fans:", fans),  # type: ignore[arg-type]
-                )
-            )
-        )
-    else:
+    success, entities = list_entities()  # one read for all three kinds
+    if not success:
         message = "I hit an error while listing devices."
         _say(message)
         return IntentResult(message=message)
+    groups = _by_domain(entities, _DEVICE_GROUPS)  # type: ignore[arg-type]
+    for title, found in groups:
+        _print_entity_list(title, found)
+    return IntentResult(message=" ".join(_format_entity_list(title, found) for title, found in groups))
 
 
 def _handle_device_control(user_input: str) -> IntentResult:
@@ -200,23 +201,12 @@ def fallback_reply_for_intent(intent: str, user_input: str) -> str:
         if intent == "ha_test":
             _, message = test_connection()
             return message
-        if intent == "list_lights":
-            success, result = list_entities("light")
-            return _format_entity_list("Lights:", result) if success else str(result)
-        if intent == "list_switches":
-            success, result = list_entities("switch")
-            return _format_entity_list("Switches:", result) if success else str(result)
-        if intent == "list_fans":
-            success, result = list_entities("fan")
-            return _format_entity_list("Fans:", result) if success else str(result)
-        if intent == "list_devices":
-            parts: list[str] = []
-            for title, domain in (("Lights:", "light"), ("Switches:", "switch"), ("Fans:", "fan")):
-                success, result = list_entities(domain)
-                if not success:
-                    return str(result)
-                parts.append(_format_entity_list(title, result))
-            return " ".join(parts)
+        if intent in _LIST_INTENTS:
+            success, result = list_entities()  # one read, however many kinds
+            if not success:
+                return str(result)
+            return " ".join(_format_entity_list(title, found)
+                            for title, found in _by_domain(result, _LIST_INTENTS[intent]))  # type: ignore[arg-type]
         if intent == "home_status":
             return describe_home_status(user_input)
         if intent == "device_control":

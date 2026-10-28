@@ -538,12 +538,12 @@ def _score_entity(command: str, entity_id: str) -> int:
 
 
 def _find_best_entity(command: str, domains: list[str]) -> tuple[bool, str]:
-    candidates: list[str] = []
-    for domain in domains:
-        success, result = list_entities(domain)
-        if not success:
-            return False, str(result)
-        candidates.extend(result)  # type: ignore[arg-type]
+    # One read of the states for every domain (it used to be one per domain).
+    success, result = list_entities()
+    if not success:
+        return False, str(result)
+    prefixes = tuple(f"{domain}." for domain in domains)
+    candidates = [entity_id for entity_id in result if entity_id.startswith(prefixes)]  # type: ignore[union-attr]
 
     scored: list[tuple[int, str]] = []
     for entity_id in candidates:

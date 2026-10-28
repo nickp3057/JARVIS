@@ -110,12 +110,13 @@ class LocalModelTests(unittest.TestCase):
         with patch(
             "brain.local_model.classify_semantic_route",
             return_value={"kind": "intent", "intent": "list_lights"},
-        ), patch("brain.intents.list_entities", return_value=(True, ["Desk Lamp"])) as listing, patch(
+        ), patch("brain.intents.list_entities",
+                 return_value=(True, ["light.desk_lamp", "switch.wii_u"])) as listing, patch(
             "brain.local_model.generate_reply"
         ) as conversation:
             reply = routed_offline_reply("Show me every lamp", [])
-        self.assertEqual(reply, "Lights: Desk Lamp")
-        listing.assert_called_once_with("light")
+        self.assertEqual(reply, "Lights: light.desk_lamp")  # only the lights
+        listing.assert_called_once_with()
         conversation.assert_not_called()
 
     def test_semantic_status_route_uses_original_question(self) -> None:
