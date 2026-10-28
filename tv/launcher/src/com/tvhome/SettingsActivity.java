@@ -25,9 +25,9 @@ import org.json.JSONObject;
 public class SettingsActivity extends Activity {
     // Same order as the phone's picker (ios/.../Views/JarvisTheme.swift).
     private static final String[] THEMES =
-            {"arc", "markIII", "hotRod", "graphite", "malibu", "crimson", "stealth", "mark85"};
+            {"arc", "hotRod", "malibu", "crimson", "mark85", "spiderMan", "mcqueen"};
     private static final String[] THEME_NAMES =
-            {"Arc", "Mark III", "Hot Rod", "Graphite", "Malibu", "Crimson", "Stealth", "Mark 85"};
+            {"Arc", "Hot Rod", "Malibu", "Crimson", "Mark 85", "Spider-Man", "McQueen"};
 
     private Theme theme;
     private LinearLayout list;

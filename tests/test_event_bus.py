@@ -137,7 +137,8 @@ class ClientTokenTests(unittest.TestCase):
         reader = {"Authorization": "Bearer " + client_tokens.create("tv", ["status:read"])}
         writer = {"Authorization": "Bearer " + client_tokens.create("tv2", ["status:read", "settings:write"])}
         with patch.dict(os.environ, {"JARVIS_THEME": "markIII"}):
-            self.assertEqual(self.client.get("/api/theme", headers=reader).json()["chosen"], False)
+            first = self.client.get("/api/theme", headers=reader).json()
+            self.assertEqual((first["theme"], first["chosen"]), ("hotRod", False))  # Mark III retired
             self.assertEqual(self.client.put("/api/theme", headers=reader, json={"theme": "arc"}).status_code, 403)
             self.assertEqual(self.client.put("/api/theme", headers=writer, json={"theme": "pink"}).status_code, 422)
             body = self.client.put("/api/theme", headers=writer, json={"theme": "hotRod"}).json()

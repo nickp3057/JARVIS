@@ -7,7 +7,7 @@ typealias RGB = (Double, Double, Double)
 /// the reactor (`reactor`: the mark and the control tint), the secondary (`blue`: Nick's bubbles), the three status colours
 /// (warning, critical, nominal), and the four surfaces, dark and light.
 enum JarvisPalette: String, CaseIterable, Identifiable {
-    case arc, markIII, hotRod, graphite, malibu, crimson, stealth, mark85
+    case arc, hotRod, malibu, crimson, mark85, spiderMan, mcqueen
 
     static let storageKey = "jarvis.palette"
     var id: String { rawValue }
@@ -15,26 +15,24 @@ enum JarvisPalette: String, CaseIterable, Identifiable {
     var name: String {
         switch self {
         case .arc: return "Arc"
-        case .markIII: return "Mark III"
         case .hotRod: return "Hot Rod"
-        case .graphite: return "Graphite"
         case .malibu: return "Malibu"
         case .crimson: return "Crimson"
-        case .stealth: return "Stealth"
         case .mark85: return "Mark 85"
+        case .spiderMan: return "Spider-Man"
+        case .mcqueen: return "Lightning McQueen"
         }
     }
 
     var blurb: String {
         switch self {
         case .arc: return "The original cyan HUD."
-        case .markIII: return "Gold HUD, hot-rod red, arc-reactor glow."
-        case .hotRod: return "Mark III's gold and red, with arc-reactor cyan on the reactor and controls."
-        case .graphite: return "Apple-clean: system blue on true black."
+        case .hotRod: return "The Mark III's gold and red, with arc-reactor cyan on the reactor and controls."
         case .malibu: return "Sunset over the cliff house: orange, ocean blue, a cyan core."
         case .crimson: return "Red, but calm: crimson on neutral charcoal."
-        case .stealth: return "The stealth suit: silver and gunmetal, cyan reactor."
         case .mark85: return "Endgame's suit: gold and crimson on deep navy, no red glare."
+        case .spiderMan: return "Suit red and web blue, after dark in Queens."
+        case .mcqueen: return "Ka-chow. Candy red, lightning yellow, a flame-orange core."
         }
     }
 
@@ -69,24 +67,14 @@ enum JarvisPalette: String, CaseIterable, Identifiable {
                          deep: ((0.008, 0.018, 0.035), (0.90, 0.93, 0.96)),
                          panel: ((0.055, 0.085, 0.125), (1, 1, 1)),
                          raised: ((0.075, 0.12, 0.17), (0.975, 0.985, 1)))
-        case .markIII, .hotRod:
-            return Roles(accent: Self.gold, reactor: self == .hotRod ? Self.cyanCore : Self.gold,
+        case .hotRod:
+            return Roles(accent: Self.gold, reactor: Self.cyanCore,
                          secondary: Self.redSecondary,
                          warning: ((1.0, 0.50, 0.18), (0.76, 0.30, 0.0)),
                          critical: ((1.0, 0.22, 0.27), (0.80, 0.03, 0.09)),
                          success: ((0.55, 0.90, 1.0), (0.0, 0.45, 0.62)),
                          background: Self.redSurfaces[0], deep: Self.redSurfaces[1],
                          panel: Self.redSurfaces[2], raised: Self.redSurfaces[3])
-        case .graphite:
-            let blue: (RGB, RGB) = ((0.04, 0.52, 1.0), (0.0, 0.40, 0.85))
-            return Roles(accent: blue, reactor: blue, secondary: blue,
-                         warning: ((1.0, 0.62, 0.04), (0.75, 0.40, 0.0)),
-                         critical: ((1.0, 0.27, 0.23), (0.84, 0.12, 0.10)),
-                         success: ((0.19, 0.82, 0.35), (0.0, 0.55, 0.20)),
-                         background: ((0.0, 0.0, 0.0), (0.95, 0.95, 0.97)),
-                         deep: ((0.0, 0.0, 0.0), (0.90, 0.90, 0.92)),
-                         panel: ((0.11, 0.11, 0.12), (1, 1, 1)),
-                         raised: ((0.17, 0.17, 0.18), (0.98, 0.98, 0.99)))
         case .malibu:
             return Roles(accent: ((1.0, 0.58, 0.28), (0.72, 0.33, 0.0)), reactor: Self.cyanCore,
                          secondary: ((0.16, 0.45, 0.85), (0.08, 0.33, 0.70)),
@@ -108,17 +96,6 @@ enum JarvisPalette: String, CaseIterable, Identifiable {
                          deep: ((0.02, 0.02, 0.025), (0.92, 0.91, 0.91)),
                          panel: ((0.10, 0.10, 0.11), (1, 1, 1)),
                          raised: ((0.14, 0.14, 0.155), (0.99, 0.98, 0.98)))
-        case .stealth:
-            return Roles(accent: ((0.80, 0.84, 0.90), (0.25, 0.28, 0.33)),
-                         reactor: ((0.40, 0.90, 1.0), (0.0, 0.45, 0.62)),
-                         secondary: ((0.35, 0.42, 0.52), (0.30, 0.36, 0.45)),
-                         warning: ((1.0, 0.73, 0.30), (0.69, 0.40, 0.0)),
-                         critical: ((1.0, 0.36, 0.38), (0.78, 0.10, 0.14)),
-                         success: ((0.45, 0.88, 0.75), (0.0, 0.48, 0.36)),
-                         background: ((0.05, 0.055, 0.065), (0.95, 0.955, 0.965)),
-                         deep: ((0.02, 0.022, 0.028), (0.90, 0.91, 0.925)),
-                         panel: ((0.09, 0.10, 0.115), (1, 1, 1)),
-                         raised: ((0.13, 0.14, 0.16), (0.975, 0.98, 0.99)))
         case .mark85:
             return Roles(accent: ((1.0, 0.80, 0.40), (0.58, 0.40, 0.0)), reactor: Self.cyanCore,
                          secondary: ((0.78, 0.12, 0.16), (0.66, 0.06, 0.10)),
@@ -129,6 +106,28 @@ enum JarvisPalette: String, CaseIterable, Identifiable {
                          deep: ((0.012, 0.016, 0.035), (0.91, 0.915, 0.935)),
                          panel: ((0.07, 0.085, 0.14), (1, 1, 1)),
                          raised: ((0.10, 0.12, 0.19), (0.98, 0.98, 0.995)))
+        case .spiderMan:
+            return Roles(accent: ((0.93, 0.18, 0.22), (0.75, 0.05, 0.10)),
+                         reactor: ((0.55, 0.75, 1.0), (0.10, 0.30, 0.70)),
+                         secondary: ((0.15, 0.38, 0.90), (0.08, 0.28, 0.75)),
+                         warning: ((1.0, 0.70, 0.25), (0.70, 0.38, 0.0)),
+                         critical: ((1.0, 0.42, 0.30), (0.80, 0.15, 0.05)),
+                         success: ((0.40, 0.85, 0.65), (0.0, 0.50, 0.32)),
+                         background: ((0.03, 0.04, 0.09), (0.96, 0.965, 0.98)),
+                         deep: ((0.01, 0.015, 0.04), (0.91, 0.92, 0.95)),
+                         panel: ((0.06, 0.08, 0.16), (1, 1, 1)),
+                         raised: ((0.09, 0.11, 0.22), (0.98, 0.985, 1.0)))
+        case .mcqueen:
+            return Roles(accent: ((1.0, 0.83, 0.18), (0.60, 0.45, 0.0)),
+                         reactor: ((1.0, 0.55, 0.15), (0.75, 0.32, 0.0)),
+                         secondary: ((0.88, 0.12, 0.14), (0.72, 0.06, 0.10)),
+                         warning: ((1.0, 0.62, 0.20), (0.76, 0.34, 0.0)),
+                         critical: ((1.0, 0.30, 0.32), (0.80, 0.05, 0.10)),
+                         success: ((0.45, 0.88, 0.55), (0.0, 0.50, 0.25)),
+                         background: ((0.09, 0.025, 0.03), (0.98, 0.95, 0.94)),
+                         deep: ((0.035, 0.008, 0.012), (0.94, 0.90, 0.89)),
+                         panel: ((0.15, 0.045, 0.05), (1, 1, 1)),
+                         raised: ((0.21, 0.07, 0.07), (1, 0.98, 0.975)))
         }
     }
 

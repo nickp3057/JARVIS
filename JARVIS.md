@@ -619,7 +619,7 @@ SCHWAB_CALLBACK_URL=https://127.0.0.1:8182   # exactly what the Schwab app has r
 TV_REMOTE_ENTITY=remote.nick_s_room_tv   # HA Android TV Remote entity for Nick's room TV
 TV_MEDIA_PLAYERS=media_player.nicks_room_tv,media_player.nicks_room_tv_2,media_player.nick_s_room_tv,media_player.nicks_room_group,media_player.nick_s_room_display   # on/off for these goes to the remote
 SCHWAB_POLL_SECONDS=30      # holdings/cash refresh in market hours (prices stream live regardless)
-JARVIS_THEME=arc            # arc | markIII | hotRod | graphite | malibu | crimson | stealth | mark85: default look until someone picks one on the phone or TV (then memory/theme.json via /api/theme)
+JARVIS_THEME=arc            # arc | hotRod | malibu | crimson | mark85 | spiderMan | mcqueen (markIII/graphite/stealth retired): default look until someone picks one on the phone or TV (then memory/theme.json via /api/theme)
 CALENDAR_CATEGORIES=        # calendar name=category pairs, ';'-separated (e.g. Oil/Boil Outs=work);
                             # unlisted names with school/family/work in them use that, else personal
 GLANCE_HIDDEN_CATEGORIES=work # categories left off the TV's Coming up list
@@ -688,6 +688,12 @@ CALENDAR_ALERT_LEAD_MIN=10  # warn this many minutes before a meeting
 
 ## Recently Shipped
 
+- **Themes trimmed and two added; tiles read like wordmarks (TV 7.1, iOS 3.2
+  / build 114)** — Nick kept Arc, Hot Rod, Malibu, Crimson and Mark 85 (his
+  favourite) and asked for Spider-Man and Lightning McQueen; Mark III,
+  Graphite and Stealth are gone (`brain/theme.py` maps a stored one to Hot
+  Rod / Arc). TV bottom-row tiles put the headline over the label like the
+  wordmarks.
 - **TV 7.0: one bottom row, no Plex PIN robot** — every bottom-row tile
   (Plex, Spotify, Wake-up, Continue, Settings) shares one look and width,
   spread evenly; Continue's list opens on the newest and lands on Plex's

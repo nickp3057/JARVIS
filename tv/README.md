@@ -64,15 +64,22 @@ every deploy, so edit the repo copy, not the TV's.
   movie (Interstellar) and an episode (Suits). Refreshed with the glance.
 - **Bottom row**: Plex, Spotify, Wake-up, Continue, Settings, all the same
   tile (gradient, accent outline, centred text), equal widths spread edge
-  to edge. Continue hides when Plex has nothing in progress.
+  to edge, and all read the same way: the big thing on top, its spaced
+  label under it, small print last (plex / LIBRARY, 8:00am / WAKE-UP /
+  Tomorrow · Back in Black, Interstellar / CONTINUE / 2h 43m left, Settings
+  / JARVIS). The wordmarks' accent letter (Plex's x, its logo's chevron;
+  Spotify's i) is the theme accent. Continue hides when Plex has nothing in
+  progress.
 - **Plex sign-in**: Nick stays signed in to his Plex profile, so the old PIN
   auto-entry is gone (2026-10-27); `PlexWatch` only presses Watch/Resume for
   "play ..." voice requests.
 - **Phone snooze**: `wake_snooze` / `wake_dismiss` bus events (from the
   phone's notification buttons) pause and count down, or close
   `WakeActivity`. Core rings a phone snooze again itself.
-- **Themes**: Arc, Mark III, Hot Rod, Graphite, Malibu, Crimson, Stealth,
-  Mark 85 (`Theme.java`, dark variants of the phone's `JarvisPalette`).
+- **Themes**: Arc, Hot Rod, Malibu, Crimson, Mark 85 (Nick's pick),
+  Spider-Man, McQueen (`Theme.java`, dark variants of the phone's
+  `JarvisPalette`). Mark III, Graphite and Stealth were retired 2026-10-27;
+  Core maps a stored retired pick to Hot Rod / Arc.
 - **Weather icon** (`HomeActivity.weatherIcon`): one emoji from the
   description: sun (moon at night), part-cloud, cloud, rain, snow, storm, fog.
 - **Power and remote from the phone** don't touch this app: Core drives the

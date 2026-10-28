@@ -60,10 +60,11 @@ toolbar).
 
 ## Themes and motion (1.86, simulator tests pass)
 
-- Settings → Theme (3.0): Arc, Mark III, Hot Rod plus five to try, Graphite
-  (Apple blue on black), Malibu (sunset orange, ocean blue, cyan core),
-  Crimson (calm red on charcoal), Stealth (silver/gunmetal) and Mark 85 (gold
-  and crimson on navy). Nick picks which stay. Earlier: (`JarvisPalette`; Reactor removed in 1.87, Nick disliked the violet; Hot Rod added in 1.91). Mark III's red
+- Settings → Theme (3.2): Arc, Hot Rod, Malibu (sunset orange, ocean blue,
+  cyan core), Crimson (calm red on charcoal), Mark 85 (gold and crimson on
+  navy; Nick's favourite), Spider-Man (suit red, web blue) and Lightning
+  McQueen (candy red, lightning yellow). Mark III, Graphite and Stealth were
+  tried and retired in 3.2. Earlier: (`JarvisPalette`; Reactor removed in 1.87, Nick disliked the violet; Hot Rod added in 1.91). Mark III's red
   accent sits close to the red "critical" dot; revisit if that confuses.
 - The reactor mark animates at display rate; check smoothness on device with
   Instruments → Animation Hitches (target: no hitches on the Chat empty

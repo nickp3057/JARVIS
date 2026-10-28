@@ -997,15 +997,10 @@ public class HomeActivity extends Activity {
         inner.setOrientation(LinearLayout.VERTICAL);
         inner.setGravity(Gravity.CENTER);
         inner.setPadding(dp(12), 0, dp(12), 0);
-        TextView eyebrow = label("WAKE-UP", 9, Theme.alpha(theme.accent, 200));
-        eyebrow.setLetterSpacing(0.3f);
-        inner.addView(eyebrow);
-        wakeTime = label("", 20, theme.text);
-        wakeTime.setTypeface(Typeface.create("sans-serif-light", Typeface.NORMAL));
+        wakeTime = tileHeadline("");
         inner.addView(wakeTime);
-        wakeDays = label("", 10, theme.dim);
-        wakeDays.setSingleLine(true);
-        wakeDays.setEllipsize(TextUtils.TruncateAt.END);
+        inner.addView(tileLabel("WAKE-UP"));
+        wakeDays = tileInfo();
         inner.addView(wakeDays);
         centreText(inner);
         tile.addView(inner, new FrameLayout.LayoutParams(
@@ -1021,15 +1016,10 @@ public class HomeActivity extends Activity {
         inner.setOrientation(LinearLayout.VERTICAL);
         inner.setGravity(Gravity.CENTER);
         inner.setPadding(dp(12), 0, dp(12), 0);
-        TextView eyebrow = label("CONTINUE", 9, Theme.alpha(theme.accent, 200));
-        eyebrow.setLetterSpacing(0.3f);
-        inner.addView(eyebrow);
-        continueTitle = label("", 15, theme.text);
-        continueTitle.setSingleLine(true);
-        continueTitle.setEllipsize(TextUtils.TruncateAt.END);
+        continueTitle = tileHeadline("");
         inner.addView(continueTitle);
-        continueDetail = label("", 10, theme.dim);
-        continueDetail.setSingleLine(true);
+        inner.addView(tileLabel("CONTINUE"));
+        continueDetail = tileInfo();
         inner.addView(continueDetail);
         centreText(inner);
         tile.addView(inner, new FrameLayout.LayoutParams(
@@ -1102,17 +1092,43 @@ public class HomeActivity extends Activity {
         LinearLayout inner = new LinearLayout(this);
         inner.setOrientation(LinearLayout.VERTICAL);
         inner.setGravity(Gravity.CENTER);
-        TextView eyebrow = label("JARVIS", 9, Theme.alpha(theme.accent, 200));
-        eyebrow.setLetterSpacing(0.3f);
-        inner.addView(eyebrow);
-        TextView t = label("Settings", 20, theme.text);
-        t.setTypeface(Typeface.create("sans-serif-light", Typeface.NORMAL));
-        inner.addView(t);
+        inner.addView(tileHeadline("Settings"));
+        inner.addView(tileLabel("JARVIS"));
         centreText(inner);
         tile.addView(inner, new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
         tile.setOnClickListener(v -> startSafely(new Intent(this, SettingsActivity.class)));
         addTile(row, tile);
+    }
+
+    /**
+     * Bottom-row tiles read like the wordmarks: the big thing on top ("plex",
+     * "8:00am", "Interstellar"), its spaced label under it ("LIBRARY",
+     * "WAKE-UP"), then any small print.
+     */
+    private TextView tileHeadline(String text) {
+        TextView t = label(text, 22, theme.text);
+        t.setTypeface(Typeface.create("sans-serif-light", Typeface.NORMAL));
+        t.setIncludeFontPadding(false);
+        t.setSingleLine(true);
+        t.setEllipsize(TextUtils.TruncateAt.END);
+        return t;
+    }
+
+    /** The wordmarks' sub-label style (LIBRARY, MUSIC). */
+    private TextView tileLabel(String text) {
+        TextView t = label(text, 9, Theme.alpha(theme.accent, 180));
+        t.setLetterSpacing(0.3f);
+        t.setPadding(0, dp(4), 0, 0);
+        return t;
+    }
+
+    private TextView tileInfo() {
+        TextView t = label("", 10, theme.dim);
+        t.setSingleLine(true);
+        t.setEllipsize(TextUtils.TruncateAt.END);
+        t.setPadding(0, dp(3), 0, 0);
+        return t;
     }
 
     /** Bottom-row text sits centred, like the Plex and Spotify wordmarks. */
