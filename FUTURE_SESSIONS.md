@@ -166,6 +166,14 @@ of each group.
   `runtime.raise_alert` when it drops below a target). Price watching is a
   monitor, not a UI poll.
 
+- [ ] **Room scenes** (Nick, 2026-10-27; "not yet"): one phrase sets the
+  whole room. "Game time": strips and desk strips on, bedroom light off,
+  Avengers tower on, fan on. "Bedtime": everything off, fan to 40%. Barn
+  Door Protocol becomes one of them. Shape: named scenes in a small store
+  (entity → state/colour/effect/fan %) that JARVIS runs by name, editable in
+  the app; expose them to Google Home through HA scripts so "Hey Google,
+  game time" works too. Remember Govee app modes (rainbows) aren't visible to
+  HA; use the effect names HA lists.
 - [ ] **Room sentry on the work iPad** (Nick, 2026-10-27; waiting on the
   iPad). The iPad, propped up running JARVIS, watches the room with Vision's
   on-device person detection (frames never leave it, nothing recorded).

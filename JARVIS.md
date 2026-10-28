@@ -263,7 +263,7 @@ RMS envelope from ElevenLabs audio drives the orb in real time using a monotonic
 - `barn_door_protocol(action?)` — "Barn Door Protocol" / "lockdown": HA
   snapshots the room (`scene.create` → `scene.barn_door_before`), every
   colour light in `BARN_DOOR_LIGHTS` (strips, desk, the fan's LEDs) goes full
-  red, `BARN_DOOR_OFF` (the bedroom light) goes dark, the shared theme goes
+  red, `BARN_DOOR_OFF` (the bedroom light, the Avengers tower) goes dark, the shared theme goes
   to the hidden red `barnDoor` palette (`brain/theme.py` remembers the old
   one) and the TV gets a red banner. `stand_down` restores the snapshot and
   the theme (`brain/protocols.py`), then re-applies each light's effect
@@ -629,7 +629,7 @@ SCHWAB_APP_KEY=             # JARVIS's own Schwab developer app (developer.schwa
 SCHWAB_APP_SECRET=
 SCHWAB_CALLBACK_URL=https://127.0.0.1:8182   # exactly what the Schwab app has registered
 BARN_DOOR_LIGHTS=light.nick_strip_lights,light.strip_lights,light.desk_lights,light.desk_lights_2,light.nicks_fan   # go red
-BARN_DOOR_OFF=light.bedroom_lights   # go dark
+BARN_DOOR_OFF=light.bedroom_lights,switch.avengers_tower_socket_1   # can't go red, so go dark (lights or switches)
 BARN_DOOR_EFFECTS=light.nick_strip_lights=Rainbow-A,light.desk_lights_2=Rainbow   # effects to return to when HA can't see the running one
 TV_REMOTE_ENTITY=remote.nick_s_room_tv   # HA Android TV Remote entity for Nick's room TV
 TV_MEDIA_PLAYERS=media_player.nicks_room_tv,media_player.nicks_room_tv_2,media_player.nick_s_room_tv,media_player.nicks_room_group,media_player.nick_s_room_display   # on/off for these goes to the remote

@@ -1,8 +1,9 @@
 """Barn Door Protocol: Nick's room goes to red alert, and back.
 
 Engage: Home Assistant snapshots the room's lights (``scene.create``), every
-colour light in ``BARN_DOOR_LIGHTS`` goes full red, the plain ones in
-``BARN_DOOR_OFF`` go dark, the shared theme switches to the red ``barnDoor``
+colour light in ``BARN_DOOR_LIGHTS`` goes full red, everything in
+``BARN_DOOR_OFF`` that can't be red (the bedroom light, the Avengers tower)
+goes dark, the shared theme switches to the red ``barnDoor``
 palette (phone and TV follow; brain/theme.py remembers the old one) and the
 TV shows a red banner. Stand down: the snapshot and the old theme come back.
 
@@ -24,7 +25,7 @@ from integrations import home_assistant
 
 _SCENE = "barn_door_before"
 _COLOUR = "light.nick_strip_lights,light.strip_lights,light.desk_lights,light.desk_lights_2,light.nicks_fan"
-_OFF = "light.bedroom_lights"
+_OFF = "light.bedroom_lights,switch.avengers_tower_socket_1"  # not red: dark
 _EFFECTS_FILE = Path(__file__).resolve().parents[1] / "memory" / "barn_door_effects.json"
 
 
@@ -41,7 +42,7 @@ def engage() -> str:
     failed = [e for e in colour if not home_assistant.call_service(
         "light", "turn_on", e, {"rgb_color": [255, 0, 0], "brightness": 255})[0]]
     for entity in off:
-        home_assistant.call_service("light", "turn_off", entity)
+        home_assistant.call_service(entity.split(".", 1)[0], "turn_off", entity)
     theme.choose("barnDoor", remember=True)
     event_bus.publish("barn_door", "BARN DOOR PROTOCOL", "Engaged. Room locked to red.",
                       source="protocols", severity="critical", push=False)

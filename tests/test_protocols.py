@@ -39,6 +39,8 @@ class BarnDoorTests(unittest.TestCase):
         self.assertEqual(len(red), 5)
         self.assertEqual(red[0].args[3]["rgb_color"], [255, 0, 0])
         self.assertEqual(self.calls("light", "turn_off")[0].args[2], "light.bedroom_lights")
+        self.assertEqual(self.calls("switch", "turn_off")[0].args[2], "switch.avengers_tower_socket_1")
+        self.assertIn("switch.avengers_tower_socket_1", snapshot["snapshot_entities"])  # comes back on
         self.assertEqual(theme.current()["theme"], "barnDoor")
         self.assertEqual(event_bus.since(0)[-1].severity, "critical")
         # Saying it twice must not snapshot the red room over the real one.

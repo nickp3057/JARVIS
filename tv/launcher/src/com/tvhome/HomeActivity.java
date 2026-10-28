@@ -328,32 +328,40 @@ public class HomeActivity extends Activity {
 
     /**
      * Barn Door Protocol (brain/protocols.py) owns the screen: everything else
-     * goes, leaving a giant reactor, the protocol's name and the time. The
+     * goes, leaving the hostile reactor (RedAlertView), a blinking LOCKDOWN
+     * line and the protocol's name across the bottom. The
      * normal home sits underneath (its timers keep running) and comes back
      * when JARVIS stands down and the theme changes.
      */
     private void addBarnDoor() {
-        LinearLayout alert = new LinearLayout(this);
-        alert.setOrientation(LinearLayout.VERTICAL);
-        alert.setGravity(Gravity.CENTER);
-        alert.setBackground(new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,
-                new int[] {theme.background, theme.deep}));
+        FrameLayout alert = new FrameLayout(this);
+        alert.setBackgroundColor(theme.deep);
         alert.setClickable(true);
-        alert.addView(new ReactorView(this, theme.reactor, theme.critical),
-                new LinearLayout.LayoutParams(dp(330), dp(330)));
-        TextView name = label("BARN DOOR PROTOCOL", 30, theme.accent);
+        alert.addView(new RedAlertView(this, theme.reactor, Color.rgb(255, 72, 56)), new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+
+        TextView status = label("●  LOCKDOWN ACTIVE  ·  ROOM SEALED", 12, theme.critical);
+        status.setLetterSpacing(0.35f);
+        status.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
+        android.animation.ObjectAnimator blink = android.animation.ObjectAnimator.ofFloat(status, "alpha", 1f, 0.15f);
+        blink.setDuration(700);
+        blink.setRepeatMode(android.animation.ValueAnimator.REVERSE);
+        blink.setRepeatCount(android.animation.ValueAnimator.INFINITE);
+        blink.start();
+        FrameLayout.LayoutParams top = new FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.TOP | Gravity.CENTER_HORIZONTAL);
+        top.setMargins(0, dp(22), 0, 0);
+        alert.addView(status, top);
+
+        TextView name = label("BARN DOOR PROTOCOL", 44, theme.accent);
         name.setTypeface(Typeface.create("sans-serif-black", Typeface.BOLD));
-        name.setLetterSpacing(0.25f);
-        name.setShadowLayer(dp(14), 0, 0, Theme.alpha(theme.accent, 160));
-        name.setPadding(0, dp(18), 0, dp(6));
-        alert.addView(name);
-        TextClock time = new TextClock(this);
-        time.setFormat12Hour("h:mm  ·  EEEE");
-        time.setFormat24Hour("HH:mm  ·  EEEE");
-        time.setTextSize(15);
-        time.setTextColor(theme.dim);
-        time.setLetterSpacing(0.1f);
-        alert.addView(time);
+        name.setLetterSpacing(0.3f);
+        name.setShadowLayer(dp(18), 0, 0, Theme.alpha(theme.accent, 200));
+        FrameLayout.LayoutParams bottom = new FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL);
+        bottom.setMargins(0, 0, 0, dp(22));
+        alert.addView(name, bottom);
+
         stage.addView(alert, new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
         screen.setDescendantFocusability(ViewGroup.FOCUS_BLOCK_DESCENDANTS);
