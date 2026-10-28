@@ -727,6 +727,14 @@ CALENDAR_ALERT_LEAD_MIN=10  # warn this many minutes before a meeting
   Resume (tested on a movie and an episode). Plex keeps Nick signed in, so
   the PIN auto-entry (`PlexAutoLogin.run`) is removed; `PlexWatch` keeps
   pressing Watch for "play ..." voice requests.
+- **Tap the wake-up push for the alarm screen; Spotify fallback (iOS 4.4 /
+  build 126, TV 8.1)** — tapping the WAKE_UP notification itself (not a
+  button) opens the app on `WakeRingingView`, full screen, with big Snooze
+  9 min / I'm up buttons (same `/api/wake/snooze` / `/api/wake/awake`). TV:
+  if Spotify's leftover session ignores `playFromUri` and stays paused (seen
+  2026-10-28: paused on last night's track), `Wake.run` opens the link in
+  Spotify itself (`am start VIEW`, `spotify:search:` for searches) and
+  presses play again.
 - **Five new themes, phone snooze, Continue Watching (TV 6.9, iOS 3.0 / build
   112)** — Graphite, Malibu, Crimson, Stealth, Mark 85 on phone, TV and Core
   (`JarvisPalette`, `Theme.java`, `brain/theme.py`). The wake-up push now

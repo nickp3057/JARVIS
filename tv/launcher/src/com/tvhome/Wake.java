@@ -2,6 +2,7 @@ package com.tvhome;
 
 import android.content.Context;
 import android.media.AudioManager;
+import android.net.Uri;
 import android.os.Handler;
 import android.os.Looper;
 import android.util.Log;
@@ -53,6 +54,18 @@ final class Wake {
             for (int i = 0; i < 6 && !Music.now(c).playing; i++) {
                 Thread.sleep(3000);
                 if (!Music.now(c).playing) adb.shell("input keyevent 126"); // MEDIA_PLAY
+            }
+            // A session left over from last night can ignore playFromUri and sit
+            // paused on the old track (2026-10-28): open the link in Spotify itself.
+            if (!Music.now(c).playing && !music.isEmpty()) {
+                String uri = music.startsWith("search:") ? "spotify:search:" + Uri.encode(music.substring(7)) : music;
+                Log.w(TAG, "still not playing; opening " + uri);
+                adb.shell("am start -a android.intent.action.VIEW -d '" + uri.replace("'", "")
+                        + "' -p " + Music.SPOTIFY);
+                for (int i = 0; i < 4 && !Music.now(c).playing; i++) {
+                    Thread.sleep(3000);
+                    if (!Music.now(c).playing) adb.shell("input keyevent 126");
+                }
             }
             Thread.sleep(1500);
             // I'm up / Snooze over the home screen (also covers Spotify if it had to open).

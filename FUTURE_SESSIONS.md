@@ -136,7 +136,33 @@ of each group.
 - [ ] Check the iPhone app's server address in Settings; if it's 10.0.0.80,
   switch it to the Tailscale address `100.69.8.11`.
 
-### Next session starts here (left 2026-10-27, late)
+### Next session starts here (left 2026-10-28, from school)
+
+- **Morning report 2026-10-28:** the TV turned on at 8:00 (proven), but no
+  music. HA history: at 08:00:03 Spotify's session was *paused* on "Highway
+  to Hell" (last night's track), so `playFromUri` was ignored; the TV went
+  off at 08:00:52. TV 8.1 (built, not installed) falls back to opening the
+  link in Spotify. **Install at home:** `TV=10.0.0.46:5555 tv/launcher/deploy.sh`,
+  then test with the WakeTestReceiver broadcast after the TV has slept.
+  Ask Nick whether he turned the TV off at 08:00:52 or it shut itself off.
+- **iOS 4.4 / build 126 (not installed):** tap the wake-up push → full-screen
+  Snooze / I'm up. Install from Xcode when at the Mac.
+- **1337x is IP-banned, not rate-limited.** Prowlarr logs: `403 Forbidden,
+  error code: 1006` from `1337x.to` (Cloudflare "your IP is banned" for the
+  VPN exit IP); FlareSolverr can't solve that. JARVIS's own incident read
+  ("429 rate limit, category mismatch") was wrong: teach the arr incident
+  report to quote the real HTTP status/Cloudflare code from Prowlarr's log.
+  Fix options: point the indexer at a mirror (`1337x.st`, `x1337x.ws`,
+  `x1337x.eu`, `x1337x.cc`) or rotate the gluetun server. A `switch_indexer_mirror`
+  stack fix (confirm-gated) would let JARVIS do this itself.
+- **NAS powers today:** read-only host health (cron JSON), arr recovery
+  script, Prowlarr indexer retest, HA restart, Plex refresh, download retry.
+  No arbitrary docker, no image updates, no config edits, by design
+  (restricted SSH keys). Nick asked for "update and do everything with my NAS
+  and docker": next step is a confirm-gated, allow-listed `nas_docker` action
+  (pull + recreate one named container from compose) on the NAS side.
+
+### Earlier: left 2026-10-27, late
 
 - **Morning checks Nick will report:** did the 8:00 wake-up turn the TV on
   from a night off (the unproven part)? Did the LED under the TV still

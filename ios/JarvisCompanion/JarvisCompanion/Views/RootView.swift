@@ -15,6 +15,7 @@ struct RootView: View {
     @AppStorage(JarvisPalette.storageKey) private var palette = JarvisPalette.arc.rawValue
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.scenePhase) private var scenePhase
+    @ObservedObject private var wakeRinging = WakeRinging.shared
 
     /// Tab-bar (and swipe) order: Home sits in the middle.
     enum RootTab: Hashable, CaseIterable { case media, hub, home, chat, settings }
@@ -50,6 +51,7 @@ struct RootView: View {
         .tint(JarvisTheme.reactor)
         .simultaneousGesture(DragGesture(minimumDistance: 30).onChanged(track).onEnded(swipe))
         .sensoryFeedback(.selection, trigger: selection)
+        .fullScreenCover(isPresented: $wakeRinging.showing) { WakeRingingView().environmentObject(settings) }
         .task(id: scenePhase) {
             // Follow the shared theme while the app is open (a pick on the TV,
             // Barn Door engaging or standing down), not just on launch.

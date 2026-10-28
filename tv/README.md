@@ -44,7 +44,9 @@ every deploy, so edit the repo copy, not the TV's.
   Spotify searches, a link, or resume. At the time Core publishes a
   `wake_up` event; the TV turns on, goes home and plays through Spotify's
   media session (`playFromSearch` / `playFromUri`), so Spotify never takes
-  the screen unless it hasn't run since boot. Volume goes straight to the
+  the screen unless it hasn't run since boot. If it still isn't playing after
+  the play presses (a stale session sitting paused on last night's track), it
+  opens the link in Spotify itself (`am start VIEW`) and presses play. Volume goes straight to the
   alarm's level (no fade: Nick didn't like it creeping up), then
   `WakeActivity` shows the time with **I'm up** (closes; music plays on;
   Back does the same) and **Snooze 9 min** (pauses, then `Wake.run` again,

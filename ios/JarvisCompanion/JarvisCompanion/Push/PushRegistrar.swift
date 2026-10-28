@@ -106,6 +106,16 @@ final class PushAppDelegate: NSObject, UIApplicationDelegate, UNUserNotification
     func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse,
                                 withCompletionHandler completionHandler: @escaping () -> Void) {
         let action = response.actionIdentifier
+        let content = response.notification.request.content
+        if action == UNNotificationDefaultActionIdentifier, content.categoryIdentifier == "WAKE_UP" {
+            // Tapped the push itself: open on the alarm screen.
+            Task { @MainActor in
+                WakeRinging.shared.detail = content.body
+                WakeRinging.shared.showing = true
+                completionHandler()
+            }
+            return
+        }
         guard action == Self.wakeAwake || action == Self.wakeSnooze else {
             completionHandler()
             return
