@@ -703,6 +703,16 @@ def _tool_cancel_wake_up(args: dict[str, Any]) -> str:
     return f"Wake-up cancelled for {days}, sir." if days else "Wake-up alarm cancelled, sir."
 
 
+def _tool_announce_in_room(args: dict[str, Any]) -> str:
+    from speech import room_voice
+    message = str(args.get("message", "")).strip()
+    if not message:
+        return "Tool error: nothing to announce."
+    if not room_voice.announce(message):
+        return "The room speaker isn't running right now, sir (ROOM_VOICE is off on Core)."
+    return "Announced in Nick's room."
+
+
 def _tool_browser_open(args: dict[str, Any]) -> str:
     from brain import browser
     return browser.open_page(str(args.get("url", "")))
@@ -1844,6 +1854,19 @@ _CUSTOM_TOOLS: list[dict[str, Any]] = [
         ),
         "input_schema": {"type": "object", "properties": {}},
     },
+    {
+        "name": "announce_in_room",
+        "description": (
+            "Say a line out loud on the speaker in Nick's room (a chime first), like a smart speaker's "
+            "broadcast: \"tell my room dinner's ready\", \"announce I'm on my way home\". Only when Nick "
+            "asks for it. Write the exact words to be spoken."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {"message": {"type": "string", "description": "The words to speak, under 400 chars."}},
+            "required": ["message"],
+        },
+    },
     # --- JARVIS's own browser (brain/browser.py) -------------------------
     {
         "name": "browser_open",
@@ -2317,6 +2340,7 @@ _DISPATCH: dict[str, Callable[[dict[str, Any]], str]] = {
     "torrent_inventory": _tool_torrent_inventory,
     "manage_torrent": _tool_manage_torrent,
     "test_qbittorrent": _tool_test_qbittorrent,
+    "announce_in_room": _tool_announce_in_room,
     "browser_open": _tool_browser_open,
     "browser_read": _tool_browser_read,
     "browser_act": _tool_browser_act,

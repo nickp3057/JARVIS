@@ -6,6 +6,8 @@ Generated once into ``memory/sounds/`` (no asset files in git):
 - ``done``: a quick three-note jingle for a home command that worked (no
   words, like a smart speaker's confirmation).
 - ``error``: a low falling two-note when something didn't work.
+- ``alarm``: four quick beeps, repeated while a timer rings.
+- ``chime``: a soft rising three-note before a reminder or a broadcast.
 
 ``AUDIO_OUTPUT_DEVICE`` picks the ALSA device (see ``speech/tts.py``).
 """
@@ -31,6 +33,8 @@ _SOUNDS = {
     "listen": [(660.0, 0.07), (990.0, 0.09)],
     "done": [(784.0, 0.07), (988.0, 0.07), (1319.0, 0.12)],
     "error": [(494.0, 0.10), (330.0, 0.16)],
+    "alarm": [(880.0, 0.11), (0.0, 0.07)] * 4 + [(0.0, 0.3)],
+    "chime": [(523.0, 0.12), (659.0, 0.12), (784.0, 0.26)],
 }
 
 
@@ -41,7 +45,7 @@ def _render(name: str) -> Path:
     _DIR.mkdir(parents=True, exist_ok=True)
     samples: list[int] = []
     for freq, seconds in _SOUNDS[name]:
-        count, fade = int(_RATE * seconds), int(_RATE * 0.012)
+        count, fade = int(_RATE * seconds), int(_RATE * 0.012)  # freq 0 is a rest
         for i in range(count):
             envelope = min(1.0, i / fade, (count - i) / fade)
             samples.append(int(math.sin(2 * math.pi * freq * i / _RATE) * envelope * 11000))

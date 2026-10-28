@@ -18,12 +18,31 @@ Built for smart-speaker speed:
 5. After a spoken answer, a short follow-up window (``VOICE_FOLLOWUP_S``)
    takes the next question without the wake word.
 
+Smart-speaker extras:
+
+- Instant answers with no model (``speech/quick_answers.py``): time, date,
+  weather now, timers ("ten minute pasta timer", "how long's left",
+  "cancel the timer"), volume ("volume 4", "louder"), "stop", "say that
+  again"; "good morning" runs the morning routine (``speech/good_morning.py``).
+- Timers ring on the speaker (the ``alarm`` beeps, then "Sir, your pasta
+  timer is done") until "Hey JARVIS" (or stop, or the app) dismisses them,
+  for at most ``ROOM_ALARM_RING_S`` (120). Reminders and broadcasts get a
+  chime and are spoken; other announcements wait out ``ROOM_QUIET_HOURS``.
+  Core's room voice owns ``runtime.pop_due_reminders()`` in server mode.
+- Barge-in: "Hey JARVIS" while he's talking cuts him off and listens
+  (``VOICE_BARGE_IN``, on by default).
+- Night mode: ``speech/room_volume.py`` lowers the speaker in quiet hours.
+- ``announce(text)``: speak a broadcast from the phone or a chat
+  (``POST /api/voice/announce``, the ``announce_in_room`` tool).
+
 The wake word works at the end too ("game time, Jarvis"): a little audio
 from before the wake word is kept and used when nothing follows it.
 """
 from __future__ import annotations
 
+from collections import deque
 import os
+import re
 import threading
 import time
 
@@ -31,13 +50,15 @@ import numpy as np
 
 from brain import voice_presence, voice_shortcuts
 from jarvis_logger import get_logger
-from speech import room_sounds
+from speech import room_sounds, room_volume
 from speech.audio import FRAME_MS, SAMPLE_RATE, MicStream, rms, rms_threshold
 from speech.wake_words import strip_wake_word
 
 log = get_logger(__name__)
 
 _JINGLE_REPLIES = {"done", "yes sir", "yes, sir", "ok", "okay"}
+# While a timer rings, any of these (with or without "Hey JARVIS") stops it.
+_DISMISS = re.compile(r"\b(stop|cancel|dismiss|enough|off|okay|ok|thanks|thank you|got it|i'm up|shut up|quiet)\b")
 
 
 def enabled() -> bool:
@@ -66,6 +87,14 @@ class RoomVoice:
             live = Transcriber(model_size=live_model) if live_model and live_model != "off" else None
         self.live = live
         self.stop = threading.Event()
+        self.stream = None
+        self.last_reply = ""
+        self._barged = False
+        self._broadcasts: deque[str] = deque(maxlen=10)
+        self._ringing_since: float | None = None
+        self._next_ring = 0.0
+        self._next_duties = 0.0
+        self._spoke = False
 
     # --- lifecycle -----------------------------------------------------------
 
@@ -97,9 +126,14 @@ class RoomVoice:
     def _loop(self, stream: MicStream) -> None:
         self.stream = stream  # routines (goodnight) listen for an answer on it
         need_wake = True
+        barged = False
         while not self.stop.is_set():
             stream.drain()
-            if need_wake:
+            if barged:  # "Hey JARVIS" cut him off: listen straight away
+                voice_presence.update("listening")
+                room_sounds.play("listen")
+                audio = self._capture(stream, None, start_timeout=_seconds("VOICE_START_TIMEOUT_S", 4.0))
+            elif need_wake:
                 if not self._wait_for_wake(stream):
                     return
                 preroll = stream.get_recent_audio(_seconds("VOICE_PREROLL_S", 2.0))
@@ -114,20 +148,140 @@ class RoomVoice:
                 need_wake = True
                 continue
             need_wake = not self._handle(audio)
+            barged, self._barged = self._barged, False
+
+    def _heard_wake(self, frame: np.ndarray) -> bool:
+        from speech.wake import wake_threshold
+        try:
+            scores = self.detector._model.predict(frame)  # noqa: SLF001
+        except Exception:  # noqa: BLE001
+            log.exception("openWakeWord predict() failed; skipping frame")
+            return False
+        return any(score >= wake_threshold() for score in scores.values())
 
     def _wait_for_wake(self, stream: MicStream) -> bool:
-        from speech.wake import wake_threshold
         self.detector.reset()
         while not self.stop.is_set():
-            frame = stream.read(timeout=1.0)
+            self._duties(stream)
+            frame = stream.read(timeout=0.5)
             if frame is None:
                 continue
+            if self._heard_wake(frame):
+                if self._ringing_since is not None:  # "Hey JARVIS" while a timer rings: that's stop
+                    self._dismiss_alarms()
+                    self.detector.reset()
+                    continue
+                return True
+        return False
+
+    # --- alarms, reminders, broadcasts ------------------------------------------
+
+    def _duties(self, stream: MicStream) -> None:
+        """Between wake-word frames: ring timers, speak what's due."""
+        now = time.monotonic()
+        if now >= self._next_duties:
+            self._next_duties = now + 1.0
             try:
-                scores = self.detector._model.predict(frame)  # noqa: SLF001
+                due = list(self.runtime.pop_due_reminders())
             except Exception:  # noqa: BLE001
-                log.exception("openWakeWord predict() failed; skipping frame")
-                continue
-            if any(score >= wake_threshold() for score in scores.values()):
+                log.debug("pop_due_reminders failed", exc_info=True)
+                due = []
+            for item in due:
+                self._deliver(item)
+            while self._broadcasts:
+                self._chime_and_say(self._broadcasts.popleft())
+        if self._ringing_since is not None:
+            if not self._alarming() or now - self._ringing_since > _seconds("ROOM_ALARM_RING_S", 120):
+                self._ringing_since = None
+                voice_presence.update("idle")
+            elif now >= self._next_ring:
+                self._next_ring = now + 3.5
+                room_volume.prepare()
+                room_sounds.play("alarm")
+        if self._spoke:
+            self._spoke = False
+            stream.drain()  # don't hear ourselves as the wake word
+            self.detector.reset()
+
+    def _deliver(self, item) -> None:  # noqa: ANN001
+        from brain.reminders import Reminder
+        from brain.timers import Timer
+        from speech import quick_answers
+        if isinstance(item, Timer):
+            label = quick_answers.timer_label(item.message)
+            log.info("Timer ringing: %s", item.id)
+            self._ringing_since = time.monotonic()
+            self._next_ring = 0.0
+            room_volume.prepare()
+            room_sounds.play("alarm", wait=True)
+            self._say(f"Sir, your {label} timer is done." if label else "Sir, your timer is done.")
+            voice_presence.update("speaking", reply="Time's up")
+        elif isinstance(item, Reminder):
+            self._chime_and_say(f"Reminder, sir: {item.message}")
+        elif not room_volume.quiet_now() and os.getenv("ROOM_ANNOUNCEMENTS", "1").strip().lower() not in (
+                "0", "off", "false", "no"):
+            self._chime_and_say(str(getattr(item, "message", "") or ""))
+
+    def _chime_and_say(self, text: str) -> None:
+        text = text.strip()
+        if not text:
+            return
+        room_volume.prepare()
+        room_sounds.play("chime", wait=True)
+        self._say(text)
+        voice_presence.update("idle")
+
+    def _alarming(self) -> list:
+        from brain import timers
+        try:
+            return [t for t in timers.active_timers() if t.alarming]
+        except Exception:  # noqa: BLE001
+            return []
+
+    def _dismiss_alarms(self) -> bool:
+        from brain import timers
+        ringing = self._alarming()
+        for t in ringing:
+            timers.dismiss_timer(t.id)
+        self._ringing_since = None
+        if ringing:
+            log.info("Dismissed %d ringing timer(s)", len(ringing))
+            room_sounds.play("done")
+            voice_presence.update("idle")
+        return bool(ringing)
+
+    def broadcast(self, text: str) -> None:
+        self._broadcasts.append(text)
+
+    # --- speaking (with barge-in) ------------------------------------------------
+
+    def _speak(self, text: str, cache: bool | str = False) -> bool:
+        """Say ``text``; True if Nick cut in with the wake word."""
+        from speech.tts import speak, stop_playback
+        room_volume.prepare()
+        self.last_reply = text
+        stream = self.stream
+        if stream is None or os.getenv("VOICE_BARGE_IN", "1").strip().lower() in ("0", "off", "false", "no"):
+            speak(text, cache=cache)
+            return False
+        done = threading.Event()
+
+        def run() -> None:
+            try:
+                speak(text, cache=cache)
+            finally:
+                done.set()
+
+        threading.Thread(target=run, name="room-voice-speak", daemon=True).start()
+        self.detector.reset()
+        stream.drain()
+        while not done.is_set() and not self.stop.is_set():
+            frame = stream.read(timeout=0.1)
+            if frame is not None and self._heard_wake(frame):
+                log.info("Barge-in: stopped speaking")
+                stop_playback()
+                done.wait(2)
+                self.detector.reset()
                 return True
         return False
 
@@ -180,8 +334,7 @@ class RoomVoice:
 
     def _handle(self, audio: np.ndarray) -> bool:
         """Transcribe and act. True keeps a follow-up window open."""
-        from speech import goodnight, quick_commands
-        from speech.tts import speak
+        from speech import good_morning, goodnight, quick_answers, quick_commands
         voice_presence.update("thinking")
         started = time.perf_counter()
         text = strip_wake_word(self.final.transcribe(audio)).strip()
@@ -189,6 +342,37 @@ class RoomVoice:
         voice_presence.update(transcript=text)
         if not text:
             voice_presence.update("idle")
+            return False
+
+        if self._alarming() and _DISMISS.search(text.lower()):
+            self._dismiss_alarms()
+            voice_presence.update("idle")
+            return False
+
+        if good_morning.is_good_morning(text):
+            good_morning.run(self._say)
+            voice_presence.update("idle")
+            return False
+
+        try:
+            answer = quick_answers.answer(text, self.last_reply)
+        except Exception:  # noqa: BLE001
+            log.exception("Quick answer failed for %r", text)
+            answer = None
+        if answer is not None:
+            log.info("Room voice quick answer: %s", answer.kind)
+            if answer.stop:
+                from speech.tts import stop_playback
+                self._dismiss_alarms()
+                stop_playback()
+                voice_presence.update("idle")
+                return False
+            if answer.say:
+                voice_presence.update("speaking", reply=answer.say)
+                self._barged = self._speak(answer.say, cache="auto")
+                voice_presence.update("idle")
+                return False
+            self._finish(answer.sound or "done", "")
             return False
 
         if goodnight.is_goodnight(text):
@@ -228,10 +412,10 @@ class RoomVoice:
             self._finish("done", "")
             return False
         voice_presence.update("speaking", reply=reply)
-        speak(reply, cache="auto")  # a reply said before replays without synthesis
+        self._barged = self._speak(reply, cache="auto")  # a reply said before replays without synthesis
         voice_presence.update("idle")
         # A question or a chat keeps listening briefly; a finished task doesn't.
-        return not self.runtime.last_used_tools
+        return not self.runtime.last_used_tools and not self._barged
 
     def _learn(self, text: str) -> None:
         """A simple action Claude did for this phrase: maybe now a shortcut."""
@@ -248,7 +432,10 @@ class RoomVoice:
     def _say(self, text: str) -> None:
         from speech.tts import speak
         voice_presence.update("speaking", reply=text)
+        room_volume.prepare()
+        self.last_reply = text
         speak(text, cache=True)  # routine lines repeat: instant from the second time
+        self._spoke = True
 
     def _listen_for_answer(self) -> str | None:
         """One reply, no wake word needed; None if Nick says nothing."""
@@ -283,6 +470,7 @@ class RoomVoice:
 
     def _finish(self, phase: str, reply: str) -> None:
         voice_presence.update(phase, reply=reply)
+        room_volume.prepare()
         room_sounds.play("done" if phase == "done" else "error", wait=True)
         time.sleep(0.6)  # long enough for a screen to show the tick
         voice_presence.update("idle")
@@ -340,3 +528,13 @@ def start(runtime) -> RoomVoice | None:  # noqa: ANN001
 def stop() -> None:
     if _voice is not None:
         _voice.stop.set()
+
+
+def announce(text: str) -> bool:
+    """Speak ``text`` on the room speaker (with a chime) at the next pause;
+    False when the room voice isn't running here."""
+    text = (text or "").strip()
+    if _voice is None or not text:
+        return False
+    _voice.broadcast(text[:400])
+    return True

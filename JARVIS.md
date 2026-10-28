@@ -427,6 +427,7 @@ RMS envelope from ElevenLabs audio drives the orb in real time using a monotonic
   versions on Opus/Sonnet 4.6+ and Fable, the basic ones on Haiku
   (`tools._dynamic_web_tools`). A 400 naming one drops it for the process
   (`reject_server_tool`) instead of failing every turn; `pause_turn` resumes.
+- `announce_in_room` — speak a broadcast on the room speaker (chime first)
 - `browser_open` / `browser_read` / `browser_act` — JARVIS's own browser
   (`brain/browser.py`): numbered links, buttons and fields; click, type,
   type_and_enter, select, scroll, back. Headless Chromium via Playwright when
@@ -656,6 +657,12 @@ VOICE_START_TIMEOUT_S=4     # wait after the wake word before giving up
 VOICE_FOLLOWUP_S=5          # no-wake-word follow-up window after a spoken answer
 VOICE_PREROLL_S=2           # audio kept from before the wake word ("game time, Jarvis")
 VOICE_SHORTCUT_AFTER=2      # same phrase + same simple action this many times -> instant shortcut
+VOICE_BARGE_IN=1            # "Hey JARVIS" while he's talking stops him and listens
+ROOM_ALARM_RING_S=120       # longest a finished timer rings on the room speaker
+ROOM_ANNOUNCEMENTS=1        # speak runtime announcements (never in quiet hours)
+ROOM_QUIET_HOURS=22-7       # night mode hours; empty turns night mode off
+ROOM_NIGHT_VOLUME=3         # 0-10 speaker level in quiet hours (voice changes at night override)
+ROOM_VOLUME_CONTROL=Master  # ALSA mixer control for "volume 4" / "louder"
 LIGHT_RAINBOWS=             # light=select:DIY option pairs for the Rainbow button (defaults to Nick's strip + desk)
 WAKE_UP_SCENE=              # optional HA scene./script. to run instead; unset uses scene.good_morning when HA has it
 # Companion dashboard (read-only status hub endpoints)
@@ -833,6 +840,28 @@ CALENDAR_ALERT_LEAD_MIN=10  # warn this many minutes before a meeting
   then the reply or a tick — and wakes the night screen. Checked in the iPad
   mini simulator against a local Core cycling fake states; the Optiplex mic
   and speaker path is untested.
+- **Smart-speaker room voice (2026-10-28, untested on hardware)** — before
+  scenes and the model, `speech/quick_answers.py` answers instantly: the
+  time, the date, the weather right now (`status_hub.weather_status`;
+  "tomorrow"/"forecast"/rain questions still go to the model), timers ("set
+  a pasta timer for 10 minutes", "an hour and a half timer", "how long's
+  left", "cancel the pasta timer"), volume ("volume 4", "70 percent",
+  "louder", "quieter", "max volume", "what's the volume"), "stop" and "say
+  that again". "Good morning" (`speech/good_morning.py`) speaks the time,
+  weather and today's first calendar item, and does what I'm up does
+  (snooze cleared, TV wake screen closed, good-morning lights). The room
+  voice now owns `runtime.pop_due_reminders()` in server mode: a finished
+  timer beeps (`alarm`) and says "Sir, your pasta timer is done", ringing
+  every 3.5 s until "Hey JARVIS"/"stop", the app's dismiss, or
+  `ROOM_ALARM_RING_S`; reminders and broadcasts get a `chime`; other
+  announcements are skipped in quiet hours (`ROOM_ANNOUNCEMENTS=0` mutes
+  them). Barge-in: the wake word while JARVIS talks stops him and listens
+  (`VOICE_BARGE_IN`). `speech/room_volume.py` is volume by `amixer` on the
+  `AUDIO_OUTPUT_DEVICE` card plus night mode (`ROOM_QUIET_HOURS` 22-7 at
+  `ROOM_NIGHT_VOLUME` 3; the day level is remembered and restored).
+  Broadcasts: `POST /api/voice/announce {"text"}` (`chat` scope; 409 when the
+  room voice is off) and the `announce_in_room` tool ("tell my room dinner's
+  ready" from the phone).
 - **Nick's room scenes in HA, Peace on the iPad (iOS 4.12 / build 134)** —
   made 2026-10-28 through HA's scene config API, to Nick's spec: Good
   Morning, Study, Movie, Game Time, Goodnight, Peace (plus Rainbow). Rules:

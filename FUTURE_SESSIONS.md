@@ -138,6 +138,17 @@ of each group.
 
 ### Next session starts here (left 2026-10-28, from school)
 
+- **Built 2026-10-28 evening, from work (none of it run on hardware yet):**
+  after `git pull` + restart on the Optiplex, try: "Hey JARVIS, what time is
+  it", "what's the weather", "set a pasta timer for 1 minute" (it should
+  beep and say so; "Hey JARVIS" stops it), "volume 4" / "louder", "good
+  morning", interrupting a long answer with "Hey JARVIS", and a broadcast
+  from the phone chat ("announce in my room that dinner's ready"). The mic
+  fix (`MIC_DEVICE=CMTECK` + native-rate conversion) must be live first.
+  Browser: `.venv/bin/pip install playwright` and `.venv/bin/python -m
+  playwright install --with-deps chromium` (needs sudo for the deps) before
+  JARVIS can click or fill forms; without it he reads pages over plain HTTP.
+
 - **Morning report 2026-10-28:** the TV turned on at 8:00 (proven), but no
   music. HA history: at 08:00:03 Spotify's session was *paused* on "Highway
   to Hell" (last night's track), so `playFromUri` was ignored; the TV went
@@ -258,9 +269,11 @@ of each group.
 Little things mentioned along the way, roughly smallest first:
 
 - [x] Room voice caches repeated replies (`cache="auto"`) and routine lines.
-- [ ] Room voice: speak due reminders/timers on the room speaker;
-  barge-in (stop talking when Nick speaks: `tts.stop_playback()` now works
-  on Linux); start speaking the first sentence of long answers sooner.
+- [x] Room voice: timers ring and reminders/broadcasts are spoken on the
+  room speaker; barge-in on the wake word (2026-10-28).
+- [ ] Room voice: start speaking the first sentence of long answers sooner
+  (skipped 2026-10-28: spoken replies are one sentence, so streaming saves
+  little; `tts.speak_stream` + `respond_streaming(spoken=True)` if needed).
 - [ ] "What scenes do I have?" by voice (list `status_hub.home_scenes`).
 - [ ] Govee effects (Aurora, Candlelight, Starry Sky...) in the light sheet.
 - [ ] "Save this as a scene": the current room becomes an HA scene by name.

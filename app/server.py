@@ -718,6 +718,20 @@ def maintenance_delete_entry(task_id: int, entry_id: int, _: None = Depends(auth
     return Response(status_code=204)
 
 
+class AnnounceRequest(BaseModel):
+    text: str = Field(min_length=1, max_length=400)
+
+
+@app.post("/api/voice/announce")
+def voice_announce(request: AnnounceRequest, _: None = Depends(require_scope("chat"))) -> dict[str, object]:
+    """Broadcast: a chime, then ``text`` spoken on the room speaker at the
+    next pause (speech/room_voice.py). 409 when the room voice is off."""
+    from speech import room_voice
+    if not room_voice.announce(request.text):
+        raise HTTPException(status_code=409, detail="The room voice isn't running")
+    return {"queued": True}
+
+
 @app.get("/api/voice/state")
 def voice_state(_: None = _status_read) -> dict[str, object]:
     """What the room voice is doing (brain/voice_presence.py)."""
