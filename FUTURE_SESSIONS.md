@@ -152,7 +152,7 @@ of each group.
   the Optiplex. Later: build a real `scene.good_morning` in HA (colours,
   brightness, maybe blinds) and set `WAKE_UP_SCENE`.
 - Schwab shows Live after the open (confirmed 2026-10-28).
-- **Cleanup pass (2026-10-28):** 614 → 689 Python tests, 23 → 28 iOS
+- **Cleanup passes (2026-10-28):** 614 → 741 Python tests (coverage 68% → 79%), 23 → 28 iOS
   tests; coverage 68% → 73% (room voice 16% → 67%, timers 31% → 94%,
   settings 17% → 93%, weather 19% → 97%, intents 53% → 82%, HA 71% → 84%).
   Fixed: `.env` line-break injection and nan through `update_setting`;
@@ -247,6 +247,39 @@ of each group.
   visible feedback surface (the TV/iPad showing what JARVIS heard and is
   doing) from the start.
 
+### Small add-ons (collected 2026-10-28; none started)
+
+Little things mentioned along the way, roughly smallest first:
+
+- [ ] Room voice: cache the "Yes, sir." / "Done." audio so a spoken ack has
+  no ElevenLabs delay; speak due reminders/timers on the room speaker;
+  barge-in (stop talking when Nick speaks: `tts.stop_playback()` now works
+  on Linux); start speaking the first sentence of long answers sooner.
+- [ ] "What scenes do I have?" by voice (list `status_hub.home_scenes`).
+- [ ] Govee effects (Aurora, Candlelight, Starry Sky...) in the light sheet.
+- [ ] "Save this as a scene": the current room becomes an HA scene by name.
+- [ ] Scenes on the iPhone Home Screen / Control Center (widget target).
+- [ ] iPad Room tab: a now-playing / music card.
+- [ ] Fan's RGB rainbow: try the HACS "Tuya Local" integration.
+- [ ] "Hey Google, game time / peace" → `scene.game_time` / `scene.peace`
+  (needs HA linked to Google Home; not checked).
+- [ ] TV LED under the screen still flashing overnight? If so, close the SSE
+  stream on screen-off (plan above).
+- [ ] 1337x: `switch_indexer_mirror` stack fix, and incident reports quoting
+  the real HTTP / Cloudflare code (separate chat prompt written 2026-10-28).
+- [ ] NAS: allow-listed, confirm-gated "update one container" action.
+- [ ] Reserve the Optiplex's IP on the router (still drifting).
+
+### Is the Optiplex enough? (checked 2026-10-28)
+
+i5-6500T (4 cores, 2015), 3.7 GB RAM, 113 GB disk (6% used), idle at load
+0.1 and 28-30 °C; Core uses ~170 MB. Measured: Whisper `small.en` takes
+2.3 s for 3 s of audio (too slow for the room voice); `base.en` (~2-3x
+faster, est.) plus `tiny.en` captions fit fine, with ~2.5 GB RAM to spare.
+Enough for everything planned. Upgrade only for: a local LLM (needs a GPU
+or a much newer CPU), bigger Whisper models, or running cameras/vision
+(the room sentry) at the same time. Cheapest useful upgrade: 8-16 GB RAM.
+
 ### Integrations
 
 - [x] **Charles Schwab, read-only and live** (shipped 2026-10-27, iOS 2.5 /
@@ -277,7 +310,7 @@ of each group.
   `runtime.raise_alert` when it drops below a target). Price watching is a
   monitor, not a UI poll.
 
-- [ ] **Room scenes** (Nick, 2026-10-27; "not yet"): one phrase sets the
+- [x] **Room scenes** (done 2026-10-28 as HA scenes: Good Morning, Study, Movie, Game Time, Goodnight, Peace, Rainbow; app picker + voice). Original note (Nick, 2026-10-27): one phrase sets the
   whole room. "Game time": strips and desk strips on, bedroom light off,
   Avengers tower on, fan on. "Bedtime": everything off, fan to 40%. Barn
   Door Protocol becomes one of them. Shape: named scenes in a small store
@@ -303,7 +336,7 @@ of each group.
   door sensors in Home Assistant; a break-in at night puts every room into
   Barn Door Protocol and plays Back in Black through the house. Builds on
   the room sentry and scenes.
-- [ ] **"Hey Google" replacement on the Optiplex** (Nick, 2026-10-27): the
+- [x] **"Hey Google" replacement on the Optiplex** (built 2026-10-28 as `speech/room_voice.py`, `ROOM_VOICE=1`; not yet run on the hardware). Original note (Nick, 2026-10-27): the
   Optiplex has a mic and speakers (and maybe ElevenLabs set up already, to
   verify), so `--voice` mode could run there as the house's always-listening
   JARVIS once Nick wants it.
