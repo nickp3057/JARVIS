@@ -136,6 +136,25 @@ of each group.
 - [ ] Check the iPhone app's server address in Settings; if it's 10.0.0.80,
   switch it to the Tailscale address `100.69.8.11`.
 
+### Next session starts here (left 2026-10-27, late)
+
+- **Morning checks Nick will report:** did the 8:00 wake-up turn the TV on
+  from a night off (the unproven part)? Did the LED under the TV still
+  flash overnight (the voice-mic LED was turned off via
+  `settings put global tcl_sys_lights_farfiled_voice_led_enabled 0`)? Does
+  the Schwab card show Live after the open, and does "yesterday" fill in?
+- **If the LED still flashed:** suspect the SSE keep-alive (every 15 s)
+  waking the TV from network standby. Fix: AlertStream closes the stream on
+  screen-off and reconnects on screen-on; Core's wake monitor wakes the TV
+  with `tv_remote.power(True)` (HA Android TV Remote) before publishing
+  `wake_up`, which the TV replays on reconnect. Only after the alarm test
+  works, so the wake path isn't changed blind.
+- **Next big step Nick wants:** the always-listening voice assistant on the
+  Optiplex (mic + speakers, maybe ElevenLabs already there), to replace his
+  Google Home Hub. He's wary because the Hub shows what's happening; plan a
+  visible feedback surface (the TV/iPad showing what JARVIS heard and is
+  doing) from the start.
+
 ### Integrations
 
 - [x] **Charles Schwab, read-only and live** (shipped 2026-10-27, iOS 2.5 /
