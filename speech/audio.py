@@ -92,6 +92,12 @@ class MicStream:
             callback=_callback,
         )
         self._stream.start()
+        device = getattr(self._stream, "device", device)
+        try:
+            name = sd.query_devices(device)["name"]
+        except Exception:  # noqa: BLE001
+            name = str(device)
+        log.info("Mic open: %s", name)
         return self
 
     def __exit__(self, exc_type, exc, tb) -> None:

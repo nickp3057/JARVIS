@@ -630,7 +630,7 @@ JARVIS_SERVER_PORT=8000
 WAKE_UP_LIGHTS=1            # I'm up (phone or TV) turns on every light (strip segments skipped); 0 = off
 ROOM_VOICE=0                # 1 = "Hey JARVIS" on the Optiplex mic/speakers inside Core (speech/room_voice.py)
 AUDIO_OUTPUT_DEVICE=        # ALSA device for aplay; Optiplex: plughw:1,0 (card 0 is the USB mic, no output)
-MIC_DEVICE=                 # sounddevice input name/index; empty = ALSA default (the CMTECK USB mic)
+MIC_DEVICE=CMTECK           # sounddevice input name/index. Set it: left empty, Core's room voice opened the onboard jack (hw:1,0) instead of the USB mic
 VOICE_LIVE_MODEL=tiny.en    # Whisper model for live captions on the iPad; "off" to skip
 VOICE_SILENCE_END_MS=550    # silence that ends what you said
 VOICE_START_TIMEOUT_S=4     # wait after the wake word before giving up
@@ -823,6 +823,16 @@ CALENDAR_ALERT_LEAD_MIN=10  # warn this many minutes before a meeting
   exposed by the Tuya integration, so no scene sets it. I'm up runs
   `scene.good_morning` when it exists. The iPad Room tab has a Peace
   button (shown when `scene.peace` exists) for heading out.
+- **iPad as a room panel (iOS 5.3 / build 146)** — the Room tab's Peace
+  button moved to the top of the right-hand column; the left column gains
+  the JARVIS reactor (`JarvisCoreMark`, glow lifts while the room voice is
+  active) and a **Full screen** toggle (hides the tab bar, status bar and
+  home indicator; swipe still changes tabs). Running Peace or Goodnight
+  from the iPad brings the night screen up 3 s after the lights read off,
+  day or night and without Keep screen on (still needs "Dark at night");
+  a tap or any light coming on cancels it. Core's room voice now logs
+  `Mic open: <device>`; set `MIC_DEVICE=CMTECK` on the Optiplex (left
+  empty it opened the onboard jack, so "Hey JARVIS" never heard anything).
 - **Rainbow in the light sheet, on phone and iPad (iOS 4.11 / build 133)** —
   lights in `LIGHT_RAINBOWS` (default: Nick Strip Lights → its DIY "Real
   Rainbow", Desk Lights → "New Rainbow", via `select.<light>_diy_scene`)

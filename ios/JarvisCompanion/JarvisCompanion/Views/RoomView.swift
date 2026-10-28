@@ -9,10 +9,14 @@ import UIKit
 ///
 /// Night screen: with Keep screen on, after dark (HA's `sun.sun`) and every
 /// light (and lamp) off for 45 s, the screen goes black at its lowest
-/// brightness, so the iPad isn't a night light. Any light coming on, sunrise,
-/// or a tap brings it back; a tap with the room still dark sleeps again 45 s
-/// later. iPads don't let apps read their light sensor, so the room's own
-/// lights stand in for it.
+/// brightness, so the iPad isn't a night light. Peace or Goodnight does the
+/// same a few seconds after the lights go out, day or night. Any light
+/// coming on, sunrise, or a tap brings it back; a tap with the room still
+/// dark sleeps again 45 s later (after dark). iPads don't let apps read their
+/// light sensor, so the room's own lights stand in for it.
+///
+/// Full screen hides the tab bar, status bar and home indicator so the iPad
+/// is just the panel; a swipe still reaches the other tabs.
 struct RoomView: View {
     @EnvironmentObject private var settings: AppSettings
     @ObservedObject var model: HubViewModel
@@ -25,6 +29,9 @@ struct RoomView: View {
     @State private var lightSheet: LightSheetID?
     @AppStorage("room.nightScreen") private var nightScreen = true
     @State private var asleep = false
+    /// Peace or Goodnight just ran: go dark once the lights are out, even by day.
+    @State private var lightsOut = false
+    @AppStorage("room.fullScreen") private var fullScreen = false
     /// The screen's brightness before the night screen, to put back.
     @State private var savedBrightness: CGFloat?
     @ObservedObject private var voice = VoicePresence.shared
@@ -40,6 +47,7 @@ struct RoomView: View {
                     clockPanel
                         .frame(width: wide ? min(360, geo.size.width * 0.36) : nil)
                     VStack(spacing: 20) {
+                        peaceButton
                         devicesPanel
                         scenesPanel
                     }
@@ -48,6 +56,9 @@ struct RoomView: View {
             }
         }
         .background { JarvisBackdrop().ignoresSafeArea() }
+        .toolbar(fullScreen ? .hidden : .automatic, for: .tabBar)
+        .statusBarHidden(fullScreen)
+        .persistentSystemOverlays(fullScreen ? .hidden : .automatic)
         .refreshable { await refresh() }
         .sheet(isPresented: $showingRemote) { TVRemoteView() }
         .sheet(isPresented: $showingWake) {
@@ -60,19 +71,23 @@ struct RoomView: View {
             // Black; a tap is the only thing on it.
             Color.black.ignoresSafeArea()
                 .contentShape(Rectangle())
-                .onTapGesture { asleep = false }
+                .onTapGesture { lightsOut = false; asleep = false }
                 .accessibilityLabel("Night screen. Tap to wake.")
         }
         .transaction { $0.disablesAnimations = asleep }
-        .task(id: "\(roomIsDark)-\(asleep)") {
+        .task(id: "\(roomIsDark)-\(asleep)-\(lightsOut)") {
             if roomIsDark && !asleep {
-                try? await Task.sleep(for: .seconds(45))
+                try? await Task.sleep(for: .seconds(lightsOut ? 3 : 45))
                 if !Task.isCancelled, roomIsDark { asleep = true }
             } else if !roomIsDark && asleep {
                 asleep = false
             }
         }
         .onChange(of: asleep) { _, sleeping in setDimmed(sleeping) }
+        .onChange(of: model.runningScene) { ran, running in
+            if running == nil, let ran, Self.lightsOutScenes.contains(ran) { lightsOut = true }
+        }
+        .onChange(of: lightsAllOff) { _, off in if off == false { lightsOut = false } }
         // "Hey JARVIS" lights the screen back up (the overlay shows above it).
         .onChange(of: voice.active) { _, active in if active { asleep = false } }
         .task {
@@ -105,12 +120,21 @@ struct RoomView: View {
         .onChange(of: keepAwake) { _, on in UIApplication.shared.isIdleTimerDisabled = on }
     }
 
-    /// After dark with every light and lamp off (and Keep screen on).
-    private var roomIsDark: Bool {
-        guard keepAwake, nightScreen, scenePhase == .active, !voice.active, model.sun == "below_horizon",
-              let entities = model.entities.value, model.entities.failureText == nil else { return false }
+    private static let lightsOutScenes: Set<String> = ["scene.peace", "scene.goodnight"]
+
+    /// Every light and lamp off; nil while the device list isn't known.
+    private var lightsAllOff: Bool? {
+        guard let entities = model.entities.value, model.entities.failureText == nil else { return nil }
         let sources = entities.filter { $0.domain == "light" || $0.friendlyName.lowercased().contains("lamp") }
-        return !sources.isEmpty && sources.allSatisfy { !(model.pendingEntityStates[$0.entityID] ?? $0.isOn) }
+        guard !sources.isEmpty else { return nil }
+        return sources.allSatisfy { !(model.pendingEntityStates[$0.entityID] ?? $0.isOn) }
+    }
+
+    /// Lights out, and either after dark with Keep screen on or just after Peace/Goodnight.
+    private var roomIsDark: Bool {
+        guard nightScreen, scenePhase == .active, !voice.active,
+              lightsOut || (keepAwake && model.sun == "below_horizon") else { return false }
+        return lightsAllOff == true
     }
 
     /// The app may set the screen's brightness while it's in front; put it
@@ -152,28 +176,15 @@ struct RoomView: View {
                         .foregroundStyle(.secondary)
                 }
             }
+            // The reactor; its glow lifts while "Hey JARVIS" is listening or thinking.
+            JarvisCoreMark(size: 150, active: voice.active)
+                .frame(maxWidth: .infinity)
             Divider().overlay(JarvisTheme.border)
             infoRow("alarm", title: "Wake-up", value: wakeText) { showingWake = true }
             if let event = model.now.value?.nextEvent {
                 infoRow("calendar", title: "Next up", value: eventText(event))
             }
             Divider().overlay(JarvisTheme.border)
-            if let peace = model.scenes.value?.scenes.first(where: { $0.entityID == "scene.peace" }) {
-                // Heading out: everything off, plugs too (HA's Peace scene).
-                Button { model.runScene(peace) } label: {
-                    HStack {
-                        if model.runningScene == peace.entityID { ProgressView() }
-                        Label("Peace", systemImage: "hand.wave")
-                    }
-                    .font(.title3.weight(.semibold))
-                    .frame(maxWidth: .infinity, minHeight: 60)
-                    .background(JarvisTheme.amber.opacity(0.16), in: .rect(cornerRadius: 14))
-                    .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(JarvisTheme.amber.opacity(0.5)))
-                }
-                .buttonStyle(CockpitButtonStyle())
-                .disabled(model.runningScene != nil)
-                .accessibilityHint("Turns everything off for when you leave")
-            }
             Button { showingRemote = true } label: {
                 Label("TV remote", systemImage: "appletvremote.gen4")
                     .font(.headline)
@@ -189,8 +200,31 @@ struct RoomView: View {
                 .tint(JarvisTheme.cyan)
                 .font(.subheadline)
                 .disabled(!keepAwake)
+            Toggle("Full screen", isOn: $fullScreen)
+                .tint(JarvisTheme.cyan)
+                .font(.subheadline)
         }
         .roomPanel()
+    }
+
+    /// Heading out: everything off, plugs too (HA's Peace scene), then the
+    /// night screen. Top of the right-hand column.
+    @ViewBuilder private var peaceButton: some View {
+        if let peace = model.scenes.value?.scenes.first(where: { $0.entityID == "scene.peace" }) {
+            Button { model.runScene(peace) } label: {
+                HStack {
+                    if model.runningScene == peace.entityID { ProgressView() }
+                    Label("Peace", systemImage: "hand.wave")
+                }
+                .font(.title3.weight(.semibold))
+                .frame(maxWidth: .infinity, minHeight: 60)
+                .background(JarvisTheme.amber.opacity(0.16), in: .rect(cornerRadius: 14))
+                .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(JarvisTheme.amber.opacity(0.5)))
+            }
+            .buttonStyle(CockpitButtonStyle())
+            .disabled(model.runningScene != nil)
+            .accessibilityHint("Turns everything off for when you leave")
+        }
     }
 
     private var wakeText: String {
