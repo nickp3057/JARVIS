@@ -25,5 +25,6 @@ memory/model_cache.json
 memory/client_tokens.json
 memory/schwab_token.json
 memory/theme.json
+memory/barn_door_effects.json
 tv/launcher/out/
 tv/launcher/src/com/tvhome/Config.java

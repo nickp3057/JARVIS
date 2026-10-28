@@ -17,6 +17,14 @@ class BarnDoorTests(unittest.TestCase):
         ha = patch.object(protocols.home_assistant, "call_service", return_value=(True, "ok"))
         self.ha = ha.start()
         self.addCleanup(ha.stop)
+        effects = patch.object(protocols, "_EFFECTS_FILE", Path(tmp.name) / "effects.json")
+        effects.start()
+        self.addCleanup(effects.stop)
+        states = {"light.desk_lights_2": {"attributes": {"effect": "Rainbow"}}}
+        get = patch.object(protocols.home_assistant, "_request",
+                           side_effect=lambda _m, path: (True, states.get(path.rsplit("/", 1)[-1], {"attributes": {}})))
+        get.start()
+        self.addCleanup(get.stop)
         event_bus.reset_for_tests()
 
     def calls(self, domain: str, service: str) -> list:
@@ -39,6 +47,16 @@ class BarnDoorTests(unittest.TestCase):
         self.assertIn("mark85", tools.execute_tool("barn_door_protocol", {"action": "stand_down"}))
         self.assertEqual(self.calls("scene", "turn_on")[0].args[2], "scene.barn_door_before")
         self.assertEqual(theme.current()["theme"], "mark85")
+        # Effects come back too: the one HA saw, and the configured Govee one.
+        restored = {c.args[2]: c.args[3]["effect"] for c in self.calls("light", "turn_on") if "effect" in c.args[3]}
+        self.assertEqual(restored, {"light.desk_lights_2": "Rainbow"})
+
+    def test_configured_effects_cover_what_ha_cannot_see(self) -> None:
+        with patch.dict("os.environ", {"BARN_DOOR_EFFECTS": "light.nick_strip_lights=Rainbow-A"}):
+            protocols.engage()
+            protocols.stand_down()
+        restored = {c.args[2]: c.args[3]["effect"] for c in self.calls("light", "turn_on") if "effect" in c.args[3]}
+        self.assertEqual(restored, {"light.nick_strip_lights": "Rainbow-A", "light.desk_lights_2": "Rainbow"})
 
 
 if __name__ == "__main__":

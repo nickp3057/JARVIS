@@ -175,7 +175,9 @@ of each group.
   the iPad). Detection → Core → `barn_door_protocol` + one line spoken in
   unison on TV (Android TTS / ElevenLabs), iPad and the Optiplex speakers
   ("Barn Door Protocol activated. Get out of Nick's room."); nobody in frame
-  for ~30 s → stand down. Tell the household it exists.
+  for ~30 s → stand down. Tell the household it exists. Nick's plan: the
+  iPad wall-mounted by his door, with a big ARM button he taps on the way
+  out (and DISARM / Face ID on the way in), so "armed" is explicit.
 - [ ] **"Hey Google" replacement on the Optiplex** (Nick, 2026-10-27): the
   Optiplex has a mic and speakers (and maybe ElevenLabs set up already, to
   verify), so `--voice` mode could run there as the house's always-listening
