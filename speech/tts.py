@@ -179,7 +179,7 @@ def _play_async_and_wait(
     except Exception:  # noqa: BLE001
         log.exception("winsound async start failed")
         return False
-    print(f"[TIMING] 5. winsound playback start: {(time.perf_counter() - t0) * 1000:.0f}ms")
+    log.debug("5. winsound playback start: %.0f ms", (time.perf_counter() - t0) * 1000)
 
     duration = _wav_duration_seconds(wav_path)
     deadline = time.time() + duration + 0.4
@@ -287,10 +287,10 @@ def speak(
     t0 = time.perf_counter()
     if _synthesize_elevenlabs(text):
         log.debug("Synthesized via ElevenLabs.")
-        print(f"[TIMING] 4. TTS synthesis (ElevenLabs): {(time.perf_counter() - t0) * 1000:.0f}ms")
+        log.debug("4. TTS synthesis (ElevenLabs): %.0f ms", (time.perf_counter() - t0) * 1000)
     elif _synthesize_piper(text):
         log.debug("Synthesized via Piper fallback.")
-        print(f"[TIMING] 4. TTS synthesis (Piper): {(time.perf_counter() - t0) * 1000:.0f}ms")
+        log.debug("4. TTS synthesis (Piper): %.0f ms", (time.perf_counter() - t0) * 1000)
     else:
         log.error("All TTS engines failed; staying silent.")
         return
@@ -391,7 +391,7 @@ def _play_posix_blocking(wav_path: Path) -> bool:
     except Exception:  # noqa: BLE001
         log.exception("Unexpected error starting audio playback.")
         return False
-    print(f"[TIMING] 5. {player} playback start (process spawn): {(time.perf_counter() - t0) * 1000:.0f}ms")
+    log.debug("5. %s playback start (process spawn): %.0f ms", player, (time.perf_counter() - t0) * 1000)
 
     proc.wait()
     if proc.returncode != 0:

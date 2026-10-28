@@ -152,6 +152,15 @@ of each group.
   the Optiplex. Later: build a real `scene.good_morning` in HA (colours,
   brightness, maybe blinds) and set `WAKE_UP_SCENE`.
 - Schwab shows Live after the open (confirmed 2026-10-28).
+- **Cleanup pass (2026-10-28):** 614 → 689 Python tests, 23 → 28 iOS
+  tests; coverage 68% → 73% (room voice 16% → 67%, timers 31% → 94%,
+  settings 17% → 93%, weather 19% → 97%, intents 53% → 82%, HA 71% → 84%).
+  Fixed: `.env` line-break injection and nan through `update_setting`;
+  HA service catalogue cached; one state read per spoken command; voice
+  quick commands don't wait for HA to settle; weather geocodes cached;
+  TTS timing prints are debug logs. Least covered now: `brain/runtime.py`
+  (monitor loops), `speech/tts.py`, `integrations/spotify.py`,
+  `brain/self_repair.py`, `app/main.py`.
 - **Room voice (built 2026-10-28, not run on the Optiplex yet).** Turn on
   at home, in the Optiplex `.env`:
   `ROOM_VOICE=1`, `AUDIO_OUTPUT_DEVICE=plughw:1,0`, `WHISPER_MODEL=base.en`
