@@ -87,10 +87,20 @@ final class AlertStream {
     private static void handle(Context c, JSONObject alert) {
         long id = alert.optLong("id");
         long age = System.currentTimeMillis() - (long) (alert.optDouble("created_at") * 1000);
-        if (age >= FRESH_MS) return;
+        boolean wake = "wake_up".equals(alert.optString("kind"));
+        // A wake-up can arrive late if the TV took a while to come out of standby.
+        if (age >= (wake ? 10 * FRESH_MS / 2 : FRESH_MS)) return;
         synchronized (SEEN) {
             if (!SEEN.add(id + "@" + alert.optDouble("created_at"))) return;
             if (SEEN.size() > 500) SEEN.clear();
+        }
+        if (wake) {
+            JSONObject ctx = alert.optJSONObject("context");
+            if (ctx == null) ctx = new JSONObject();
+            String music = ctx.optString("music"), label = ctx.optString("label");
+            int volume = ctx.optInt("volume", 30);
+            new Thread(() -> Wake.run(c, music, volume, label), "wake").start();
+            return;
         }
         new Thread(() -> {
             try {
@@ -103,9 +113,7 @@ final class AlertStream {
         Log.i(TAG, "alert " + id + " [" + severity + "] " + alert.optString("title")
                 + " age=" + age / 1000 + "s screen=" + screenOn);
         if (!"info".equals(severity) && screenOn) {
-            JSONObject glance = Jarvis.cached(c);
-            Theme theme = Theme.named(glance != null ? glance.optString("theme") : "");
-            Banner.show(c, theme, severity, alert.optString("title"), alert.optString("message"));
+            Banner.show(c, Jarvis.theme(c), severity, alert.optString("title"), alert.optString("message"));
         }
     }
 }

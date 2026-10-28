@@ -205,7 +205,7 @@ def _weather_uncached() -> dict[str, Any]:
 
 
 _GLANCE_EVENT_DAYS = 14
-_GLANCE_EVENT_LIMIT = 8
+_GLANCE_EVENT_LIMIT = 20
 
 
 def calendar_category(name: str) -> str:
@@ -249,6 +249,15 @@ def _glance_events() -> list[dict[str, Any]]:
     return out
 
 
+def _wake_status() -> dict[str, Any] | None:
+    from brain import wake_alarm
+    try:
+        return wake_alarm.public()
+    except Exception as exc:  # noqa: BLE001 - glance must still render
+        log.warning("Wake alarm unreadable: %s", exc)
+        return None
+
+
 def glance_status() -> dict[str, Any]:
     """One snapshot for a screen across the room: who to greet and how to look,
     weather, the Now feed, downloads in flight and alerts from the last day.
@@ -282,6 +291,7 @@ def glance_status() -> dict[str, Any]:
         "weather": sections["weather"],
         "now": sections["now"],
         "events": sections["events"] if isinstance(sections["events"], list) else [],
+        "wake": _wake_status(),
         "downloads": downloads[:5],
         "alerts": alerts[:5],
     }

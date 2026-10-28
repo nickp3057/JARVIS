@@ -44,6 +44,23 @@ final class Jarvis {
         return c.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
     }
 
+    // --- Settings Nick changes on the TV (SettingsActivity) -------------------
+
+    static final String THEME = "theme_override", SPEAK = "speak_replies",
+            REFRESH = "nightly_refresh", DOWNLOADS = "show_downloads";
+
+    static boolean flag(Context c, String key) {
+        return prefs(c).getBoolean(key, !SPEAK.equals(key)); // everything on but read-aloud
+    }
+
+    /** The TV's theme: Nick's pick on the TV, else Core's JARVIS_THEME. */
+    static Theme theme(Context c) {
+        String pick = prefs(c).getString(THEME, "");
+        if (!pick.isEmpty()) return Theme.named(pick);
+        JSONObject g = cached(c);
+        return Theme.named(g != null ? g.optString("theme") : "");
+    }
+
     static boolean provisioned(Context c) {
         return !prefs(c).getString("token", "").isEmpty();
     }

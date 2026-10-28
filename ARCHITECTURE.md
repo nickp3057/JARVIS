@@ -313,6 +313,9 @@ runtime knows, the more JARVIS feels like one mind instead of several scripts.
 
 ## Runtime Monitor Settings
 
+- Wake-up monitor: always on; idle unless `set_wake_up` saved an alarm
+  (`brain/wake_alarm.py`). Publishes `wake_up` (`push=False`) for the TV.
+
 - `HOME_MONITOR_ENABLED`: true/false, defaults to true.
 - `HOME_MONITOR_INTERVAL_S`: polling interval in seconds, defaults to 20.
 - `HOME_MONITOR_TRANSPORT`: `websocket` (default) or `polling`/`rest` fallback.

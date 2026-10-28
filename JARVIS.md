@@ -258,6 +258,16 @@ RMS envelope from ElevenLabs audio drives the orb in real time using a monotonic
 - `todays_agenda` — Google Calendar schedule for the rest of today
 - `next_event` — the next upcoming calendar event
 
+### Wake-up music *(new)*
+- `set_wake_up(time, days?, music?, label?, volume?)` — one alarm
+  (`brain/wake_alarm.py`, `memory/wake_alarm.json`): at the time the TV in
+  Nick's room turns on and plays Spotify, fading up to `volume` (default 30)
+  over 90 s. `music` is a Spotify link/URI (playlist, album, track, artist) or
+  empty to resume; JARVIS can't search Spotify, so he asks for a link.
+- `get_wake_up` / `cancel_wake_up`
+- Runtime wake monitor (every 20 s, fires once a day within 10 minutes of the
+  time) publishes a `wake_up` bus event with `push=False`; the TV acts on it.
+
 ### Price Watching
 - `watch_price(url, label?, target_price?)` — monitor structured price metadata
   on an exact public product URL; private/local destinations are rejected
@@ -615,6 +625,24 @@ CALENDAR_ALERT_LEAD_MIN=10  # warn this many minutes before a meeting
 ---
 
 ## Recently Shipped
+
+- **JARVIS TV 6.0: cards, settings, wake-up music (iOS 1.99 / build 101)** —
+  Reactor centred in the header between greeting and clock. Cards: Next up
+  (four non-school calendar items; family red, personal yellow, school
+  purple), School (next assignment, "in 2 days · Thursday", how many more in
+  two weeks), Systems ("All systems running." or the worst alert, one
+  download, to-dos and chores in small print; "CORE ONLINE" without the time)
+  and the music player. Every card opens a detail list; Back closes it.
+  Bottom row: Plex, Spotify, Wake-up (next alarm), Settings small in the far
+  corner. Settings is JARVIS's own page in front of Android's: colour theme
+  (TV-local for now), read replies aloud (off), show downloads, nightly sound
+  refresh, wake-up info, Android settings. Voice replies are no longer read
+  aloud by default, and the launcher steps Back out of any Google app the
+  Assistant opens for a "Jarvis, ..." request. Wake-up: `set_wake_up` on Core
+  (ask JARVIS on the phone), the TV wakes on the `wake_up` event, opens the
+  Spotify link, presses play until it plays, fades the volume in and lands on
+  the home screen (verified with the adb test hook; the standby wake-from-
+  network path still needs one real morning to prove).
 
 - **JARVIS TV 5.0: calm home, music, "Jarvis, ..." (iOS 1.97 / build 99)** —
   The TV home screen is two panels now: Coming up (the next two weeks of
@@ -1309,6 +1337,8 @@ TV=10.0.0.46:5555 tv/provision.sh         # Nick, at home: scoped token + Core U
 - Music: `MediaListener` is an empty NotificationListenerService that deploy.sh
   enables (`cmd notification allow_listener`) so the launcher can read and
   control Spotify's media session; no Spotify API keys involved.
+- Wake-up test hook (DUMP-guarded): `adb shell am broadcast -n
+  com.tvhome/.WakeTestReceiver [--es music spotify:playlist:...] [--ei volume 20]`.
 - Voice: `Voice.request` matches "jarvis" and common mishearings (jervis,
   travis, charvis); one Core chat session per day so follow-ups have context.
   The Assistant panel is dismissed only if it holds focus (never Back out of Plex).

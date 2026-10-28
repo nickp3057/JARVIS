@@ -141,6 +141,7 @@ class JarvisRuntime:
         self._arr_last_cycle = 0.0
         self._deadman_started = False
         self._price_monitor_started = False
+        self._wake_monitor_started = False
         self._price_monitor_failed = False
         self._home_snapshot = HomeSnapshot(
             online=False,
@@ -224,6 +225,10 @@ class JarvisRuntime:
         if _watched_devices() and not self._device_watch_started:
             self._device_watch_started = True
             threading.Thread(target=self._device_watch_loop, daemon=True).start()
+
+        if not self._wake_monitor_started:
+            self._wake_monitor_started = True
+            threading.Thread(target=self._wake_monitor_loop, daemon=True).start()
 
         price_enabled = os.getenv("PRICE_WATCH_MONITOR_ENABLED", "true").strip().lower()
         if price_enabled in ("1", "true", "yes", "on") and not self._price_monitor_started:
@@ -1009,6 +1014,26 @@ class JarvisRuntime:
                     title="Upcoming meeting",
                 )
             if self._stop_monitors.wait(interval):
+                break
+
+    def _wake_monitor_loop(self) -> None:
+        """At the wake-up alarm's time, tell the TV (brain/wake_alarm.py).
+
+        A bus event, not a phone push: the TV follows /api/clients/events,
+        and the packet itself wakes it from network standby."""
+        from brain import wake_alarm
+        while not self._stop_monitors.is_set():
+            try:
+                alarm = wake_alarm.due()
+            except Exception:  # noqa: BLE001
+                log.exception("Wake-up monitor failed")
+                alarm = None
+            if alarm:
+                self.raise_alert("wake_up", "Good morning", wake_alarm.describe(alarm),
+                                 source="wake-up", severity="info", push=False,
+                                 context={"music": alarm["music"], "volume": alarm["volume"],
+                                          "label": alarm.get("label", "")})
+            if self._stop_monitors.wait(20):
                 break
 
     def _price_monitor_loop(self) -> None:

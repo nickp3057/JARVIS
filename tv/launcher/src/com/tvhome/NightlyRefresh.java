@@ -64,7 +64,9 @@ public class NightlyRefresh extends BroadcastReceiver {
         boolean screenOn = c.getSystemService(PowerManager.class).isInteractive();
         long uptime = SystemClock.elapsedRealtime();
         String verdict;
-        if (screenOn) {
+        if (!Jarvis.flag(c, Jarvis.REFRESH) && minUptimeMs > 0) {
+            verdict = why + " skipped: turned off in Settings";
+        } else if (screenOn) {
             verdict = why + " skipped: screen on";
         } else if (uptime < minUptimeMs) {
             verdict = why + " skipped: up " + uptime / 60_000 + " min";

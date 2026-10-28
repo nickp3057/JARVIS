@@ -628,6 +628,27 @@ def _tool_watch_price(args: dict[str, Any]) -> str:
     return f"I'm watching {item.label} at {currency}{item.last_price:,.2f}{target}, sir."
 
 
+def _tool_set_wake_up(args: dict[str, Any]) -> str:
+    from brain.wake_alarm import describe, set_alarm
+    try:
+        data = set_alarm(str(args.get("time", "")), str(args.get("days") or "every day"),
+                         str(args.get("music") or ""), str(args.get("label") or ""),
+                         int(args.get("volume") or 30))
+    except ValueError as exc:
+        return f"{exc} No alarm was changed, sir."
+    return "Done. " + describe(data)
+
+
+def _tool_get_wake_up(_: dict[str, Any]) -> str:
+    from brain.wake_alarm import describe
+    return describe()
+
+
+def _tool_cancel_wake_up(_: dict[str, Any]) -> str:
+    from brain.wake_alarm import cancel
+    return "Wake-up alarm cancelled, sir." if cancel() else "There was no wake-up alarm to cancel, sir."
+
+
 def _tool_list_price_watches(_: dict[str, Any]) -> str:
     from brain.price_watch import describe_price_watches
     return describe_price_watches()
@@ -1626,6 +1647,38 @@ _CUSTOM_TOOLS: list[dict[str, Any]] = [
         "description": "Get Nick's next upcoming calendar event and when it starts.",
         "input_schema": {"type": "object", "properties": {}},
     },
+    # --- Wake-up music on the TV ------------------------------------------
+    {
+        "name": "set_wake_up",
+        "description": (
+            "Set (or replace) Nick's wake-up alarm: at the time, the TV in his room turns on "
+            "and plays music from Spotify, fading in. One alarm only. music is a Spotify link "
+            "or URI Nick gives (playlist, album, track, artist); leave it empty to resume "
+            "whatever Spotify last played. You can't search Spotify by name, so ask for a link "
+            "if he names a playlist."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "time": {"type": "string", "description": "e.g. 7:00am, 6:45, 19:30."},
+                "days": {"type": "string", "description": "every day (default), weekdays, weekends, or names like mon,wed,fri."},
+                "music": {"type": "string", "description": "Spotify link/URI, or empty to resume."},
+                "label": {"type": "string", "description": "Short name for the music, e.g. 'Morning Acoustic'."},
+                "volume": {"type": "integer", "minimum": 5, "maximum": 100, "description": "Volume it fades up to (default 30)."},
+            },
+            "required": ["time"],
+        },
+    },
+    {
+        "name": "get_wake_up",
+        "description": "Say when Nick's wake-up alarm is set for and what it plays.",
+        "input_schema": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "cancel_wake_up",
+        "description": "Turn off Nick's wake-up alarm.",
+        "input_schema": {"type": "object", "properties": {}},
+    },
     # --- Guarded public-page price watching -----------------------------
     {
         "name": "watch_price",
@@ -2033,6 +2086,9 @@ _DISPATCH: dict[str, Callable[[dict[str, Any]], str]] = {
     "delete_reminder": _tool_delete_reminder,
     "todays_agenda": _tool_todays_agenda,
     "next_event": _tool_next_event,
+    "set_wake_up": _tool_set_wake_up,
+    "get_wake_up": _tool_get_wake_up,
+    "cancel_wake_up": _tool_cancel_wake_up,
     "watch_price": _tool_watch_price,
     "list_price_watches": _tool_list_price_watches,
     "check_prices": _tool_check_prices,

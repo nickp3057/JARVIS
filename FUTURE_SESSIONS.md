@@ -174,16 +174,19 @@ of each group.
   media (continue watching / recently added), then v2.
 
   **Pinned by Nick 2026-10-27 (next TV session)**
-  - [ ] A JARVIS settings page in front of Android Settings (the Settings
+  - [x] (6.0) A JARVIS settings page in front of Android Settings (the Settings
     tile opens it; "Android settings" stays reachable from inside it). Lets
     Nick change what I set: colour theme (Arc / Mark III / Hot Rod, saved on
     Core so the phone can follow), which calendar categories show, what the
     small-print line includes, the nightly refresh, the voice. Needs a write
     path on Core for those settings (a new client scope, not the admin token).
-  - [ ] Drop the time after "CORE ONLINE" in the footer (keep "LAST SEEN
+  - [x] (6.0) Drop the time after "CORE ONLINE" in the footer (keep "LAST SEEN
     <time>" when Core is unreachable).
-  - [ ] Maybe: Hotschedules shifts live on the personal calendar; ask whether
-    to treat "Hotschedules:" titles as work (hidden).
+  - [x] Hotschedules shifts stay on the calendar (Nick, 2026-10-27).
+  - [ ] Theme choice saved on Core (a settings scope) so the phone follows;
+    today it's TV-local.
+  - [ ] Prove the wake-up from deep standby on a real morning (the Core
+    event should wake the TV over the network; TCL blocks app alarms).
 
   **Foundation**
   - [x] Boots straight into JARVIS; the remote's Home button always returns
@@ -226,9 +229,10 @@ of each group.
     remote has buttons for them. Music and House are v2/v3.)
 
   **Mornings**
-  - [ ] Wake-up: the TV turns on (HDMI-CEC / wake-on-LAN via HA), music
-    fades in gently at alarm time, then a short spoken briefing.
-  - [ ] Alarm time set from the phone or by asking JARVIS; skips days off.
+  - [x] Wake-up: the TV turns on, music fades in at alarm time (6.0; the
+    spoken briefing waits for the ElevenLabs voice).
+  - [x] Alarm time set by asking JARVIS (set_wake_up); days of the week.
+    Skipping specific days off is not built.
 
   **Music**
   - [x] Simple player: now playing, play/pause/skip (volume is the remote's).

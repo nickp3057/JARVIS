@@ -45,8 +45,8 @@ final class Voice {
 
     /** Blocking; call off the main thread. */
     static void ask(Context c, String request) {
-        Theme theme = Theme.named(themeName(c));
-        dismissAssistant(c);
+        Theme theme = Jarvis.theme(c);
+        new Thread(() -> dismissAssistant(c), "dismiss").start();
         Banner.show(c, theme, "reply", "“" + request + "”", "One moment, sir…");
         String reply;
         try {
@@ -61,7 +61,8 @@ final class Voice {
             return;
         }
         Banner.show(c, theme, "reply", "“" + request + "”", reply);
-        speak(c, reply);
+        // Off until JARVIS's own (ElevenLabs) voice is wired up; Settings can turn it on.
+        if (Jarvis.flag(c, Jarvis.SPEAK)) speak(c, reply);
     }
 
     private static String chat(Context c, String request) throws Exception {
@@ -107,10 +108,20 @@ final class Voice {
                 .replaceAll("\\s+", " ").trim();
     }
 
-    /** Close the Assistant's panel if it is the focused window (never "Back" out of Plex). */
+    /**
+     * The Assistant hears "Jarvis, ..." too and acts on it: a panel, or a whole
+     * app (it opened YouTube news for a misheard request). For five seconds,
+     * close its panel and step Back out of any Google app it launches over
+     * what was on screen. Never presses Back on anything else (Plex stays).
+     */
     private static void dismissAssistant(Context c) {
-        try (SelfAdb adb = SelfAdb.connect(c, 10_000)) {
-            adb.shell("dumpsys window | grep -q 'mCurrentFocus.*katniss' && input keyevent 4");
+        String top = "dumpsys activity activities 2>/dev/null | grep -m1 mResumedActivity"
+                + " | sed 's/.* u0 \\([^/]*\\)\\/.*/\\1/'";
+        try (SelfAdb adb = SelfAdb.connect(c, 15_000)) {
+            adb.shell("orig=$(" + top + "); for i in 1 2 3 4 5 6 7 8 9 10; do sleep 0.5;"
+                    + " dumpsys window | grep -q 'mCurrentFocus.*katniss' && input keyevent 4;"
+                    + " now=$(" + top + "); if [ \"$now\" != \"$orig\" ]; then"
+                    + " case \"$now\" in com.google.*|com.android.vending) input keyevent 4;; esac; fi; done");
         } catch (Exception e) {
             Log.i(TAG, "couldn't dismiss the Assistant: " + e);
         }
@@ -132,8 +143,4 @@ final class Voice {
         if (ttsReady) tts.speak(text, TextToSpeech.QUEUE_FLUSH, null, "jarvis");
     }
 
-    private static String themeName(Context c) {
-        JSONObject g = Jarvis.cached(c);
-        return g != null ? g.optString("theme") : "";
-    }
 }
