@@ -104,6 +104,11 @@ class HomeSnapshot:
     error: str = ""
 
 
+
+def _monitor_on(name: str) -> bool:
+    """A monitor's on/off switch in .env; monitors are on unless switched off."""
+    return os.getenv(name, "true").strip().lower() in ("1", "true", "yes", "on")
+
 class JarvisRuntime:
     """Coordinates JARVIS subsystems behind one stable interface."""
 
@@ -189,20 +194,17 @@ class JarvisRuntime:
         """Record that the latest runtime action was conversational only."""
         self.agent.last_used_tools = False
 
-    def start_monitors(self) -> None:
+    def start_monitors(self) -> None:  # noqa: C901 (one block per monitor, flat on purpose)
         """Start background monitors that feed observations into the inbox."""
-        home_enabled = os.getenv("HOME_MONITOR_ENABLED", "true").strip().lower()
-        if home_enabled in ("1", "true", "yes", "on") and not self._home_monitor_started:
+        if _monitor_on("HOME_MONITOR_ENABLED") and not self._home_monitor_started:
             self._home_monitor_started = True
             threading.Thread(target=self._home_monitor_entry, daemon=True).start()
 
-        weather_enabled = os.getenv("WEATHER_MONITOR_ENABLED", "true").strip().lower()
-        if weather_enabled in ("1", "true", "yes", "on") and not self._weather_monitor_started:
+        if _monitor_on("WEATHER_MONITOR_ENABLED") and not self._weather_monitor_started:
             self._weather_monitor_started = True
             threading.Thread(target=self._weather_monitor_loop, daemon=True).start()
 
-        cal_enabled = os.getenv("CALENDAR_MONITOR_ENABLED", "true").strip().lower()
-        if cal_enabled in ("1", "true", "yes", "on") and not self._calendar_monitor_started:
+        if _monitor_on("CALENDAR_MONITOR_ENABLED") and not self._calendar_monitor_started:
             try:
                 from integrations.google_calendar import is_configured
                 configured = is_configured()
@@ -212,8 +214,7 @@ class JarvisRuntime:
                 self._calendar_monitor_started = True
                 threading.Thread(target=self._calendar_monitor_loop, daemon=True).start()
 
-        download_enabled = os.getenv("QBITTORRENT_MONITOR_ENABLED", "true").strip().lower()
-        if download_enabled in ("1", "true", "yes", "on") and not self._download_monitor_started:
+        if _monitor_on("QBITTORRENT_MONITOR_ENABLED") and not self._download_monitor_started:
             try:
                 from integrations.qbittorrent import is_configured
                 configured = is_configured()
@@ -237,8 +238,7 @@ class JarvisRuntime:
             threading.Thread(target=self._schwab_monitor_loop, daemon=True).start()
             threading.Thread(target=schwab.stream_forever, args=(self._stop_monitors,), daemon=True).start()
 
-        price_enabled = os.getenv("PRICE_WATCH_MONITOR_ENABLED", "true").strip().lower()
-        if price_enabled in ("1", "true", "yes", "on") and not self._price_monitor_started:
+        if _monitor_on("PRICE_WATCH_MONITOR_ENABLED") and not self._price_monitor_started:
             self._price_monitor_started = True
             threading.Thread(target=self._price_monitor_loop, daemon=True).start()
 

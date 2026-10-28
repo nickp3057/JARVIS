@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from dotenv import load_dotenv
 
@@ -33,7 +33,6 @@ log = get_logger(__name__)
 CLIENT_ID = os.getenv("SPOTIFY_CLIENT_ID", "")
 CLIENT_SECRET = os.getenv("SPOTIFY_CLIENT_SECRET", "")
 REDIRECT_URI = os.getenv("SPOTIFY_REDIRECT_URI", "http://127.0.0.1:8888/callback")
-PREFERRED_DEVICE = os.getenv("SPOTIFY_PREFERRED_DEVICE", "").strip()
 CACHE_PATH = str(_PROJECT_ROOT / ".spotify_cache")
 
 _SCOPES = " ".join(
@@ -121,14 +120,12 @@ def _pick_target_device(sp: Any) -> dict[str, Any] | None:
     if not devices:
         return None
 
-    if PREFERRED_DEVICE:
-        match = _match_device(devices, PREFERRED_DEVICE)
+    preferred = os.getenv("SPOTIFY_PREFERRED_DEVICE", "").strip()  # read live, like every setting
+    if preferred:
+        match = _match_device(devices, preferred)
         if match:
             return match
-        log.info(
-            "Preferred device '%s' not currently available; falling back.",
-            PREFERRED_DEVICE,
-        )
+        log.info("Preferred device '%s' not currently available; falling back.", preferred)
 
     for d in devices:
         if d.get("is_active"):
@@ -152,118 +149,88 @@ def _no_device_message() -> str:
 
 # --- Public API (each returns a spoken-friendly string) ---------------------
 
+_NOT_CONFIGURED = "Spotify isn't configured, sir."
+
+
+def _run(action: str, call: Callable[[Any], str]) -> str:
+    """The shared shape of every command: no client -> say so; an API error
+    -> "Spotify error: ..." (logged), never an exception."""
+    sp = _get_client()
+    if sp is None:
+        return _NOT_CONFIGURED
+    try:
+        return call(sp)
+    except Exception as exc:  # noqa: BLE001
+        log.exception("%s failed", action)
+        return f"Spotify error: {exc}"
+
+
 def is_available() -> bool:
     return _get_client() is not None
 
 
 def play_music(query: str) -> str:
-    """Search Spotify for ``query`` and start playback on the chosen device."""
-    sp = _get_client()
-    if sp is None:
-        return "Spotify isn't configured, sir."
-
+    """Search Spotify for ``query`` (a track, else a playlist) and play it."""
     query = (query or "").strip()
-    if not query:
-        return "I need something to play, sir."
 
-    target = _pick_target_device(sp)
-    if target is None:
-        return _no_device_message()
-    device_id = target.get("id")
-
-    try:
-        track_results = (
-            sp.search(q=query, type="track", limit=1)
-            .get("tracks", {})
-            .get("items", [])
-        )
-        if track_results:
-            track = track_results[0]
-            sp.start_playback(device_id=device_id, uris=[track["uri"]])
-            return f"Playing {_format_track(track)} on {target.get('name', 'your device')}."
-
-        playlist_results = (
-            sp.search(q=query, type="playlist", limit=1)
-            .get("playlists", {})
-            .get("items", [])
-        )
-        if playlist_results:
-            playlist = playlist_results[0]
-            sp.start_playback(device_id=device_id, context_uri=playlist["uri"])
-            return (
-                f"Playing the playlist '{playlist.get('name', query)}' on "
-                f"{target.get('name', 'your device')}."
-            )
-
+    def play(sp: Any) -> str:
+        if not query:
+            return "I need something to play, sir."
+        target = _pick_target_device(sp)
+        if target is None:
+            return _no_device_message()
+        device_id, device_name = target.get("id"), target.get("name", "your device")
+        tracks = sp.search(q=query, type="track", limit=1).get("tracks", {}).get("items", [])
+        if tracks:
+            sp.start_playback(device_id=device_id, uris=[tracks[0]["uri"]])
+            return f"Playing {_format_track(tracks[0])} on {device_name}."
+        playlists = sp.search(q=query, type="playlist", limit=1).get("playlists", {}).get("items", [])
+        if playlists:
+            sp.start_playback(device_id=device_id, context_uri=playlists[0]["uri"])
+            return f"Playing the playlist '{playlists[0].get('name', query)}' on {device_name}."
         return f"I couldn't find anything for '{query}' on Spotify."
-    except Exception as exc:  # noqa: BLE001
-        log.exception("play_music failed")
-        return f"Spotify error: {exc}"
+
+    return _run("play_music", play)
 
 
 def pause_music() -> str:
-    sp = _get_client()
-    if sp is None:
-        return "Spotify isn't configured, sir."
-    try:
+    def pause(sp: Any) -> str:
         sp.pause_playback()
         return "Paused."
-    except Exception as exc:  # noqa: BLE001
-        log.exception("pause_music failed")
-        return f"Spotify error: {exc}"
+    return _run("pause_music", pause)
 
 
 def resume_music() -> str:
-    sp = _get_client()
-    if sp is None:
-        return "Spotify isn't configured, sir."
-    target = _pick_target_device(sp)
-    if target is None:
-        return _no_device_message()
-    try:
+    def resume(sp: Any) -> str:
+        target = _pick_target_device(sp)
+        if target is None:
+            return _no_device_message()
         sp.start_playback(device_id=target.get("id"))
         return "Playing."
-    except Exception as exc:  # noqa: BLE001
-        log.exception("resume_music failed")
-        return f"Spotify error: {exc}"
+    return _run("resume_music", resume)
 
 
 def skip_track() -> str:
-    sp = _get_client()
-    if sp is None:
-        return "Spotify isn't configured, sir."
-    try:
+    def skip(sp: Any) -> str:
         sp.next_track()
         return "Skipped."
-    except Exception as exc:  # noqa: BLE001
-        log.exception("skip_track failed")
-        return f"Spotify error: {exc}"
+    return _run("skip_track", skip)
 
 
 def previous_track() -> str:
-    sp = _get_client()
-    if sp is None:
-        return "Spotify isn't configured, sir."
-    try:
+    def back(sp: Any) -> str:
         sp.previous_track()
         return "Going back."
-    except Exception as exc:  # noqa: BLE001
-        log.exception("previous_track failed")
-        return f"Spotify error: {exc}"
+    return _run("previous_track", back)
 
 
 def current_track() -> str:
-    sp = _get_client()
-    if sp is None:
-        return "Spotify isn't configured, sir."
-    try:
+    def now(sp: Any) -> str:
         playing = sp.current_playback()
         if not playing or not playing.get("item"):
             return "Nothing is playing, sir."
         return f"{_format_track(playing['item'])}."
-    except Exception as exc:  # noqa: BLE001
-        log.exception("current_track failed")
-        return f"Spotify error: {exc}"
+    return _run("current_track", now)
 
 
 def current_track_structured() -> dict | None:
@@ -294,23 +261,18 @@ def current_track_structured() -> dict | None:
 
 
 def set_volume(percent: int) -> str:
-    sp = _get_client()
-    if sp is None:
-        return "Spotify isn't configured, sir."
-    try:
+    def volume(sp: Any) -> str:
         clamped = max(0, min(100, int(percent)))
         sp.volume(clamped)
         return f"Volume {clamped}."
-    except Exception as exc:  # noqa: BLE001
-        log.exception("set_volume failed")
-        return f"Spotify error: {exc}"
+    return _run("set_volume", volume)
 
 
 def list_speakers() -> str:
     """Return a spoken summary of available Spotify Connect devices."""
     sp = _get_client()
     if sp is None:
-        return "Spotify isn't configured, sir."
+        return _NOT_CONFIGURED
 
     devices = _list_devices_raw(sp)
     if not devices:
@@ -331,26 +293,19 @@ def list_speakers() -> str:
 
 def transfer_playback(device_name: str) -> str:
     """Move active playback to the device whose name contains ``device_name``."""
-    sp = _get_client()
-    if sp is None:
-        return "Spotify isn't configured, sir."
-
     device_name = (device_name or "").strip()
-    if not device_name:
-        return "Which device should I move playback to, sir?"
 
-    devices = _list_devices_raw(sp)
-    if not devices:
-        return _no_device_message()
-
-    target = _match_device(devices, device_name)
-    if target is None:
-        available = ", ".join(d.get("name", "Unknown") for d in devices)
-        return f"I don't see a device matching '{device_name}', sir. Available: {available}."
-
-    try:
+    def transfer(sp: Any) -> str:
+        if not device_name:
+            return "Which device should I move playback to, sir?"
+        devices = _list_devices_raw(sp)
+        if not devices:
+            return _no_device_message()
+        target = _match_device(devices, device_name)
+        if target is None:
+            available = ", ".join(d.get("name", "Unknown") for d in devices)
+            return f"I don't see a device matching '{device_name}', sir. Available: {available}."
         sp.transfer_playback(target["id"], force_play=True)
         return f"Playback moved to {target.get('name', 'that device')}."
-    except Exception as exc:  # noqa: BLE001
-        log.exception("transfer_playback failed")
-        return f"Spotify error: {exc}"
+
+    return _run("transfer_playback", transfer)
