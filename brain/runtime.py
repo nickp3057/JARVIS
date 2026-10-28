@@ -142,6 +142,7 @@ class JarvisRuntime:
         self._deadman_started = False
         self._price_monitor_started = False
         self._wake_monitor_started = False
+        self._schwab_monitor_started = False
         self._price_monitor_failed = False
         self._home_snapshot = HomeSnapshot(
             online=False,
@@ -229,6 +230,12 @@ class JarvisRuntime:
         if not self._wake_monitor_started:
             self._wake_monitor_started = True
             threading.Thread(target=self._wake_monitor_loop, daemon=True).start()
+
+        from integrations import schwab
+        if schwab.configured() and not self._schwab_monitor_started:
+            self._schwab_monitor_started = True
+            threading.Thread(target=self._schwab_monitor_loop, daemon=True).start()
+            threading.Thread(target=schwab.stream_forever, args=(self._stop_monitors,), daemon=True).start()
 
         price_enabled = os.getenv("PRICE_WATCH_MONITOR_ENABLED", "true").strip().lower()
         if price_enabled in ("1", "true", "yes", "on") and not self._price_monitor_started:
@@ -1035,6 +1042,37 @@ class JarvisRuntime:
                                  context={"music": alarm["music"], "volume": alarm["volume"],
                                           "label": alarm.get("label", "")})
             if self._stop_monitors.wait(20):
+                break
+
+    def _schwab_monitor_loop(self) -> None:
+        """Schwab holdings and cash (integrations/schwab.py): every
+        SCHWAB_POLL_SECONDS (30) while the market is open, 10 minutes when
+        it isn't; prices stream separately. Asks Nick to log in again a day
+        before Schwab's 7-day login runs out, and once more if it does."""
+        from integrations import schwab
+        warned: set[str] = set()
+        while not self._stop_monitors.is_set():
+            warning = schwab.login_warning()
+            expires = schwab.login_expires_at()
+            if warning and f"{warning}@{expires}" not in warned:
+                warned.add(f"{warning}@{expires}")
+                detail = ("Schwab's weekly login runs out " + schwab.expires_text(expires) + "."
+                          if warning == "soon" else "Schwab's weekly login ran out; the portfolio is frozen.")
+                self.raise_alert("schwab_login", "Schwab needs you",
+                                 detail + " Open JARVIS > Settings > Charles Schwab > Log in.",
+                                 source="schwab", severity="warning")
+            if schwab.linked():
+                try:
+                    schwab.refresh_accounts()
+                    schwab.refresh_yesterday()
+                except Exception as exc:  # noqa: BLE001
+                    log.warning("Schwab refresh failed: %s", exc)
+                    schwab.set_error(str(exc)[:200])
+            try:
+                interval = float(os.getenv("SCHWAB_POLL_SECONDS", "30"))
+            except ValueError:
+                interval = 30.0
+            if self._stop_monitors.wait(max(10.0, interval) if schwab.market_open() else 600):
                 break
 
     def _price_monitor_loop(self) -> None:

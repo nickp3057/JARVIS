@@ -51,6 +51,10 @@ every deploy, so edit the repo copy, not the TV's.
   resuming the song). The snooze is a main-looper Handler, so it's lost if
   the TV is switched off meanwhile. The last alarm handled is kept in prefs
   (`last_wake_at`): a replay after a restart must never wake Nick twice.
+- **Money** (`HomeActivity.moneyTick`): when Core has a linked Schwab
+  portfolio (`/api/glance` `portfolio`), a line under the weather shows the
+  value and today's change, re-read from `/api/portfolio` every 5 s while
+  home is showing (Core streams the prices).
 - **Easter egg** (`Beat`): while "Back in Black" plays, the reactor bounces,
   flares and spins with the audio (output-mix Visualizer, RECORD_AUDIO
   granted by deploy.sh; falls back to 94 BPM if the TV returns silence).

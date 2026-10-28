@@ -583,6 +583,18 @@ struct JarvisAPIClient {
         _ = try validate(response, data: data)
     }
 
+    // MARK: - Charles Schwab (read-only)
+
+    func portfolio() async throws -> Portfolio {
+        try await getJSON(Portfolio.self, path: "api/portfolio")
+    }
+
+    /// Schwab's login page, to open in Safari; Schwab sends it back to Core.
+    func schwabLoginURL() async throws -> URL {
+        struct Envelope: Decodable { let url: URL }
+        return try await postJSON(Envelope.self, path: "api/schwab/login", body: EmptyBody()).url
+    }
+
     // MARK: - Wake-up schedule and shared theme
 
     func wakeSchedule() async throws -> WakeSchedule {

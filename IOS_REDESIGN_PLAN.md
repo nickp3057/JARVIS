@@ -120,8 +120,8 @@ toolbar).
   right = done). Home switches are three-across tap tiles. Reactor glow no
   longer pulses. Chat's suggested prompts removed. Third theme Hot Rod
   (Mark III + cyan `reactor` role for the mark and control tint).
-- Not yet: Charles Schwab "today" glance on Home (Nick wants it eventually;
-  needs a Schwab API integration on Core first).
+- Charles Schwab portfolio card on Home (2.5): live value, today, yesterday,
+  cash; Log in when Schwab's weekly login is due. Settings > Charles Schwab.
 
 ## Proposed structure: hub-first
 

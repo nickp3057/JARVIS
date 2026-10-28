@@ -550,3 +550,48 @@ struct WakeScheduleDraft: Encodable {
     var volume: Int
     var enabled: Bool
 }
+
+/// Nick's Schwab portfolio (`GET /api/portfolio`), read-only and live: prices
+/// stream into Core, so each poll can move. Value fields are nil until Core
+/// has fetched the accounts once.
+struct Portfolio: Decodable, Equatable {
+    struct Position: Decodable, Equatable, Identifiable {
+        let symbol: String
+        let quantity: Double
+        let value: Double
+        let todayChange: Double
+        let last: Double?
+        var id: String { symbol }
+
+        enum CodingKeys: String, CodingKey {
+            case symbol, quantity, value, last
+            case todayChange = "today_change"
+        }
+    }
+
+    let configured: Bool
+    let linked: Bool
+    var loginExpiresAt: Double?
+    var streaming: Bool?
+    var error: String?
+    var value: Double?
+    var cash: Double?
+    var todayChange: Double?
+    var todayPct: Double?
+    var yesterdayChange: Double?
+    var positions: [Position]?
+
+    enum CodingKeys: String, CodingKey {
+        case configured, linked, streaming, error, value, cash, positions
+        case loginExpiresAt = "login_expires_at"
+        case todayChange = "today_change"
+        case todayPct = "today_pct"
+        case yesterdayChange = "yesterday_change"
+    }
+
+    /// Within a day of Schwab's weekly login running out (or past it).
+    var loginDueSoon: Bool {
+        guard let loginExpiresAt else { return false }
+        return loginExpiresAt - Date().timeIntervalSince1970 < 24 * 3600
+    }
+}

@@ -153,6 +153,15 @@ final class Jarvis {
         }
     }
 
+    /** Blocking: the live Schwab snapshot (/api/portfolio), or null if Core can't be reached. */
+    static JSONObject portfolio(Context c) {
+        try {
+            return getJson(base(c), "/api/portfolio", token(c), 5000);
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
     static void notifyUpdated(Context c) {
         c.sendBroadcast(new Intent(ACTION_UPDATED).setPackage(c.getPackageName()));
     }

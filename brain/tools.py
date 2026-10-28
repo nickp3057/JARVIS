@@ -640,6 +640,11 @@ def _tool_set_wake_up(args: dict[str, Any]) -> str:
     return "Done. " + describe(data)
 
 
+def _tool_portfolio_summary(_: dict[str, Any]) -> str:
+    from integrations import schwab
+    return schwab.describe()
+
+
 def _tool_get_wake_up(_: dict[str, Any]) -> str:
     from brain.wake_alarm import describe
     return describe()
@@ -1696,6 +1701,15 @@ _CUSTOM_TOOLS: list[dict[str, Any]] = [
             },
         },
     },
+    # --- Charles Schwab, read-only ---------------------------------------
+    {
+        "name": "portfolio_summary",
+        "description": (
+            "Nick's Charles Schwab portfolio, live: total value, today's and yesterday's change, "
+            "cash, biggest movers. Read-only: JARVIS can't trade, and says so if asked to."
+        ),
+        "input_schema": {"type": "object", "properties": {}},
+    },
     # --- Guarded public-page price watching -----------------------------
     {
         "name": "watch_price",
@@ -2105,6 +2119,7 @@ _DISPATCH: dict[str, Callable[[dict[str, Any]], str]] = {
     "next_event": _tool_next_event,
     "set_wake_up": _tool_set_wake_up,
     "get_wake_up": _tool_get_wake_up,
+    "portfolio_summary": _tool_portfolio_summary,
     "cancel_wake_up": _tool_cancel_wake_up,
     "watch_price": _tool_watch_price,
     "list_price_watches": _tool_list_price_watches,

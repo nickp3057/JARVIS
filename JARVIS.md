@@ -88,6 +88,7 @@ Pearson-Stark-Jarvis/
 │   ├── nas_host.py          NAS host-health snapshot (containers, RAID, SMART, volumes, temps): debounced alerts + incident-report lines
 │   ├── media_doctor.py      Traces one title request→arr→indexer→qBit→import→Plex; names the stalled stage; fixes via confirm_gate
 │   ├── plex.py              Minimal Plex client (title search + library rescan) for the media doctor
+│   ├── schwab.py            Charles Schwab, read-only: OAuth (7-day login), holdings every 30 s, live prices over the streamer
 │   └── spotify.py           Spotipy wrapper: play/pause/skip/volume/transfer/now-playing
 │
 ├── speech/
@@ -257,6 +258,30 @@ RMS envelope from ElevenLabs audio drives the orb in real time using a monotonic
 - `list_reminders` / `complete_reminder(id)` / `delete_reminder(id)`
 - `todays_agenda` — Google Calendar schedule for the rest of today
 - `next_event` — the next upcoming calendar event
+
+### Charles Schwab *(new, read-only)*
+- `portfolio_summary` — live value, today's and yesterday's change, cash,
+  biggest movers (`integrations/schwab.py`). JARVIS can't trade.
+- JARVIS's own Schwab developer app (not the one for Nick's coworker), with
+  "Accounts and Trading Production" + "Market Data Production" so trading can
+  come later without a new app. Callback
+  `https://nick-jarvis.tailbb082d.ts.net/api/schwab/callback` (Tailscale
+  HTTPS via `tailscale serve`, only that path).
+- Login: the companion's Settings > Charles Schwab > Log in gets
+  `POST /api/schwab/login` (admin) → Schwab's page in Safari → Schwab
+  redirects to `/api/schwab/callback` (no bearer; a one-time `state`, 10 min)
+  → tokens in `memory/schwab_token.json` (0600, gitignored). Access tokens
+  refresh every 30 min; Schwab ends the login after 7 days regardless, so the
+  monitor raises `schwab_login` a day before and when it lapses. Nick chose
+  this over JARVIS logging in himself (2026-10-27): no Schwab password or 2FA
+  on Core.
+- Live: holdings/cash from `/trader/v1/accounts?fields=positions` every
+  `SCHWAB_POLL_SECONDS` (30) in market hours (4am-8pm ET weekdays, else 10
+  min); stock/ETF prices from the streamer (LEVELONE_EQUITIES fields 0,3,12)
+  as they tick; yesterday from daily candles once a day. `GET /api/portfolio`
+  (status:read) serves the in-memory snapshot; `/api/glance` has a
+  `portfolio` summary. Phone Home card polls it every 5 s; the TV's line
+  under the weather every 5 s while home is showing.
 
 ### Wake-up music *(new)*
 - `set_wake_up(time, days?, music?, label?, volume?)` — puts a time on the
@@ -565,6 +590,10 @@ LINK_REMOTE_HOSTS=          # lan=tailscale host pairs; /api/links adds remote_u
 PLEX_TOKEN=                 # X-Plex-Token; enables the media doctor's "is it on Plex" stage and Plex rescan fix
 MEDIA_DOCTOR_STALL_MINUTES=30  # no torrent progress for this long counts as stalled (doctor + download monitor)
 HOME_DASHBOARD_ENTITIES=    # comma-separated HA entity_ids for /api/home/entities
+SCHWAB_APP_KEY=             # JARVIS's own Schwab developer app (developer.schwab.com); empty = Schwab off
+SCHWAB_APP_SECRET=
+SCHWAB_CALLBACK_URL=https://nick-jarvis.tailbb082d.ts.net/api/schwab/callback
+SCHWAB_POLL_SECONDS=30      # holdings/cash refresh in market hours (prices stream live regardless)
 JARVIS_THEME=arc            # arc | markIII | hotRod: default look until someone picks one on the phone or TV (then memory/theme.json via /api/theme)
 CALENDAR_CATEGORIES=        # calendar name=category pairs, ';'-separated (e.g. Oil/Boil Outs=work);
                             # unlisted names with school/family/work in them use that, else personal
@@ -634,6 +663,14 @@ CALENDAR_ALERT_LEAD_MIN=10  # warn this many minutes before a meeting
 
 ## Recently Shipped
 
+- **Charles Schwab, read-only and live (TV 6.6, iOS 2.5 / build 107)** —
+  `integrations/schwab.py`, the runtime's Schwab monitor and streamer,
+  `/api/portfolio`, `/api/schwab/login` + `/callback`, `portfolio_summary`.
+  Phone: Home portfolio card (value, today, yesterday, cash, "Live" when the
+  streamer is up) and Settings > Charles Schwab (link status, Log in). TV: a
+  live line under the weather. Built and tested against fakes only; waiting
+  on Schwab to approve JARVIS's app. Trading is the next step (see
+  FUTURE_SESSIONS.md).
 - **Wake-up schedule, no fade, snooze; one theme everywhere (TV 6.5, iOS 2.4 /
   build 106)** — the wake-up is a weekly schedule with its own time per day
   (`brain/wake_alarm.py`; `set_wake_up` merges days, `cancel_wake_up` takes

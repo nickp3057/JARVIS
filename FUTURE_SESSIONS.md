@@ -138,10 +138,21 @@ of each group.
 
 ### Integrations
 
-- [ ] **Charles Schwab** (asked 2026-10-27): read-only Schwab Trader API on
-  Core (OAuth app, token refresh). Endpoint like `/api/portfolio/today`:
-  today's and yesterday's change, uninvested cash. Feeds the phone Home tile
-  and the TV. A quick look, never a trading UI.
+- [x] **Charles Schwab, read-only and live** (shipped 2026-10-27, iOS 2.5 /
+  TV 6.6; see JARVIS.md "Charles Schwab"). Built against fakes; first real
+  run once Schwab approves JARVIS's app. Check then: streamer field numbers
+  (3 last, 12 close), cash fields for Nick's account type, the callback
+  through `tailscale serve`.
+- [ ] **Schwab trading** (Nick wants it, 2026-10-27): "if NVIDIA hits X,
+  sell; at 170, buy". Place real limit/stop orders at Schwab (they run even
+  if Core is down), not price-watching in JARVIS. Agreed guardrails: every
+  order confirmed on the phone with the exact order and dollar amount;
+  per-order and daily caps Nick sets; stocks/ETFs only, no options or
+  margin; "buy tons" becomes a number before anything is placed. Same app
+  (it already has Accounts and Trading).
+- [ ] **Headless browser for JARVIS** (asked 2026-10-27): Playwright on the
+  Optiplex for searching, reading and filling forms. Not for logging into
+  banks or brokerages (Nick agreed: no Schwab password on Core).
 - [ ] **Letterboxd** (asked 2026-10-27): pull Nick's diary/ratings (RSS feed
   is the easy path, no official API) so JARVIS knows what he's watched and
   liked, and can tie it into Radarr requests.
@@ -222,7 +233,7 @@ of each group.
   - [ ] Today: work shift, next assessment(s), birthdays, calendar events.
     (Next event, assessments within 14 days, timers and maintenance done;
     work shift and birthdays wait on decision 2.)
-  - [ ] Money: portfolio today and yesterday, idle cash (needs Schwab).
+  - [x] Money: live portfolio line under the weather (6.6); value and today.
   - [x] To-dos count and list; "things need you" alerts (plus live banners
     over any app from the SSE stream).
   - [ ] Media: Plex continue-watching / recently added, downloads in

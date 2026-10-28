@@ -12,7 +12,7 @@ import uuid
 from contextlib import asynccontextmanager
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Request, Response, status
-from fastapi.responses import StreamingResponse
+from fastapi.responses import HTMLResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
 from brain.history import (
@@ -74,6 +74,7 @@ _COMPANION_CAPABILITIES: dict[str, object] = {
         "todos": True,
         "glance": True,
         "wake_schedule": True,
+        "portfolio": True,
         "shared_theme": True,
     },
     "actions": {
@@ -482,6 +483,51 @@ def wake_put(request: WakeScheduleRequest, _: None = Depends(authorize)) -> dict
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     return wake_alarm.editor()
+
+
+# --- Charles Schwab, read-only (integrations/schwab.py) ----------------------
+
+
+@app.get("/api/portfolio")
+def portfolio(_: None = _status_read) -> dict[str, object]:
+    from integrations import schwab
+    return schwab.snapshot()
+
+
+@app.post("/api/schwab/login")
+def schwab_login(_: None = Depends(authorize)) -> dict[str, object]:
+    """Schwab's login page for the phone to open in Safari."""
+    from integrations import schwab
+    try:
+        return {"url": schwab.login_url()}
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+
+def _schwab_page(title: str, body: str, status_code: int = 200) -> HTMLResponse:
+    return HTMLResponse(status_code=status_code, content=(
+        "<!doctype html><meta name=viewport content='width=device-width,initial-scale=1'>"
+        "<body style='font:17px -apple-system,sans-serif;background:#06101c;color:#e8f6fa;"
+        "text-align:center;padding:64px 24px'>"
+        f"<h2 style='color:#40d9f2;font-weight:600'>{title}</h2><p>{body}</p></body>"))
+
+
+@app.get("/api/schwab/callback", include_in_schema=False)
+def schwab_callback(code: str = "", state: str = "", error: str = "") -> HTMLResponse:
+    """Where Schwab sends Safari after Nick logs in (SCHWAB_CALLBACK_URL, via
+    Tailscale HTTPS). No bearer token: the one-time state from
+    /api/schwab/login is what proves the login came from JARVIS."""
+    from integrations import schwab
+    if error or not code:
+        return _schwab_page("Not linked", "Schwab didn't finish the login. Try again from the app.", 400)
+    try:
+        schwab.finish_login(code, state)
+    except PermissionError as exc:
+        return _schwab_page("Not linked", str(exc), 403)
+    except Exception as exc:  # noqa: BLE001 - show Nick, don't 500
+        return _schwab_page("Not linked", f"Schwab said no: {exc}", 502)
+    threading.Thread(target=runtime, daemon=True).start()  # monitors pick it up
+    return _schwab_page("Linked, sir.", "Your portfolio will be on JARVIS in a moment. You can close this tab.")
 
 
 # --- Shared colour theme (phone and TV follow one pick; brain/theme.py) -----

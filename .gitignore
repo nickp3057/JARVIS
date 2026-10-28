@@ -23,5 +23,7 @@ memory/wake_alarm.json
 memory/arr_stack_alerts.json
 memory/model_cache.json
 memory/client_tokens.json
+memory/schwab_token.json
+memory/theme.json
 tv/launcher/out/
 tv/launcher/src/com/tvhome/Config.java

@@ -313,6 +313,10 @@ runtime knows, the more JARVIS feels like one mind instead of several scripts.
 
 ## Runtime Monitor Settings
 
+- Schwab monitor + streamer: on when `SCHWAB_APP_KEY`/`SECRET`/`CALLBACK_URL`
+  are set (`integrations/schwab.py`). Holdings every `SCHWAB_POLL_SECONDS`
+  (30) in market hours, prices streamed live; raises `schwab_login` a day
+  before Schwab's 7-day login lapses.
 - Wake-up monitor: always on; idle unless the wake-up schedule or a one-off
   is set (`brain/wake_alarm.py`). Publishes `wake_up` (`push=False`) for the TV.
 

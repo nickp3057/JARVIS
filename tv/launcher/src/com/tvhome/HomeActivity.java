@@ -61,6 +61,7 @@ public class HomeActivity extends Activity {
     private final Handler handler = new Handler(Looper.getMainLooper());
     private final Runnable poll = this::pollTick;
     private final Runnable musicTick = this::musicTick;
+    private final Runnable moneyTick = this::moneyTick;
     private final BroadcastReceiver updated = new GlanceReceiver(this);
 
     /**
@@ -88,7 +89,7 @@ public class HomeActivity extends Activity {
     private View rest;
     private View focusBeforeRest;
     private boolean resting;
-    private TextView greeting, weather;
+    private TextView greeting, weather, money;
     private LinearLayout nextUp, legend, school, systems;
     private TextView systemsState, wakeTime, wakeDays;
     private ImageView art;
@@ -116,6 +117,7 @@ public class HomeActivity extends Activity {
         render();
         handler.post(poll);
         handler.post(musicTick);
+        handler.post(moneyTick);
         resting = false;
         if (overlay == null && firstTile != null) firstTile.requestFocus();
     }
@@ -124,6 +126,7 @@ public class HomeActivity extends Activity {
     protected void onPause() {
         handler.removeCallbacks(poll);
         handler.removeCallbacks(musicTick);
+        handler.removeCallbacks(moneyTick);
         Beat.stop();
         try {
             unregisterReceiver(updated);
@@ -176,6 +179,38 @@ public class HomeActivity extends Activity {
             }
         }
         return super.dispatchKeyEvent(event);
+    }
+
+    /**
+     * Schwab, live: every 5 s while home is showing, the light /api/portfolio
+     * (Core streams the prices) rather than the whole glance. Idle when
+     * Schwab isn't linked (the glance has no portfolio).
+     */
+    private void moneyTick() {
+        JSONObject g = Jarvis.cached(this);
+        if (g != null && g.optJSONObject("portfolio") != null) {
+            new Thread(() -> {
+                JSONObject p = Jarvis.portfolio(this);
+                if (p != null) runOnUiThread(() -> showMoney(p.has("value") ? p : null));
+            }, "portfolio").start();
+        }
+        handler.postDelayed(moneyTick, 5000);
+    }
+
+    private void showMoney(JSONObject p) {
+        if (p == null || !p.has("value")) {
+            money.setVisibility(View.GONE);
+            return;
+        }
+        double change = p.optDouble("today_change", 0);
+        String text = String.format(Locale.US, "Portfolio $%,.0f   %s $%,.0f (%+.2f%%) today",
+                p.optDouble("value"), change >= 0 ? "▲" : "▼", Math.abs(change), p.optDouble("today_pct", 0));
+        android.text.SpannableString line = new android.text.SpannableString(text);
+        int start = text.indexOf(change >= 0 ? "▲" : "▼");
+        line.setSpan(new android.text.style.ForegroundColorSpan(change >= 0 ? theme.success : theme.critical),
+                start, text.length() - " today".length(), 0);
+        money.setText(line);
+        money.setVisibility(View.VISIBLE);
     }
 
     private void pollTick() {
@@ -292,6 +327,9 @@ public class HomeActivity extends Activity {
         weather = label("", 13, theme.dim);
         weather.setPadding(0, dp(2), 0, 0);
         words.addView(weather);
+        money = label("", 13, theme.dim);
+        money.setPadding(0, dp(2), 0, 0);
+        words.addView(money);
         h.addView(words, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.START | Gravity.CENTER_VERTICAL));
 
@@ -482,6 +520,7 @@ public class HomeActivity extends Activity {
         String address = g != null ? g.optString("address", "sir") : "sir";
         greeting.setText(greetingText() + ", " + address + ".");
         weather.setText(g != null ? weatherLine(g.optJSONObject("weather")) : "");
+        showMoney(g != null ? g.optJSONObject("portfolio") : null);
         systemsState.setText(statusLine());
 
         nextUp.removeAllViews();

@@ -26,6 +26,7 @@ struct HubView: View {
         var id: String { kind + title }
     }
     @State private var holdsPolling = false
+    @Environment(\.openURL) private var openURL
     private let focus: HubFocus
 
     /// Home is JARVIS himself: the reactor, a quick look, the next
@@ -55,6 +56,9 @@ struct HubView: View {
                         case .home:
                             hero
                             homeTiles
+                            if let portfolio = model.portfolio.value, portfolio.configured {
+                                portfolioTile(portfolio)
+                            }
                         case .hub:
                             if !attentionAlerts.isEmpty { needsAttentionCard }
                             if !visibleRepairs.isEmpty { repairsCard }
@@ -347,6 +351,59 @@ struct HubView: View {
             .accessibilityLabel("Add a to-do")
         }
         .animation(.snappy, value: count)
+    }
+
+    // MARK: - Home: Schwab portfolio (read-only, live)
+
+    private func portfolioTile(_ p: Portfolio) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                tileHeading("Portfolio", symbol: "chart.line.uptrend.xyaxis")
+                Spacer()
+                if p.streaming == true {
+                    Label("Live", systemImage: "dot.radiowaves.left.and.right")
+                        .font(.caption2.weight(.semibold)).foregroundStyle(JarvisTheme.success)
+                }
+            }
+            if !p.linked || p.loginDueSoon {
+                Text(p.linked ? "Schwab's weekly login runs out soon." : "Schwab needs you to log in.")
+                    .font(.subheadline.weight(.semibold))
+                Button("Log in to Schwab") { schwabLogin() }
+                    .font(.footnote.weight(.semibold)).foregroundStyle(JarvisTheme.cyan)
+            }
+            if let value = p.value, let today = p.todayChange {
+                Text(value, format: .currency(code: "USD"))
+                    .font(.system(size: 30, weight: .semibold, design: .rounded).monospacedDigit())
+                    .contentTransition(.numericText(value: value))
+                    .animation(.snappy, value: value)
+                HStack(spacing: 14) {
+                    change(today, pct: p.todayPct, label: "today")
+                    if let yesterday = p.yesterdayChange { change(yesterday, pct: nil, label: "yesterday") }
+                }
+                if let cash = p.cash {
+                    Text("\(cash.formatted(.currency(code: "USD"))) cash")
+                        .font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+                }
+            } else if p.linked {
+                Text(p.error?.isEmpty == false ? p.error! : "Fetching your accounts…")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+        }
+        .homeTile()
+        .fixedSize(horizontal: false, vertical: true)
+    }
+
+    private func change(_ amount: Double, pct: Double?, label: String) -> some View {
+        let up = amount >= 0
+        let pctText = pct.map { String(format: " (%+.2f%%)", $0) } ?? ""
+        return Text("\(up ? "▲" : "▼") \(abs(amount).formatted(.currency(code: "USD")))\(pctText) \(label)")
+            .font(.caption.weight(.semibold).monospacedDigit())
+            .foregroundStyle(up ? JarvisTheme.success : JarvisTheme.critical)
+            .accessibilityLabel("\(up ? "Up" : "Down") \(abs(amount).formatted(.currency(code: "USD"))) \(label)")
+    }
+
+    private func schwabLogin() {
+        Task { if let url = await model.schwabLoginURL() { openURL(url) } }
     }
 
     private func tileHeading(_ title: String, symbol: String) -> some View {

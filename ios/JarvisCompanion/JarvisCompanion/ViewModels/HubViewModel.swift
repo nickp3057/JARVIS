@@ -33,6 +33,8 @@ final class HubViewModel: ObservableObject {
     @Published var alerts = Section<[JarvisAlert]>()
     /// Recurring chores, soonest due first (server-sorted).
     @Published var maintenance = Section<[MaintenanceTask]>()
+    /// Schwab, read-only. Polled every tick: Core streams prices, so it moves.
+    @Published var portfolio = Section<Portfolio>()
     /// The study brief as JARVIS Core plans it; Settings shows the schedule.
     @Published var studyBrief = Section<StudyBrief>()
 
@@ -114,7 +116,8 @@ final class HubViewModel: ObservableObject {
         async let h: Void = refreshAlerts()
         async let i: Void = refreshRepairs()
         async let j: Void = refreshMaintenance()
-        _ = await (a, b, c, d, e, f, g, h, i, j)
+        async let k: Void = refreshPortfolio()
+        _ = await (a, b, c, d, e, f, g, h, i, j, k)
     }
 
     func refreshNow() async {
@@ -196,7 +199,7 @@ final class HubViewModel: ObservableObject {
         connectionIdentity = settings.connectionIdentity
         now = Section(); services = Section(); torrents = Section(); media = Section()
         storage = Section(); entities = Section(); links = Section(); studyBrief = Section()
-        alerts = Section(); repairs = Section(); maintenance = Section()
+        alerts = Section(); repairs = Section(); maintenance = Section(); portfolio = Section()
         nowSnapshotIsStale = false
         if let data = snapshotDefaults.data(forKey: nowSnapshotKey),
            let cached = try? JSONDecoder().decode(NowStatus.self, from: data) {
@@ -282,6 +285,22 @@ final class HubViewModel: ObservableObject {
                 finishedTodoIDs.remove(id)
                 actionError = error.localizedDescription
             }
+        }
+    }
+
+    // MARK: - Portfolio
+
+    /// An older Core without /api/portfolio just never shows the card.
+    func refreshPortfolio() async {
+        await load(\.portfolio) { try await $0.portfolio() }
+    }
+
+    func schwabLoginURL() async -> URL? {
+        do {
+            return try await client().schwabLoginURL()
+        } catch {
+            actionError = error.localizedDescription
+            return nil
         }
     }
 
@@ -437,7 +456,8 @@ final class HubViewModel: ObservableObject {
                 async let now: Void = self.refreshNow()
                 async let alerts: Void = self.refreshAlerts()
                 async let repairs: Void = self.refreshRepairs()
-                _ = await (torrents, services, entities, now, alerts, repairs)
+                async let portfolio: Void = self.refreshPortfolio()
+                _ = await (torrents, services, entities, now, alerts, repairs, portfolio)
                 tick += 1
                 if tick.isMultiple(of: 3) { await self.refreshMedia() }
                 if tick.isMultiple(of: 6) {

@@ -257,6 +257,19 @@ def _wake_status() -> dict[str, Any] | None:
         return None
 
 
+def _portfolio_glance() -> dict[str, Any] | None:
+    """Value and today's change for the TV, or None when Schwab isn't linked."""
+    from integrations import schwab
+    try:
+        snap = schwab.snapshot()
+    except Exception as exc:  # noqa: BLE001 - glance must still render
+        log.warning("Portfolio unavailable: %s", exc)
+        return None
+    if "value" not in snap:
+        return None
+    return {key: snap.get(key) for key in ("value", "today_change", "today_pct", "linked", "streaming")}
+
+
 def glance_status() -> dict[str, Any]:
     """One snapshot for a screen across the room: who to greet and how to look,
     weather, the Now feed, downloads in flight and alerts from the last day.
@@ -291,6 +304,7 @@ def glance_status() -> dict[str, Any]:
         "now": sections["now"],
         "events": sections["events"] if isinstance(sections["events"], list) else [],
         "wake": _wake_status(),
+        "portfolio": _portfolio_glance(),
         "downloads": downloads[:5],
         "alerts": alerts[:5],
     }

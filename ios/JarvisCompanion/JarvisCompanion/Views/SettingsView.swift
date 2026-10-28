@@ -86,6 +86,7 @@ struct SettingsView: View {
                         }
                         .buttonStyle(.plain)
                     }
+                    SchwabPanel()
                     CockpitPanel("Study brief", symbol: "graduationcap") {
                         Toggle("Deliver on this phone", isOn: $settings.studyAlertsEnabled).tint(JarvisTheme.cyan)
                         if settings.studyAlertsEnabled {
@@ -245,5 +246,64 @@ struct ThemePicker: View {
         return Circle().fill(Color(red: c.0, green: c.1, blue: c.2))
             .frame(width: 22, height: 22)
             .overlay(Circle().strokeBorder(.white.opacity(0.25)))
+    }
+}
+
+/// Charles Schwab link status and the weekly log-in (Schwab ends every login
+/// after 7 days). Read-only: JARVIS sees the portfolio, never trades.
+struct SchwabPanel: View {
+    @EnvironmentObject private var settings: AppSettings
+    @Environment(\.openURL) private var openURL
+    @State private var portfolio: Portfolio?
+    @State private var error: String?
+
+    var body: some View {
+        CockpitPanel("Charles Schwab", symbol: "chart.line.uptrend.xyaxis") {
+            Text(status).font(.subheadline.weight(.medium))
+            Text("Read-only. Schwab ends every login after 7 days; JARVIS reminds you the day before.")
+                .font(.caption).foregroundStyle(.secondary)
+            if let error {
+                Label(error, systemImage: "exclamationmark.triangle").font(.caption).foregroundStyle(JarvisTheme.amber)
+            }
+            if portfolio?.configured == true {
+                Button(action: logIn) {
+                    HStack {
+                        Text(portfolio?.linked == true ? "Log in again" : "Log in to Schwab")
+                            .font(.subheadline.weight(.semibold))
+                        Spacer()
+                        Image(systemName: "arrow.up.right")
+                    }
+                    .padding(14).foregroundStyle(JarvisTheme.background)
+                    .background(JarvisTheme.cyan, in: .rect(cornerRadius: 12))
+                }
+                Text("Your phone needs Tailscale on: Schwab sends you back to JARVIS over it.")
+                    .font(.caption2).foregroundStyle(.secondary)
+            }
+        }
+        .task { await load() }
+    }
+
+    private var status: String {
+        guard let portfolio else { return "Checking…" }
+        guard portfolio.configured else { return "Not set up on JARVIS Core yet." }
+        guard portfolio.linked, let expires = portfolio.loginExpiresAt else { return "Not logged in." }
+        let date = Date(timeIntervalSince1970: expires)
+        return "Linked until \(date.formatted(.dateTime.weekday(.wide).hour().minute()))"
+    }
+
+    private func load() async {
+        guard settings.isConfigured else { return }
+        portfolio = try? await JarvisAPIClient.make(from: settings).portfolio()
+    }
+
+    private func logIn() {
+        error = nil
+        Task {
+            do {
+                openURL(try await JarvisAPIClient.make(from: settings).schwabLoginURL())
+            } catch {
+                self.error = error.localizedDescription
+            }
+        }
     }
 }
