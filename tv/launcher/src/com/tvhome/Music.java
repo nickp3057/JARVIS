@@ -74,6 +74,36 @@ final class Music {
         if (m != null) m.getTransportControls().skipToPrevious();
     }
 
+    /** Spotify's own session, or null if Spotify hasn't run since boot. */
+    static MediaController spotify(Context c) {
+        try {
+            for (MediaController m : c.getSystemService(MediaSessionManager.class)
+                    .getActiveSessions(new ComponentName(c, MediaListener.class))) {
+                if (SPOTIFY.equals(m.getPackageName())) return m;
+            }
+        } catch (SecurityException ignored) {
+        }
+        return null;
+    }
+
+    /**
+     * Plays without opening Spotify on screen: a spotify: URI, "search:words"
+     * (Spotify plays its top hit), or "" to resume. False if Spotify has no
+     * session yet (not run since boot) and has to be opened instead.
+     */
+    static boolean playInBackground(Context c, String music) {
+        MediaController m = spotify(c);
+        if (m == null) return false;
+        if (music.startsWith("spotify:")) {
+            m.getTransportControls().playFromUri(android.net.Uri.parse(music), null);
+        } else if (music.startsWith("search:")) {
+            m.getTransportControls().playFromSearch(music.substring(7), null);
+        } else {
+            m.getTransportControls().play();
+        }
+        return true;
+    }
+
     /** Opens Spotify itself (search, playlists); Back returns home. */
     static void openSpotify(Context c) {
         Intent i = c.getPackageManager().getLeanbackLaunchIntentForPackage(SPOTIFY);

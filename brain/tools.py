@@ -631,7 +631,7 @@ def _tool_watch_price(args: dict[str, Any]) -> str:
 def _tool_set_wake_up(args: dict[str, Any]) -> str:
     from brain.wake_alarm import describe, set_alarm
     try:
-        data = set_alarm(str(args.get("time", "")), str(args.get("days") or "every day"),
+        data = set_alarm(str(args.get("time", "")), args.get("days") or None,
                          str(args.get("music") or ""), str(args.get("label") or ""),
                          int(args.get("volume") or 30))
     except ValueError as exc:
@@ -1652,17 +1652,18 @@ _CUSTOM_TOOLS: list[dict[str, Any]] = [
         "name": "set_wake_up",
         "description": (
             "Set (or replace) Nick's wake-up alarm: at the time, the TV in his room turns on "
-            "and plays music from Spotify, fading in. One alarm only. music is a Spotify link "
-            "or URI Nick gives (playlist, album, track, artist); leave it empty to resume "
-            "whatever Spotify last played. You can't search Spotify by name, so ask for a link "
-            "if he names a playlist."
+            "and plays music from Spotify, fading in. One alarm only. time can be a clock time "
+            "or relative (\"in 3 minutes\", which makes a one-off). music is what to play: a "
+            "Spotify link/URI, or just the name (\"Back in Black AC/DC\", \"my Morning Acoustic "
+            "playlist\") and Spotify on the TV searches for it; empty resumes whatever Spotify "
+            "last played. Don't ask for a link."
         ),
         "input_schema": {
             "type": "object",
             "properties": {
-                "time": {"type": "string", "description": "e.g. 7:00am, 6:45, 19:30."},
-                "days": {"type": "string", "description": "every day (default), weekdays, weekends, or names like mon,wed,fri."},
-                "music": {"type": "string", "description": "Spotify link/URI, or empty to resume."},
+                "time": {"type": "string", "description": "e.g. 7:00am, 6:45, 19:30, in 3 minutes."},
+                "days": {"type": "string", "description": "every day (default for clock times), weekdays, weekends, names like mon,wed,fri, or once/tomorrow."},
+                "music": {"type": "string", "description": "Song/playlist/artist name, Spotify link/URI, or empty to resume."},
                 "label": {"type": "string", "description": "Short name for the music, e.g. 'Morning Acoustic'."},
                 "volume": {"type": "integer", "minimum": 5, "maximum": 100, "description": "Volume it fades up to (default 30)."},
             },

@@ -38,9 +38,16 @@ every deploy, so edit the repo copy, not the TV's.
   the Assistant opened. Other speech that names a Plex title opens it in Plex.
 - **Music** (`Music`, `MediaListener`): Spotify's media session (read and
   controlled via an enabled NotificationListener; no Spotify API keys).
-- **Wake-up** (`Wake`): Core's `set_wake_up` tool saves an alarm; at the time
-  Core publishes a `wake_up` event; the TV turns on, opens the Spotify link,
-  presses play until it plays, fades volume in over 90 s, goes home.
+- **Wake-up** (`Wake`): Core's `set_wake_up` tool saves an alarm (clock time
+  or "in 3 minutes"; music is a name Spotify searches, a link, or resume); at
+  the time Core publishes a `wake_up` event; the TV turns on, goes home and
+  plays through Spotify's media session (`playFromSearch` / `playFromUri`),
+  so Spotify never takes the screen unless it hasn't run since boot, then
+  fades volume in over 90 s. The last alarm handled is kept in prefs
+  (`last_wake_at`): a replay after a restart must never wake Nick twice.
+- **Easter egg** (`Beat`): while "Back in Black" plays, the reactor bounces,
+  flares and spins with the audio (output-mix Visualizer, RECORD_AUDIO
+  granted by deploy.sh; falls back to 94 BPM if the TV returns silence).
 - **Sound fix** (`NightlyRefresh`): "off" on this TV is TCL suspend-to-RAM
   (`tcl_sys_pms_str_enabled=1`), and after long stretches audio resumes
   silent (TCL quirk NO_SOUND_AFTER_STR_RESUME). A minute after the TV is

@@ -5,7 +5,9 @@ JARVIS (``set_wake_up`` / ``cancel_wake_up`` / ``get_wake_up``); the runtime's
 wake monitor publishes a ``wake_up`` bus event (``push=False``, so the phone
 stays quiet) at the alarm time, and the TV, which follows the event stream,
 turns itself on and plays the music. Music is a Spotify link or URI
-(playlist, album or track), or empty to resume whatever Spotify last played.
+(playlist, album or track), a search Spotify runs itself ("Back in Black
+AC/DC", stored as ``search:...``), or empty to resume whatever Spotify last
+played. A time like "in 3 minutes" makes a one-off alarm unless days are given.
 """
 from __future__ import annotations
 
@@ -42,6 +44,19 @@ def _save(data: dict[str, Any] | None) -> None:
         tmp.replace(_FILE)
 
 
+_RELATIVE = re.compile(r"\s*in\s+(\d+)\s*(m|min|mins|minutes?|h|hrs?|hours?)\s*", re.IGNORECASE)
+
+
+def relative_time(text: str, now: datetime | None = None) -> str | None:
+    """"in 3 minutes" / "in 2 hours" -> "HH:MM" from now; None if not relative."""
+    m = _RELATIVE.fullmatch(text or "")
+    if not m:
+        return None
+    amount = int(m.group(1))
+    delta = timedelta(hours=amount) if m.group(2).lower().startswith("h") else timedelta(minutes=amount)
+    return ((now or datetime.now()) + delta).strftime("%H:%M")
+
+
 def parse_time(text: str) -> str:
     """"7", "7:30", "7:30am", "19:05" -> "HH:MM" (24 h); ValueError otherwise."""
     m = re.fullmatch(r"\s*(\d{1,2})(?::(\d{2}))?\s*([ap]\.?m\.?)?\s*", text.lower())
@@ -73,7 +88,8 @@ def parse_days(text: str) -> list[int]:
 
 
 def normalize_music(music: str) -> str:
-    """A Spotify link or URI -> ``spotify:<kind>:<id>``; empty means resume."""
+    """A Spotify link or URI -> ``spotify:<kind>:<id>``; words -> ``search:<words>``
+    (Spotify on the TV searches and plays the top hit); empty means resume."""
     music = (music or "").strip()
     if not music or music.lower() in ("resume", "last played", "whatever was playing"):
         return ""
@@ -82,16 +98,31 @@ def normalize_music(music: str) -> str:
     m = _SPOTIFY_LINK.search(music)
     if m:
         return f"spotify:{m.group(1)}:{m.group(2)}"
-    raise ValueError("I need a Spotify link for that (Share > Copy link in Spotify), or say resume.")
+    return "search:" + music[:120]
 
 
-def set_alarm(time_text: str, days_text: str = "every day", music: str = "", label: str = "",
-              volume: int = 30) -> dict[str, Any]:
+def set_alarm(time_text: str, days_text: str | None = None, music: str = "", label: str = "",
+              volume: int = 30, now: datetime | None = None) -> dict[str, Any]:
+    now = now or datetime.now()
+    relative = relative_time(time_text, now)
+    hhmm = relative or parse_time(time_text)
+    once = (days_text or "").strip().lower() in ("once", "one time", "today", "tomorrow") or (
+        relative is not None and not days_text)
+    if once:
+        hour, minute = (int(x) for x in hhmm.split(":"))
+        at = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+        if at <= now or (days_text or "").strip().lower() == "tomorrow":
+            at += timedelta(days=1)
+        days = [at.weekday()]
+    else:
+        days = parse_days(days_text or "every day")
+    music = normalize_music(music)
     data = {
-        "time": parse_time(time_text),
-        "days": parse_days(days_text),
-        "music": normalize_music(music),
-        "label": (label or "").strip()[:80],
+        "time": hhmm,
+        "days": days,
+        "once": once,
+        "music": music,
+        "label": ((label or "").strip() or (music[7:] if music.startswith("search:") else ""))[:80],
         "volume": max(5, min(100, int(volume))),
         "enabled": True,
         "last_fired": "",
@@ -131,11 +162,15 @@ def due(now: datetime | None = None) -> dict[str, Any] | None:
     if not at <= now < at + timedelta(minutes=10) or data.get("last_fired") == now.date().isoformat():
         return None
     data["last_fired"] = now.date().isoformat()
+    if data.get("once"):
+        data["enabled"] = False  # a one-off: done after it goes off
     _save(data)
     return data
 
 
-def days_text(days: list[int]) -> str:
+def days_text(days: list[int], once: bool = False) -> str:
+    if once:
+        return "once"
     if sorted(days) == list(range(7)):
         return "every day"
     if sorted(days) == [0, 1, 2, 3, 4]:
@@ -151,18 +186,20 @@ def describe(data: dict[str, Any] | None = None) -> str:
         return "No wake-up alarm is set, sir."
     when = datetime.strptime(data["time"], "%H:%M").strftime("%-I:%M %p")
     music = data.get("label") or ("the Spotify link you gave me" if data.get("music") else "whatever Spotify last played")
-    return f"Wake-up at {when}, {days_text(data['days'])}, with {music} on the TV."
+    if not data.get("enabled", True):
+        return f"The one-off wake-up at {when} has already gone off, sir."
+    return f"Wake-up at {when}, {days_text(data['days'], data.get('once', False))}, with {music} on the TV."
 
 
 def public(now: datetime | None = None) -> dict[str, Any] | None:
     """For /api/glance: what the TV shows on its wake-up tile."""
     data = load()
-    if not data:
+    if not data or not data.get("enabled", True):
         return None
     at = next_time(data, now)
     return {
         "time": data["time"],
-        "days": days_text(data["days"]),
+        "days": days_text(data["days"], data.get("once", False)),
         "label": data.get("label", ""),
         "next_at": at.timestamp() if at else None,
     }

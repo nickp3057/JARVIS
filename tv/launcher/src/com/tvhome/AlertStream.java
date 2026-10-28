@@ -95,6 +95,11 @@ final class AlertStream {
             if (SEEN.size() > 500) SEEN.clear();
         }
         if (wake) {
+            // Replays after a restart or reboot must not wake him twice; the
+            // in-memory SEEN set doesn't survive those, so remember it on disk.
+            long at = (long) alert.optDouble("created_at");
+            if (at <= Jarvis.prefs(c).getLong("last_wake_at", 0)) return;
+            Jarvis.prefs(c).edit().putLong("last_wake_at", at).commit();
             JSONObject ctx = alert.optJSONObject("context");
             if (ctx == null) ctx = new JSONObject();
             String music = ctx.optString("music"), label = ctx.optString("label");

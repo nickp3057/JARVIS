@@ -95,6 +95,7 @@ public class HomeActivity extends Activity {
     private TextView musicLabel, songTitle, songArtist;
     private MediaIcon playIcon;
     private View prevButton, playButton, nextButton;
+    private ReactorView reactor;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -123,6 +124,7 @@ public class HomeActivity extends Activity {
     protected void onPause() {
         handler.removeCallbacks(poll);
         handler.removeCallbacks(musicTick);
+        Beat.stop();
         try {
             unregisterReceiver(updated);
         } catch (IllegalArgumentException ignored) {
@@ -280,6 +282,7 @@ public class HomeActivity extends Activity {
     /** Greeting on the left, the reactor dead centre, the clock on the right. */
     private View header() {
         FrameLayout h = new FrameLayout(this);
+        h.setClipChildren(false); // the reactor bounces past its box to Back in Black
 
         LinearLayout words = new LinearLayout(this);
         words.setOrientation(LinearLayout.VERTICAL);
@@ -292,8 +295,8 @@ public class HomeActivity extends Activity {
         h.addView(words, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.START | Gravity.CENTER_VERTICAL));
 
-        ReactorView mark = new ReactorView(this, theme.reactor, theme.success);
-        h.addView(mark, new FrameLayout.LayoutParams(dp(124), dp(124), Gravity.CENTER));
+        reactor = new ReactorView(this, theme.reactor, theme.success);
+        h.addView(reactor, new FrameLayout.LayoutParams(dp(124), dp(124), Gravity.CENTER));
 
         LinearLayout time = new LinearLayout(this);
         time.setOrientation(LinearLayout.VERTICAL);
@@ -459,6 +462,11 @@ public class HomeActivity extends Activity {
         float extras = n.title != null ? 1f : 0.35f;
         prevButton.setAlpha(extras);
         nextButton.setAlpha(extras);
+        // Easter egg: the reactor dances to Back in Black.
+        boolean acdc = n.playing && n.title != null
+                && n.title.toLowerCase(Locale.US).startsWith("back in black");
+        if (acdc) Beat.start(this, reactor);
+        else Beat.stop();
         handler.removeCallbacks(musicTick);
         handler.postDelayed(musicTick, 1000);
     }

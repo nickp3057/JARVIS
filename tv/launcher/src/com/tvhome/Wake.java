@@ -21,7 +21,7 @@ final class Wake {
 
     private Wake() {}
 
-    /** Blocking; call off the main thread. {@code music} empty = resume Spotify. */
+    /** Blocking; call off the main thread. {@code music}: spotify: URI, "search:words", or "" to resume. */
     static void run(Context c, String music, int volumePercent, String label) {
         Log.i(TAG, "waking: music=" + music + " volume=" + volumePercent);
         AudioManager audio = c.getSystemService(AudioManager.class);
@@ -30,12 +30,17 @@ final class Wake {
         audio.setStreamVolume(AudioManager.STREAM_MUSIC, Math.max(1, target / 8), 0);
         try (SelfAdb adb = SelfAdb.connect(c, 30_000)) {
             adb.shell("input keyevent 224"); // WAKEUP: screen on, no toggle
+            adb.shell("input keyevent 3"); // home: clock, greeting and the music card
             Thread.sleep(2500);
-            if (music.isEmpty()) {
+            // Through Spotify's media session, so Spotify never takes the screen.
+            if (!Music.playInBackground(c, music)) {
+                // Spotify hasn't run since boot: open it once, then play through it.
                 adb.shell("monkey -p " + Music.SPOTIFY + " -c android.intent.category.LEANBACK_LAUNCHER 1");
-            } else {
-                adb.shell("am start -a android.intent.action.VIEW -d '" + music.replace("'", "")
-                        + "' -p " + Music.SPOTIFY);
+                for (int i = 0; i < 10 && Music.spotify(c) == null; i++) Thread.sleep(1000);
+                if (!Music.playInBackground(c, music) && music.startsWith("spotify:")) {
+                    adb.shell("am start -a android.intent.action.VIEW -d '" + music.replace("'", "")
+                            + "' -p " + Music.SPOTIFY);
+                }
             }
             // Opening a playlist doesn't always start it; press play until it does.
             for (int i = 0; i < 6 && !Music.now(c).playing; i++) {
@@ -43,7 +48,7 @@ final class Wake {
                 if (!Music.now(c).playing) adb.shell("input keyevent 126"); // MEDIA_PLAY
             }
             Thread.sleep(1500);
-            adb.shell("input keyevent 3"); // home: clock, greeting and the music card
+            adb.shell("input keyevent 3"); // back home if Spotify had to open
         } catch (Exception e) {
             Log.w(TAG, "wake-up failed", e);
         }

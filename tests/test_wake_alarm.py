@@ -29,8 +29,7 @@ class WakeAlarmTests(unittest.TestCase):
             "https://open.spotify.com/playlist/37i9dQZF1DX0UrRvztWcAU?si=abc"),
             "spotify:playlist:37i9dQZF1DX0UrRvztWcAU")
         self.assertEqual(wake_alarm.normalize_music("resume"), "")
-        with self.assertRaises(ValueError):
-            wake_alarm.normalize_music("my morning playlist")
+        self.assertEqual(wake_alarm.normalize_music("Back in Black AC/DC"), "search:Back in Black AC/DC")
 
     def test_fires_once_in_its_window_on_its_days(self) -> None:
         wake_alarm.set_alarm("7:00am", "weekdays")
@@ -43,13 +42,25 @@ class WakeAlarmTests(unittest.TestCase):
         self.assertEqual(wake_alarm.next_time(wake_alarm.load(), datetime(2026, 10, 30, 8, 0)),
                          datetime(2026, 11, 2, 7, 0))
 
+    def test_in_three_minutes_is_a_one_off(self) -> None:
+        now = datetime(2026, 10, 27, 18, 55)
+        data = wake_alarm.set_alarm("in 3 minutes", music="Back in Black", now=now)
+        self.assertEqual((data["time"], data["once"], data["label"]), ("18:58", True, "Back in Black"))
+        self.assertEqual(wake_alarm.public(now)["days"], "once")
+        self.assertIsNotNone(wake_alarm.due(datetime(2026, 10, 27, 18, 58, 10)))
+        self.assertIsNone(wake_alarm.public())  # done after it goes off
+        self.assertIsNone(wake_alarm.due(datetime(2026, 11, 3, 18, 58, 10)))
+        self.assertEqual(wake_alarm.set_alarm("in 2 hours", now=now)["time"], "20:55")
+        late = wake_alarm.set_alarm("6:00am", "once", now=now)
+        self.assertEqual(late["days"], [2])  # tomorrow, Wednesday
+
     def test_tools(self) -> None:
         reply = tools.execute_tool("set_wake_up", {
             "time": "6:30am", "days": "weekdays", "label": "Morning Acoustic",
             "music": "https://open.spotify.com/playlist/37i9dQZF1DX0UrRvztWcAU"})
         self.assertIn("6:30 AM, weekdays, with Morning Acoustic", reply)
         self.assertEqual(wake_alarm.public()["days"], "weekdays")
-        self.assertIn("Spotify link", tools.execute_tool("set_wake_up", {"time": "7", "music": "chill vibes"}))
+        self.assertIn("with chill vibes", tools.execute_tool("set_wake_up", {"time": "7", "music": "chill vibes"}))
         self.assertIn("cancelled", tools.execute_tool("cancel_wake_up", {}))
         self.assertIsNone(wake_alarm.public())
 

@@ -259,7 +259,8 @@ RMS envelope from ElevenLabs audio drives the orb in real time using a monotonic
 - `next_event` — the next upcoming calendar event
 
 ### Wake-up music *(new)*
-- `set_wake_up(time, days?, music?, label?, volume?)` — one alarm
+- `set_wake_up(time, days?, music?, label?, volume?)` — one alarm (time may be
+  "in 3 minutes", a one-off; music may be a song/playlist name)
   (`brain/wake_alarm.py`, `memory/wake_alarm.json`): at the time the TV in
   Nick's room turns on and plays Spotify, fading up to `volume` (default 30)
   over 90 s. `music` is a Spotify link/URI (playlist, album, track, artist) or
@@ -625,6 +626,17 @@ CALENDAR_ALERT_LEAD_MIN=10  # warn this many minutes before a meeting
 ---
 
 ## Recently Shipped
+
+- **Wake-up by name, no Spotify on screen, Back in Black (TV 6.4, iOS 2.3 /
+  build 105)** — `set_wake_up` takes relative times ("in 3 minutes" makes a
+  one-off that disables itself after firing; days "once"/"tomorrow" too) and
+  music by name: anything that isn't a Spotify link is stored as
+  `search:<words>` and the TV plays Spotify's top hit through its media
+  session (Spotify supports PLAY_FROM_SEARCH / PLAY_FROM_URI), so the app
+  never opens on screen. Fixed: a TV restart within 10 minutes of an alarm
+  replayed it and woke Nick again; the handled alarm is now persisted.
+  Easter egg: the reactor dances to "Back in Black" (Visualizer on the
+  output mix).
 
 - **TV 6.2 (iOS 2.2 / build 104)** — Right from School or Systems now goes to
   the music player (it used to drop to the Wake-up tile). `tv/README.md`

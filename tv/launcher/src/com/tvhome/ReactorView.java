@@ -23,6 +23,12 @@ final class ReactorView extends View {
     private final int color, core;
     private final float density;
     private final long start = SystemClock.uptimeMillis();
+    /** 0..1 from Beat (the Back in Black easter egg); 0 is the normal mark. */
+    private float level;
+
+    void setLevel(float level) {
+        this.level = level;
+    }
 
     /** Waveform bar heights (fractions of the glyph height), like SF Symbols' "waveform". */
     private static final float[] WAVE = {0.28f, 0.55f, 0.85f, 1f, 0.62f, 0.4f, 0.75f, 0.5f, 0.3f};
@@ -40,11 +46,16 @@ final class ReactorView extends View {
         float cx = getWidth() / 2f, cy = getHeight() / 2f;
         float t = (SystemClock.uptimeMillis() - start) / 1000f;
         paint.setPathEffect(null);
+        canvas.save();
+        float bounce = 1f + 0.12f * level;
+        canvas.scale(bounce, bounce, cx, cy);
+        // Under the music the glow flares and the rings spin faster.
+        t += Beat.spin;
 
         // Glow (steady: he doesn't breathe), and the core's warm centre.
         paint.setStyle(Paint.Style.FILL);
         paint.setShader(new RadialGradient(cx, cy, size / 2,
-                new int[] {Theme.alpha(color, 56), Theme.alpha(color, 0)},
+                new int[] {Theme.alpha(color, Math.min(255, Math.round(56 + 150 * level))), Theme.alpha(color, 0)},
                 new float[] {4 * density / (size / 2), 1f}, Shader.TileMode.CLAMP));
         canvas.drawCircle(cx, cy, size / 2, paint);
         paint.setShader(new RadialGradient(cx, cy, size * 0.22f,
@@ -95,6 +106,7 @@ final class ReactorView extends View {
             x += bar * 1.9f;
         }
 
+        canvas.restore();
         if (isAttachedToWindow()) postInvalidateOnAnimation();
     }
 
