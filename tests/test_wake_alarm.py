@@ -73,9 +73,32 @@ class WakeAlarmTests(unittest.TestCase):
         self.assertEqual(wake_alarm.public(now)["label"], "Morning Acoustic")
         self.assertEqual(wake_alarm.set_alarm("in 2 hours", now=now)["once"]["at"], "2026-10-27T20:55")
         late = wake_alarm.set_alarm("6:00am", "once", now=now)
-        self.assertEqual(late["once"]["at"], "2026-10-28T06:00")  # tomorrow
+        self.assertEqual(late["once"]["at"], "2026-10-28T06:00")  # already past today
         self.assertTrue(wake_alarm.cancel("once"))
         self.assertIsNone(wake_alarm.load()["once"])
+
+    def test_one_day_changes_then_back_to_normal(self) -> None:
+        tuesday_night = datetime(2026, 10, 27, 22, 0)
+        wake_alarm.set_alarm("6:30am", "weekdays")
+        with patch.object(wake_alarm, "datetime", wraps=datetime) as fake:
+            fake.now.return_value = tuesday_night
+            wake_alarm.set_alarm("8:30", "tomorrow", now=tuesday_night)
+            self.assertEqual(wake_alarm.public(tuesday_night)["time"], "08:30")
+            self.assertIsNone(wake_alarm.due(datetime(2026, 10, 28, 6, 31)))  # not at 6:30
+            self.assertIsNotNone(wake_alarm.due(datetime(2026, 10, 28, 8, 31)))
+            self.assertIn("Wed Oct 28: 8:30 AM instead", wake_alarm.describe())
+            # The Wednesday after rings at the usual time.
+            self.assertEqual(wake_alarm.next_time(wake_alarm.load(), datetime(2026, 11, 3, 22, 0)),
+                             datetime(2026, 11, 4, 6, 30))
+            wake_alarm.skip("2026-10-29", now=tuesday_night)
+            self.assertEqual(wake_alarm.next_time(wake_alarm.load(), datetime(2026, 10, 28, 9, 0)),
+                             datetime(2026, 10, 30, 6, 30))  # Thursday skipped
+            wake_alarm.skip("2026-10-29", restore=True, now=tuesday_night)
+            self.assertEqual(wake_alarm.next_time(wake_alarm.load(), datetime(2026, 10, 28, 9, 0)),
+                             datetime(2026, 10, 29, 6, 30))
+            self.assertEqual(wake_alarm.load()["times"][2], "06:30")  # the schedule itself never moved
+        with self.assertRaises(ValueError):
+            wake_alarm.skip("someday", now=tuesday_night)
 
     def test_paused_schedule_and_old_file_migrate(self) -> None:
         wake_alarm._FILE.write_text(json.dumps({

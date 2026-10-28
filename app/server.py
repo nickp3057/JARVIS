@@ -75,6 +75,7 @@ _COMPANION_CAPABILITIES: dict[str, object] = {
         "glance": True,
         "wake_schedule": True,
         "portfolio": True,
+        "tv_remote": True,
         "shared_theme": True,
     },
     "actions": {
@@ -549,6 +550,26 @@ def schwab_callback(code: str = "", state: str = "", error: str = "") -> HTMLRes
         return _schwab_page("Not linked", f"Schwab said no: {exc}", 502)
     threading.Thread(target=runtime, daemon=True).start()  # monitors pick it up
     return _schwab_page("Linked, sir.", "Your portfolio will be on JARVIS in a moment. You can close this tab.")
+
+
+# --- TV remote (integrations/tv_remote.py) ------------------------------------
+
+
+class TvRemoteRequest(BaseModel):
+    key: str = Field(min_length=1, max_length=20)
+
+
+@app.post("/api/tv/remote")
+def tv_remote_press(request: TvRemoteRequest, _: None = Depends(authorize)) -> dict[str, object]:
+    """One button on the companion's TV remote."""
+    from integrations import tv_remote
+    try:
+        ok, detail = tv_remote.press(request.key)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    if not ok:
+        raise HTTPException(status_code=502, detail=detail)
+    return {"ok": True}
 
 
 # --- Shared colour theme (phone and TV follow one pick; brain/theme.py) -----

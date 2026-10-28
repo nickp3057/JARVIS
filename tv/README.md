@@ -51,10 +51,16 @@ every deploy, so edit the repo copy, not the TV's.
   resuming the song). The snooze is a main-looper Handler, so it's lost if
   the TV is switched off meanwhile. The last alarm handled is kept in prefs
   (`last_wake_at`): a replay after a restart must never wake Nick twice.
-- **Money** (`HomeActivity.moneyTick`): when Core has a linked Schwab
-  portfolio (`/api/glance` `portfolio`), a line under the weather shows the
-  value and today's change, re-read from `/api/portfolio` every 5 s while
-  home is showing (Core streams the prices).
+- **Every 5 s while home is showing** (`HomeActivity.moneyTick`): the shared
+  theme (`/api/theme`, `Jarvis.followTheme`; a phone pick lands within ~5 s)
+  and, when Core has a linked Schwab portfolio (`/api/glance` `portfolio`),
+  the line under the weather with value and today's change in dollars and
+  cents from `/api/portfolio` (Core streams the prices).
+- **Weather icon** (`HomeActivity.weatherIcon`): one emoji from the
+  description: sun (moon at night), part-cloud, cloud, rain, snow, storm, fog.
+- **Power and remote from the phone** don't touch this app: Core drives the
+  TV through Home Assistant's Android TV Remote entity
+  (`integrations/tv_remote.py`).
 - **Easter egg** (`Beat`): while "Back in Black" plays, the reactor bounces,
   flares and spins with the audio (output-mix Visualizer, RECORD_AUDIO
   granted by deploy.sh; falls back to 94 BPM if the TV returns silence).

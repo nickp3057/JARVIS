@@ -583,6 +583,14 @@ struct JarvisAPIClient {
         _ = try validate(response, data: data)
     }
 
+    // MARK: - TV remote
+
+    func pressTVRemote(_ key: String) async throws {
+        struct Body: Encodable { let key: String }
+        struct Done: Decodable { let ok: Bool }
+        _ = try await postJSON(Done.self, path: "api/tv/remote", body: Body(key: key))
+    }
+
     // MARK: - Charles Schwab (read-only)
 
     func portfolio() async throws -> Portfolio {

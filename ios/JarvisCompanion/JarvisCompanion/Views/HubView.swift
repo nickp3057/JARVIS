@@ -27,6 +27,7 @@ struct HubView: View {
     }
     @State private var holdsPolling = false
     @State private var schwabLoggingIn = false
+    @State private var showingRemote = false
     private let focus: HubFocus
 
     /// Home is JARVIS himself: the reactor, a quick look, the next
@@ -93,6 +94,7 @@ struct HubView: View {
                 }
             }
             .sheet(isPresented: $showingSettings) { SettingsView() }
+            .sheet(isPresented: $showingRemote) { TVRemoteView() }
             .sheet(isPresented: $schwabLoggingIn) {
                 SchwabLoginView { Task { await model.refreshPortfolio() } }
             }
@@ -194,8 +196,8 @@ struct HubView: View {
             }
 
             ViewThatFits(in: .horizontal) {
-                HStack(spacing: 8) { systemsChip; storageChip }
-                VStack(spacing: 8) { systemsChip; storageChip }
+                HStack(spacing: 8) { systemsChip; storageChip; remoteChip }
+                VStack(spacing: 8) { systemsChip; storageChip; remoteChip }
             }
             if attentionCount > 0 { attentionChip }
             if onAsk != nil {
@@ -242,6 +244,10 @@ struct HubView: View {
                 openMedia("storage")
             }
         }
+    }
+
+    private var remoteChip: some View {
+        heroChip("TV remote", symbol: "av.remote", tint: JarvisTheme.cyan) { showingRemote = true }
     }
 
     private func heroChip(_ text: String, symbol: String, tint: Color, action: @escaping () -> Void) -> some View {

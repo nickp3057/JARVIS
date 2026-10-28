@@ -259,6 +259,17 @@ RMS envelope from ElevenLabs audio drives the orb in real time using a monotonic
 - `todays_agenda` — Google Calendar schedule for the rest of today
 - `next_event` — the next upcoming calendar event
 
+### Nick's room TV *(new)*
+- `tv_power(state)` — on/off through Home Assistant's Android TV Remote
+  entity (`TV_REMOTE_ENTITY`, default `remote.nick_s_room_tv`), which can
+  wake the TV from standby (`integrations/tv_remote.py`).
+- `home_assistant.call_service` sends `media_player` turn_on/off for any of
+  `TV_MEDIA_PLAYERS` (the TV's Cast/group entries) to that remote instead:
+  "turning on" a Cast entity opened Home Assistant's cast screen on the TV.
+- Companion remote (Home > TV remote chip, `TVRemoteView`): power, D-pad +
+  OK, back, home, play/pause, volume, mute → `POST /api/tv/remote {key}`
+  (admin) → `remote.send_command` (DPAD_*, BACK, HOME, MEDIA_*, VOLUME_*).
+
 ### Charles Schwab *(new, read-only)*
 - `portfolio_summary` — live value, today's and yesterday's change, overall
   gain/loss (`total_gain`/`total_gain_pct`: unrealized, live value of what's
@@ -300,11 +311,16 @@ RMS envelope from ElevenLabs audio drives the orb in real time using a monotonic
   Snooze 9 min on screen. `music` is a Spotify link/URI, a name (stored as
   `search:<words>`, Spotify plays the top hit), `resume`, or omitted to keep
   the current music.
-- `get_wake_up` / `cancel_wake_up(days?)` (some days, `once`, or everything)
+- One day only: `set_wake_up` with days `today`/`tomorrow`/`YYYY-MM-DD`
+  ("8:30 tomorrow") and `skip_wake_up(day?, restore?)` ("skip my alarm
+  tomorrow") write an override for that date (`overrides`, "" = skipped);
+  it wins even while the schedule is paused, drops off once the date has
+  passed, and the weekday is back to normal the week after.
+- `get_wake_up` / `cancel_wake_up(days?)` (some weekdays for good, `once`, or everything)
 - Companion editor: `GET`/`PUT /api/wake` (admin token) with `times` (7
   entries, Monday first, `HH:MM` or null), `music`, `label`, `volume`,
-  `enabled` (pauses the schedule without losing it); the one-off is shown,
-  not edited.
+  `enabled` (pauses the schedule without losing it); the one-off and the
+  one-day `overrides` are shown, not edited.
 - Runtime wake monitor (every 20 s, fires each alarm once within 10 minutes of
   its time) publishes a `wake_up` bus event with `push=False`; the TV acts on it.
 
@@ -600,6 +616,8 @@ HOME_DASHBOARD_ENTITIES=    # comma-separated HA entity_ids for /api/home/entiti
 SCHWAB_APP_KEY=             # JARVIS's own Schwab developer app (developer.schwab.com); empty = Schwab off
 SCHWAB_APP_SECRET=
 SCHWAB_CALLBACK_URL=https://127.0.0.1:8182   # exactly what the Schwab app has registered
+TV_REMOTE_ENTITY=remote.nick_s_room_tv   # HA Android TV Remote entity for Nick's room TV
+TV_MEDIA_PLAYERS=media_player.nicks_room_tv,media_player.nicks_room_tv_2,media_player.nick_s_room_tv,media_player.nicks_room_group,media_player.nick_s_room_display   # on/off for these goes to the remote
 SCHWAB_POLL_SECONDS=30      # holdings/cash refresh in market hours (prices stream live regardless)
 JARVIS_THEME=arc            # arc | markIII | hotRod: default look until someone picks one on the phone or TV (then memory/theme.json via /api/theme)
 CALENDAR_CATEGORIES=        # calendar name=category pairs, ';'-separated (e.g. Oil/Boil Outs=work);
@@ -670,6 +688,13 @@ CALENDAR_ALERT_LEAD_MIN=10  # warn this many minutes before a meeting
 
 ## Recently Shipped
 
+- **One-day alarm changes, TV remote, weather icons (TV 6.7, iOS 2.9 / build
+  111)** — "skip my alarm tomorrow" / "8:30 tomorrow" change one date only
+  (`skip_wake_up`, wake `overrides`). `tv_power` and a remote in the phone app
+  go through HA's Android TV Remote entity; Cast "turn on" no longer opens
+  Home Assistant on the TV. TV: portfolio in dollars and cents, a weather icon
+  (sun/moon, cloud, rain, snow, storm, fog) before the temperature, and the
+  shared theme followed every 5 s while home is showing.
 - **Charles Schwab, read-only and live (TV 6.6, iOS 2.5 / build 107)** —
   `integrations/schwab.py`, the runtime's Schwab monitor and streamer,
   `/api/portfolio`, `/api/schwab/login` + `/callback`, `portfolio_summary`.

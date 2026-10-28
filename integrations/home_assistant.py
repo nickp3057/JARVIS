@@ -266,6 +266,11 @@ def call_service(
     entity_id: str | None = None,
     service_data: dict[str, Any] | None = None,
 ) -> tuple[bool, str]:
+    from integrations import tv_remote
+    if domain == "media_player" and service in ("turn_on", "turn_off") and tv_remote.is_tv_player(entity_id):
+        # Cast "turn on" opens Home Assistant's cast screen on the TV; the
+        # TV's own remote protocol wakes it properly.
+        return tv_remote.power(service == "turn_on")
     payload = dict(service_data or {})
     if entity_id:
         payload["entity_id"] = entity_id

@@ -200,6 +200,10 @@ of each group.
   - [ ] Prove the wake-up from deep standby on a real morning (the Core
     event should wake the TV over the network; TCL blocks app alarms).
     Nick is testing 2026-10-28.
+  - [x] (2026-10-27) One-day alarm changes by voice: "skip my alarm
+    tomorrow", "8:30 tomorrow"; back to normal the week after.
+  - [x] (6.7 / iOS 2.9) Phone TV remote, `tv_power`, weather icon, cents,
+    5-second theme follow.
   - [ ] Wake-up options Nick may want once he's lived with it ("idk what i
     want yet"): snooze length, stop music on I'm up, a gentler start,
     snooze from the phone.

@@ -535,11 +535,20 @@ struct WakeSchedule: Decodable, Equatable {
     var onceAt: String?
     var nextAt: Double?
     var summary: String
+    /// One-day changes made by asking JARVIS ("skip tomorrow", "8:30 tomorrow");
+    /// `time` nil means skipped. They drop off once the day has passed.
+    var overrides: [Override]?
+
+    struct Override: Decodable, Equatable, Hashable {
+        let date: String
+        let time: String?
+    }
 
     enum CodingKeys: String, CodingKey {
         case times, music, label, volume, enabled, summary
         case onceAt = "once_at"
         case nextAt = "next_at"
+        case overrides
     }
 }
 

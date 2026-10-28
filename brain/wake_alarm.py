@@ -30,7 +30,7 @@ _SPOTIFY_URI = re.compile(r"^spotify:(playlist|album|track|artist):[A-Za-z0-9]+$
 
 def _blank() -> dict[str, Any]:
     return {"times": [None] * 7, "music": "", "label": "", "volume": 30,
-            "enabled": True, "once": None, "last_fired": ""}
+            "enabled": True, "once": None, "overrides": {}, "last_fired": ""}
 
 
 def _migrate(data: dict[str, Any]) -> dict[str, Any]:
@@ -65,7 +65,10 @@ def load() -> dict[str, Any] | None:
     times = data.get("times")
     if not isinstance(times, list) or len(times) != 7:
         data["times"] = [None] * 7
-    return data if any(data["times"]) or data.get("once") else None
+    today = datetime.now().date().isoformat()
+    overrides = data.get("overrides") if isinstance(data.get("overrides"), dict) else {}
+    data["overrides"] = {d: t for d, t in overrides.items() if d >= today}  # past days drop off
+    return data if any(data["times"]) or data.get("once") or data["overrides"] else None
 
 
 def _save(data: dict[str, Any] | None) -> None:
@@ -138,6 +141,20 @@ def normalize_music(music: str) -> str:
     return "search:" + music[:120]
 
 
+def _one_day(when: str, now: datetime) -> str | None:
+    """"today" / "tomorrow" / "YYYY-MM-DD" -> that date (ISO); None otherwise."""
+    if when == "today":
+        return now.date().isoformat()
+    if when == "tomorrow":
+        return (now + timedelta(days=1)).date().isoformat()
+    if re.fullmatch(r"\d{4}-\d{2}-\d{2}", when):
+        datetime.strptime(when, "%Y-%m-%d")  # ValueError if it isn't a real date
+        if when < now.date().isoformat():
+            raise ValueError(f"{when} has already been.")
+        return when
+    return None
+
+
 def set_alarm(time_text: str, days_text: str | None = None, music: str | None = None,
               label: str = "", volume: int | None = None, now: datetime | None = None) -> dict[str, Any]:
     """Put a time on the schedule for some days (other days keep theirs), or
@@ -149,10 +166,14 @@ def set_alarm(time_text: str, days_text: str | None = None, music: str | None = 
     data = load() or _blank()
     music = None if music is None else normalize_music(music)
     label = (label or "").strip() or (music[7:] if music and music.startswith("search:") else "")
-    if when in ("once", "one time", "today", "tomorrow") or (relative is not None and not days_text):
+    day = None if relative is not None else _one_day(when, now)
+    if day:
+        # Just that one day; the week after, the schedule is as it was.
+        data["overrides"][day] = hhmm
+    elif when in ("once", "one time") or (relative is not None and not days_text):
         hour, minute = (int(x) for x in hhmm.split(":"))
         at = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
-        if at <= now or when == "tomorrow":
+        if at <= now:
             at += timedelta(days=1)
         data["once"] = {"at": at.isoformat(timespec="minutes"), "music": music, "label": label[:80]}
     else:
@@ -179,6 +200,22 @@ def set_schedule(times: list[str | None], music: str = "", label: str = "", volu
                 volume=max(5, min(100, int(volume))), enabled=bool(enabled))
     _save(data)
     return data
+
+
+def skip(day_text: str = "tomorrow", restore: bool = False, now: datetime | None = None) -> str:
+    """No alarm on one day (or, with ``restore``, that day back to normal).
+    Returns the ISO date it applied to."""
+    now = now or datetime.now()
+    day = _one_day((day_text or "tomorrow").strip().lower(), now)
+    if day is None:
+        raise ValueError(f"I need today, tomorrow or a date like 2026-10-30, not {day_text!r}.")
+    data = load() or _blank()
+    if restore:
+        data["overrides"].pop(day, None)
+    else:
+        data["overrides"][day] = ""
+    _save(data)
+    return day
 
 
 def cancel(days_text: str | None = None) -> bool:
@@ -215,13 +252,15 @@ def _upcoming(data: dict[str, Any], now: datetime) -> tuple[datetime, dict[str, 
             found.append((at, {"music": data["music"] if once.get("music") is None else once["music"],
                                "label": once.get("label") or (data["label"] if once.get("music") is None else ""),
                                "once": True}))
-    if data.get("enabled", True):
-        for offset in range(8):
-            day = now + timedelta(days=offset)
-            hhmm = data["times"][day.weekday()]
-            if hhmm and _at(day, hhmm) > now:
-                found.append((_at(day, hhmm), {"music": data["music"], "label": data["label"], "once": False}))
-                break
+    overrides = data.get("overrides", {})
+    for offset in range(8):
+        day = now + timedelta(days=offset)
+        date = day.date().isoformat()
+        # A one-day change wins (even while the schedule is paused); "" skips the day.
+        hhmm = overrides[date] if date in overrides else data["times"][day.weekday()] if data.get("enabled", True) else None
+        if hhmm and _at(day, hhmm) > now:
+            found.append((_at(day, hhmm), {"music": data["music"], "label": data["label"], "once": False}))
+            break
     return min(found, key=lambda pair: pair[0]) if found else None
 
 
@@ -288,6 +327,9 @@ def describe(data: dict[str, Any] | None = None, now: datetime | None = None) ->
         music = data.get("label") or ("the Spotify link you gave me" if data.get("music") else "whatever Spotify last played")
         paused = "" if data.get("enabled", True) else " (paused)"
         parts.append(f"Wake-up schedule{paused}: {schedule_text(data)}, with {music} on the TV.")
+    for date, hhmm in sorted(data.get("overrides", {}).items()):
+        day = datetime.strptime(date, "%Y-%m-%d").strftime("%a %b %-d")
+        parts.append(f"{day}: skipped." if not hhmm else f"{day}: {_clock(hhmm)} instead.")
     if data.get("once"):
         at = datetime.fromisoformat(data["once"]["at"])
         parts.append(f"A one-off at {at.strftime('%-I:%M %p')} {at.strftime('%a')}.")
@@ -326,6 +368,7 @@ def editor(now: datetime | None = None) -> dict[str, Any]:
         "volume": data["volume"],
         "enabled": data.get("enabled", True),
         "once_at": data["once"]["at"] if data.get("once") else None,
+        "overrides": [{"date": d, "time": t or None} for d, t in sorted(data.get("overrides", {}).items())],
         "next_at": at.timestamp() if at else None,
         "summary": describe(data) if load() else "No wake-up set.",
     }

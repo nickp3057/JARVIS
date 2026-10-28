@@ -182,11 +182,16 @@ public class HomeActivity extends Activity {
     }
 
     /**
-     * Schwab, live: every 5 s while home is showing, the light /api/portfolio
-     * (Core streams the prices) rather than the whole glance. Idle when
-     * Schwab isn't linked (the glance has no portfolio).
+     * Every 5 s while home is showing: the shared theme (/api/theme) and
+     * Schwab, live (/api/portfolio; Core streams the prices) rather than the
+     * whole glance. The portfolio part idles when Schwab isn't linked (the
+     * glance has no portfolio).
      */
     private void moneyTick() {
+        // The shared theme, too: a pick on the phone lands here within ~5 s.
+        new Thread(() -> {
+            if (Jarvis.followTheme(this)) runOnUiThread(this::recreate);
+        }, "theme").start();
         JSONObject g = Jarvis.cached(this);
         if (g != null && g.optJSONObject("portfolio") != null) {
             new Thread(() -> {
@@ -203,7 +208,7 @@ public class HomeActivity extends Activity {
             return;
         }
         double change = p.optDouble("today_change", 0);
-        String text = String.format(Locale.US, "Portfolio $%,.0f   %s $%,.0f (%+.2f%%) today",
+        String text = String.format(Locale.US, "Portfolio $%,.2f   %s $%,.2f (%+.2f%%) today",
                 p.optDouble("value"), change >= 0 ? "▲" : "▼", Math.abs(change), p.optDouble("today_pct", 0));
         android.text.SpannableString line = new android.text.SpannableString(text);
         int start = text.indexOf(change >= 0 ? "▲" : "▼");
@@ -896,13 +901,28 @@ public class HomeActivity extends Activity {
     private static String weatherLine(JSONObject w) {
         if (w == null || !w.optBoolean("online")) return "";
         StringBuilder s = new StringBuilder();
-        s.append(w.optInt("temperature_f")).append("°  ");
         String desc = w.optString("description");
+        s.append(weatherIcon(desc)).append("  ").append(w.optInt("temperature_f")).append("°  ");
         if (!desc.isEmpty()) s.append(Character.toUpperCase(desc.charAt(0))).append(desc.substring(1));
         if (!w.isNull("high_f") && !w.isNull("low_f")) {
             s.append("  ·  H ").append(w.optInt("high_f")).append("  L ").append(w.optInt("low_f"));
         }
         return s.toString();
+    }
+
+    /** One small icon for the sky (brain/weather.py's descriptions); a moon on clear nights. */
+    static String weatherIcon(String desc) {
+        String d = desc.toLowerCase(Locale.US);
+        int hour = java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY);
+        boolean night = hour >= 19 || hour < 6;
+        if (d.contains("thunder")) return "⛈";
+        if (d.contains("snow")) return "❄";
+        if (d.contains("rain") || d.contains("drizzle") || d.contains("shower")) return "🌧";
+        if (d.contains("fog")) return "🌫";
+        if (d.contains("partly") || d.contains("mostly clear")) return night ? "☁" : "⛅";
+        if (d.contains("overcast") || d.contains("cloud")) return "☁";
+        if (d.contains("clear")) return night ? "🌙" : "☀";
+        return "";
     }
 
     private String clock(long ms) {

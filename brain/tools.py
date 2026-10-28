@@ -640,6 +640,11 @@ def _tool_set_wake_up(args: dict[str, Any]) -> str:
     return "Done. " + describe(data)
 
 
+def _tool_tv_power(args: dict[str, Any]) -> str:
+    from integrations import tv_remote
+    return tv_remote.power(str(args.get("state", "on")).lower() != "off")[1]
+
+
 def _tool_portfolio_summary(_: dict[str, Any]) -> str:
     from integrations import schwab
     return schwab.describe()
@@ -648,6 +653,18 @@ def _tool_portfolio_summary(_: dict[str, Any]) -> str:
 def _tool_get_wake_up(_: dict[str, Any]) -> str:
     from brain.wake_alarm import describe
     return describe()
+
+
+def _tool_skip_wake_up(args: dict[str, Any]) -> str:
+    from datetime import datetime
+    from brain.wake_alarm import describe, skip
+    restore = bool(args.get("restore"))
+    try:
+        day = skip(str(args.get("day") or "tomorrow"), restore)
+    except ValueError as exc:
+        return f"{exc} Nothing changed, sir."
+    name = datetime.strptime(day, "%Y-%m-%d").strftime("%A")
+    return (f"{name} is back to normal, sir. " if restore else f"No alarm {name}, sir. ") + describe()
 
 
 def _tool_cancel_wake_up(args: dict[str, Any]) -> str:
@@ -1678,7 +1695,7 @@ _CUSTOM_TOOLS: list[dict[str, Any]] = [
             "type": "object",
             "properties": {
                 "time": {"type": "string", "description": "e.g. 7:00am, 6:45, 19:30, in 3 minutes."},
-                "days": {"type": "string", "description": "every day (default for clock times), weekdays, weekends, names like mon,wed,fri, or once/tomorrow."},
+                "days": {"type": "string", "description": "Recurring: every day (default for clock times), weekdays, weekends, names like mon,wed,fri. Just one day ('tomorrow at 8:30', 'Friday only'): today, tomorrow or YYYY-MM-DD; that day goes back to normal the week after. once = an extra one-off."},
                 "music": {"type": "string", "description": "Song/playlist/artist name, Spotify link/URI, or 'resume'. Omit to keep the current music."},
                 "label": {"type": "string", "description": "Short name for the music, e.g. 'Morning Acoustic'."},
                 "volume": {"type": "integer", "minimum": 5, "maximum": 100, "description": "Volume the music plays at (default 30)."},
@@ -1692,13 +1709,43 @@ _CUSTOM_TOOLS: list[dict[str, Any]] = [
         "input_schema": {"type": "object", "properties": {}},
     },
     {
+        "name": "skip_wake_up",
+        "description": (
+            "Skip Nick's wake-up on one day only ('skip my alarm tomorrow'); the schedule is "
+            "untouched and that weekday rings as usual next week. restore=true puts a skipped or "
+            "changed day back to its normal time."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "day": {"type": "string", "description": "today, tomorrow (default) or YYYY-MM-DD."},
+                "restore": {"type": "boolean", "description": "Undo a skip or one-day change for that day."},
+            },
+        },
+    },
+    {
         "name": "cancel_wake_up",
-        "description": "Turn off Nick's wake-up: some days (keeping the others), the one-off ('once'), or everything.",
+        "description": "Turn off Nick's wake-up for good: some weekdays every week (keeping the others), the one-off ('once'), or everything. For a single day use skip_wake_up instead.",
         "input_schema": {
             "type": "object",
             "properties": {
                 "days": {"type": "string", "description": "e.g. 'saturday', 'weekends', 'once'. Omit to cancel everything."},
             },
+        },
+    },
+    # --- Nick's room TV ----------------------------------------------------
+    {
+        "name": "tv_power",
+        "description": (
+            "Turn the TV in Nick's room on or off (its own remote protocol through Home "
+            "Assistant). Use this for 'turn my TV on/off', never a media_player turn_on: the "
+            "Cast entities open Home Assistant's screen on the TV. If he only says 'the TV' he "
+            "means this one."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {"state": {"type": "string", "enum": ["on", "off"]}},
+            "required": ["state"],
         },
     },
     # --- Charles Schwab, read-only ---------------------------------------
@@ -2119,7 +2166,9 @@ _DISPATCH: dict[str, Callable[[dict[str, Any]], str]] = {
     "next_event": _tool_next_event,
     "set_wake_up": _tool_set_wake_up,
     "get_wake_up": _tool_get_wake_up,
+    "skip_wake_up": _tool_skip_wake_up,
     "portfolio_summary": _tool_portfolio_summary,
+    "tv_power": _tool_tv_power,
     "cancel_wake_up": _tool_cancel_wake_up,
     "watch_price": _tool_watch_price,
     "list_price_watches": _tool_list_price_watches,

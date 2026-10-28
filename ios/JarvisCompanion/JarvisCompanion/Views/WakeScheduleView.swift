@@ -66,6 +66,11 @@ struct WakeScheduleView: View {
                     Text("Plays at \(Int(volume))% right away, no fade. Snooze on the TV gives you 9 more minutes.")
                         .font(.caption).foregroundStyle(.secondary)
                 }
+                ForEach(loaded?.overrides ?? [], id: \.self) { change in
+                    Label(Self.overrideText(change), systemImage: change.time == nil ? "moon.zzz" : "clock.arrow.circlepath")
+                        .font(.footnote).foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
                 if let once = loaded?.onceAt, let date = Self.iso(once) {
                     Label("One-off at \(date.formatted(date: .abbreviated, time: .shortened)), set by JARVIS.",
                           systemImage: "clock.badge")
@@ -176,6 +181,17 @@ struct WakeScheduleView: View {
     private static func hhmm(_ date: Date) -> String {
         let c = Calendar.current.dateComponents([.hour, .minute], from: date)
         return String(format: "%02d:%02d", c.hour ?? 7, c.minute ?? 0)
+    }
+
+    /// "Wednesday: 8:30 AM instead, just this once" / "Thursday: skipped, just this once".
+    private static func overrideText(_ change: WakeSchedule.Override) -> String {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.dateFormat = "yyyy-MM-dd"
+        let day = f.date(from: change.date).map { $0.formatted(.dateTime.weekday(.wide).month(.abbreviated).day()) }
+            ?? change.date
+        guard let time = change.time else { return "\(day): skipped, just this once" }
+        return "\(day): \(clock(time).formatted(date: .omitted, time: .shortened)) instead, just this once"
     }
 
     private static func iso(_ text: String) -> Date? {

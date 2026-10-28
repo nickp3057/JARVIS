@@ -97,6 +97,25 @@ final class Jarvis {
         }
     }
 
+    /**
+     * Blocking: true if Core's shared theme changed since the last snapshot
+     * (the cached glance is updated to match). A TV-only pick wins until it
+     * has been shared.
+     */
+    static boolean followTheme(Context c) {
+        if (!prefs(c).getString(THEME, "").isEmpty()) return false;
+        JSONObject g = cached(c);
+        if (g == null) return false;
+        try {
+            String shared = getJson(base(c), "/api/theme", token(c), 4000).optString("theme");
+            if (shared.isEmpty() || shared.equals(g.optString("theme"))) return false;
+            prefs(c).edit().putString("glance", g.put("theme", shared).toString()).apply();
+            return true;
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
     static boolean provisioned(Context c) {
         return !prefs(c).getString("token", "").isEmpty();
     }
