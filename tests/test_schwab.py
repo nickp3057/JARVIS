@@ -64,6 +64,7 @@ class SchwabTests(unittest.TestCase):
         self.assertFalse(schwab.linked())
         self.link()
         self.assertTrue(schwab.linked())
+        self.assertTrue(schwab.linked_event.is_set())  # the monitor fetches right away
         self.assertAlmostEqual(schwab.login_expires_at(), time.time() + 7 * 86400, delta=5)
         self.assertEqual(oct(schwab._TOKEN_FILE.stat().st_mode & 0o777), "0o600")
 

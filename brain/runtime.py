@@ -441,6 +441,8 @@ class JarvisRuntime:
     def stop_monitors(self) -> None:
         """Ask background monitors to stop."""
         self._stop_monitors.set()
+        from integrations import schwab
+        schwab.linked_event.set()  # its monitor waits on this, not on _stop_monitors
         memory_extractor.remove_listener(self._on_memory_change)
         memory_extractor.stop()
 
@@ -1069,10 +1071,16 @@ class JarvisRuntime:
                     log.warning("Schwab refresh failed: %s", exc)
                     schwab.set_error(str(exc)[:200])
             try:
-                interval = float(os.getenv("SCHWAB_POLL_SECONDS", "30"))
+                interval = max(10.0, float(os.getenv("SCHWAB_POLL_SECONDS", "30")))
             except ValueError:
                 interval = 30.0
-            if self._stop_monitors.wait(max(10.0, interval) if schwab.market_open() else 600):
+            # Slow down only once there's something to show; a fresh login
+            # (linked_event) cuts the wait short either way.
+            if not schwab.market_open() and schwab.has_accounts():
+                interval = 600.0
+            schwab.linked_event.wait(interval)
+            schwab.linked_event.clear()
+            if self._stop_monitors.is_set():
                 break
 
     def _price_monitor_loop(self) -> None:

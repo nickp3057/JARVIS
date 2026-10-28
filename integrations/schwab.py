@@ -45,6 +45,8 @@ _STREAMED = ("EQUITY", "ETF", "COLLECTIVE_INVESTMENT")
 _FIELDS = "0,3,12"
 
 _lock = threading.RLock()
+# Set on a fresh login so the monitor fetches now, not after its wait.
+linked_event = threading.Event()
 _pending_logins: dict[str, float] = {}
 _state: dict[str, Any] = {
     "accounts": None,       # parsed holdings (see _parse_accounts)
@@ -131,6 +133,12 @@ def finish_login(code: str, state: str) -> None:
                   "expires_at": now + float(data.get("expires_in", 1800)), "refresh_issued_at": now})
     with _lock:
         _state["error"] = ""
+    linked_event.set()
+
+
+def has_accounts() -> bool:
+    with _lock:
+        return _state["accounts"] is not None
 
 
 def finish_from_redirect(redirect_url: str) -> None:
