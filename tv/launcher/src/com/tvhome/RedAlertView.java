@@ -3,8 +3,8 @@ package com.tvhome;
 import android.content.Context;
 import android.graphics.Canvas;
 import android.graphics.DashPathEffect;
-import android.graphics.LinearGradient;
 import android.graphics.Paint;
+import android.graphics.Path;
 import android.graphics.RadialGradient;
 import android.graphics.RectF;
 import android.graphics.Shader;
@@ -13,13 +13,15 @@ import android.view.View;
 
 /**
  * Barn Door Protocol's JARVIS: the reactor gone hostile, filling the screen.
- * A heartbeat glow, heavy armour segments turning one way and a targeting
- * dial racing the other, two sweeping lock-on arcs, a jagged flickering core
- * and a scan line raking the room. Red only.
+ * Nothing pulses or flashes (Nick's call); it's menacing through shape and
+ * slow, steady motion: heavy armour turning one way, a ring of teeth closing
+ * the other, a racing targeting dial, two lock-on arcs, and at the centre a
+ * slit-pupilled eye that slowly looks around the room. Red only.
  */
 final class RedAlertView extends View {
     private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final RectF oval = new RectF();
+    private final Path path = new Path();
     private final int red, hot;
     private final float density;
     private final long start = SystemClock.uptimeMillis();
@@ -31,47 +33,26 @@ final class RedAlertView extends View {
         this.density = context.getResources().getDisplayMetrics().density;
     }
 
-    /** Lub-dub every 1.4 s: two quick swells, then a pause. */
-    private static float heartbeat(float t) {
-        float p = t % 1.4f;
-        float lub = (float) Math.exp(-Math.pow((p - 0.10f) / 0.07f, 2));
-        float dub = 0.7f * (float) Math.exp(-Math.pow((p - 0.32f) / 0.08f, 2));
-        return Math.max(lub, dub);
-    }
-
     @Override
     protected void onDraw(Canvas canvas) {
         float w = getWidth(), h = getHeight();
         float t = (SystemClock.uptimeMillis() - start) / 1000f;
-        float beat = heartbeat(t);
         float cx = w / 2f, cy = h * 0.465f;
         float r = h * 0.35f;
         paint.setPathEffect(null);
 
-        // Heartbeat glow behind everything, and the edges falling to black.
+        // A steady red glow behind it, and the edges falling to black.
         paint.setStyle(Paint.Style.FILL);
         paint.setShader(new RadialGradient(cx, cy, r * 1.9f,
-                new int[] {Theme.alpha(red, Math.round(70 + 110 * beat)), Theme.alpha(red, 0)},
-                null, Shader.TileMode.CLAMP));
+                new int[] {Theme.alpha(red, 120), Theme.alpha(red, 0)}, null, Shader.TileMode.CLAMP));
         canvas.drawRect(0, 0, w, h, paint);
         paint.setShader(new RadialGradient(cx, h / 2f, Math.max(w, h) * 0.75f,
                 new int[] {0x00000000, 0xD0000000}, new float[] {0.55f, 1f}, Shader.TileMode.CLAMP));
         canvas.drawRect(0, 0, w, h, paint);
         paint.setShader(null);
 
-        // Scan line raking down the room every 3 s.
-        float sy = h * ((t % 3f) / 3f);
-        paint.setShader(new LinearGradient(0, sy - 40 * density, 0, sy,
-                Theme.alpha(red, 0), Theme.alpha(red, 110), Shader.TileMode.CLAMP));
-        canvas.drawRect(0, sy - 40 * density, w, sy, paint);
-        paint.setShader(null);
-
-        paint.setStyle(Paint.Style.STROKE);
-        float scale = 1f + 0.03f * beat;
-        canvas.save();
-        canvas.scale(scale, scale, cx, cy);
-
         // Armour: twelve heavy segments, turning slowly.
+        paint.setStyle(Paint.Style.STROKE);
         paint.setStrokeCap(Paint.Cap.BUTT);
         paint.setColor(Theme.alpha(red, 210));
         paint.setStrokeWidth(r * 0.07f);
@@ -83,7 +64,7 @@ final class RedAlertView extends View {
         canvas.restore();
 
         // Targeting dial: ninety ticks racing the other way.
-        float rd = r * 0.86f;
+        float rd = r * 0.88f;
         float gap = (float) (2 * Math.PI * rd / 90);
         paint.setColor(Theme.alpha(hot, 150));
         paint.setStrokeWidth(r * 0.05f);
@@ -94,19 +75,37 @@ final class RedAlertView extends View {
         canvas.restore();
         paint.setPathEffect(null);
 
+        // Teeth: a ring of fangs pointing in, closing slowly against the armour.
+        paint.setStyle(Paint.Style.FILL);
+        paint.setColor(Theme.alpha(red, 230));
+        canvas.save();
+        canvas.rotate(-360f * (t % 45f) / 45f, cx, cy);
+        int teeth = 24;
+        for (int i = 0; i < teeth; i++) {
+            canvas.save();
+            canvas.rotate(360f * i / teeth, cx, cy);
+            float base = r * 0.78f, tip = r * (i % 2 == 0 ? 0.62f : 0.68f), half = r * 0.045f;
+            path.reset();
+            path.moveTo(cx - half, cy - base);
+            path.lineTo(cx + half, cy - base);
+            path.lineTo(cx, cy - tip);
+            path.close();
+            canvas.drawPath(path, paint);
+            canvas.restore();
+        }
+        canvas.restore();
+
         // Two lock-on arcs sweeping opposite ways.
+        paint.setStyle(Paint.Style.STROKE);
         paint.setStrokeCap(Paint.Cap.ROUND);
         paint.setColor(hot);
-        paint.setStrokeWidth(r * 0.03f);
-        arc(canvas, cx, cy, r * 0.72f, 360f * (t % 2.4f) / 2.4f, 0.32f);
+        paint.setStrokeWidth(r * 0.025f);
+        arc(canvas, cx, cy, r * 0.56f, 360f * (t % 2.4f) / 2.4f, 0.3f);
         paint.setColor(Theme.alpha(red, 200));
-        arc(canvas, cx, cy, r * 0.62f, -360f * (t % 1.7f) / 1.7f, 0.22f);
-        paint.setStrokeCap(Paint.Cap.BUTT);
-        paint.setStrokeWidth(density * 1.5f);
-        paint.setColor(Theme.alpha(red, 120));
-        canvas.drawCircle(cx, cy, r * 0.52f, paint);
+        arc(canvas, cx, cy, r * 0.50f, -360f * (t % 1.7f) / 1.7f, 0.2f);
 
         // Crosshair notches at the four points.
+        paint.setStrokeCap(Paint.Cap.BUTT);
         paint.setStrokeWidth(r * 0.02f);
         paint.setColor(hot);
         for (int i = 0; i < 4; i++) {
@@ -116,30 +115,31 @@ final class RedAlertView extends View {
             canvas.restore();
         }
 
-        // The core: a hot glow and a jagged, flickering waveform.
+        // The eye: an almond lid, a red iris and a slit pupil that slowly
+        // looks from side to side.
+        float ew = r * 0.42f, eh = r * 0.2f;
+        path.reset();
+        path.moveTo(cx - ew, cy);
+        path.quadTo(cx, cy - eh * 2, cx + ew, cy);
+        path.quadTo(cx, cy + eh * 2, cx - ew, cy);
+        path.close();
         paint.setStyle(Paint.Style.FILL);
-        paint.setShader(new RadialGradient(cx, cy, r * 0.45f,
-                new int[] {Theme.alpha(hot, Math.round(90 + 120 * beat)), Theme.alpha(red, 0)},
-                null, Shader.TileMode.CLAMP));
-        canvas.drawCircle(cx, cy, r * 0.45f, paint);
+        paint.setShader(new RadialGradient(cx, cy, ew,
+                new int[] {Theme.alpha(hot, 255), Theme.alpha(red, 200), 0xFF100000},
+                new float[] {0f, 0.55f, 1f}, Shader.TileMode.CLAMP));
+        canvas.drawPath(path, paint);
         paint.setShader(null);
+        float look = (float) Math.sin(t * 2 * Math.PI / 7) * ew * 0.35f;
+        paint.setColor(0xFF050000);
+        oval.set(cx + look - r * 0.035f, cy - eh * 0.9f, cx + look + r * 0.035f, cy + eh * 0.9f);
+        canvas.drawOval(oval, paint);
+        paint.setStyle(Paint.Style.STROKE);
+        paint.setStrokeWidth(r * 0.018f);
         paint.setColor(hot);
-        int bars = 13;
-        float glyph = r * 0.42f;
-        float bar = glyph / (bars * 1.8f);
-        float x = cx - (bars * bar * 1.8f - bar * 0.8f) / 2;
-        for (int i = 0; i < bars; i++) {
-            double n = Math.sin(t * 9 + i * 1.7) * Math.sin(t * 4.3 + i * 0.9);
-            float half = glyph * (0.15f + 0.85f * (float) Math.abs(n)) * (1f - Math.abs(i - bars / 2f) / bars) / 2;
-            oval.set(x, cy - half, x + bar, cy + half);
-            canvas.drawRect(oval, paint);
-            x += bar * 1.8f;
-        }
+        canvas.drawPath(path, paint);
 
-        canvas.restore();
         if (isAttachedToWindow()) postInvalidateOnAnimation();
     }
-
     private void arc(Canvas canvas, float cx, float cy, float r, float rotation, float sweep) {
         oval.set(cx - r, cy - r, cx + r, cy + r);
         canvas.drawArc(oval, rotation, sweep * 360f, false, paint);

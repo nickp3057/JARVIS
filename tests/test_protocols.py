@@ -42,7 +42,7 @@ class BarnDoorTests(unittest.TestCase):
         self.assertEqual(self.calls("switch", "turn_off")[0].args[2], "switch.avengers_tower_socket_1")
         self.assertIn("switch.avengers_tower_socket_1", snapshot["snapshot_entities"])  # comes back on
         self.assertEqual(theme.current()["theme"], "barnDoor")
-        self.assertEqual(event_bus.since(0)[-1].severity, "critical")
+        self.assertEqual(event_bus.since(0), [])  # no alert banner or Systems line
         # Saying it twice must not snapshot the red room over the real one.
         protocols.engage()
         self.assertEqual(len(self.calls("scene", "create")), 1)

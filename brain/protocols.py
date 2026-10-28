@@ -4,8 +4,8 @@ Engage: Home Assistant snapshots the room's lights (``scene.create``), every
 colour light in ``BARN_DOOR_LIGHTS`` goes full red, everything in
 ``BARN_DOOR_OFF`` that can't be red (the bedroom light, the Avengers tower)
 goes dark, the shared theme switches to the red ``barnDoor``
-palette (phone and TV follow; brain/theme.py remembers the old one) and the
-TV shows a red banner. Stand down: the snapshot and the old theme come back.
+palette (phone and TV follow; brain/theme.py remembers the old one) and
+the TV hands its whole screen to the red-alert view. Stand down: the snapshot and the old theme come back.
 
 A scene snapshot restores colour and brightness but not animated modes, and
 Govee's app modes (Nick's rainbow) don't show up in Home Assistant at all.
@@ -20,7 +20,7 @@ import json
 import os
 from pathlib import Path
 
-from brain import event_bus, theme
+from brain import theme
 from integrations import home_assistant
 
 _SCENE = "barn_door_before"
@@ -43,9 +43,8 @@ def engage() -> str:
         "light", "turn_on", e, {"rgb_color": [255, 0, 0], "brightness": 255})[0]]
     for entity in off:
         home_assistant.call_service(entity.split(".", 1)[0], "turn_off", entity)
+    # No alert: the red room and the TV taking over say it (Nick's call).
     theme.choose("barnDoor", remember=True)
-    event_bus.publish("barn_door", "BARN DOOR PROTOCOL", "Engaged. Room locked to red.",
-                      source="protocols", severity="critical", push=False)
     note = f" {len(failed)} light(s) didn't answer." if failed else ""
     return f"Barn Door Protocol engaged, sir. Everything's red.{note}"
 

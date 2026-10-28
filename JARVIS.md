@@ -265,7 +265,8 @@ RMS envelope from ElevenLabs audio drives the orb in real time using a monotonic
   colour light in `BARN_DOOR_LIGHTS` (strips, desk, the fan's LEDs) goes full
   red, `BARN_DOOR_OFF` (the bedroom light, the Avengers tower) goes dark, the shared theme goes
   to the hidden red `barnDoor` palette (`brain/theme.py` remembers the old
-  one) and the TV gets a red banner. `stand_down` restores the snapshot and
+  one) and the TV's whole screen becomes the red-alert view (no alert
+  banner). `stand_down` restores the snapshot and
   the theme (`brain/protocols.py`), then re-applies each light's effect
   (scene snapshots skip animated modes): the effect HA reported at engage
   time, else `BARN_DOOR_EFFECTS`. Govee app modes (Nick's rainbow) report

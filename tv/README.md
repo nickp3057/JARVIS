@@ -83,10 +83,13 @@ every deploy, so edit the repo copy, not the TV's.
   ("Ka-chow, sir." and a ⚡ on the date), plus `barnDoor`, Barn Door
   Protocol's red alert, set by JARVIS and never in the picker. While it's
   on, `HomeActivity.addBarnDoor` covers the home screen with `RedAlertView`
-  (the reactor gone hostile: heartbeat glow, turning armour, racing dial,
-  lock-on arcs, a jagged core, a scan line), a blinking "LOCKDOWN ACTIVE"
-  line and "BARN DOOR PROTOCOL" across the bottom; no time or date (Nick's
-  call). The normal home keeps running underneath and returns on stand-down (`Theme.java`, dark variants of the phone's
+  (the reactor gone hostile: turning armour, a ring of fangs, a racing
+  dial, lock-on arcs and a slit-pupilled eye that slowly looks around; no
+  pulsing, flashing or scanning, Nick's call), a "LOCKDOWN ACTIVE" line and
+  "BARN DOOR PROTOCOL" across the bottom; no time or date. Home just comes
+  back to it; only "stand down" (or a theme pick) ends it. Preview any
+  theme without touching Core's: `adb shell am broadcast -n
+  com.tvhome/.PreviewReceiver --es theme barnDoor [--ei seconds 20]`. The normal home keeps running underneath and returns on stand-down (`Theme.java`, dark variants of the phone's
   `JarvisPalette`). Mark III, Graphite and Stealth were retired 2026-10-27;
   Core maps a stored retired pick to Hot Rod / Arc.
 - **Weather icon** (`HomeActivity.weatherIcon`): one emoji from the

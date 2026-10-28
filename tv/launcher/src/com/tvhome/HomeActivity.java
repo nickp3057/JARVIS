@@ -328,8 +328,9 @@ public class HomeActivity extends Activity {
 
     /**
      * Barn Door Protocol (brain/protocols.py) owns the screen: everything else
-     * goes, leaving the hostile reactor (RedAlertView), a blinking LOCKDOWN
-     * line and the protocol's name across the bottom. The
+     * goes, leaving the hostile reactor (RedAlertView), a LOCKDOWN line and
+     * the protocol's name across the bottom. Home just comes back here; only
+     * standing down (or a theme pick) ends it. The
      * normal home sits underneath (its timers keep running) and comes back
      * when JARVIS stands down and the theme changes.
      */
@@ -340,14 +341,9 @@ public class HomeActivity extends Activity {
         alert.addView(new RedAlertView(this, theme.reactor, Color.rgb(255, 72, 56)), new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
 
-        TextView status = label("●  LOCKDOWN ACTIVE  ·  ROOM SEALED", 12, theme.critical);
+        TextView status = label("●  LOCKDOWN ACTIVE  ·  ROOM SEALED", 12, Theme.alpha(theme.accent, 220));
         status.setLetterSpacing(0.35f);
         status.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
-        android.animation.ObjectAnimator blink = android.animation.ObjectAnimator.ofFloat(status, "alpha", 1f, 0.15f);
-        blink.setDuration(700);
-        blink.setRepeatMode(android.animation.ValueAnimator.REVERSE);
-        blink.setRepeatCount(android.animation.ValueAnimator.INFINITE);
-        blink.start();
         FrameLayout.LayoutParams top = new FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.TOP | Gravity.CENTER_HORIZONTAL);
         top.setMargins(0, dp(22), 0, 0);

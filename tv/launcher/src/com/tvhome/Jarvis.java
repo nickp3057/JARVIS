@@ -58,6 +58,9 @@ final class Jarvis {
      * the TV couldn't be saved to Core (old token without settings:write).
      */
     static Theme theme(Context c) {
+        if (prefs(c).getLong("preview_until", 0) > System.currentTimeMillis()) {
+            return Theme.named(prefs(c).getString("preview_theme", "")); // PreviewReceiver, adb only
+        }
         String pick = prefs(c).getString(THEME, "");
         if (!pick.isEmpty()) return Theme.named(pick);
         JSONObject g = cached(c);
