@@ -10,6 +10,10 @@ struct HubView: View {
     /// Home's chips jump to another tab (Hub for alerts; Media's Services or
     /// drive card); RootView switches tabs.
     var onNavigate: ((HubFocus) -> Void)? = nil
+    /// Desk's ask bar: send straight to Chat (RootView switches tabs).
+    var onSend: ((String) -> Void)? = nil
+    @State private var deskWidth: CGFloat = 0
+    @State private var deskQuestion = ""
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.dynamicTypeSize) private var typeSize
     @State private var isVisible = false
@@ -36,13 +40,17 @@ struct HubView: View {
     /// assessment and the to-do list. Hub is the house and the day in full
     /// (alerts, repairs, Now, maintenance, switches). Media carries the
     /// machinery: requests, the drive, transfers, queues, links, services.
-    enum HubFocus { case home, hub, media }
+    /// Desk (the Mac) is all of it at once, in columns, plus weather and the
+    /// agenda.
+    enum HubFocus { case home, hub, media, desk }
 
     init(model: HubViewModel, onAsk: ((String) -> Void)? = nil,
-         onNavigate: ((HubFocus) -> Void)? = nil, focus: HubFocus = .home) {
+         onNavigate: ((HubFocus) -> Void)? = nil, onSend: ((String) -> Void)? = nil,
+         focus: HubFocus = .home) {
         self.model = model
         self.onAsk = onAsk
         self.onNavigate = onNavigate
+        self.onSend = onSend
         self.focus = focus
     }
 
@@ -54,45 +62,51 @@ struct HubView: View {
         NavigationStack {
             ScrollViewReader { proxy in
                 ScrollView {
-                    LazyVStack(spacing: 16) {
-                        switch focus {
-                        case .home:
-                            hero
-                            homeTiles
-                            if let scenes = model.scenes.value, !scenes.scenes.isEmpty {
-                                scenesCard(scenes)
+                    if focus == .desk {
+                        desk
+                    } else {
+                        LazyVStack(spacing: 16) {
+                            switch focus {
+                            case .home:
+                                hero
+                                homeTiles
+                                if let scenes = model.scenes.value, !scenes.scenes.isEmpty {
+                                    scenesCard(scenes)
+                                }
+                                if let portfolio = model.portfolio.value, portfolio.configured {
+                                    portfolioTile(portfolio)
+                                }
+                            case .hub:
+                                tvRemoteButton
+                                if !attentionAlerts.isEmpty { needsAttentionCard }
+                                if !visibleRepairs.isEmpty { repairsCard }
+                                nowCard
+                                if model.maintenance.value != nil { maintenanceCard }
+                                quickActionsCard
+                            case .media:
+                                requestMediaButton
+                                storageCard.highlight(highlightedCard == "storage").id("storage")
+                                torrentsCard
+                                mediaCard
+                                linksCard
+                                servicesCard.highlight(highlightedCard == "services").id("services")
+                            case .desk:
+                                EmptyView()  // drawn by `desk` above
                             }
-                            if let portfolio = model.portfolio.value, portfolio.configured {
-                                portfolioTile(portfolio)
-                            }
-                        case .hub:
-                            tvRemoteButton
-                            if !attentionAlerts.isEmpty { needsAttentionCard }
-                            if !visibleRepairs.isEmpty { repairsCard }
-                            nowCard
-                            if model.maintenance.value != nil { maintenanceCard }
-                            quickActionsCard
-                        case .media:
-                            requestMediaButton
-                            storageCard.highlight(highlightedCard == "storage").id("storage")
-                            torrentsCard
-                            mediaCard
-                            linksCard
-                            servicesCard.highlight(highlightedCard == "services").id("services")
                         }
+                        .frame(maxWidth: 760)
+                        .padding(.horizontal, 16)
+                        .padding(.bottom, 28)
+                        .frame(maxWidth: .infinity)
                     }
-                    .frame(maxWidth: 760)
-                    .padding(.horizontal, 16)
-                    .padding(.bottom, 28)
-                    .frame(maxWidth: .infinity)
                 }
                 .onAppear { jump(proxy) }
                 .onChange(of: model.mediaScrollTarget) { jump(proxy) }
             }
             .refreshable { await model.refreshAll() }
             .background { JarvisBackdrop() }
-            .navigationTitle(focus == .media ? "Media" : focus == .hub ? "Hub" : "Home")
-            .toolbar(focus == .home ? .hidden : .automatic, for: .navigationBar)
+            .navigationTitle(focus == .media ? "Media" : focus == .hub ? "Hub" : focus == .desk ? "Desk" : "Home")
+            .toolbar(focus == .home || focus == .desk ? .hidden : .automatic, for: .navigationBar)
             .navigationDestination(for: MaintenanceRoute.self) { route in
                 switch route {
                 case .all: MaintenanceListView(model: model)
@@ -141,6 +155,10 @@ struct HubView: View {
             }
         }
         .task {
+            if focus == .desk {
+                model.wantsGlance = true
+                await model.refreshGlance()
+            }
             isVisible = true
             guard !Task.isCancelled, isVisible, !holdsPolling else { return }
             holdsPolling = true
@@ -302,6 +320,208 @@ struct HubView: View {
     private func openMedia(_ card: String) {
         model.mediaScrollTarget = card
         onNavigate?(.media)
+    }
+
+    // MARK: - Desk (the Mac): everything, in columns
+
+    /// Three columns on a wide window (Today, House, Machines); two when
+    /// narrower, the machinery split between them.
+    private var desk: some View {
+        let three = deskWidth >= 1180
+        return VStack(spacing: 16) {
+            deskHeader
+            HStack(alignment: .top, spacing: 16) {
+                VStack(spacing: 16) {
+                    deskToday
+                    if !three { storageCard; servicesCard }
+                }
+                VStack(spacing: 16) {
+                    deskHouse
+                    if !three { requestMediaButton; torrentsCard; mediaCard; linksCard }
+                }
+                if three {
+                    VStack(spacing: 16) { deskMachines }
+                }
+            }
+        }
+        .padding(20)
+        .frame(maxWidth: 1800)
+        .frame(maxWidth: .infinity)
+        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { deskWidth = $0 }
+    }
+
+    @ViewBuilder private var deskToday: some View {
+        deskWeatherCard
+        deskAgendaCard
+        homeTiles
+        nowCard
+        if model.maintenance.value != nil { maintenanceCard }
+    }
+
+    @ViewBuilder private var deskHouse: some View {
+        if !attentionAlerts.isEmpty { needsAttentionCard }
+        if !visibleRepairs.isEmpty { repairsCard }
+        if let scenes = model.scenes.value, !scenes.scenes.isEmpty { scenesCard(scenes) }
+        quickActionsCard
+        tvRemoteButton
+        if let portfolio = model.portfolio.value, portfolio.configured { portfolioTile(portfolio) }
+    }
+
+    @ViewBuilder private var deskMachines: some View {
+        requestMediaButton
+        storageCard
+        torrentsCard
+        mediaCard
+        servicesCard
+        linksCard
+    }
+
+    /// The reactor (tap for a briefing), greeting, live clock, the hero chips
+    /// and an ask bar that goes straight to Chat.
+    private var deskHeader: some View {
+        HStack(alignment: .center, spacing: 22) {
+            Button { send("Give me a briefing on my day and anything that needs my attention.") } label: {
+                JarvisCoreMark(size: 120)
+            }
+            .buttonStyle(CockpitButtonStyle())
+            .accessibilityLabel("Brief me")
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(alignment: .firstTextBaseline, spacing: 14) {
+                    Text(Self.greeting(at: .now)).font(.largeTitle.weight(.semibold))
+                    TimelineView(.everyMinute) { context in
+                        Text(context.date, format: .dateTime.weekday(.wide).month(.wide).day().hour().minute())
+                            .font(.title3.weight(.medium).monospacedDigit())
+                            .foregroundStyle(JarvisTheme.cyan)
+                    }
+                }
+                HStack(spacing: 8) {
+                    systemsChip
+                    storageChip
+                    if attentionCount > 0 { attentionChip }
+                }
+                HStack(spacing: 10) {
+                    Image(systemName: "sparkle").foregroundStyle(JarvisTheme.cyan)
+                    TextField("Ask JARVIS anything…", text: $deskQuestion)
+                        .textFieldStyle(.plain)
+                        .font(.title3)
+                        .submitLabel(.send)
+                        .onSubmit { send(deskQuestion) }
+                    if !deskQuestion.trimmingCharacters(in: .whitespaces).isEmpty {
+                        Button { send(deskQuestion) } label: {
+                            Image(systemName: "arrow.up.circle.fill").font(.title2)
+                        }
+                        .buttonStyle(.plain)
+                        .foregroundStyle(JarvisTheme.cyan)
+                        .keyboardShortcut(.return, modifiers: .command)
+                    }
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 12)
+                .background(JarvisTheme.panel.opacity(0.8), in: .rect(cornerRadius: 14))
+                .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(JarvisTheme.border))
+            }
+        }
+        .padding(20)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(JarvisTheme.panelGradient, in: .rect(cornerRadius: 24))
+        .overlay(RoundedRectangle(cornerRadius: 24).strokeBorder(JarvisTheme.border))
+    }
+
+    private func send(_ text: String) {
+        let prompt = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !prompt.isEmpty else { return }
+        deskQuestion = ""
+        if let onSend { onSend(prompt) } else { onAsk?(prompt) }
+    }
+
+    private var deskWeatherCard: some View {
+        CockpitPanel("Weather", symbol: "cloud.sun", trailing: {
+            if let place = model.glance.value?.weather?.location, !place.isEmpty {
+                Text(place).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+            }
+        }) {
+            if let weather = model.glance.value?.weather, weather.online != false, (weather.error ?? "").isEmpty,
+               let temp = weather.temperatureF {
+                HStack(alignment: .center, spacing: 18) {
+                    Image(systemName: weather.symbol(night: model.sun == "below_horizon"))
+                        .symbolRenderingMode(.multicolor)
+                        .font(.system(size: 46))
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("\(Int(temp.rounded()))°")
+                            .font(.system(size: 44, weight: .semibold, design: .rounded).monospacedDigit())
+                        Text((weather.description ?? "").capitalized)
+                            .font(.subheadline.weight(.medium)).foregroundStyle(.secondary)
+                    }
+                    Spacer(minLength: 0)
+                    VStack(alignment: .trailing, spacing: 5) {
+                        if let high = weather.highF, let low = weather.lowF {
+                            Label("\(Int(high.rounded()))° / \(Int(low.rounded()))°", systemImage: "thermometer.medium")
+                        }
+                        if let humidity = weather.humidityPercent {
+                            Label("\(Int(humidity.rounded()))%", systemImage: "humidity")
+                        }
+                        if let wind = weather.windMph {
+                            Label("\(Int(wind.rounded())) mph", systemImage: "wind")
+                        }
+                    }
+                    .font(.caption.weight(.semibold).monospacedDigit())
+                    .foregroundStyle(.secondary)
+                }
+            } else if let error = model.glance.failureText ?? model.glance.value?.weather?.error, !error.isEmpty {
+                errorRow(error)
+            } else {
+                loadingRow
+            }
+        }
+    }
+
+    /// The next twenty calendar items, by day.
+    private var deskAgendaCard: some View {
+        let events = model.glance.value?.events ?? []
+        let days = Dictionary(grouping: events) { event in
+            Calendar.current.startOfDay(for: Date(timeIntervalSince1970: event.startAt ?? 0))
+        }
+        return CockpitPanel("Agenda", symbol: "calendar", trailing: {
+            if !events.isEmpty { StatusPill(text: "\(events.count)", color: JarvisTheme.cyan) }
+        }) {
+            if events.isEmpty {
+                if model.glance.value == nil { loadingRow }
+                else { Text("Nothing on the calendar.").font(.subheadline).foregroundStyle(.secondary) }
+            } else {
+                VStack(alignment: .leading, spacing: 12) {
+                    ForEach(days.keys.sorted(), id: \.self) { day in
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text(Self.agendaDay(day))
+                                .font(.caption.weight(.bold))
+                                .foregroundStyle(Calendar.current.isDateInToday(day) ? JarvisTheme.cyan : .secondary)
+                                .textCase(.uppercase)
+                            ForEach(days[day] ?? []) { event in
+                                HStack(alignment: .firstTextBaseline, spacing: 10) {
+                                    Text(event.allDay ? "All day" : Date(timeIntervalSince1970: event.startAt ?? 0)
+                                        .formatted(.dateTime.hour().minute()))
+                                        .font(.caption.weight(.semibold).monospacedDigit())
+                                        .foregroundStyle(.secondary)
+                                        .frame(width: 64, alignment: .leading)
+                                    VStack(alignment: .leading, spacing: 1) {
+                                        Text(event.title).font(.subheadline.weight(.medium)).lineLimit(2)
+                                        if let calendar = event.calendar, !calendar.isEmpty, !calendar.contains("@") {
+                                            Text(calendar).font(.caption2).foregroundStyle(.tertiary)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private static func agendaDay(_ day: Date) -> String {
+        let calendar = Calendar.current
+        if calendar.isDateInToday(day) { return "Today" }
+        if calendar.isDateInTomorrow(day) { return "Tomorrow" }
+        return day.formatted(.dateTime.weekday(.wide).month(.abbreviated).day())
     }
 
     // MARK: - Home: next up and to-dos

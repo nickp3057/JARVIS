@@ -823,6 +823,15 @@ CALENDAR_ALERT_LEAD_MIN=10  # warn this many minutes before a meeting
   exposed by the Tuya integration, so no scene sets it. I'm up runs
   `scene.good_morning` when it exists. The iPad Room tab has a Peace
   button (shown when `scene.peace` exists) for heading out.
+- **Desk on the Mac (iOS 5.6 / build 149)** — on the Mac, Room and Home are
+  replaced by **Desk** (the default tab): a header with the reactor (tap
+  for a briefing), greeting, live clock, the system/storage/attention chips
+  and an "Ask JARVIS anything…" bar that sends straight to Chat; then
+  Today (weather and the 20-item agenda from `GET /api/glance`, next
+  assessment and to-dos, Now, maintenance), House (alerts, repairs, scenes,
+  switches, TV remote, portfolio) and Machines (request, drive, transfers,
+  media, services, links) columns, two columns under 1180 pt. Glance is
+  fetched only while Desk exists (`HubViewModel.wantsGlance`, every 30 s).
 - **JARVIS on the MacBook (iOS 5.5 / build 148)** — the companion app now
   also builds for Mac Catalyst: the iPad layout in a window (min 900×640),
   Room tab first, wall-panel features off (`RootView.isMac`), a Go menu

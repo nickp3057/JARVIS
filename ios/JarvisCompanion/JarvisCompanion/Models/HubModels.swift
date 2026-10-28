@@ -679,3 +679,76 @@ struct VoiceState: Decodable, Equatable {
 
     static let idle = VoiceState(seq: 0, phase: "idle", transcript: "", reply: "")
 }
+
+/// `GET /api/glance`, the parts the Mac's Desk shows: weather and the
+/// calendar agenda (the TV reads the same snapshot).
+struct Glance: Decodable {
+    let weather: GlanceWeather?
+    let events: [GlanceEvent]
+
+    enum CodingKeys: String, CodingKey { case weather, events }
+
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        weather = try? values.decodeIfPresent(GlanceWeather.self, forKey: .weather)
+        events = (try? values.decodeIfPresent([GlanceEvent].self, forKey: .events)) ?? []
+    }
+}
+
+struct GlanceWeather: Decodable {
+    let online: Bool?
+    let location: String?
+    let temperatureF: Double?
+    let description: String?
+    let highF: Double?
+    let lowF: Double?
+    let humidityPercent: Double?
+    let windMph: Double?
+    let error: String?
+
+    enum CodingKeys: String, CodingKey {
+        case online, location, description, error
+        case temperatureF = "temperature_f"
+        case highF = "high_f"
+        case lowF = "low_f"
+        case humidityPercent = "humidity_percent"
+        case windMph = "wind_mph"
+    }
+
+    /// An SF Symbol for the description ("clear", "light rain", ...).
+    func symbol(night: Bool) -> String {
+        let text = (description ?? "").lowercased()
+        if text.contains("thunder") || text.contains("storm") { return "cloud.bolt.rain.fill" }
+        if text.contains("snow") || text.contains("sleet") { return "cloud.snow.fill" }
+        if text.contains("rain") || text.contains("drizzle") || text.contains("shower") { return "cloud.rain.fill" }
+        if text.contains("fog") || text.contains("mist") || text.contains("haze") || text.contains("smoke") { return "cloud.fog.fill" }
+        if text.contains("overcast") { return "cloud.fill" }
+        if text.contains("cloud") { return night ? "cloud.moon.fill" : "cloud.sun.fill" }
+        return night ? "moon.stars.fill" : "sun.max.fill"
+    }
+}
+
+struct GlanceEvent: Decodable, Identifiable {
+    let title: String
+    let startAt: Double?
+    let allDay: Bool
+    let calendar: String?
+    let category: String?
+
+    var id: String { "\(startAt ?? 0)-\(title)-\(calendar ?? "")" }
+
+    enum CodingKeys: String, CodingKey {
+        case title, calendar, category
+        case startAt = "start_at"
+        case allDay = "all_day"
+    }
+
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        title = (try? values.decode(String.self, forKey: .title)) ?? "Untitled"
+        startAt = try? values.decodeIfPresent(Double.self, forKey: .startAt)
+        allDay = (try? values.decodeIfPresent(Bool.self, forKey: .allDay)) ?? false
+        calendar = try? values.decodeIfPresent(String.self, forKey: .calendar)
+        category = try? values.decodeIfPresent(String.self, forKey: .category)
+    }
+}

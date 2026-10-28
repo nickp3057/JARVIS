@@ -8,7 +8,7 @@ struct RootView: View {
     @EnvironmentObject private var settings: AppSettings
     @ObservedObject var chat: ChatViewModel
     @ObservedObject var hub: HubViewModel
-    @State private var selection = RootView.isPad ? RootTab.room : RootTab.home
+    @State private var selection = RootView.isMac ? RootTab.desk : RootView.isPad ? RootTab.room : RootTab.home
     /// Horizontal offset of the visible tab while swiping, and while the new
     /// tab slides in. The tab bar itself never moves.
     @State private var swipeOffset: CGFloat = 0
@@ -23,19 +23,34 @@ struct RootView: View {
     @State private var touches = 0
 
     /// Tab-bar (and swipe) order: Home sits in the middle. The iPad adds Room
-    /// first (its default): the tablet is mainly a panel for the room.
-    enum RootTab: Hashable, CaseIterable { case room, media, hub, home, chat, settings }
+    /// first (its default): the tablet is mainly a panel for the room. The
+    /// Mac swaps Room and Home for Desk, everything on one screen.
+    enum RootTab: Hashable, CaseIterable { case room, desk, media, hub, home, chat, settings }
 
     /// True on the Mac too (Mac Catalyst runs the iPad layout, Room tab included).
     static let isPad = UIDevice.current.userInterfaceIdiom == .pad
     /// The laptop app: no night screen, no wall-panel habits.
     static let isMac = ProcessInfo.processInfo.isMacCatalystApp
     static let tabsInOrder = tabs
-    private static let tabs = RootTab.allCases.filter { isPad || $0 != .room }
+    private static let tabs = RootTab.allCases.filter { tab in
+        switch tab {
+        case .room: return isPad && !isMac
+        case .desk: return isMac
+        case .home: return !isMac
+        default: return true
+        }
+    }
 
     var body: some View {
         TabView(selection: $selection) {
-            if Self.isPad {
+            if Self.isMac {
+                HubView(model: hub, onAsk: ask, onNavigate: navigate, onSend: sendNow, focus: .desk)
+                    .swipePage(swipeOffset)
+                    .tabItem { Label("Desk", systemImage: "rectangle.3.group") }
+                    .tag(RootTab.desk)
+            }
+
+            if Self.isPad && !Self.isMac {
                 RoomView(model: hub)
                     .swipePage(swipeOffset)
                     .tabItem { Label("Room", systemImage: "lightbulb.2") }
@@ -52,10 +67,12 @@ struct RootView: View {
                 .tabItem { Label("Hub", systemImage: "square.grid.2x2") }
                 .tag(RootTab.hub)
 
-            HubView(model: hub, onAsk: ask, onNavigate: navigate, focus: .home)
-                .swipePage(swipeOffset)
-                .tabItem { Label("Home", systemImage: "house") }
-                .tag(RootTab.home)
+            if !Self.isMac {
+                HubView(model: hub, onAsk: ask, onNavigate: navigate, focus: .home)
+                    .swipePage(swipeOffset)
+                    .tabItem { Label("Home", systemImage: "house") }
+                    .tag(RootTab.home)
+            }
 
             ChatView(model: chat)
                 .swipePage(swipeOffset)
@@ -142,13 +159,21 @@ struct RootView: View {
 
     /// Home's chips: slide over to Hub or Media (which scrolls to the card).
     private func navigate(_ focus: HubView.HubFocus) {
-        let target: RootTab = focus == .media ? .media : focus == .hub ? .hub : .home
+        let target: RootTab = focus == .media ? .media : focus == .hub ? .hub : focus == .desk ? .desk : .home
         guard target != selection, let from = Self.tabs.firstIndex(of: selection),
               let to = Self.tabs.firstIndex(of: target) else { return }
         selection = target
         guard !reduceMotion else { return }
         swipeOffset = to > from ? 140 : -140
         withAnimation(.spring(duration: 0.35, bounce: 0.12)) { swipeOffset = 0 }
+    }
+
+    /// Desk's ask bar: straight into Chat and sent.
+    private func sendNow(_ prompt: String) {
+        chat.draft = prompt
+        chat.draftChanged()
+        selection = .chat
+        chat.send()
     }
 
     /// Hub "ask" shortcuts drop the prompt into Chat's composer and switch there.
@@ -176,6 +201,7 @@ extension RootView.RootTab {
     var title: String {
         switch self {
         case .room: return "Room"
+        case .desk: return "Desk"
         case .media: return "Media"
         case .hub: return "Hub"
         case .home: return "Home"

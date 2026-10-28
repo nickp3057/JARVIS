@@ -36,6 +36,9 @@ final class HubViewModel: ObservableObject {
     /// Schwab, read-only. Polled every tick: Core streams prices, so it moves.
     @Published var portfolio = Section<Portfolio>()
     @Published var scenes = Section<HomeScenes>()
+    /// Weather and the agenda, for the Mac's Desk (fetched only while it shows).
+    @Published var glance = Section<Glance>()
+    var wantsGlance = false
     /// `sun.sun` from the last entities read; the iPad's night screen uses it.
     @Published var sun: String?
     /// The scene being run right now (its tile shows a spinner).
@@ -123,7 +126,13 @@ final class HubViewModel: ObservableObject {
         async let j: Void = refreshMaintenance()
         async let k: Void = refreshPortfolio()
         async let l: Void = refreshScenes()
-        _ = await (a, b, c, d, e, f, g, h, i, j, k, l)
+        async let m: Void = refreshGlance()
+        _ = await (a, b, c, d, e, f, g, h, i, j, k, l, m)
+    }
+
+    func refreshGlance() async {
+        guard wantsGlance else { return }
+        await load(\.glance) { try await $0.glance() }
     }
 
     func refreshNow() async {
@@ -506,7 +515,8 @@ final class HubViewModel: ObservableObject {
                 if tick.isMultiple(of: 6) {
                     async let storage: Void = self.refreshStorage()
                     async let maintenance: Void = self.refreshMaintenance()
-                    _ = await (storage, maintenance)
+                    async let glance: Void = self.refreshGlance()
+                    _ = await (storage, maintenance, glance)
                 }
             }
         }

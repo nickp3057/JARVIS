@@ -731,6 +731,10 @@ struct JarvisAPIClient {
         try await getJSON(NowStatus.self, path: "api/now")
     }
 
+    func glance() async throws -> Glance {
+        try await getJSON(Glance.self, path: "api/glance")
+    }
+
     func studyBrief() async throws -> StudyBrief {
         try await getJSON(StudyBrief.self, path: "api/study/brief")
     }

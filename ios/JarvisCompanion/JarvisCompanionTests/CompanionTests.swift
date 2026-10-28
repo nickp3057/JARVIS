@@ -624,3 +624,31 @@ final class CompanionTests: XCTestCase {
         #endif
     }
 }
+
+final class GlanceDecodingTests: XCTestCase {
+    func testWeatherAndAgendaDecodeAndToleratesGaps() throws {
+        let json = """
+        {"weather":{"online":true,"location":"Herriman, Utah, US","temperature_f":60,"description":"light rain",
+          "high_f":60,"low_f":43,"humidity_percent":43,"wind_mph":11,"error":""},
+         "events":[{"title":"Chem quiz","start_at":1793224800.0,"all_day":false,"calendar":"School"},
+                   {"start_at":1793167200.0,"all_day":true}],
+         "now":{},"alerts":[]}
+        """
+        let glance = try JSONDecoder().decode(Glance.self, from: Data(json.utf8))
+        XCTAssertEqual(glance.weather?.temperatureF, 60)
+        XCTAssertEqual(glance.weather?.symbol(night: false), "cloud.rain.fill")
+        XCTAssertEqual(glance.events.count, 2)
+        XCTAssertEqual(glance.events[1].title, "Untitled")
+        XCTAssertTrue(glance.events[1].allDay)
+
+        let broken = try JSONDecoder().decode(Glance.self, from: Data(#"{"weather":{"error":"down"},"events":"nope"}"#.utf8))
+        XCTAssertEqual(broken.weather?.error, "down")
+        XCTAssertTrue(broken.events.isEmpty)
+    }
+
+    func testClearSkyIsMoonAtNight() throws {
+        let weather = try JSONDecoder().decode(GlanceWeather.self, from: Data(#"{"description":"clear"}"#.utf8))
+        XCTAssertEqual(weather.symbol(night: true), "moon.stars.fill")
+        XCTAssertEqual(weather.symbol(night: false), "sun.max.fill")
+    }
+}

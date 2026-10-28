@@ -29,8 +29,10 @@ developer account (it signs with `JarvisCompanion-Mac.entitlements`:
 sandbox, network client, microphone, push). Then **Product › Archive ›
 Distribute App › Custom › Copy App** gives a `.app` for `/Applications`.
 
-On the Mac it runs the iPad layout, Room tab first, without the wall-panel
-habits (night screen, keep awake, full screen, tap-to-wake, back to Room).
+On the Mac, Desk is the first tab (everything at once in columns, with
+weather, the agenda and an ask bar); Room and Home are iPad/iPhone only,
+and the wall-panel habits (night screen, keep awake, full screen,
+tap-to-wake, back to Room) are off.
 The menu bar gets a **Go** menu (⌘1–⌘6 for the tabs) and ⌘, opens Settings.
 Connect it exactly like the phone: `http://100.69.8.11:8000` and the API
 token (it has to be on Tailscale away from home).
