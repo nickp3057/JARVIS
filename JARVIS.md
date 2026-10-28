@@ -544,8 +544,8 @@ SONARR_API_KEY=...
 RADARR_ROOT_FOLDER=
 SONARR_ROOT_FOLDER=
 # quality phrase used when a request omits one
-RADARR_DEFAULT_QUALITY=1080p
-SONARR_DEFAULT_QUALITY=1080p
+RADARR_DEFAULT_QUALITY=Standard   # profile for requests with no quality (app quick add, chat, voice)
+SONARR_DEFAULT_QUALITY=TV
 # future | all | firstSeason | latestSeason | lastSeason | pilot | none
 SONARR_MONITOR_STRATEGY=future
 SONARR_LANGUAGE_PROFILE_ID=       # Sonarr v3 only; blank = first listed profile (v4 ignores it)

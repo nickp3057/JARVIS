@@ -91,3 +91,15 @@ class MediaRequestApiTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class DefaultProfileTests(unittest.TestCase):
+    def test_movies_default_to_standard_and_shows_to_tv(self) -> None:
+        from integrations import servarr_common
+        with patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("RADARR_DEFAULT_QUALITY", None)
+            os.environ.pop("SONARR_DEFAULT_QUALITY", None)
+            self.assertEqual(servarr_common.default_quality("radarr"), "Standard")
+            self.assertEqual(servarr_common.default_quality("sonarr"), "TV")
+        with patch.dict(os.environ, {"RADARR_DEFAULT_QUALITY": "Favorite 4K"}):
+            self.assertEqual(servarr_common.default_quality("radarr"), "Favorite 4K")

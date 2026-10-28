@@ -86,8 +86,13 @@ def is_configured(service: str) -> bool:
     return bool(_service_url(service) and _service_key(service))
 
 
+# Nick's profiles: movies go to Radarr's "Standard", shows to Sonarr's "TV".
+_DEFAULT_PROFILES = {"radarr": "Standard", "sonarr": "TV"}
+
+
 def default_quality(service: str) -> str:
-    return os.getenv(f"{service.upper()}_DEFAULT_QUALITY", "1080p").strip() or "1080p"
+    fallback = _DEFAULT_PROFILES.get(service.lower(), "1080p")
+    return os.getenv(f"{service.upper()}_DEFAULT_QUALITY", fallback).strip() or fallback
 
 
 def _quality_map(service: str) -> list[tuple[str, str]]:
