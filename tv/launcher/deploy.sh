@@ -15,4 +15,6 @@ adb -s "$TV" shell pm grant com.tvhome android.permission.READ_LOGS
 adb -s "$TV" shell cmd notification allow_listener com.tvhome/com.tvhome.MediaListener
 # The service isn't exported; BootReceiver starts it for any explicit broadcast.
 adb -s "$TV" shell am broadcast -n com.tvhome/.BootReceiver >/dev/null
+# Notes for future sessions, kept on the TV itself.
+adb -s "$TV" push ../README.md /sdcard/JARVIS_TV.md >/dev/null
 echo "deployed to $TV"

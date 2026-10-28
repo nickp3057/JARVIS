@@ -71,6 +71,6 @@ controlled by `JARVIS_SERVER_HOST` and `JARVIS_SERVER_PORT`. Non-companion clien
 
 **Background monitors** run on the runtime and feed a proactive event inbox (Home Assistant state polling, weather refresh, calendar alerts) — see `ARCHITECTURE.md`'s "Runtime Monitor Settings" for the relevant `.env` toggles. New sensors/proactive behavior should be added as a monitor here, not polled from the UI. Monitors raise alerts with `runtime.raise_alert` (→ `brain/event_bus.py`), never by calling `brain/notifications.py` directly; the phone (APNs, HA fallback) and `GET /api/clients/events` SSE streams are bus subscribers.
 
-**JARVIS TV** (`tv/`) is a thin client like the phone: it reads Core's `/api/glance` and `/api/clients/events` with its own scoped token and never holds `JARVIS_API_TOKEN`. When you change TV behaviour, bump `versionCode`/`versionName` in `tv/launcher/AndroidManifest.xml`.
+**JARVIS TV** (`tv/`, read `tv/README.md` first; a copy lives on the TV at `/sdcard/JARVIS_TV.md`) is a thin client like the phone: it reads Core's `/api/glance` and `/api/clients/events` with its own scoped token and never holds `JARVIS_API_TOKEN`. When you change TV behaviour, bump `versionCode`/`versionName` in `tv/launcher/AndroidManifest.xml`.
 
 **Personality is centralized**: `brain/personality.py` builds the system prompt (tone, address form, humor level, tool descriptions) from `.env` settings — this is the one place that defines how JARVIS "sounds," so persona changes belong there, not scattered across tool reply strings.

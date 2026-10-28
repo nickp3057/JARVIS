@@ -626,6 +626,11 @@ CALENDAR_ALERT_LEAD_MIN=10  # warn this many minutes before a meeting
 
 ## Recently Shipped
 
+- **TV 6.2 (iOS 2.2 / build 104)** — Right from School or Systems now goes to
+  the music player (it used to drop to the Wake-up tile). `tv/README.md`
+  holds the TV's working notes and `deploy.sh` copies it to
+  `/sdcard/JARVIS_TV.md` on the TV.
+
 - **TV 6.1: Back hides the highlight (iOS 2.1 / build 103)** — On the TV home
   screen, Back (with no detail open) parks focus on an invisible view so
   nothing is lit; the next arrow/OK only brings the highlight back where it
@@ -1312,6 +1317,8 @@ python create_shortcut.py
 ---
 
 ## JARVIS TV
+
+Full working notes: `tv/README.md` (also on the TV at `/sdcard/JARVIS_TV.md`).
 
 The TCL Google TV in Nick's room ("Nick's Room TV", G10, Android 12,
 1920x1080 UI at density 320) runs `tv/launcher` as its HOME app. adb over

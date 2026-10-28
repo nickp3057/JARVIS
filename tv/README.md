@@ -1,0 +1,94 @@
+# JARVIS TV — notes for whoever works on this TV next
+
+This file lives on the TV at `/sdcard/JARVIS_TV.md` (read it with
+`adb -s <tv>:5555 shell cat /sdcard/JARVIS_TV.md`) and in the JARVIS repo at
+`tv/README.md`. `tv/launcher/deploy.sh` copies the repo version to the TV on
+every deploy, so edit the repo copy, not the TV's.
+
+## The TV
+
+- TCL Google TV "Nick's Room TV", model G10_4K_US_NF, Android 12, Realtek SoC.
+  UI is 1920x1080 at density 320 (960x540 dp).
+- adb over Wi-Fi on port 5555; the Mac's key is authorized. The DHCP address
+  drifts (10.0.0.44 until Oct 2026, 10.0.0.46 since). If it moved, scan:
+  `for i in $(seq 1 254); do (nc -z -G1 10.0.0.$i 5555 && echo 10.0.0.$i) & done; wait`
+- Inputs: PS5 on HDMI1, Switch on HDMI2, Wii U on HDMI3 (eARC). No soundbar.
+- Nick uses it mostly for Plex (NAS at 10.0.0.147:32400) and Spotify.
+
+## What runs on it
+
+`com.tvhome` is the HOME app: JARVIS's home screen. Source:
+`tv/launcher/` in the JARVIS repo (hand-built Java, no Gradle).
+
+- **Home screen** (`HomeActivity`): greeting, reactor (port of the phone's
+  `JarvisCoreMark`), clock; cards Next up / School / Systems / Music, each
+  opens a detail list (Back closes). Bottom row: Plex, Spotify, Wake-up,
+  Settings (corner). Back on the home screen hides the highlight.
+- **Data**: JARVIS Core on the Optiplex (`http://10.0.0.81:8000`, DHCP too;
+  the TV rescans its /24 if Core moves). `GET /api/glance` every minute and the
+  live alert stream `GET /api/clients/events` (SSE). Token `nicks-room-tv`,
+  scopes `events:read status:read chat` (never the admin token). Set by
+  `tv/provision.sh` (run by Nick: SSH writes to the Optiplex need him).
+- **Banners** (`AlertStream`, `Banner`): fresh warning/critical alerts appear
+  top-right over any app, Plex included, without taking focus.
+- **Voice** (`Voice`, via `RemoteBridgeService`): "Jarvis, ..." on the remote
+  mic. The Assistant hears it too; the launcher reads its transcript from
+  logcat, sends the rest to Core `POST /chat`, shows the reply as a banner
+  (read aloud only if turned on in Settings), and backs out of any Google app
+  the Assistant opened. Other speech that names a Plex title opens it in Plex.
+- **Music** (`Music`, `MediaListener`): Spotify's media session (read and
+  controlled via an enabled NotificationListener; no Spotify API keys).
+- **Wake-up** (`Wake`): Core's `set_wake_up` tool saves an alarm; at the time
+  Core publishes a `wake_up` event; the TV turns on, opens the Spotify link,
+  presses play until it plays, fades volume in over 90 s, goes home.
+- **Sound fix** (`NightlyRefresh`): "off" on this TV is TCL suspend-to-RAM
+  (`tcl_sys_pms_str_enabled=1`), and after long stretches audio resumes
+  silent (TCL quirk NO_SOUND_AFTER_STR_RESUME). A minute after the TV is
+  switched off, if it has been up 20 h+, it reboots with
+  `svc power reboot quiescent` (stays dark, ~20 s). A plain `reboot` turns
+  the screen ON; never use it at night.
+- **Settings** (`SettingsActivity`): theme (TV-local), read replies aloud,
+  show downloads, nightly refresh, wake-up info, then Android settings.
+- **Debloat** (`BootCleanup`): firmware restores some TCL apps every boot;
+  the launcher removes them again via self-adb. `tv/restore.sh` undoes it all.
+
+## Working on it
+
+```bash
+TV=10.0.0.46:5555 tv/launcher/deploy.sh   # build, install, re-grant, start, copy this file
+TV=10.0.0.46:5555 tv/provision.sh         # Nick runs it: new token + Core URL
+```
+
+- Build needs `/opt/homebrew/share/android-commandlinetools` (build-tools 34,
+  platform 31) and javac. Signing key and Plex token/PIN are outside git in
+  `~/tcl-tv-cleanup`; the TV only accepts upgrades signed with that key.
+- d8 34 can't read inner (non-static) classes compiled by javac 24: keep
+  nested classes static, no anonymous classes.
+- Bump `versionCode`/`versionName` in `AndroidManifest.xml` per change, and
+  (repo rule) the iOS version fields on every commit.
+- adb test hooks (DUMP-guarded, adb only):
+  - `am broadcast -n com.tvhome/.NightlyRefresh --el in_ms 0 [--ez dry_run true]`
+  - `am broadcast -n com.tvhome/.WakeTestReceiver [--es music spotify:...] [--ei volume 20]`
+  - `am broadcast -n com.tvhome/.ProvisionReceiver --ez clear true` (unlink)
+- Screenshots: `adb shell screencap -p /sdcard/x.png` then `adb pull`.
+  `uiautomator dump` hangs on the home screen (the reactor never stops
+  animating).
+
+## TCL quirks (learned the hard way)
+
+- Reinstalling resets `appops APP_AUTO_START` (TclAppBoot then blocks the
+  service) and the notification-listener grant; `deploy.sh` re-applies both.
+- TCL turns every app's wakeup alarm into a non-wakeup one
+  (`ro.feature.alarm_wakeup_control`); app alarms can't wake the TV. Network
+  traffic can (network standby), which is why wake-up comes from Core.
+- The log buffer is 64 KiB: logs from a few minutes ago are gone.
+- The launcher's own adb key is approved on the TV (self-adb). If the "Allow
+  debugging?" prompt appears behind the launcher: `am task lock <id>`, then
+  `am task lock stop`.
+- `hdmi_earc_connected=1` is the Wii U on HDMI3, not a soundbar.
+
+## Etiquette
+
+Nick may be watching. Check `dumpsys activity activities | grep -m1 mResumedActivity`
+and media sessions before injecting keys, waking or rebooting; ask first if
+something is playing. Restore volume after any audio test.

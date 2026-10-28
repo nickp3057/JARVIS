@@ -94,7 +94,7 @@ public class HomeActivity extends Activity {
     private ImageView art;
     private TextView musicLabel, songTitle, songArtist;
     private MediaIcon playIcon;
-    private View prevButton, nextButton;
+    private View prevButton, playButton, nextButton;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -252,6 +252,13 @@ public class HomeActivity extends Activity {
 
         LinearLayout musicCard = card(cards, 1.15f, false, null);
         buildMusic(musicCard);
+        // Right from School or Systems goes to the player, not down to the
+        // nearest bottom tile; left from the player comes back to School.
+        playButton.setId(View.generateViewId());
+        schoolCard.setId(View.generateViewId());
+        schoolCard.setNextFocusRightId(playButton.getId());
+        systemsCard.setNextFocusRightId(playButton.getId());
+        prevButton.setNextFocusLeftId(schoolCard.getId());
 
         LinearLayout apps = new LinearLayout(this);
         apps.setClipChildren(false);
@@ -397,7 +404,7 @@ public class HomeActivity extends Activity {
         prevButton = control(controls, new MediaIcon(this, MediaIcon.PREVIOUS, theme.text), false,
                 () -> Music.previous(this));
         playIcon = new MediaIcon(this, MediaIcon.PLAY, theme.deep);
-        control(controls, playIcon, true, () -> Music.playPause(this));
+        playButton = control(controls, playIcon, true, () -> Music.playPause(this));
         nextButton = control(controls, new MediaIcon(this, MediaIcon.NEXT, theme.text), false,
                 () -> Music.next(this));
     }
