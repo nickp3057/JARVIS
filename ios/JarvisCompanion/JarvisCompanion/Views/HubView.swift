@@ -57,6 +57,9 @@ struct HubView: View {
                         case .home:
                             hero
                             homeTiles
+                            if let scenes = model.scenes.value, !scenes.scenes.isEmpty {
+                                scenesCard(scenes)
+                            }
                             if let portfolio = model.portfolio.value, portfolio.configured {
                                 portfolioTile(portfolio)
                             }
@@ -423,6 +426,54 @@ struct HubView: View {
             .font(.caption.weight(.semibold).monospacedDigit())
             .foregroundStyle(up ? JarvisTheme.success : JarvisTheme.critical)
             .accessibilityLabel("\(up ? "Up" : "Down") \(abs(amount).formatted(.currency(code: "USD"))) \(label)")
+    }
+
+    /// Home Assistant scenes, picked like Focus modes: the last one run is lit.
+    private func scenesCard(_ scenes: HomeScenes) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            tileHeading("Scenes", symbol: "sparkles")
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 140), spacing: 10)], spacing: 10) {
+                ForEach(scenes.scenes) { scene in
+                    sceneButton(scene, lit: scene.entityID == scenes.last)
+                }
+            }
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(JarvisTheme.panelGradient, in: .rect(cornerRadius: 20))
+        .overlay(RoundedRectangle(cornerRadius: 20).strokeBorder(JarvisTheme.border))
+    }
+
+    private func sceneButton(_ scene: HomeScene, lit: Bool) -> some View {
+        Button { model.runScene(scene) } label: {
+            HStack(spacing: 10) {
+                ZStack {
+                    if model.runningScene == scene.entityID {
+                        ProgressView()
+                    } else {
+                        Image(systemName: scene.symbol)
+                            .font(.body.weight(.semibold))
+                    }
+                }
+                .frame(width: 34, height: 34)
+                .background(lit ? JarvisTheme.cyan.opacity(0.9) : JarvisTheme.panelRaised, in: Circle())
+                .foregroundStyle(lit ? JarvisTheme.backgroundDeep : JarvisTheme.cyan)
+                Text(scene.name)
+                    .font(.subheadline.weight(.semibold))
+                    .lineLimit(2)
+                    .multilineTextAlignment(.leading)
+                Spacer(minLength: 0)
+            }
+            .padding(10)
+            .frame(maxWidth: .infinity, minHeight: 56, alignment: .leading)
+            .background(lit ? JarvisTheme.cyan.opacity(0.14) : Color.clear, in: .rect(cornerRadius: 14))
+            .overlay(RoundedRectangle(cornerRadius: 14)
+                .strokeBorder(lit ? JarvisTheme.cyan.opacity(0.7) : JarvisTheme.border))
+        }
+        .buttonStyle(CockpitButtonStyle())
+        .disabled(model.runningScene != nil)
+        .sensoryFeedback(.success, trigger: model.runningScene == scene.entityID)
+        .accessibilityLabel(scene.name + (lit ? ", last run" : ""))
     }
 
     private func tileHeading(_ title: String, symbol: String) -> some View {

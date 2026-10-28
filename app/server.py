@@ -797,6 +797,24 @@ def home_entities(_: None = Depends(authorize)) -> dict[str, object]:
     return status_hub.home_entities()
 
 
+@app.get("/api/home/scenes")
+def home_scenes(_: None = Depends(authorize)) -> dict[str, object]:
+    """Saved Home Assistant scenes for the app's scene picker."""
+    return status_hub.home_scenes()
+
+
+class SceneRequest(BaseModel):
+    entity_id: str = Field(min_length=7, max_length=200, pattern=r"^scene\.[a-z0-9_]+$")
+
+
+@app.post("/api/home/scenes/activate")
+def home_scene_activate(request: SceneRequest, _: None = Depends(authorize)) -> dict[str, object]:
+    try:
+        return status_hub.activate_scene(request.entity_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
 # --- Quick actions ----------------------------------------------------------
 # Guarded writes for the companion hub. Invalid input (bad action, entity not
 # on the HOME_DASHBOARD_ENTITIES allowlist) is a 400; a failed or refused

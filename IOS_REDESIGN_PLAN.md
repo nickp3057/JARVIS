@@ -15,6 +15,14 @@ hub-first app with chat as one tab.
 
 Check these on the phone first. Some of the "weird" may already be gone.
 
+## Scenes and the wake alarm screen (4.4–4.6, compiled against iphoneos, not run)
+
+- Home tab: a **Scenes** card under the tiles, every saved HA scene as a
+  tile, the last one run lit (like picking a Focus). Tap runs it.
+- Tapping the wake-up push opens `WakeRingingView` (Snooze / I'm up).
+- Next: an iOS Home Screen / Control Center widget for scenes (needs a
+  widget extension target and an App Group for the server address/token).
+
 ## Today's structure
 
 `RootView`: TabView with Chat (default, tab 0), Hub ("Control Room": a

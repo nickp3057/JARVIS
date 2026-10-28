@@ -35,6 +35,9 @@ final class HubViewModel: ObservableObject {
     @Published var maintenance = Section<[MaintenanceTask]>()
     /// Schwab, read-only. Polled every tick: Core streams prices, so it moves.
     @Published var portfolio = Section<Portfolio>()
+    @Published var scenes = Section<HomeScenes>()
+    /// The scene being run right now (its tile shows a spinner).
+    @Published var runningScene: String?
     /// The study brief as JARVIS Core plans it; Settings shows the schedule.
     @Published var studyBrief = Section<StudyBrief>()
 
@@ -117,7 +120,8 @@ final class HubViewModel: ObservableObject {
         async let i: Void = refreshRepairs()
         async let j: Void = refreshMaintenance()
         async let k: Void = refreshPortfolio()
-        _ = await (a, b, c, d, e, f, g, h, i, j, k)
+        async let l: Void = refreshScenes()
+        _ = await (a, b, c, d, e, f, g, h, i, j, k, l)
     }
 
     func refreshNow() async {
@@ -295,6 +299,29 @@ final class HubViewModel: ObservableObject {
         await load(\.portfolio) { try await $0.portfolio() }
     }
 
+    // MARK: - Scenes
+
+    /// An older Core without /api/home/scenes just never shows the picker.
+    func refreshScenes() async {
+        await load(\.scenes, serverError: { $0.error }) { try await $0.homeScenes() }
+    }
+
+    func runScene(_ scene: HomeScene) {
+        guard runningScene == nil else { return }
+        runningScene = scene.entityID
+        Task {
+            defer { runningScene = nil }
+            do {
+                let error = try await client().activateScene(scene.entityID)
+                if !error.isEmpty { actionError = error }
+            } catch {
+                actionError = error.localizedDescription
+            }
+            await refreshScenes()
+            await refreshEntities()
+        }
+    }
+
     // MARK: - Maintenance
 
     /// An older Core without /api/maintenance just never shows the card.
@@ -450,7 +477,11 @@ final class HubViewModel: ObservableObject {
                 async let portfolio: Void = self.refreshPortfolio()
                 _ = await (torrents, services, entities, now, alerts, repairs, portfolio)
                 tick += 1
-                if tick.isMultiple(of: 3) { await self.refreshMedia() }
+                if tick.isMultiple(of: 3) {
+                    async let media: Void = self.refreshMedia()
+                    async let scenes: Void = self.refreshScenes() // new scenes made in HA show up
+                    _ = await (media, scenes)
+                }
                 if tick.isMultiple(of: 6) {
                     async let storage: Void = self.refreshStorage()
                     async let maintenance: Void = self.refreshMaintenance()

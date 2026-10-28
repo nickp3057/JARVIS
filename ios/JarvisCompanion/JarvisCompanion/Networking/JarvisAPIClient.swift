@@ -745,6 +745,19 @@ struct JarvisAPIClient {
         }
     }
 
+    func homeScenes() async throws -> HomeScenes {
+        try await getJSON(HomeScenes.self, path: "api/home/scenes")
+    }
+
+    func activateScene(_ entityID: String) async throws -> String {
+        struct Body: Encodable {
+            let entityID: String
+            enum CodingKeys: String, CodingKey { case entityID = "entity_id" }
+        }
+        struct Result: Decodable { let error: String }
+        return try await postJSON(Result.self, path: "api/home/scenes/activate", body: Body(entityID: entityID)).error
+    }
+
     func homeControl(entityID: String, turnOn: Bool) async throws -> HomeControlResult {
         try await postJSON(
             HomeControlResult.self,

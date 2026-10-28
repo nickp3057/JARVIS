@@ -696,6 +696,53 @@ def home_control(entity_id: str, action: str) -> dict[str, Any]:
     return {"error": "", "entity_id": entity_id, "state": _settled_state(entity_id, action)}
 
 
+def home_scenes() -> dict[str, Any]:
+    """Every saved Home Assistant scene, for the app's scene picker.
+
+    Saved scenes carry an ``id`` attribute; snapshots JARVIS takes with
+    ``scene.create`` (Barn Door's ``barn_door_before``) don't, so they stay
+    hidden. A scene's state is when it last ran: ``last`` is the most recent.
+    """
+    return _cached("scenes", _ENTITIES_TTL_S, _home_scenes_uncached)
+
+
+def _home_scenes_uncached() -> dict[str, Any]:
+    ok, payload = get_states()
+    if not ok or not isinstance(payload, list):
+        return {"error": str(payload), "scenes": [], "last": None}
+    scenes = []
+    for entity in payload:
+        entity_id = str(entity.get("entity_id", ""))
+        attributes = entity.get("attributes", {}) or {}
+        if not entity_id.startswith("scene.") or "id" not in attributes:
+            continue
+        state = str(entity.get("state", ""))
+        scenes.append({
+            "entity_id": entity_id,
+            "name": str(attributes.get("friendly_name", entity_id)),
+            "icon": str(attributes.get("icon", "")),
+            "last_activated": state if state[:2] == "20" else None,  # ISO time, else unknown
+        })
+    scenes.sort(key=lambda s: s["name"].lower())
+    ran = [s for s in scenes if s["last_activated"]]
+    last = max(ran, key=lambda s: s["last_activated"])["entity_id"] if ran else None
+    return {"error": "", "scenes": scenes, "last": last}
+
+
+def activate_scene(entity_id: str) -> dict[str, Any]:
+    """Run one saved scene. ValueError (a 400) unless it's in ``home_scenes``."""
+    entity_id = (entity_id or "").strip().lower()
+    known = {s["entity_id"] for s in _home_scenes_uncached()["scenes"]}
+    if entity_id not in known:
+        raise ValueError("not a saved Home Assistant scene")
+    message = call_discovered_service("scene", "turn_on", entity_id=entity_id)
+    invalidate("scenes")
+    invalidate("entities")
+    if _HA_SUCCESS_MARKER not in message.lower():
+        return {"error": message, "entity_id": entity_id}
+    return {"error": "", "entity_id": entity_id}
+
+
 # Home Assistant acknowledges a service call before the device reports back,
 # so an immediate read still shows the old state (the app's switch then
 # bounced back). Poll briefly for the requested state before answering.

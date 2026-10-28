@@ -362,6 +362,40 @@ struct HomeEntity: Decodable, Identifiable {
     }
 }
 
+/// Saved Home Assistant scenes (`GET /api/home/scenes`); `last` is the one run most recently.
+struct HomeScenes: Decodable {
+    let error: String
+    let scenes: [HomeScene]
+    let last: String?
+}
+
+struct HomeScene: Decodable, Identifiable {
+    let entityID: String
+    let name: String
+    let icon: String
+
+    var id: String { entityID }
+
+    /// HA's mdi icon or the name, as an SF Symbol.
+    var symbol: String {
+        let text = (icon + " " + name).lowercased()
+        let table: [(String, String)] = [
+            ("morning", "sun.horizon"), ("wake", "sun.horizon"), ("sun", "sun.max"),
+            ("movie", "film"), ("tv", "tv"), ("film", "film"),
+            ("night", "moon.stars"), ("bed", "bed.double"), ("sleep", "moon.zzz"),
+            ("study", "book"), ("work", "laptopcomputer"), ("focus", "scope"), ("read", "book"),
+            ("party", "party.popper"), ("game", "gamecontroller"), ("relax", "sofa"), ("chill", "sofa"),
+            ("off", "power"), ("red", "light.beacon.max"), ("dinner", "fork.knife"),
+        ]
+        return table.first { text.contains($0.0) }?.1 ?? "sparkles"
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case name, icon
+        case entityID = "entity_id"
+    }
+}
+
 struct HomeControlResult: Decodable {
     let error: String
     let entityID: String

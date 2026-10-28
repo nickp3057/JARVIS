@@ -152,7 +152,12 @@ of each group.
   the Optiplex. Later: build a real `scene.good_morning` in HA (colours,
   brightness, maybe blinds) and set `WAKE_UP_SCENE`.
 - Schwab shows Live after the open (confirmed 2026-10-28).
-- **iOS 4.5 / build 127 (not installed):** tap the wake-up push → full-screen
+- **Scenes decision (2026-10-28):** scenes live in Home Assistant; JARVIS
+  runs them (app picker, voice, `WAKE_UP_SCENE`). JARVIS protocols only for
+  things that also touch TV/theme/music. Next: a confirm-gated "save this as
+  a scene" tool (HA `/api/config/scene/config/<id>` from current light
+  states), and an iOS widget / Control Center control for scenes.
+- **iOS 4.6 / build 128 (not installed):** tap the wake-up push → full-screen
   Snooze / I'm up. Install from Xcode when at the Mac.
 - **1337x is IP-banned, not rate-limited.** Prowlarr logs: `403 Forbidden,
   error code: 1006` from `1337x.to` (Cloudflare "your IP is banned" for the

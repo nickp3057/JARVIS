@@ -729,6 +729,17 @@ CALENDAR_ALERT_LEAD_MIN=10  # warn this many minutes before a meeting
   Resume (tested on a movie and an episode). Plex keeps Nick signed in, so
   the PIN auto-entry (`PlexAutoLogin.run`) is removed; `PlexWatch` keeps
   pressing Watch for "play ..." voice requests.
+- **Scene picker on the Home tab (iOS 4.6 / build 128)** — `GET
+  /api/home/scenes` lists every *saved* Home Assistant scene (those with an
+  `id` attribute; `scene.create` snapshots like `barn_door_before` stay
+  hidden) plus `last`, the one run most recently (a scene's state is its
+  last-run time). `POST /api/home/scenes/activate {"entity_id"}` runs one,
+  only if it's in that list (`status_hub.activate_scene`, via
+  `call_discovered_service`). The app shows them like Focus modes: a grid of
+  tiles, the last-run one lit; SF Symbols guessed from the mdi icon/name.
+  New scenes made in HA appear within ~15 s. Scenes live in HA, not JARVIS:
+  JARVIS protocols (Barn Door) are for things that also touch the TV, theme
+  or music.
 - **Good-morning lights (Core, TV 8.2)** — I'm up (phone button, phone alarm
   screen, or the TV's I'm up / Back) calls `POST /api/wake/awake`, which now
   also runs `wake_alarm.good_morning()` on a background thread: the
