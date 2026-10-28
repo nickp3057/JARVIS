@@ -53,6 +53,20 @@ ROLLING_BUFFER_SECONDS = float(os.getenv("ROLLING_BUFFER_SECONDS", "5.0"))
 ROLLING_BUFFER_FRAMES = int(ROLLING_BUFFER_SECONDS * 1000 / FRAME_MS)
 
 
+def to_mono_16k(block: np.ndarray, rate: int, target: int = SAMPLE_RATE) -> np.ndarray:
+    """One captured block -> mono int16 at ``target`` Hz (first channel;
+    whole-number ratios like 48 kHz are averaged, others interpolated)."""
+    samples = block.reshape(len(block), -1)[:, 0].astype(np.float32) if block.ndim > 1 else block.astype(np.float32)
+    if rate != target and samples.size:
+        if rate % target == 0:
+            step = rate // target
+            samples = samples[: samples.size // step * step].reshape(-1, step).mean(axis=1)
+        else:
+            count = int(round(samples.size * target / rate))
+            samples = np.interp(np.linspace(0, samples.size - 1, count), np.arange(samples.size), samples)
+    return np.clip(np.round(samples), -32768, 32767).astype(np.int16)
+
+
 class MicStream:
     """Context-managed input stream with both a frame queue and a rolling buffer."""
 
@@ -74,31 +88,48 @@ class MicStream:
     def __enter__(self) -> "MicStream":
         import sounddevice as sd  # local import keeps module loadable without the dep
 
+        device = os.getenv("MIC_DEVICE", "").strip() or None  # sounddevice name or index
+        device = int(device) if device and device.isdigit() else device
+        # Raw ALSA devices (hw:0,0, like the Optiplex's CMTECK USB mic) may
+        # refuse 16 kHz mono; then record at the device's own rate and
+        # channel count and convert each block here.
+        attempts = [(self.sample_rate, 1)]
+        try:
+            info = sd.query_devices(device, "input")
+            native = int(info["default_samplerate"])
+            attempts += [(native, 1), (native, max(1, int(info["max_input_channels"])))]
+        except Exception:  # noqa: BLE001
+            info = None
+        error: Exception | None = None
+        for rate, channels in dict.fromkeys(attempts):
+            try:
+                self._stream = sd.InputStream(
+                    device=device,
+                    samplerate=rate,
+                    channels=channels,
+                    dtype="int16",
+                    blocksize=int(round(self.frame_samples * rate / self.sample_rate)),
+                    callback=self._callback_for(rate),
+                )
+                break
+            except Exception as exc:  # noqa: BLE001
+                error = exc
+        else:
+            raise error  # type: ignore[misc]
+        self._stream.start()
+        name = info["name"] if info else str(device or "default input")
+        log.info("Mic open: %s at %d Hz, %d channel(s)", name, rate, channels)
+        return self
+
+    def _callback_for(self, rate: int):  # noqa: ANN202
         def _callback(indata, frames, time_info, status):  # type: ignore[no-untyped-def]
             if status:
                 log.debug("audio status: %s", status)
-            frame = indata.copy().reshape(-1).astype(np.int16)
+            frame = to_mono_16k(np.asarray(indata), rate, self.sample_rate)
             self._queue.put(frame)
             with self._buffer_lock:
                 self._buffer.append(frame)
-
-        device = os.getenv("MIC_DEVICE", "").strip() or None  # sounddevice name or index
-        self._stream = sd.InputStream(
-            device=int(device) if device and device.isdigit() else device,
-            samplerate=self.sample_rate,
-            channels=1,
-            dtype="int16",
-            blocksize=self.frame_samples,
-            callback=_callback,
-        )
-        self._stream.start()
-        device = getattr(self._stream, "device", device)
-        try:
-            name = sd.query_devices(device)["name"]
-        except Exception:  # noqa: BLE001
-            name = str(device)
-        log.info("Mic open: %s", name)
-        return self
+        return _callback
 
     def __exit__(self, exc_type, exc, tb) -> None:
         if self._stream is not None:

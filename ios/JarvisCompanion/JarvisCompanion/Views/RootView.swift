@@ -17,6 +17,10 @@ struct RootView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.scenePhase) private var scenePhase
     @ObservedObject private var wakeRinging = WakeRinging.shared
+    /// iPad: slide back to Room after a few idle minutes on another tab.
+    @AppStorage(RoomView.autoReturnKey) private var autoReturn = true
+    /// Bumped by any touch, so the trip back to Room waits for a quiet spell.
+    @State private var touches = 0
 
     /// Tab-bar (and swipe) order: Home sits in the middle. The iPad adds Room
     /// first (its default): the tablet is mainly a panel for the room.
@@ -62,6 +66,13 @@ struct RootView: View {
         .id(palette)
         .tint(JarvisTheme.reactor)
         .simultaneousGesture(DragGesture(minimumDistance: 30).onChanged(track).onEnded(swipe))
+        .simultaneousGesture(TapGesture().onEnded { touches &+= 1 })
+        .task(id: "\(selection)-\(touches)-\(autoReturn)") {
+            // Chat is left alone: a half-typed message shouldn't be yanked away.
+            guard Self.isPad, autoReturn, selection != .room, selection != .chat else { return }
+            try? await Task.sleep(for: .seconds(180))
+            if !Task.isCancelled, !wakeRinging.showing { selection = .room }
+        }
         .sensoryFeedback(.selection, trigger: selection)
         .fullScreenCover(isPresented: $wakeRinging.showing) { WakeRingingView().environmentObject(settings) }
         .task(id: scenePhase) {
@@ -89,6 +100,7 @@ struct RootView: View {
     /// The page follows the finger (rubber-banded at the first/last tab) only
     /// while the drag is clearly horizontal, so vertical scrolling is untouched.
     private func track(_ drag: DragGesture.Value) {
+        touches &+= 1
         guard !reduceMotion, drag.startLocation.x > 24 else { return }
         let dx = drag.translation.width, dy = drag.translation.height
         guard abs(dx) > 2.5 * abs(dy) else {

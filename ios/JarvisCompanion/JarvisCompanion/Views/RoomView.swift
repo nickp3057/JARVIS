@@ -9,11 +9,13 @@ import UIKit
 ///
 /// Night screen: with Keep screen on, after dark (HA's `sun.sun`) and every
 /// light (and lamp) off for 45 s, the screen goes black at its lowest
-/// brightness, so the iPad isn't a night light. Peace or Goodnight does the
-/// same a few seconds after the lights go out, day or night. Any light
-/// coming on, sunrise, or a tap brings it back; a tap with the room still
-/// dark sleeps again 45 s later (after dark). iPads don't let apps read their
-/// light sensor, so the room's own lights stand in for it.
+/// brightness, so the iPad isn't a night light. Peace or Goodnight (from
+/// here, by voice or in HA) does the same a few seconds after the lights go
+/// out, day or night. Any light coming on, sunrise or a timer going off
+/// brings it back. A tap anywhere wakes it and turns on the tap-to-wake light
+/// (Bedroom Lights unless changed); with the room still dark it sleeps again
+/// 45 s later (after dark). iPads don't let apps read their light sensor, so
+/// the room's own lights stand in for it.
 ///
 /// Full screen hides the tab bar, status bar and home indicator so the iPad
 /// is just the panel; a swipe still reaches the other tabs.
@@ -32,6 +34,9 @@ struct RoomView: View {
     /// Peace or Goodnight just ran: go dark once the lights are out, even by day.
     @State private var lightsOut = false
     @AppStorage("room.fullScreen") private var fullScreen = false
+    /// Light a tap on the night screen turns on; "" = just the screen.
+    @AppStorage("room.wakeLight") private var wakeLight = "light.bedroom_lights"
+    @AppStorage(RoomView.autoReturnKey) private var autoReturn = true
     /// The screen's brightness before the night screen, to put back.
     @State private var savedBrightness: CGFloat?
     @ObservedObject private var voice = VoicePresence.shared
@@ -71,7 +76,7 @@ struct RoomView: View {
             // Black; a tap is the only thing on it.
             Color.black.ignoresSafeArea()
                 .contentShape(Rectangle())
-                .onTapGesture { lightsOut = false; asleep = false }
+                .onTapGesture { wakeFromNight() }
                 .accessibilityLabel("Night screen. Tap to wake.")
         }
         .transaction { $0.disablesAnimations = asleep }
@@ -86,6 +91,11 @@ struct RoomView: View {
         .onChange(of: asleep) { _, sleeping in setDimmed(sleeping) }
         .onChange(of: model.runningScene) { ran, running in
             if running == nil, let ran, Self.lightsOutScenes.contains(ran) { lightsOut = true }
+        }
+        // Goodnight or Peace from anywhere else (voice, phone, HA) shows up
+        // as the scenes' "last" within a poll or three.
+        .onChange(of: model.scenes.value?.last) { _, last in
+            if let last, Self.lightsOutScenes.contains(last), model.runningScene == nil { lightsOut = true }
         }
         .onChange(of: lightsAllOff) { _, off in if off == false { lightsOut = false } }
         // "Hey JARVIS" lights the screen back up (the overlay shows above it).
@@ -121,6 +131,27 @@ struct RoomView: View {
     }
 
     private static let lightsOutScenes: Set<String> = ["scene.peace", "scene.goodnight"]
+    /// Shared with `RootView`: slide back to Room after a while on another tab.
+    static let autoReturnKey = "room.autoReturn"
+
+    /// A tap on the night screen: screen back on, and the tap-to-wake light.
+    private func wakeFromNight() {
+        lightsOut = false
+        asleep = false
+        if let light = model.entities.value?.first(where: { $0.entityID == wakeLight }), !light.isOn {
+            model.toggle(light, to: true)
+        }
+    }
+
+    /// Lights Nick can pick for tap-to-wake. Never the fan light (it's only
+    /// ever turned off).
+    private var wakeLightChoices: [HomeEntity] {
+        (model.entities.value ?? []).filter { $0.domain == "light" && $0.entityID != "light.nicks_fan" }
+    }
+
+    private var timers: [NowTimer] {
+        (model.now.value?.timers ?? []).filter { $0.state == "running" || $0.state == "alarming" }
+    }
 
     /// Every light and lamp off; nil while the device list isn't known.
     private var lightsAllOff: Bool? {
@@ -132,7 +163,7 @@ struct RoomView: View {
 
     /// Lights out, and either after dark with Keep screen on or just after Peace/Goodnight.
     private var roomIsDark: Bool {
-        guard nightScreen, scenePhase == .active, !voice.active,
+        guard nightScreen, scenePhase == .active, !voice.active, !timers.contains(where: { $0.state == "alarming" }),
               lightsOut || (keepAwake && model.sun == "below_horizon") else { return false }
         return lightsAllOff == true
     }
@@ -184,6 +215,7 @@ struct RoomView: View {
             if let event = model.now.value?.nextEvent {
                 infoRow("calendar", title: "Next up", value: eventText(event))
             }
+            ForEach(timers) { timerRow($0) }
             Divider().overlay(JarvisTheme.border)
             Button { showingRemote = true } label: {
                 Label("TV remote", systemImage: "appletvremote.gen4")
@@ -203,6 +235,20 @@ struct RoomView: View {
             Toggle("Full screen", isOn: $fullScreen)
                 .tint(JarvisTheme.cyan)
                 .font(.subheadline)
+            Toggle("Back to Room after 3 min on another tab", isOn: $autoReturn)
+                .tint(JarvisTheme.cyan)
+                .font(.subheadline)
+            if !wakeLightChoices.isEmpty {
+                LabeledContent("Tap the dark screen to turn on") {
+                    Picker("Tap the dark screen to turn on", selection: $wakeLight) {
+                        Text("Just the screen").tag("")
+                        ForEach(wakeLightChoices) { Text($0.friendlyName).tag($0.entityID) }
+                    }
+                    .labelsHidden()
+                    .tint(JarvisTheme.cyan)
+                }
+                .font(.subheadline)
+            }
         }
         .roomPanel()
     }
@@ -225,6 +271,30 @@ struct RoomView: View {
             .disabled(model.runningScene != nil)
             .accessibilityHint("Turns everything off for when you leave")
         }
+    }
+
+    /// A running timer counts down live; one that's done says so.
+    private func timerRow(_ timer: NowTimer) -> some View {
+        let alarming = timer.state == "alarming"
+        let end = Date(timeIntervalSince1970: timer.expiresAt)
+        return HStack(spacing: 12) {
+            Image(systemName: alarming ? "alarm.waves.left.and.right.fill" : "timer")
+                .font(.title3)
+                .foregroundStyle(alarming ? JarvisTheme.amber : JarvisTheme.cyan)
+                .frame(width: 28)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(timer.label.isEmpty ? "Timer" : timer.label.capitalized)
+                    .font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                if alarming || end <= .now {
+                    Text("Time's up").font(.headline).foregroundStyle(JarvisTheme.amber)
+                } else {
+                    Text(timerInterval: Date.now...end, countsDown: true)
+                        .font(.headline).monospacedDigit()
+                }
+            }
+            Spacer(minLength: 0)
+        }
+        .accessibilityElement(children: .combine)
     }
 
     private var wakeText: String {

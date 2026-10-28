@@ -630,7 +630,7 @@ JARVIS_SERVER_PORT=8000
 WAKE_UP_LIGHTS=1            # I'm up (phone or TV) turns on every light (strip segments skipped); 0 = off
 ROOM_VOICE=0                # 1 = "Hey JARVIS" on the Optiplex mic/speakers inside Core (speech/room_voice.py)
 AUDIO_OUTPUT_DEVICE=        # ALSA device for aplay; Optiplex: plughw:1,0 (card 0 is the USB mic, no output)
-MIC_DEVICE=CMTECK           # sounddevice input name/index. Set it: left empty, Core's room voice opened the onboard jack (hw:1,0) instead of the USB mic
+MIC_DEVICE=CMTECK           # sounddevice input name/index. Set it: left empty, Core's room voice opened the onboard jack (hw:1,0). Rates it refuses are converted (48 kHz -> 16 kHz)
 VOICE_LIVE_MODEL=tiny.en    # Whisper model for live captions on the iPad; "off" to skip
 VOICE_SILENCE_END_MS=550    # silence that ends what you said
 VOICE_START_TIMEOUT_S=4     # wait after the wake word before giving up
@@ -823,6 +823,16 @@ CALENDAR_ALERT_LEAD_MIN=10  # warn this many minutes before a meeting
   exposed by the Tuya integration, so no scene sets it. I'm up runs
   `scene.good_morning` when it exists. The iPad Room tab has a Peace
   button (shown when `scene.peace` exists) for heading out.
+- **iPad tap-to-wake light, timers, back to Room (iOS 5.4 / build 147)** —
+  a tap on the night screen also turns on the Room tab's "Tap the dark
+  screen to turn on" light (default `light.bedroom_lights`; never the fan
+  light; "Just the screen" for none). Goodnight or Peace run anywhere
+  (voice, phone, HA) sleeps the iPad too, via the scenes' `last`. Running
+  timers count down on the clock panel; one going off wakes the screen.
+  "Back to Room after 3 min on another tab" (on by default; Chat is
+  exempt) slides the iPad home after three minutes without a touch. Core:
+  `MicStream` falls back to the device's own rate/channels and converts to
+  16 kHz mono when a raw device (the CMTECK `hw:0,0`) refuses 16 kHz.
 - **iPad as a room panel (iOS 5.3 / build 146)** — the Room tab's Peace
   button moved to the top of the right-hand column; the left column gains
   the JARVIS reactor (`JarvisCoreMark`, glow lifts while the room voice is

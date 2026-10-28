@@ -16,8 +16,11 @@ QUIET = np.zeros(audio.FRAME_SAMPLES, dtype=np.int16)
 
 class FakeInputStream:
     last = None
+    refuse_rates: set = set()
 
     def __init__(self, **kwargs) -> None:  # noqa: ANN003
+        if kwargs["samplerate"] in FakeInputStream.refuse_rates:
+            raise RuntimeError("Invalid sample rate [PaErrorCode -9997]")
         self.kwargs, self.started, self.closed = kwargs, False, False
         FakeInputStream.last = self
 
@@ -31,13 +34,17 @@ class FakeInputStream:
         self.closed = True
 
     def feed(self, frame: np.ndarray, status=None) -> None:  # noqa: ANN001
-        self.kwargs["callback"](frame.reshape(-1, 1), len(frame), None, status)
+        block = frame.reshape(len(frame), -1) if frame.ndim > 1 else frame.reshape(-1, 1)
+        self.kwargs["callback"](block, len(block), None, status)
 
 
 class MicStreamTests(unittest.TestCase):
     def setUp(self) -> None:
-        fake = types.SimpleNamespace(InputStream=FakeInputStream)
+        def query_devices(device=None, kind=None):  # noqa: ANN001, ANN202
+            return {"name": "CMTECK: USB Audio (hw:0,0)", "default_samplerate": 48000.0, "max_input_channels": 2}
+        fake = types.SimpleNamespace(InputStream=FakeInputStream, query_devices=query_devices)
         patch.dict(sys.modules, {"sounddevice": fake}).start()
+        FakeInputStream.refuse_rates = set()
         self.addCleanup(patch.stopall)
 
     def test_frames_queue_and_rolling_buffer(self) -> None:
@@ -60,6 +67,30 @@ class MicStreamTests(unittest.TestCase):
         for value, expected in (("2", 2), ("CMTECK", "CMTECK")):
             with patch.dict(os.environ, {"MIC_DEVICE": value}), audio.MicStream():
                 self.assertEqual(FakeInputStream.last.kwargs["device"], expected)
+
+
+    def test_device_that_refuses_16k_records_native_and_converts(self) -> None:
+        FakeInputStream.refuse_rates = {audio.SAMPLE_RATE}
+        with patch.dict(os.environ, {"MIC_DEVICE": "CMTECK"}), audio.MicStream() as mic:
+            fake = FakeInputStream.last
+            self.assertEqual((fake.kwargs["samplerate"], fake.kwargs["channels"]), (48000, 1))
+            self.assertEqual(fake.kwargs["blocksize"], 3 * audio.FRAME_SAMPLES)
+            fake.feed(np.repeat(np.arange(audio.FRAME_SAMPLES, dtype=np.int16), 3))
+            frame = mic.read(timeout=0)
+            self.assertEqual(frame.size, audio.FRAME_SAMPLES)
+            self.assertEqual((int(frame[0]), int(frame[-1])), (0, audio.FRAME_SAMPLES - 1))
+
+    def test_stereo_and_odd_rates_convert_to_mono_16k(self) -> None:
+        stereo = np.stack([np.full(441, 100, np.int16), np.full(441, -5, np.int16)], axis=1)
+        out = audio.to_mono_16k(stereo, 44100)
+        self.assertEqual(out.size, 160)
+        self.assertTrue((out == 100).all())  # first channel only
+        self.assertTrue((audio.to_mono_16k(np.arange(4, dtype=np.int16), 16000) == np.arange(4)).all())
+
+    def test_every_open_failing_raises(self) -> None:
+        FakeInputStream.refuse_rates = {audio.SAMPLE_RATE, 48000}
+        with self.assertRaises(RuntimeError), audio.MicStream():
+            pass
 
 
 class FakeStream:
