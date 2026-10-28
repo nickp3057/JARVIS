@@ -283,8 +283,9 @@ RMS envelope from ElevenLabs audio drives the orb in real time using a monotonic
   on Core.
 - Live: holdings/cash from `/trader/v1/accounts?fields=positions` every
   `SCHWAB_POLL_SECONDS` (30) in market hours (4am-8pm ET weekdays, else 10
-  min); stock/ETF prices from the streamer (LEVELONE_EQUITIES fields 0,3,12)
-  as they tick; yesterday from daily candles once a day. `GET /api/portfolio`
+  min); stock/ETF prices from the streamer (LEVELONE_EQUITIES fields 0,3)
+  as they tick (today = Schwab's own day gain/loss + the price move since the
+  last fetch, so the weekly $25 deposit and its auto-buys are never "gain"); yesterday from daily candles once a day. `GET /api/portfolio`
   (status:read) serves the in-memory snapshot; `/api/glance` has a
   `portfolio` summary. Phone Home card polls it every 5 s; the TV's line
   under the weather every 5 s while home is showing.

@@ -41,8 +41,8 @@ _TOKEN_FILE = Path(__file__).resolve().parents[1] / "memory" / "schwab_token.jso
 _REFRESH_LIFETIME_S = 7 * 24 * 3600
 _MARKET_TZ = ZoneInfo("America/New_York")
 _STREAMED = ("EQUITY", "ETF", "COLLECTIVE_INVESTMENT")
-# LEVELONE_EQUITIES fields: 0 symbol, 3 last price, 12 previous close.
-_FIELDS = "0,3,12"
+# LEVELONE_EQUITIES fields: 0 symbol, 3 last price.
+_FIELDS = "0,3"
 
 _lock = threading.RLock()
 # Set on a fresh login so the monitor fetches now, not after its wait.
@@ -52,7 +52,6 @@ _state: dict[str, Any] = {
     "accounts": None,       # parsed holdings (see _parse_accounts)
     "accounts_at": 0.0,
     "prices": {},           # symbol -> live last price
-    "closes": {},           # symbol -> previous close
     "yesterday": None,      # {"date": "YYYY-MM-DD", "change": float}
     "streaming": False,
     "error": "",
@@ -153,7 +152,7 @@ def finish_from_redirect(redirect_url: str) -> None:
 def unlink() -> None:
     _save_tokens(None)
     with _lock:
-        _state.update(accounts=None, prices={}, closes={}, yesterday=None)
+        _state.update(accounts=None, prices={}, yesterday=None)
 
 
 def access_token() -> str:
@@ -254,8 +253,6 @@ def _apply_quotes(message: dict[str, Any]) -> None:
                 symbol = quote.get("key")
                 if "3" in quote:
                     _state["prices"][symbol] = float(quote["3"])
-                if "12" in quote:
-                    _state["closes"][symbol] = float(quote["12"])
 
 
 def stream_forever(stop: threading.Event) -> None:
@@ -328,7 +325,7 @@ def snapshot() -> dict[str, Any]:
     out: dict[str, Any] = {"configured": configured(), "linked": linked(),
                            "login_expires_at": login_expires_at()}
     with _lock:
-        accounts, prices, closes = _state["accounts"], dict(_state["prices"]), dict(_state["closes"])
+        accounts, prices = _state["accounts"], dict(_state["prices"])
         out.update(streaming=_state["streaming"], error=_state["error"], updated_at=_state["accounts_at"],
                    yesterday_change=_state["yesterday"]["change"] if _state["yesterday"] else None)
     if not accounts:
@@ -339,10 +336,10 @@ def snapshot() -> dict[str, Any]:
         last = prices.get(symbol)
         live_value = p["quantity"] * last if last is not None else p["value"]
         value += live_value - p["value"]
-        if last is not None and closes.get(symbol):
-            change = p["quantity"] * (last - closes[symbol])
-        else:
-            change = p["day_change"]
+        # Schwab's own day gain/loss (which knows shares bought today, e.g. the
+        # weekly deposit's auto-buy, started at their purchase price) plus the
+        # price move since that fetch. Deposits themselves are never a gain.
+        change = p["day_change"] + live_value - p["value"]
         today += change
         if p["cost"]:  # unrealized gain/loss since bought, at the average price paid
             cost += p["cost"]

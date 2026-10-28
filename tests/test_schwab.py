@@ -93,14 +93,27 @@ class SchwabTests(unittest.TestCase):
         snap = schwab.snapshot()
         self.assertEqual((snap["value"], snap["cash"], snap["today_change"]), (2500.0, 500.0, 20.0))
         schwab._apply_quotes({"data": [{"service": "LEVELONE_EQUITIES",
-                                        "content": [{"key": "NVDA", "3": 190.0, "12": 175.0}]}]})
+                                        "content": [{"key": "NVDA", "3": 190.0}]}]})
         snap = schwab.snapshot()
         self.assertEqual(snap["value"], 2600.0)  # 10 x 190 replaces the 1800 Schwab last reported
-        self.assertEqual(snap["today_change"], 150.0)  # 10 x (190 - 175), plus the fund's 0
+        self.assertEqual(snap["today_change"], 120.0)  # Schwab's +20, plus 10 x (190 - 180) since
         self.assertEqual(snap["positions"][0]["symbol"], "NVDA")
         # Cost 10 x 120 + 200 x 1 = 1400; worth 1900 + 200 now.
         self.assertEqual((snap["total_gain"], snap["total_gain_pct"]), (700.0, 50.0))
-        self.assertIn("up $150.00 today", schwab.describe())
+        self.assertIn("up $120.00 today", schwab.describe())
+
+    def test_a_deposit_is_value_not_gain(self) -> None:
+        self.link()
+        with patch.object(schwab.requests, "get", return_value=response(ACCOUNTS)):
+            schwab.refresh_accounts()
+        before = schwab.snapshot()
+        deposited = [{"securitiesAccount": {**ACCOUNTS[0]["securitiesAccount"], "currentBalances": {
+            "cashBalance": 525.0, "liquidationValue": 2525.0}}}]
+        with patch.object(schwab.requests, "get", return_value=response(deposited)):
+            schwab.refresh_accounts()
+        after = schwab.snapshot()
+        self.assertEqual(after["value"] - before["value"], 25.0)
+        self.assertEqual((after["today_change"], after["total_gain"]), (before["today_change"], before["total_gain"]))
 
     def test_yesterday_uses_the_last_two_full_days(self) -> None:
         self.link()
@@ -125,7 +138,7 @@ class SchwabTests(unittest.TestCase):
         sent = []
         messages = iter([
             {"response": [{"service": "ADMIN", "content": {"code": 0}}]},
-            {"data": [{"service": "LEVELONE_EQUITIES", "content": [{"key": "NVDA", "3": 181.5, "12": 175.0}]}]},
+            {"data": [{"service": "LEVELONE_EQUITIES", "content": [{"key": "NVDA", "3": 181.5}]}]},
         ])
 
         def recv():
@@ -144,7 +157,7 @@ class SchwabTests(unittest.TestCase):
             schwab.stream_forever(stop)
         login, subs = (m["requests"][0] for m in sent)
         self.assertEqual((login["command"], login["parameters"]["Authorization"]), ("LOGIN", "a1"))
-        self.assertEqual(subs["parameters"], {"keys": "NVDA", "fields": "0,3,12"})
+        self.assertEqual(subs["parameters"], {"keys": "NVDA", "fields": "0,3"})
         self.assertEqual(schwab.snapshot()["positions"][0]["last"], 181.5)
         self.assertFalse(schwab.snapshot()["streaming"])
         fake.close.assert_called_once()
