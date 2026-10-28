@@ -152,6 +152,13 @@ of each group.
   the Optiplex. Later: build a real `scene.good_morning` in HA (colours,
   brightness, maybe blinds) and set `WAKE_UP_SCENE`.
 - Schwab shows Live after the open (confirmed 2026-10-28).
+- **Scenes made 2026-10-28 (not yet run):** Good Morning, Study, Movie,
+  Game Time, Goodnight, Peace, Rainbow. At home: tap each once and adjust.
+  Check the rainbows come up when a light was off (scene sets on + DIY
+  dropdown at the same time). Open items: the fan's RGB rainbow (Tuya
+  integration doesn't expose it; try the HACS "Tuya Local" integration);
+  hook "Hey Google, game time / peace" to `scene.game_time` / `scene.peace`
+  (needs HA linked to Google Home, not checked).
 - **Nick's rainbows (picked 2026-10-28, in the Govee app):** Nick Strip
   Lights = DIY **Real Rainbow**; Desk Lights (`light.desk_lights_2`) = DIY
   **New Rainbow**; both 100% brightness. HA can't see a DIY pick made in the

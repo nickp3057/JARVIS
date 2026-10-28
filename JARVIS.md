@@ -629,7 +629,7 @@ JARVIS_SERVER_HOST=0.0.0.0
 JARVIS_SERVER_PORT=8000
 WAKE_UP_LIGHTS=1            # I'm up (phone or TV) turns on every light (strip segments skipped); 0 = off
 LIGHT_RAINBOWS=             # light=select:DIY option pairs for the Rainbow button (defaults to Nick's strip + desk)
-WAKE_UP_SCENE=              # optional HA scene./script. entity to run instead (e.g. scene.good_morning)
+WAKE_UP_SCENE=              # optional HA scene./script. to run instead; unset uses scene.good_morning when HA has it
 # Companion dashboard (read-only status hub endpoints)
 PLEX_URL=                   # Plex base URL for /api/links + /api/status/services
 LINK_REMOTE_HOSTS=          # lan=tailscale host pairs; /api/links adds remote_url (e.g. 10.0.0.147=100.97.179.53)
@@ -752,6 +752,15 @@ CALENDAR_ALERT_LEAD_MIN=10  # warn this many minutes before a meeting
   Resume (tested on a movie and an episode). Plex keeps Nick signed in, so
   the PIN auto-entry (`PlexAutoLogin.run`) is removed; `PlexWatch` keeps
   pressing Watch for "play ..." voice requests.
+- **Nick's room scenes in HA, Peace on the iPad (iOS 4.12 / build 134)** —
+  made 2026-10-28 through HA's scene config API, to Nick's spec: Good
+  Morning, Study, Movie, Game Time, Goodnight, Peace (plus Rainbow). Rules:
+  never `switch.wii_u` (its own overnight schedule; an always-powered Wii
+  burned out before); the fan light `light.nicks_fan` is only ever turned
+  off. Rainbows are the DIY dropdowns. The fan's own RGB rainbow isn't
+  exposed by the Tuya integration, so no scene sets it. I'm up runs
+  `scene.good_morning` when it exists. The iPad Room tab has a Peace
+  button (shown when `scene.peace` exists) for heading out.
 - **Rainbow in the light sheet, on phone and iPad (iOS 4.11 / build 133)** —
   lights in `LIGHT_RAINBOWS` (default: Nick Strip Lights → its DIY "Real
   Rainbow", Desk Lights → "New Rainbow", via `select.<light>_diy_scene`)

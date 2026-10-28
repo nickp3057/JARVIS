@@ -157,6 +157,22 @@ struct RoomView: View {
                 infoRow("calendar", title: "Next up", value: eventText(event))
             }
             Divider().overlay(JarvisTheme.border)
+            if let peace = model.scenes.value?.scenes.first(where: { $0.entityID == "scene.peace" }) {
+                // Heading out: everything off, plugs too (HA's Peace scene).
+                Button { model.runScene(peace) } label: {
+                    HStack {
+                        if model.runningScene == peace.entityID { ProgressView() }
+                        Label("Peace", systemImage: "hand.wave")
+                    }
+                    .font(.title3.weight(.semibold))
+                    .frame(maxWidth: .infinity, minHeight: 60)
+                    .background(JarvisTheme.amber.opacity(0.16), in: .rect(cornerRadius: 14))
+                    .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(JarvisTheme.amber.opacity(0.5)))
+                }
+                .buttonStyle(CockpitButtonStyle())
+                .disabled(model.runningScene != nil)
+                .accessibilityHint("Turns everything off for when you leave")
+            }
             Button { showingRemote = true } label: {
                 Label("TV remote", systemImage: "appletvremote.gen4")
                     .font(.headline)

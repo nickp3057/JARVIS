@@ -157,6 +157,14 @@ class GoodMorningTests(unittest.TestCase):
         call.assert_called_once_with("light", "turn_on",
                                      service_data={"entity_id": ["light.bedroom_lights", "light.desk_lights"]})
 
+    def test_good_morning_scene_when_ha_has_one(self) -> None:
+        states = self.STATES + [{"entity_id": "scene.good_morning", "state": "unknown"}]
+        with patch.dict("os.environ", {"WAKE_UP_SCENE": "", "WAKE_UP_LIGHTS": ""}), \
+                patch("integrations.home_assistant.get_states", return_value=(True, states)), \
+                patch("integrations.home_assistant.call_service", return_value=(True, "ok")) as call:
+            wake_alarm.good_morning()
+        call.assert_called_once_with("scene", "turn_on", "scene.good_morning")
+
     def test_scene_wins_and_off_switch(self) -> None:
         with patch.dict("os.environ", {"WAKE_UP_SCENE": "scene.good_morning"}), \
                 patch("integrations.home_assistant.call_service", return_value=(True, "ok")) as call:

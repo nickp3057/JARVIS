@@ -250,8 +250,9 @@ def good_morning_targets(states: list[dict[str, Any]]) -> list[str]:
 
 def good_morning() -> tuple[bool, str]:
     """I'm up -> the good-morning scene. ``WAKE_UP_SCENE`` (a ``scene.`` or
-    ``script.`` entity) if set, else every light on. ``WAKE_UP_LIGHTS=0`` turns
-    it off. Called off the request thread; Home Assistant can be slow."""
+    ``script.`` entity) if set, else HA's ``scene.good_morning`` if it exists,
+    else every light on. ``WAKE_UP_LIGHTS=0`` turns it off. Called off the
+    request thread; Home Assistant can be slow."""
     if os.getenv("WAKE_UP_LIGHTS", "1").strip().lower() in ("0", "false", "off", "no"):
         return True, "Good-morning lights are off in settings."
     from integrations import home_assistant
@@ -262,6 +263,8 @@ def good_morning() -> tuple[bool, str]:
     ok, states = home_assistant.get_states()
     if not ok or not isinstance(states, list):
         return False, f"Couldn't read the lights: {states}"
+    if any(s.get("entity_id") == "scene.good_morning" for s in states):
+        return home_assistant.call_service("scene", "turn_on", "scene.good_morning")
     lights = good_morning_targets(states)
     if not lights:
         return False, "No lights found in Home Assistant."
