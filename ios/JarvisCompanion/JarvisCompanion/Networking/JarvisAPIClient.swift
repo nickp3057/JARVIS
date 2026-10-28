@@ -589,10 +589,21 @@ struct JarvisAPIClient {
         try await getJSON(Portfolio.self, path: "api/portfolio")
     }
 
-    /// Schwab's login page, to open in Safari; Schwab sends it back to Core.
-    func schwabLoginURL() async throws -> URL {
-        struct Envelope: Decodable { let url: URL }
-        return try await postJSON(Envelope.self, path: "api/schwab/login", body: EmptyBody()).url
+    /// Schwab's login page and the callback address to catch when Schwab
+    /// redirects there (nothing listens at it; the app hands it to Core).
+    func schwabLogin() async throws -> (url: URL, callback: String) {
+        struct Envelope: Decodable { let url: URL; let callback: String }
+        let body = try await postJSON(Envelope.self, path: "api/schwab/login", body: EmptyBody())
+        return (body.url, body.callback)
+    }
+
+    func finishSchwabLogin(redirect: URL) async throws {
+        struct Body: Encodable {
+            let redirectURL: String
+            enum CodingKeys: String, CodingKey { case redirectURL = "redirect_url" }
+        }
+        struct Done: Decodable { let linked: Bool }
+        _ = try await postJSON(Done.self, path: "api/schwab/finish", body: Body(redirectURL: redirect.absoluteString))
     }
 
     // MARK: - Wake-up schedule and shared theme

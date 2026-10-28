@@ -141,8 +141,9 @@ of each group.
 - [x] **Charles Schwab, read-only and live** (shipped 2026-10-27, iOS 2.5 /
   TV 6.6; see JARVIS.md "Charles Schwab"). Built against fakes; first real
   run once Schwab approves JARVIS's app. Check then: streamer field numbers
-  (3 last, 12 close), cash fields for Nick's account type, the callback
-  through `tailscale serve`.
+  (3 last, 12 close), cash fields for Nick's account type, the in-app login
+  catching the `https://127.0.0.1:8182` redirect. The `tailscale serve`
+  route for `/api/schwab/callback` set up on 2026-10-27 is unused now.
 - [ ] **Schwab trading** (Nick wants it, 2026-10-27): "if NVIDIA hits X,
   sell; at 170, buy". Place real limit/stop orders at Schwab (they run even
   if Core is down), not price-watching in JARVIS. Agreed guardrails: every

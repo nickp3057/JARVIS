@@ -26,7 +26,7 @@ struct HubView: View {
         var id: String { kind + title }
     }
     @State private var holdsPolling = false
-    @Environment(\.openURL) private var openURL
+    @State private var schwabLoggingIn = false
     private let focus: HubFocus
 
     /// Home is JARVIS himself: the reactor, a quick look, the next
@@ -93,6 +93,9 @@ struct HubView: View {
                 }
             }
             .sheet(isPresented: $showingSettings) { SettingsView() }
+            .sheet(isPresented: $schwabLoggingIn) {
+                SchwabLoginView { Task { await model.refreshPortfolio() } }
+            }
             .sheet(item: $todoSheet) { TodoSheet(model: model, startAdding: $0 == .add) }
             .sheet(item: $diagnosisTarget) { target in
                 MediaDiagnosisView(title: target.title, kind: target.kind,
@@ -368,7 +371,7 @@ struct HubView: View {
             if !p.linked || p.loginDueSoon {
                 Text(p.linked ? "Schwab's weekly login runs out soon." : "Schwab needs you to log in.")
                     .font(.subheadline.weight(.semibold))
-                Button("Log in to Schwab") { schwabLogin() }
+                Button("Log in to Schwab") { schwabLoggingIn = true }
                     .font(.footnote.weight(.semibold)).foregroundStyle(JarvisTheme.cyan)
             }
             if let value = p.value, let today = p.todayChange {
@@ -400,10 +403,6 @@ struct HubView: View {
             .font(.caption.weight(.semibold).monospacedDigit())
             .foregroundStyle(up ? JarvisTheme.success : JarvisTheme.critical)
             .accessibilityLabel("\(up ? "Up" : "Down") \(abs(amount).formatted(.currency(code: "USD"))) \(label)")
-    }
-
-    private func schwabLogin() {
-        Task { if let url = await model.schwabLoginURL() { openURL(url) } }
     }
 
     private func tileHeading(_ title: String, symbol: String) -> some View {

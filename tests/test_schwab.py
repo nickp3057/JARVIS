@@ -163,6 +163,25 @@ class SchwabTests(unittest.TestCase):
         self.assertIn("Linked", page.text)
         self.assertTrue(client.get("/api/portfolio", headers=tv).json()["linked"])
 
+    def test_app_hands_over_the_caught_redirect(self) -> None:
+        client = TestClient(server.app)
+        self.addCleanup(client.close)
+        admin = {"Authorization": "Bearer admin"}
+        with patch.dict(os.environ, {"SCHWAB_CALLBACK_URL": "https://127.0.0.1:8182"}):
+            body = client.post("/api/schwab/login", headers=admin).json()
+        self.assertEqual(body["callback"], "https://127.0.0.1:8182")
+        state = parse_qs(urlparse(body["url"]).query)["state"][0]
+        self.assertEqual(client.post("/api/schwab/finish", headers=admin,
+                                     json={"redirect_url": "https://127.0.0.1:8182/?x=1"}).status_code, 422)
+        with patch.object(schwab.requests, "post", return_value=response(
+                {"access_token": "a1", "refresh_token": "r1", "expires_in": 1800})) as post, \
+             patch.object(server, "runtime"):
+            done = client.post("/api/schwab/finish", headers=admin, json={
+                "redirect_url": f"https://127.0.0.1:8182/?code=C0.abc%40&session=s&state={state}"})
+        self.assertEqual(done.json(), {"linked": True})
+        self.assertEqual(post.call_args.kwargs["data"]["code"], "C0.abc@")
+        self.assertTrue(schwab.linked())
+
 
 if __name__ == "__main__":
     unittest.main()

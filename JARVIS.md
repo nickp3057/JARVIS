@@ -264,13 +264,18 @@ RMS envelope from ElevenLabs audio drives the orb in real time using a monotonic
   biggest movers (`integrations/schwab.py`). JARVIS can't trade.
 - JARVIS's own Schwab developer app (not the one for Nick's coworker), with
   "Accounts and Trading Production" + "Market Data Production" so trading can
-  come later without a new app. Callback
-  `https://nick-jarvis.tailbb082d.ts.net/api/schwab/callback` (Tailscale
-  HTTPS via `tailscale serve`, only that path).
-- Login: the companion's Settings > Charles Schwab > Log in gets
-  `POST /api/schwab/login` (admin) → Schwab's page in Safari → Schwab
-  redirects to `/api/schwab/callback` (no bearer; a one-time `state`, 10 min)
-  → tokens in `memory/schwab_token.json` (0600, gitignored). Access tokens
+  come later without a new app. Its registered callback is
+  `https://127.0.0.1:8182` (changing it on Schwab's site means days of
+  re-approval, so Core follows the app, not the other way round).
+- Login: the companion's Settings > Charles Schwab > Log in (or the Home
+  card) gets `POST /api/schwab/login` (admin; returns the page and the
+  callback) and opens Schwab in an in-app web view (`SchwabLoginView`). When
+  Schwab redirects to the callback the web view cancels it and posts the
+  address to `POST /api/schwab/finish` (admin); Core checks the one-time
+  `state` (10 min) and trades the code → tokens in
+  `memory/schwab_token.json` (0600, gitignored). `/api/schwab/callback`
+  (no bearer, same `state` check) is there if the app is ever registered with
+  Core's Tailscale HTTPS name instead. Access tokens
   refresh every 30 min; Schwab ends the login after 7 days regardless, so the
   monitor raises `schwab_login` a day before and when it lapses. Nick chose
   this over JARVIS logging in himself (2026-10-27): no Schwab password or 2FA
@@ -592,7 +597,7 @@ MEDIA_DOCTOR_STALL_MINUTES=30  # no torrent progress for this long counts as sta
 HOME_DASHBOARD_ENTITIES=    # comma-separated HA entity_ids for /api/home/entities
 SCHWAB_APP_KEY=             # JARVIS's own Schwab developer app (developer.schwab.com); empty = Schwab off
 SCHWAB_APP_SECRET=
-SCHWAB_CALLBACK_URL=https://nick-jarvis.tailbb082d.ts.net/api/schwab/callback
+SCHWAB_CALLBACK_URL=https://127.0.0.1:8182   # exactly what the Schwab app has registered
 SCHWAB_POLL_SECONDS=30      # holdings/cash refresh in market hours (prices stream live regardless)
 JARVIS_THEME=arc            # arc | markIII | hotRod: default look until someone picks one on the phone or TV (then memory/theme.json via /api/theme)
 CALENDAR_CATEGORIES=        # calendar name=category pairs, ';'-separated (e.g. Oil/Boil Outs=work);
@@ -668,8 +673,10 @@ CALENDAR_ALERT_LEAD_MIN=10  # warn this many minutes before a meeting
   `/api/portfolio`, `/api/schwab/login` + `/callback`, `portfolio_summary`.
   Phone: Home portfolio card (value, today, yesterday, cash, "Live" when the
   streamer is up) and Settings > Charles Schwab (link status, Log in). TV: a
-  live line under the weather. Built and tested against fakes only; waiting
-  on Schwab to approve JARVIS's app. Trading is the next step (see
+  live line under the weather. iOS 2.6 / build 108: login moved into an
+  in-app web view that catches Schwab's redirect to the app's registered
+  `https://127.0.0.1:8182` and hands it to `/api/schwab/finish` (Safari +
+  Tailscale callback was refused: the app's callback didn't match). Trading is the next step (see
   FUTURE_SESSIONS.md).
 - **Wake-up schedule, no fade, snooze; one theme everywhere (TV 6.5, iOS 2.4 /
   build 106)** — the wake-up is a weekly schedule with its own time per day

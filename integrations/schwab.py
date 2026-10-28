@@ -1,10 +1,13 @@
 """Charles Schwab, read-only: Nick's portfolio, live.
 
 JARVIS's own Schwab developer app (``SCHWAB_APP_KEY`` / ``SCHWAB_APP_SECRET``,
-callback ``SCHWAB_CALLBACK_URL``, the Optiplex's Tailscale HTTPS name). Nick
-links it from the companion (Settings > Charles Schwab > Log in): Core hands
-the phone Schwab's login page, Schwab redirects back to
-``/api/schwab/callback`` with a code, Core trades it for tokens. Schwab's
+callback ``SCHWAB_CALLBACK_URL``, registered as ``https://127.0.0.1:8182``).
+Nick links it from the companion (Settings > Charles Schwab > Log in): Core
+hands the app Schwab's login page, which the app opens in its own web view;
+when Schwab redirects to the callback (nothing listens there) the app catches
+the address and posts it to ``/api/schwab/finish``, and Core trades the code
+for tokens. A callback on Core itself (``/api/schwab/callback``) works too if
+the app is ever registered with Core's Tailscale HTTPS name. Schwab's
 refresh token dies after 7 days whatever we do, so the runtime monitor asks
 Nick to tap Log in again a day before; his password never touches Core.
 
@@ -26,7 +29,7 @@ import secrets
 import threading
 import time
 from typing import Any
-from urllib.parse import urlencode
+from urllib.parse import parse_qs, urlencode, urlparse
 from zoneinfo import ZoneInfo
 
 import requests
@@ -128,6 +131,15 @@ def finish_login(code: str, state: str) -> None:
                   "expires_at": now + float(data.get("expires_in", 1800)), "refresh_issued_at": now})
     with _lock:
         _state["error"] = ""
+
+
+def finish_from_redirect(redirect_url: str) -> None:
+    """Where Schwab tried to send the browser (``<callback>?code=...&state=...``)."""
+    query = parse_qs(urlparse(redirect_url).query)
+    code, state = query.get("code", [""])[0], query.get("state", [""])[0]
+    if not code:
+        raise ValueError("That address has no Schwab code in it.")
+    finish_login(code, state)
 
 
 def unlink() -> None:

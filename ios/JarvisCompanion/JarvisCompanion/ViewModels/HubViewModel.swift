@@ -295,15 +295,6 @@ final class HubViewModel: ObservableObject {
         await load(\.portfolio) { try await $0.portfolio() }
     }
 
-    func schwabLoginURL() async -> URL? {
-        do {
-            return try await client().schwabLoginURL()
-        } catch {
-            actionError = error.localizedDescription
-            return nil
-        }
-    }
-
     // MARK: - Maintenance
 
     /// An older Core without /api/maintenance just never shows the card.

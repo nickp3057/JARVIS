@@ -496,12 +496,33 @@ def portfolio(_: None = _status_read) -> dict[str, object]:
 
 @app.post("/api/schwab/login")
 def schwab_login(_: None = Depends(authorize)) -> dict[str, object]:
-    """Schwab's login page for the phone to open in Safari."""
+    """Schwab's login page for the app's web view, and the callback address
+    to catch (the app hands that redirect to /api/schwab/finish)."""
     from integrations import schwab
     try:
-        return {"url": schwab.login_url()}
+        return {"url": schwab.login_url(), "callback": os.getenv("SCHWAB_CALLBACK_URL", "").strip()}
     except RuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+
+class SchwabFinishRequest(BaseModel):
+    redirect_url: str = Field(min_length=1, max_length=4_000)
+
+
+@app.post("/api/schwab/finish")
+def schwab_finish(request: SchwabFinishRequest, _: None = Depends(authorize)) -> dict[str, object]:
+    """The redirect the app caught after Schwab's login (code + state)."""
+    from integrations import schwab
+    try:
+        schwab.finish_from_redirect(request.redirect_url)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except Exception as exc:  # noqa: BLE001 - Schwab refused the code
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    threading.Thread(target=runtime, daemon=True).start()  # monitors pick it up
+    return {"linked": True}
 
 
 def _schwab_page(title: str, body: str, status_code: int = 200) -> HTMLResponse:
