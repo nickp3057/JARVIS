@@ -652,15 +652,35 @@ def _home_entities_uncached() -> dict[str, Any]:
         if entity is None:
             continue
         attributes = entity.get("attributes", {}) or {}
-        entities.append(
-            {
-                "entity_id": entity_id,
-                "friendly_name": str(attributes.get("friendly_name", entity_id)),
-                "domain": entity_id.split(".", 1)[0] if "." in entity_id else "",
-                "state": str(entity.get("state", "unknown")),
-            }
-        )
-    return {"error": "", "entities": entities}
+        item = {
+            "entity_id": entity_id,
+            "friendly_name": str(attributes.get("friendly_name", entity_id)),
+            "domain": entity_id.split(".", 1)[0] if "." in entity_id else "",
+            "state": str(entity.get("state", "unknown")),
+        }
+        if entity_id.startswith("light."):
+            item["light"] = _light_details(attributes)
+        entities.append(item)
+    # The iPad's night screen dims only after dark (sun.sun), lights all off.
+    sun = by_id.get("sun.sun")
+    return {"error": "", "entities": entities, "sun": str(sun.get("state", "")) if sun else ""}
+
+
+def _light_details(attributes: dict[str, Any]) -> dict[str, Any]:
+    """What a light can do and where it is now, for the brightness/colour sheet."""
+    modes = [str(m) for m in attributes.get("supported_color_modes") or []]
+    brightness = attributes.get("brightness")
+    rgb = attributes.get("rgb_color")
+    return {
+        "dimmable": any(m != "onoff" for m in modes),
+        "color": any(m in ("hs", "rgb", "rgbw", "rgbww", "xy") for m in modes),
+        "temperature": "color_temp" in modes,
+        "brightness_pct": round(brightness * 100 / 255) if isinstance(brightness, (int, float)) else None,
+        "rgb": list(rgb)[:3] if isinstance(rgb, (list, tuple)) else None,
+        "kelvin": attributes.get("color_temp_kelvin"),
+        "min_kelvin": attributes.get("min_color_temp_kelvin"),
+        "max_kelvin": attributes.get("max_color_temp_kelvin"),
+    }
 
 
 # --- Quick actions (guarded, allowlist-bound) -------------------------------
@@ -694,6 +714,27 @@ def home_control(entity_id: str, action: str) -> dict[str, Any]:
 
     invalidate("entities")
     return {"error": "", "entity_id": entity_id, "state": _settled_state(entity_id, action)}
+
+
+def set_light(entity_id: str, brightness_pct: int | None = None,
+              rgb: list[int] | None = None, kelvin: int | None = None) -> dict[str, Any]:
+    """Brightness and/or colour for one allowlisted light (turns it on).
+    ValueError (a 400) for anything off the allowlist or not a light."""
+    entity_id = (entity_id or "").strip().lower()
+    if not entity_id.startswith("light.") or entity_id not in _dashboard_allowlist():
+        raise ValueError("entity_id is not an allowlisted light")
+    data: dict[str, Any] = {}
+    if brightness_pct is not None:
+        data["brightness_pct"] = max(1, min(100, int(brightness_pct)))
+    if rgb is not None:
+        data["rgb_color"] = [max(0, min(255, int(c))) for c in rgb[:3]]
+    elif kelvin is not None:
+        data["color_temp_kelvin"] = max(1500, min(9000, int(kelvin)))
+    message = call_discovered_service("light", "turn_on", entity_id=entity_id, service_data=data)
+    invalidate("entities")
+    if _HA_SUCCESS_MARKER not in message.lower():
+        return {"error": message, "entity_id": entity_id}
+    return {"error": "", "entity_id": entity_id}
 
 
 def home_scenes() -> dict[str, Any]:

@@ -797,6 +797,22 @@ def home_entities(_: None = Depends(authorize)) -> dict[str, object]:
     return status_hub.home_entities()
 
 
+class LightRequest(BaseModel):
+    entity_id: str = Field(min_length=7, max_length=200)
+    brightness_pct: int | None = Field(default=None, ge=1, le=100)
+    rgb: list[int] | None = Field(default=None, min_length=3, max_length=3)
+    kelvin: int | None = Field(default=None, ge=1500, le=9000)
+
+
+@app.post("/api/home/light")
+def home_light(request: LightRequest, _: None = Depends(authorize)) -> dict[str, object]:
+    """Brightness / colour for an allowlisted light (the iPad's light sheet)."""
+    try:
+        return status_hub.set_light(request.entity_id, request.brightness_pct, request.rgb, request.kelvin)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
 @app.get("/api/home/scenes")
 def home_scenes(_: None = Depends(authorize)) -> dict[str, object]:
     """Saved Home Assistant scenes for the app's scene picker."""

@@ -36,6 +36,8 @@ final class HubViewModel: ObservableObject {
     /// Schwab, read-only. Polled every tick: Core streams prices, so it moves.
     @Published var portfolio = Section<Portfolio>()
     @Published var scenes = Section<HomeScenes>()
+    /// `sun.sun` from the last entities read; the iPad's night screen uses it.
+    @Published var sun: String?
     /// The scene being run right now (its tile shows a spinner).
     @Published var runningScene: String?
     /// The study brief as JARVIS Core plans it; Settings shows the schedule.
@@ -230,8 +232,10 @@ final class HubViewModel: ObservableObject {
     }
 
     func refreshEntities() async {
-        await load(\.entities, serverError: { $0.error }, transform: { $0.entities }) {
-            try await $0.homeEntities()
+        await load(\.entities, serverError: { $0.error }, transform: { $0.entities }) { [weak self] in
+            let result = try await $0.homeEntities()
+            self?.sun = result.sun
+            return result
         }
     }
 
@@ -297,6 +301,21 @@ final class HubViewModel: ObservableObject {
     /// An older Core without /api/portfolio just never shows the card.
     func refreshPortfolio() async {
         await load(\.portfolio) { try await $0.portfolio() }
+    }
+
+    // MARK: - Light brightness and colour
+
+    /// Brightness and/or colour for one light; re-reads the room after.
+    func setLight(_ entity: HomeEntity, brightness: Int? = nil, rgb: [Int]? = nil, kelvin: Int? = nil) {
+        Task {
+            do {
+                let error = try await client().setLight(entity.entityID, brightness: brightness, rgb: rgb, kelvin: kelvin)
+                if !error.isEmpty { actionError = error }
+            } catch {
+                actionError = error.localizedDescription
+            }
+            await refreshEntities()
+        }
     }
 
     // MARK: - Scenes
@@ -572,12 +591,7 @@ final class HubViewModel: ObservableObject {
         guard var current = entities.value,
               let index = current.firstIndex(where: { $0.entityID == entityID })
         else { return }
-        current[index] = HomeEntity(
-            entityID: entityID,
-            friendlyName: current[index].friendlyName,
-            domain: current[index].domain,
-            state: state
-        )
+        current[index].state = state
         entities.value = current
     }
 

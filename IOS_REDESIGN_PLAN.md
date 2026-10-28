@@ -22,8 +22,10 @@ Check these on the phone first. Some of the "weird" may already be gone.
 - Tapping the wake-up push opens `WakeRingingView` (Snooze / I'm up).
 - iPad: a **Room** tab (default on iPad) — clock, next alarm/event, TV
   remote, keep-screen-on, big device tiles, scenes. No camera/security yet
-  (Nick, 2026-10-28). Later: brightness/colour on long-press (needs a Core
-  endpoint beyond on/off), music card, StandBy-style night dimming.
+  (Nick, 2026-10-28). 4.8 adds long-press brightness/colour (`LightSheet`)
+  and the night screen (black + brightness 0 after dark with the lights off).
+  Later: the same light sheet on the phone's Home tab, a music card, effects
+  (the Govee scenes HA lists in `effect_list`).
 - Next: an iOS Home Screen / Control Center widget for scenes (needs a
   widget extension target and an App Group for the server address/token).
 

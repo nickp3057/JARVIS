@@ -5,6 +5,14 @@ import UIKit
 /// next on one side; big light/switch tiles and the Home Assistant scenes
 /// (picked like Focus modes) on the other. Side by side in landscape,
 /// stacked in portrait (iPad mini). Same Core calls as the phone's Home tab.
+/// Long-press a light for brightness and colour (`LightSheet`).
+///
+/// Night screen: with Keep screen on, after dark (HA's `sun.sun`) and every
+/// light (and lamp) off for 45 s, the screen goes black at its lowest
+/// brightness, so the iPad isn't a night light. Any light coming on, sunrise,
+/// or a tap brings it back; a tap with the room still dark sleeps again 45 s
+/// later. iPads don't let apps read their light sensor, so the room's own
+/// lights stand in for it.
 struct RoomView: View {
     @EnvironmentObject private var settings: AppSettings
     @ObservedObject var model: HubViewModel
@@ -14,6 +22,11 @@ struct RoomView: View {
     @State private var showingRemote = false
     @State private var showingWake = false
     @State private var holdsPolling = false
+    @State private var lightSheet: String?
+    @AppStorage("room.nightScreen") private var nightScreen = true
+    @State private var asleep = false
+    /// The screen's brightness before the night screen, to put back.
+    @State private var savedBrightness: CGFloat?
 
     var body: some View {
         GeometryReader { geo in
@@ -39,6 +52,26 @@ struct RoomView: View {
         .sheet(isPresented: $showingWake) {
             NavigationStack { WakeScheduleView() }
         }
+        .sheet(item: Binding(get: { lightSheet.map(SheetID.init) }, set: { lightSheet = $0?.id })) { item in
+            LightSheet(model: model, entityID: item.id)
+        }
+        .fullScreenCover(isPresented: $asleep) {
+            // Black; a tap is the only thing on it.
+            Color.black.ignoresSafeArea()
+                .contentShape(Rectangle())
+                .onTapGesture { asleep = false }
+                .accessibilityLabel("Night screen. Tap to wake.")
+        }
+        .transaction { $0.disablesAnimations = asleep }
+        .task(id: "\(roomIsDark)-\(asleep)") {
+            if roomIsDark && !asleep {
+                try? await Task.sleep(for: .seconds(45))
+                if !Task.isCancelled, roomIsDark { asleep = true }
+            } else if !roomIsDark && asleep {
+                asleep = false
+            }
+        }
+        .onChange(of: asleep) { _, sleeping in setDimmed(sleeping) }
         .task {
             if !holdsPolling {
                 holdsPolling = true
@@ -59,9 +92,37 @@ struct RoomView: View {
                 model.releasePolling()
             }
             UIApplication.shared.isIdleTimerDisabled = false
+            asleep = false
+            setDimmed(false)
+        }
+        .onChange(of: scenePhase) { _, phase in
+            if phase != .active { asleep = false; setDimmed(false) }
         }
         .onAppear { UIApplication.shared.isIdleTimerDisabled = keepAwake }
         .onChange(of: keepAwake) { _, on in UIApplication.shared.isIdleTimerDisabled = on }
+    }
+
+    private struct SheetID: Identifiable { let id: String }
+
+    /// After dark with every light and lamp off (and Keep screen on).
+    private var roomIsDark: Bool {
+        guard keepAwake, nightScreen, scenePhase == .active, model.sun == "below_horizon",
+              let entities = model.entities.value, model.entities.failureText == nil else { return false }
+        let sources = entities.filter { $0.domain == "light" || $0.friendlyName.lowercased().contains("lamp") }
+        return !sources.isEmpty && sources.allSatisfy { !(model.pendingEntityStates[$0.entityID] ?? $0.isOn) }
+    }
+
+    /// The app may set the screen's brightness while it's in front; put it
+    /// back whenever the night screen ends or the app leaves.
+    private func setDimmed(_ dim: Bool) {
+        guard let screen = (UIApplication.shared.connectedScenes.first as? UIWindowScene)?.screen else { return }
+        if dim {
+            if savedBrightness == nil { savedBrightness = screen.brightness }
+            screen.brightness = 0
+        } else if let saved = savedBrightness {
+            screen.brightness = saved
+            savedBrightness = nil
+        }
     }
 
     private func refresh() async {
@@ -107,6 +168,10 @@ struct RoomView: View {
             Toggle("Keep screen on", isOn: $keepAwake)
                 .tint(JarvisTheme.cyan)
                 .font(.subheadline)
+            Toggle("Dark at night when the lights are off", isOn: $nightScreen)
+                .tint(JarvisTheme.cyan)
+                .font(.subheadline)
+                .disabled(!keepAwake)
         }
         .roomPanel()
     }
@@ -188,7 +253,7 @@ struct RoomView: View {
                         .font(.headline)
                         .lineLimit(2, reservesSpace: true)
                         .multilineTextAlignment(.leading)
-                    Text(entity.isToggleable ? (on ? "On" : "Off") : entity.state.capitalized)
+                    Text(statusText(entity, on: on))
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                 }
@@ -202,9 +267,19 @@ struct RoomView: View {
         }
         .buttonStyle(CockpitButtonStyle())
         .disabled(!entity.isToggleable || pending != nil)
+        .simultaneousGesture(LongPressGesture(minimumDuration: 0.45).onEnded { _ in
+            if entity.light?.dimmable == true { lightSheet = entity.entityID }
+        })
         .sensoryFeedback(.impact(weight: .light), trigger: on)
         .accessibilityLabel(entity.friendlyName)
         .accessibilityValue(on ? "On" : "Off")
+    }
+
+    private func statusText(_ entity: HomeEntity, on: Bool) -> String {
+        guard entity.isToggleable else { return entity.state.capitalized }
+        guard on else { return "Off" }
+        if let pct = entity.light?.brightnessPct { return "On · \(pct)%" }
+        return "On"
     }
 
     private static func symbol(for entity: HomeEntity) -> String {

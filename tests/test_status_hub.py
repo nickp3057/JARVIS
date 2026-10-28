@@ -288,7 +288,7 @@ class StatusHubEndpointTests(unittest.TestCase):
             body = self.client.get("/api/home/entities", headers=self.headers).json()
         self.assertEqual(body["error"], "")
         self.assertEqual(
-            body["entities"],
+            [{k: v for k, v in e.items() if k != "light"} for e in body["entities"]],
             [{"entity_id": "light.desk", "friendly_name": "Desk Lamp",
               "domain": "light", "state": "on"}],
         )

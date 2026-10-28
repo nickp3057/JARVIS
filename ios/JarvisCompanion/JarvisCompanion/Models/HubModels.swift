@@ -335,19 +335,24 @@ struct ServiceLink: Decodable, Identifiable {
 struct HomeEntities: Decodable {
     let error: String
     let entities: [HomeEntity]
+    /// `sun.sun`'s state ("below_horizon" after dark); nil from an older Core.
+    let sun: String?
 }
 
 struct HomeEntity: Decodable, Identifiable {
     let entityID: String
     let friendlyName: String
     let domain: String
-    let state: String
+    var state: String
+    /// Lights only: what it can do and where it is (brightness/colour sheet).
+    var light: LightDetails? = nil
 
-    init(entityID: String, friendlyName: String, domain: String, state: String) {
+    init(entityID: String, friendlyName: String, domain: String, state: String, light: LightDetails? = nil) {
         self.entityID = entityID
         self.friendlyName = friendlyName
         self.domain = domain
         self.state = state
+        self.light = light
     }
 
     var id: String { entityID }
@@ -356,9 +361,27 @@ struct HomeEntity: Decodable, Identifiable {
     var isToggleable: Bool { state == "on" || state == "off" }
 
     enum CodingKeys: String, CodingKey {
-        case domain, state
+        case domain, state, light
         case entityID = "entity_id"
         case friendlyName = "friendly_name"
+    }
+}
+
+struct LightDetails: Decodable, Equatable {
+    let dimmable: Bool
+    let color: Bool
+    let temperature: Bool
+    let brightnessPct: Int?
+    let rgb: [Int]?
+    let kelvin: Int?
+    let minKelvin: Int?
+    let maxKelvin: Int?
+
+    enum CodingKeys: String, CodingKey {
+        case dimmable, color, temperature, rgb, kelvin
+        case brightnessPct = "brightness_pct"
+        case minKelvin = "min_kelvin"
+        case maxKelvin = "max_kelvin"
     }
 }
 

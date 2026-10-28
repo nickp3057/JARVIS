@@ -35,3 +35,36 @@ class HomeScenesTests(unittest.TestCase):
             call.assert_called_once_with("scene", "turn_on", entity_id="scene.movie")
             with self.assertRaises(ValueError):
                 status_hub.activate_scene("scene.barn_door_before")
+
+
+class LightControlTests(unittest.TestCase):
+    def setUp(self) -> None:
+        status_hub.invalidate("entities")
+        env = patch.dict("os.environ", {"HOME_DASHBOARD_ENTITIES": "light.desk,switch.lamp"})
+        env.start()
+        self.addCleanup(env.stop)
+
+    def test_entities_carry_light_details_and_sun(self) -> None:
+        states = [
+            {"entity_id": "light.desk", "state": "on", "attributes": {
+                "friendly_name": "Desk", "supported_color_modes": ["color_temp", "rgb"],
+                "brightness": 128, "rgb_color": [255, 0, 0], "min_color_temp_kelvin": 2000}},
+            {"entity_id": "switch.lamp", "state": "off", "attributes": {}},
+            {"entity_id": "sun.sun", "state": "below_horizon", "attributes": {}},
+        ]
+        with patch.object(status_hub, "get_states", return_value=(True, states)):
+            result = status_hub.home_entities()
+        self.assertEqual(result["sun"], "below_horizon")
+        light = result["entities"][0]["light"]
+        self.assertEqual((light["dimmable"], light["color"], light["brightness_pct"], light["rgb"]),
+                         (True, True, 50, [255, 0, 0]))
+        self.assertNotIn("light", result["entities"][1])
+
+    def test_set_light_only_allowlisted_lights(self) -> None:
+        with patch.object(status_hub, "call_discovered_service", return_value="Turn On command sent.") as call:
+            self.assertEqual(status_hub.set_light("light.desk", 40, kelvin=2700)["error"], "")
+        call.assert_called_once_with("light", "turn_on", entity_id="light.desk",
+                                     service_data={"brightness_pct": 40, "color_temp_kelvin": 2700})
+        for bad in ("switch.lamp", "light.kitchen"):
+            with self.assertRaises(ValueError):
+                status_hub.set_light(bad, 50)

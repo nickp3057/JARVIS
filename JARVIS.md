@@ -729,6 +729,19 @@ CALENDAR_ALERT_LEAD_MIN=10  # warn this many minutes before a meeting
   Resume (tested on a movie and an episode). Plex keeps Nick signed in, so
   the PIN auto-entry (`PlexAutoLogin.run`) is removed; `PlexWatch` keeps
   pressing Watch for "play ..." voice requests.
+- **Light brightness/colour and the iPad night screen (iOS 4.8 / build 130)**
+  — `/api/home/entities` now gives each light a `light` block (dimmable,
+  color, temperature, brightness_pct, rgb, kelvin, min/max kelvin) and the
+  payload carries `sun` (`sun.sun`'s state). `POST /api/home/light
+  {entity_id, brightness_pct?, rgb?, kelvin?}` sets one allowlisted light
+  (`status_hub.set_light`). On the iPad, long-press a light tile for
+  `LightSheet`: brightness (sent when the finger lifts), whites within the
+  bulb's kelvin range, eight colours and a colour picker. Night screen
+  (Room tab, "Dark at night when the lights are off", needs Keep screen on):
+  after sunset with every light and lamp off for 45 s, a black full-screen
+  cover at brightness 0; a light coming on (seen within the 5 s poll),
+  sunrise, or a tap restores the saved brightness. iPads give apps no
+  ambient-light reading, so the room's lights stand in for one.
 - **iPad Room tab (iOS 4.7 / build 129)** — the same universal app; on an
   iPad (`UIDevice` idiom `.pad`) a **Room** tab comes first and is the
   default: big clock and date, next wake-up (opens the editor) and next

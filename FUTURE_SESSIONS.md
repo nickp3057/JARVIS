@@ -152,6 +152,11 @@ of each group.
   the Optiplex. Later: build a real `scene.good_morning` in HA (colours,
   brightness, maybe blinds) and set `WAKE_UP_SCENE`.
 - Schwab shows Live after the open (confirmed 2026-10-28).
+- **iPad (iOS 4.8 / build 130, not installed):** Room tab, long-press
+  light → brightness/colour, night screen. Untested on hardware: check the
+  night screen tonight (sun down, all lights off, wait 45 s; turn a light on
+  from the phone and it should wake within ~5 s) and that brightness comes
+  back after leaving the app. Needs the Optiplex pull for light details.
 - **Scenes decision (2026-10-28):** scenes live in Home Assistant; JARVIS
   runs them (app picker, voice, `WAKE_UP_SCENE`). JARVIS protocols only for
   things that also touch TV/theme/music. Next: a confirm-gated "save this as
