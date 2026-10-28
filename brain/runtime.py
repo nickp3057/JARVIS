@@ -1029,7 +1029,8 @@ class JarvisRuntime:
                 log.exception("Wake-up monitor failed")
                 alarm = None
             if alarm:
-                self.raise_alert("wake_up", "Good morning", wake_alarm.describe(alarm),
+                music = alarm["label"] or ("your music" if alarm["music"] else "whatever Spotify last played")
+                self.raise_alert("wake_up", "Good morning", f"Wake-up at {alarm['time']} with {music}.",
                                  source="wake-up", severity="info", push=False,
                                  context={"music": alarm["music"], "volume": alarm["volume"],
                                           "label": alarm.get("label", "")})

@@ -1,5 +1,6 @@
 """Wake-up alarm: parsing, scheduling, once-a-day firing and the tools."""
 from datetime import datetime
+import json
 from pathlib import Path
 import tempfile
 import unittest
@@ -30,6 +31,7 @@ class WakeAlarmTests(unittest.TestCase):
             "spotify:playlist:37i9dQZF1DX0UrRvztWcAU")
         self.assertEqual(wake_alarm.normalize_music("resume"), "")
         self.assertEqual(wake_alarm.normalize_music("Back in Black AC/DC"), "search:Back in Black AC/DC")
+        self.assertEqual(wake_alarm.normalize_music("search:Back in Black"), "search:Back in Black")
 
     def test_fires_once_in_its_window_on_its_days(self) -> None:
         wake_alarm.set_alarm("7:00am", "weekdays")
@@ -42,28 +44,60 @@ class WakeAlarmTests(unittest.TestCase):
         self.assertEqual(wake_alarm.next_time(wake_alarm.load(), datetime(2026, 10, 30, 8, 0)),
                          datetime(2026, 11, 2, 7, 0))
 
-    def test_in_three_minutes_is_a_one_off(self) -> None:
+    def test_each_day_keeps_its_own_time(self) -> None:
+        wake_alarm.set_alarm("6:30am", "weekdays", music="Back in Black")
+        wake_alarm.set_alarm("8", "tue,thu")
+        wake_alarm.set_alarm("9:15", "saturday", volume=20)
+        data = wake_alarm.load()
+        self.assertEqual(data["times"], ["06:30", "08:00", "06:30", "08:00", "06:30", "09:15", None])
+        self.assertEqual((data["label"], data["volume"]), ("Back in Black", 20))  # music kept
+        self.assertIn("6:30 AM Mon, Wed, Fri; 8:00 AM Tue, Thu; 9:15 AM Sat", wake_alarm.describe())
+        friday_night = datetime(2026, 10, 30, 22, 0)
+        self.assertEqual(wake_alarm.public(friday_night)["time"], "09:15")
+        self.assertEqual(wake_alarm.public(friday_night)["days"], "Tomorrow")
+        self.assertEqual(wake_alarm.next_time(data, datetime(2026, 10, 31, 10, 0)), datetime(2026, 11, 2, 6, 30))
+        self.assertTrue(wake_alarm.cancel("weekends"))
+        self.assertIsNone(wake_alarm.load()["times"][5])
+        self.assertIsNotNone(wake_alarm.load()["times"][1])
+
+    def test_in_three_minutes_is_a_one_off_beside_the_schedule(self) -> None:
         now = datetime(2026, 10, 27, 18, 55)
+        wake_alarm.set_alarm("7:00", "weekdays", music="Morning Acoustic")
         data = wake_alarm.set_alarm("in 3 minutes", music="Back in Black", now=now)
-        self.assertEqual((data["time"], data["once"], data["label"]), ("18:58", True, "Back in Black"))
-        self.assertEqual(wake_alarm.public(now)["days"], "once")
-        self.assertIsNotNone(wake_alarm.due(datetime(2026, 10, 27, 18, 58, 10)))
-        self.assertIsNone(wake_alarm.public())  # done after it goes off
-        self.assertIsNone(wake_alarm.due(datetime(2026, 11, 3, 18, 58, 10)))
-        self.assertEqual(wake_alarm.set_alarm("in 2 hours", now=now)["time"], "20:55")
+        self.assertEqual(data["once"]["at"], "2026-10-27T18:58")
+        self.assertEqual(data["times"][1], "07:00")  # the schedule is untouched
+        self.assertEqual(wake_alarm.public(now)["label"], "Back in Black")
+        fired = wake_alarm.due(datetime(2026, 10, 27, 18, 58, 10))
+        self.assertEqual((fired["music"], fired["label"]), ("search:Back in Black", "Back in Black"))
+        self.assertIsNone(wake_alarm.load()["once"])  # gone after it goes off
+        self.assertEqual(wake_alarm.public(now)["label"], "Morning Acoustic")
+        self.assertEqual(wake_alarm.set_alarm("in 2 hours", now=now)["once"]["at"], "2026-10-27T20:55")
         late = wake_alarm.set_alarm("6:00am", "once", now=now)
-        self.assertEqual(late["days"], [2])  # tomorrow, Wednesday
+        self.assertEqual(late["once"]["at"], "2026-10-28T06:00")  # tomorrow
+        self.assertTrue(wake_alarm.cancel("once"))
+        self.assertIsNone(wake_alarm.load()["once"])
+
+    def test_paused_schedule_and_old_file_migrate(self) -> None:
+        wake_alarm._FILE.write_text(json.dumps({
+            "time": "06:45", "days": [0, 1, 2, 3, 4], "once": False, "music": "search:Back in Black",
+            "label": "Back in Black", "volume": 30, "enabled": True, "last_fired": "2026-10-27"}))
+        data = wake_alarm.load()
+        self.assertEqual(data["times"], ["06:45"] * 5 + [None, None])
+        self.assertEqual(data["label"], "Back in Black")
+        wake_alarm.set_schedule(data["times"], "resume", enabled=False)
+        self.assertIsNone(wake_alarm.public(datetime(2026, 10, 27, 5, 0)))
+        self.assertIsNone(wake_alarm.due(datetime(2026, 10, 27, 6, 46)))
+        self.assertIn("(paused)", wake_alarm.describe())
 
     def test_tools(self) -> None:
         reply = tools.execute_tool("set_wake_up", {
             "time": "6:30am", "days": "weekdays", "label": "Morning Acoustic",
             "music": "https://open.spotify.com/playlist/37i9dQZF1DX0UrRvztWcAU"})
-        self.assertIn("6:30 AM, weekdays, with Morning Acoustic", reply)
-        self.assertEqual(wake_alarm.public()["days"], "weekdays")
+        self.assertIn("6:30 AM weekdays, with Morning Acoustic", reply)
         self.assertIn("with chill vibes", tools.execute_tool("set_wake_up", {"time": "7", "music": "chill vibes"}))
+        self.assertIn("cancelled for sunday", tools.execute_tool("cancel_wake_up", {"days": "sunday"}))
         self.assertIn("cancelled", tools.execute_tool("cancel_wake_up", {}))
         self.assertIsNone(wake_alarm.public())
-
 
 if __name__ == "__main__":
     unittest.main()

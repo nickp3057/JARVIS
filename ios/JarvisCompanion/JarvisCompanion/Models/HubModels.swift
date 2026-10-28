@@ -522,3 +522,31 @@ struct MaintenanceTaskDraft: Encodable {
         }
     }
 }
+
+/// The TV wake-up schedule (`GET`/`PUT /api/wake`): a time or none for each
+/// weekday, Monday first, plus what plays. `onceAt` is a one-off set by
+/// talking to JARVIS ("in 3 minutes"); the editor shows it but leaves it be.
+struct WakeSchedule: Decodable, Equatable {
+    var times: [String?]
+    var music: String
+    var label: String
+    var volume: Int
+    var enabled: Bool
+    var onceAt: String?
+    var nextAt: Double?
+    var summary: String
+
+    enum CodingKeys: String, CodingKey {
+        case times, music, label, volume, enabled, summary
+        case onceAt = "once_at"
+        case nextAt = "next_at"
+    }
+}
+
+struct WakeScheduleDraft: Encodable {
+    var times: [String?]
+    var music: String
+    var label: String
+    var volume: Int
+    var enabled: Bool
+}

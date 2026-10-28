@@ -313,8 +313,8 @@ runtime knows, the more JARVIS feels like one mind instead of several scripts.
 
 ## Runtime Monitor Settings
 
-- Wake-up monitor: always on; idle unless `set_wake_up` saved an alarm
-  (`brain/wake_alarm.py`). Publishes `wake_up` (`push=False`) for the TV.
+- Wake-up monitor: always on; idle unless the wake-up schedule or a one-off
+  is set (`brain/wake_alarm.py`). Publishes `wake_up` (`push=False`) for the TV.
 
 - `HOME_MONITOR_ENABLED`: true/false, defaults to true.
 - `HOME_MONITOR_INTERVAL_S`: polling interval in seconds, defaults to 20.
@@ -351,7 +351,8 @@ call `raise_alert`, not `notifications.send`.
 Clients other than the iOS companion use their own scoped tokens
 (`app/client_tokens.py`, hashed in `memory/client_tokens.json`):
 `events:read` for the stream, `status:read` for the read-only `/api/status/*`
-and `/api/now` endpoints. Everything else stays admin-only
+and `/api/now` endpoints, `chat` for `POST /chat`, and `settings:write` for
+the shared colour theme (`PUT /api/theme`). Everything else stays admin-only
 (`JARVIS_API_TOKEN`).
 
 - `JARVIS_WATCH_DEVICES`: comma-separated HA entity ids to watch; empty

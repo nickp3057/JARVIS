@@ -584,7 +584,7 @@ public class HomeActivity extends Activity {
     private void fillWake(JSONObject wake) {
         if (wake == null) {
             wakeTime.setText("Not set");
-            wakeDays.setText("Ask JARVIS");
+            wakeDays.setText("Set it in the app");
         } else {
             wakeTime.setText(wakeTime(wake.optString("time")));
             String label = wake.optString("label");

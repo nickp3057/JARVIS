@@ -38,12 +38,18 @@ every deploy, so edit the repo copy, not the TV's.
   the Assistant opened. Other speech that names a Plex title opens it in Plex.
 - **Music** (`Music`, `MediaListener`): Spotify's media session (read and
   controlled via an enabled NotificationListener; no Spotify API keys).
-- **Wake-up** (`Wake`): Core's `set_wake_up` tool saves an alarm (clock time
-  or "in 3 minutes"; music is a name Spotify searches, a link, or resume); at
-  the time Core publishes a `wake_up` event; the TV turns on, goes home and
-  plays through Spotify's media session (`playFromSearch` / `playFromUri`),
-  so Spotify never takes the screen unless it hasn't run since boot, then
-  fades volume in over 90 s. The last alarm handled is kept in prefs
+- **Wake-up** (`Wake`, `WakeActivity`): Core keeps a weekly schedule (its
+  own time per weekday, edited in the phone's Settings > Wake-up or by
+  asking JARVIS) plus an optional one-off ("in 3 minutes"); music is a name
+  Spotify searches, a link, or resume. At the time Core publishes a
+  `wake_up` event; the TV turns on, goes home and plays through Spotify's
+  media session (`playFromSearch` / `playFromUri`), so Spotify never takes
+  the screen unless it hasn't run since boot. Volume goes straight to the
+  alarm's level (no fade: Nick didn't like it creeping up), then
+  `WakeActivity` shows the time with **I'm up** (closes; music plays on;
+  Back does the same) and **Snooze 9 min** (pauses, then `Wake.run` again,
+  resuming the song). The snooze is a main-looper Handler, so it's lost if
+  the TV is switched off meanwhile. The last alarm handled is kept in prefs
   (`last_wake_at`): a replay after a restart must never wake Nick twice.
 - **Easter egg** (`Beat`): while "Back in Black" plays, the reactor bounces,
   flares and spins with the audio (output-mix Visualizer, RECORD_AUDIO
@@ -54,8 +60,13 @@ every deploy, so edit the repo copy, not the TV's.
   switched off, if it has been up 20 h+, it reboots with
   `svc power reboot quiescent` (stays dark, ~20 s). A plain `reboot` turns
   the screen ON; never use it at night.
-- **Settings** (`SettingsActivity`): theme (TV-local), read replies aloud,
-  show downloads, nightly refresh, wake-up info, then Android settings.
+- **Settings** (`SettingsActivity`): theme, read replies aloud, show
+  downloads, nightly refresh, next wake-up, then Android settings. The theme
+  is shared: the TV `PUT`s `/api/theme` (token scope `settings:write`) and
+  the phone follows; `/api/glance`'s `theme` carries the phone's picks back.
+  If the token can't write (provisioned before 6.5), the pick stays TV-only
+  (`theme_override` pref) and is shared on the first refresh after
+  `tv/provision.sh` is re-run.
 - **Debloat** (`BootCleanup`): firmware restores some TCL apps every boot;
   the launcher removes them again via self-adb. `tv/restore.sh` undoes it all.
 

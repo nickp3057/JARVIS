@@ -168,10 +168,8 @@ of each group.
   **v1 shipped 2026-10-27** (`tv/`, see JARVIS.md "JARVIS TV"): native
   launcher (the existing `com.tvhome`, decision 1), TCL G10 / Android 12
   (decision 4), glance + app row + live alert banners + the no-sound fix.
-  Waiting on Nick: run `tv/provision.sh` at home (the token is a write on the
-  Optiplex). Next: theme choice synced from the phone (today it's
-  `JARVIS_THEME` in Core's `.env`; the phone keeps its own local pick),
-  media (continue watching / recently added), then v2.
+  Provisioned and live since 2026-10-27. Next: media (continue watching /
+  recently added), then v2.
 
   **Pinned by Nick 2026-10-27 (next TV session)**
   - [x] (6.0) A JARVIS settings page in front of Android Settings (the Settings
@@ -183,10 +181,16 @@ of each group.
   - [x] (6.0) Drop the time after "CORE ONLINE" in the footer (keep "LAST SEEN
     <time>" when Core is unreachable).
   - [x] Hotschedules shifts stay on the calendar (Nick, 2026-10-27).
-  - [ ] Theme choice saved on Core (a settings scope) so the phone follows;
-    today it's TV-local.
+  - [x] (6.5) Theme choice saved on Core (`settings:write` scope) so the phone
+    and TV follow one pick.
+  - [x] (6.5) Wake-up schedule with its own time per day, edited in the phone
+    app; no fade-in; I'm up / Snooze 9 min on the TV.
   - [ ] Prove the wake-up from deep standby on a real morning (the Core
     event should wake the TV over the network; TCL blocks app alarms).
+    Nick is testing 2026-10-28.
+  - [ ] Wake-up options Nick may want once he's lived with it ("idk what i
+    want yet"): snooze length, stop music on I'm up, a gentler start,
+    snooze from the phone.
 
   **Foundation**
   - [x] Boots straight into JARVIS; the remote's Home button always returns
@@ -204,10 +208,9 @@ of each group.
     needs a cable or the Play Store.
 
   **One JARVIS (cohesion with the phone)**
-  - [ ] Same themes (Arc / Mark III / Hot Rod), same reactor mark, same
-    fonts and wording; the theme choice lives on Core so phone and TV match.
-    (Palettes and reactor done; the choice is `JARVIS_THEME` on Core and the
-    phone doesn't write it yet.)
+  - [x] Same themes (Arc / Mark III / Hot Rod), same reactor mark, same
+    fonts and wording; the theme choice lives on Core so phone and TV match
+    (6.5: `/api/theme`, picked on either one).
   - [ ] Same persona: greetings, alerts and briefings in JARVIS's voice
     (ElevenLabs through Core), same phrasing as the phone.
   - [ ] Same data, same rules: to-dos, assessments (next 14 days),
@@ -224,9 +227,9 @@ of each group.
     over any app from the SSE stream).
   - [ ] Media: Plex continue-watching / recently added, downloads in
     progress (from Core's media status). (Downloads done, in Needs you.)
-  - [ ] App row: Plex, YouTube, Music, House, Settings. Nothing else.
-    (Plex and Settings today; Nick dropped YouTube and the inputs, the
-    remote has buttons for them. Music and House are v2/v3.)
+  - [x] App row: Plex, Spotify, Wake-up, Settings in the corner (6.0). Nick
+    dropped YouTube and the inputs (the remote has buttons for them). House
+    is v3.
 
   **Mornings**
   - [x] Wake-up: the TV turns on, music fades in at alarm time (6.0; the

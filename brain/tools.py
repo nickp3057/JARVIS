@@ -630,10 +630,11 @@ def _tool_watch_price(args: dict[str, Any]) -> str:
 
 def _tool_set_wake_up(args: dict[str, Any]) -> str:
     from brain.wake_alarm import describe, set_alarm
+    music = args.get("music")
     try:
         data = set_alarm(str(args.get("time", "")), args.get("days") or None,
-                         str(args.get("music") or ""), str(args.get("label") or ""),
-                         int(args.get("volume") or 30))
+                         None if music is None else str(music), str(args.get("label") or ""),
+                         int(args["volume"]) if args.get("volume") else None)
     except ValueError as exc:
         return f"{exc} No alarm was changed, sir."
     return "Done. " + describe(data)
@@ -644,9 +645,16 @@ def _tool_get_wake_up(_: dict[str, Any]) -> str:
     return describe()
 
 
-def _tool_cancel_wake_up(_: dict[str, Any]) -> str:
+def _tool_cancel_wake_up(args: dict[str, Any]) -> str:
     from brain.wake_alarm import cancel
-    return "Wake-up alarm cancelled, sir." if cancel() else "There was no wake-up alarm to cancel, sir."
+    days = str(args.get("days") or "").strip() or None
+    try:
+        removed = cancel(days)
+    except ValueError as exc:
+        return f"{exc} Nothing was cancelled, sir."
+    if not removed:
+        return "There was no wake-up to cancel there, sir."
+    return f"Wake-up cancelled for {days}, sir." if days else "Wake-up alarm cancelled, sir."
 
 
 def _tool_list_price_watches(_: dict[str, Any]) -> str:
@@ -1651,34 +1659,42 @@ _CUSTOM_TOOLS: list[dict[str, Any]] = [
     {
         "name": "set_wake_up",
         "description": (
-            "Set (or replace) Nick's wake-up alarm: at the time, the TV in his room turns on "
-            "and plays music from Spotify, fading in. One alarm only. time can be a clock time "
-            "or relative (\"in 3 minutes\", which makes a one-off). music is what to play: a "
-            "Spotify link/URI, or just the name (\"Back in Black AC/DC\", \"my Morning Acoustic "
-            "playlist\") and Spotify on the TV searches for it; empty resumes whatever Spotify "
-            "last played. Don't ask for a link."
+            "Put a time on Nick's wake-up schedule: at the time, the TV in his room turns on and "
+            "plays music from Spotify at the alarm volume, with I'm up / Snooze on screen. Each "
+            "weekday has its own time; setting some days leaves the other days' times alone "
+            "(\"6:30 weekdays\" then \"9 on Saturday\" keeps both). He can also edit the "
+            "schedule in the companion app's Wake-up screen. time can be a clock time or relative "
+            "(\"in 3 minutes\", which makes a one-off). music is what to play: a Spotify "
+            "link/URI, or just the name (\"Back in Black AC/DC\", \"my Morning Acoustic "
+            "playlist\") and Spotify on the TV searches for it; \"resume\" resumes whatever "
+            "Spotify last played; leave it out to keep the current music. Don't ask for a link."
         ),
         "input_schema": {
             "type": "object",
             "properties": {
                 "time": {"type": "string", "description": "e.g. 7:00am, 6:45, 19:30, in 3 minutes."},
                 "days": {"type": "string", "description": "every day (default for clock times), weekdays, weekends, names like mon,wed,fri, or once/tomorrow."},
-                "music": {"type": "string", "description": "Song/playlist/artist name, Spotify link/URI, or empty to resume."},
+                "music": {"type": "string", "description": "Song/playlist/artist name, Spotify link/URI, or 'resume'. Omit to keep the current music."},
                 "label": {"type": "string", "description": "Short name for the music, e.g. 'Morning Acoustic'."},
-                "volume": {"type": "integer", "minimum": 5, "maximum": 100, "description": "Volume it fades up to (default 30)."},
+                "volume": {"type": "integer", "minimum": 5, "maximum": 100, "description": "Volume the music plays at (default 30)."},
             },
             "required": ["time"],
         },
     },
     {
         "name": "get_wake_up",
-        "description": "Say when Nick's wake-up alarm is set for and what it plays.",
+        "description": "Say Nick's wake-up schedule (each day's time), any one-off, and what it plays.",
         "input_schema": {"type": "object", "properties": {}},
     },
     {
         "name": "cancel_wake_up",
-        "description": "Turn off Nick's wake-up alarm.",
-        "input_schema": {"type": "object", "properties": {}},
+        "description": "Turn off Nick's wake-up: some days (keeping the others), the one-off ('once'), or everything.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "days": {"type": "string", "description": "e.g. 'saturday', 'weekends', 'once'. Omit to cancel everything."},
+            },
+        },
     },
     # --- Guarded public-page price watching -----------------------------
     {

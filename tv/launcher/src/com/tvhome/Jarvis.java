@@ -53,12 +53,48 @@ final class Jarvis {
         return prefs(c).getBoolean(key, !SPEAK.equals(key)); // everything on but read-aloud
     }
 
-    /** The TV's theme: Nick's pick on the TV, else Core's JARVIS_THEME. */
+    /**
+     * The TV's theme: Core's shared pick (the phone's too), unless a pick on
+     * the TV couldn't be saved to Core (old token without settings:write).
+     */
     static Theme theme(Context c) {
         String pick = prefs(c).getString(THEME, "");
         if (!pick.isEmpty()) return Theme.named(pick);
         JSONObject g = cached(c);
         return Theme.named(g != null ? g.optString("theme") : "");
+    }
+
+    /**
+     * Blocking: save the theme on Core so the phone follows. True if Core took
+     * it; false keeps it as a TV-only override.
+     */
+    static boolean shareTheme(Context c, String theme) {
+        try {
+            HttpURLConnection conn = open(base(c), "/api/theme", token(c), 5000);
+            conn.setRequestMethod("PUT");
+            conn.setDoOutput(true);
+            conn.setRequestProperty("Content-Type", "application/json");
+            try {
+                try (java.io.OutputStream out = conn.getOutputStream()) {
+                    out.write(new JSONObject().put("theme", theme).toString().getBytes(StandardCharsets.UTF_8));
+                }
+                if (conn.getResponseCode() != 200) {
+                    Log.w(TAG, "theme not shared: HTTP " + conn.getResponseCode());
+                    return false;
+                }
+            } finally {
+                conn.disconnect();
+            }
+            JSONObject g = cached(c);
+            SharedPreferences.Editor edit = prefs(c).edit().remove(THEME);
+            if (g != null) edit.putString("glance", g.put("theme", theme).toString());
+            edit.apply();
+            notifyUpdated(c);
+            return true;
+        } catch (Exception e) {
+            Log.w(TAG, "theme not shared", e);
+            return false;
+        }
     }
 
     static boolean provisioned(Context c) {
@@ -125,6 +161,10 @@ final class Jarvis {
         prefs(c).edit().putString("glance", glance.toString())
                 .putLong("fetched_at", System.currentTimeMillis()).remove("failed_at").apply();
         notifyUpdated(c);
+        // A TV-only pick from before the token could write: share it once it can.
+        String pick = prefs(c).getString(THEME, "");
+        if (!pick.isEmpty() && !pick.equals(glance.optString("theme"))) shareTheme(c, pick);
+        else if (!pick.isEmpty()) prefs(c).edit().remove(THEME).apply();
         return glance;
     }
 

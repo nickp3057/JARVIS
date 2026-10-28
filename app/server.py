@@ -73,6 +73,8 @@ _COMPANION_CAPABILITIES: dict[str, object] = {
         "maintenance": True,
         "todos": True,
         "glance": True,
+        "wake_schedule": True,
+        "shared_theme": True,
     },
     "actions": {
         "home_on_off": True,
@@ -453,6 +455,52 @@ def todo_done(todo_id: str, _: None = Depends(authorize)) -> Response:
         raise HTTPException(status_code=404, detail="Unknown to-do")
     status_hub.invalidate("now")
     return Response(status_code=204)
+
+
+# --- Wake-up schedule (music on the TV; brain/wake_alarm.py) ---------------
+
+
+class WakeScheduleRequest(BaseModel):
+    times: list[str | None] = Field(min_length=7, max_length=7)
+    music: str = Field(default="", max_length=300)
+    label: str = Field(default="", max_length=80)
+    volume: int = Field(default=30, ge=5, le=100)
+    enabled: bool = True
+
+
+@app.get("/api/wake")
+def wake_get(_: None = Depends(authorize)) -> dict[str, object]:
+    from brain import wake_alarm
+    return wake_alarm.editor()
+
+
+@app.put("/api/wake")
+def wake_put(request: WakeScheduleRequest, _: None = Depends(authorize)) -> dict[str, object]:
+    from brain import wake_alarm
+    try:
+        wake_alarm.set_schedule(request.times, request.music, request.label, request.volume, request.enabled)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return wake_alarm.editor()
+
+
+# --- Shared colour theme (phone and TV follow one pick; brain/theme.py) -----
+
+
+class ThemeRequest(BaseModel):
+    theme: str = Field(pattern="^(arc|markIII|hotRod)$")
+
+
+@app.get("/api/theme")
+def theme_get(_: None = _status_read) -> dict[str, object]:
+    from brain import theme
+    return theme.current()
+
+
+@app.put("/api/theme")
+def theme_put(request: ThemeRequest, _: None = Depends(require_scope("settings:write"))) -> dict[str, object]:
+    from brain import theme
+    return theme.choose(request.theme)
 
 
 # --- Maintenance (recurring chores with a countdown and a log) -------------

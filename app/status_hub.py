@@ -67,7 +67,6 @@ _STORAGE_TTL_S = 30.0
 # library. Additions are rare, so they refresh far less often than the queue.
 _RECENT_TTL_S = 120.0
 _WEATHER_TTL_S = 600.0
-_THEMES = ("arc", "markIII", "hotRod")
 
 # Strip an API path suffix if one leaked into a base URL (e.g. ".../api/v2").
 _API_SUFFIX_RE = re.compile(r"/api(/v\d+)?/?$", re.IGNORECASE)
@@ -263,7 +262,7 @@ def glance_status() -> dict[str, Any]:
     weather, the Now feed, downloads in flight and alerts from the last day.
     Every section degrades on its own; the call itself never fails."""
     from brain import event_bus
-    theme = os.getenv("JARVIS_THEME", "arc").strip()
+    from brain import theme as shared_theme
     with ThreadPoolExecutor(max_workers=4) as pool:
         now = pool.submit(now_status)
         weather = pool.submit(weather_status)
@@ -287,7 +286,7 @@ def glance_status() -> dict[str, Any]:
     return {
         "generated_at": time.time(),
         "address": (os.getenv("ADDRESS") or "sir").strip() or "sir",
-        "theme": theme if theme in _THEMES else "arc",
+        "theme": shared_theme.current()["theme"],
         "weather": sections["weather"],
         "now": sections["now"],
         "events": sections["events"] if isinstance(sections["events"], list) else [],

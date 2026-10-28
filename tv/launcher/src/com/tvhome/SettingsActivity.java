@@ -18,7 +18,9 @@ import org.json.JSONObject;
 /**
  * JARVIS's own settings, in front of Android's: the choices made for Nick
  * that he may want to change. Each row is one press to change; Android
- * settings is the last row. Stored on the TV (Jarvis.prefs).
+ * settings is the last row. The theme is saved on Core so the phone follows
+ * (falls back to TV-only if the token lacks settings:write); the rest are
+ * stored on the TV (Jarvis.prefs).
  */
 public class SettingsActivity extends Activity {
     private static final String[] THEMES = {"arc", "markIII", "hotRod"};
@@ -27,6 +29,7 @@ public class SettingsActivity extends Activity {
     private Theme theme;
     private LinearLayout list;
     private int focusIndex;
+    private String themeNote = "Arc, Mark III or Hot Rod. Your phone follows.";
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -71,16 +74,25 @@ public class SettingsActivity extends Activity {
         for (int i = 0; i < THEMES.length; i++) if (THEMES[i].equals(current)) t = i;
         if (current.isEmpty()) t = indexOf(themeFromCore());
         final int next = (t + 1) % THEMES.length;
-        row("Colour theme", THEME_NAMES[t], "Arc, Mark III or Hot Rod, like the phone.", () -> {
+        row("Colour theme", THEME_NAMES[t], themeNote, () -> {
+            // Shown at once; Core (and with it the phone) catches up a moment later.
             Jarvis.prefs(this).edit().putString(Jarvis.THEME, THEMES[next]).apply();
             rebuild(0);
+            new Thread(() -> {
+                boolean shared = Jarvis.shareTheme(this, THEMES[next]);
+                runOnUiThread(() -> {
+                    themeNote = shared ? "Saved. Your phone follows."
+                            : "Saved on this TV only. Re-run tv/provision.sh to share it.";
+                    if (!isFinishing()) rebuild(0);
+                });
+            }, "theme").start();
         });
         toggle(1, "Read replies aloud", Jarvis.SPEAK,
                 "When you ask \"Jarvis, …\" on the remote. Better once his own voice is in.");
         toggle(2, "Show downloads", Jarvis.DOWNLOADS, "Downloads in the Systems card.");
         toggle(3, "Nightly sound refresh", Jarvis.REFRESH,
                 "Restarts the TV quietly after you switch it off, so sound never goes missing.");
-        row("Wake-up music", wakeText(), "Set or change it by asking JARVIS on your phone.", null);
+        row("Wake-up", wakeText(), "Set each day's time in the phone app, or ask JARVIS.", null);
         row("Android settings", "", "Wi-Fi, picture, sound, apps.",
                 () -> startActivity(new Intent(Settings.ACTION_SETTINGS)));
 
@@ -150,7 +162,7 @@ public class SettingsActivity extends Activity {
         JSONObject g = Jarvis.cached(this);
         JSONObject w = g != null ? g.optJSONObject("wake") : null;
         if (w == null) return "Not set";
-        return HomeActivity.wakeTime(w.optString("time")) + " · " + w.optString("days");
+        return w.optString("days") + " " + HomeActivity.wakeTime(w.optString("time"));
     }
 
     private TextView label(String text, int sp, int color) {

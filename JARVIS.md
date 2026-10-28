@@ -36,7 +36,7 @@ The character never breaks. It calls Nick "sir", uses dry British wit, answers i
 Pearson-Stark-Jarvis/
 ├── app/
 │   ├── main.py              Entry point. GUI / text / voice / server modes
-│   ├── client_tokens.py     Scoped per-client tokens (events:read, status:read, chat) + CLI; hashes in memory/client_tokens.json
+│   ├── client_tokens.py     Scoped per-client tokens (events:read, status:read, chat, settings:write) + CLI; hashes in memory/client_tokens.json
 │   └── server.py            Authenticated HTTP bridge for the iOS companion (+ /api/clients/events SSE)
 │
 ├── brain/
@@ -259,15 +259,22 @@ RMS envelope from ElevenLabs audio drives the orb in real time using a monotonic
 - `next_event` — the next upcoming calendar event
 
 ### Wake-up music *(new)*
-- `set_wake_up(time, days?, music?, label?, volume?)` — one alarm (time may be
-  "in 3 minutes", a one-off; music may be a song/playlist name)
-  (`brain/wake_alarm.py`, `memory/wake_alarm.json`): at the time the TV in
-  Nick's room turns on and plays Spotify, fading up to `volume` (default 30)
-  over 90 s. `music` is a Spotify link/URI (playlist, album, track, artist) or
-  empty to resume; JARVIS can't search Spotify, so he asks for a link.
-- `get_wake_up` / `cancel_wake_up`
-- Runtime wake monitor (every 20 s, fires once a day within 10 minutes of the
-  time) publishes a `wake_up` bus event with `push=False`; the TV acts on it.
+- `set_wake_up(time, days?, music?, label?, volume?)` — puts a time on the
+  weekly schedule for those days (other days keep their own times), or sets
+  the one-off ("in 3 minutes", days once/tomorrow)
+  (`brain/wake_alarm.py`, `memory/wake_alarm.json`, old one-alarm files
+  migrate on read). At the time the TV in Nick's room turns on and plays
+  Spotify at `volume` (default 30) straight away, no fade, with I'm up /
+  Snooze 9 min on screen. `music` is a Spotify link/URI, a name (stored as
+  `search:<words>`, Spotify plays the top hit), `resume`, or omitted to keep
+  the current music.
+- `get_wake_up` / `cancel_wake_up(days?)` (some days, `once`, or everything)
+- Companion editor: `GET`/`PUT /api/wake` (admin token) with `times` (7
+  entries, Monday first, `HH:MM` or null), `music`, `label`, `volume`,
+  `enabled` (pauses the schedule without losing it); the one-off is shown,
+  not edited.
+- Runtime wake monitor (every 20 s, fires each alarm once within 10 minutes of
+  its time) publishes a `wake_up` bus event with `push=False`; the TV acts on it.
 
 ### Price Watching
 - `watch_price(url, label?, target_price?)` — monitor structured price metadata
@@ -558,7 +565,7 @@ LINK_REMOTE_HOSTS=          # lan=tailscale host pairs; /api/links adds remote_u
 PLEX_TOKEN=                 # X-Plex-Token; enables the media doctor's "is it on Plex" stage and Plex rescan fix
 MEDIA_DOCTOR_STALL_MINUTES=30  # no torrent progress for this long counts as stalled (doctor + download monitor)
 HOME_DASHBOARD_ENTITIES=    # comma-separated HA entity_ids for /api/home/entities
-JARVIS_THEME=arc            # arc | markIII | hotRod: the TV's look, served in /api/glance
+JARVIS_THEME=arc            # arc | markIII | hotRod: default look until someone picks one on the phone or TV (then memory/theme.json via /api/theme)
 CALENDAR_CATEGORIES=        # calendar name=category pairs, ';'-separated (e.g. Oil/Boil Outs=work);
                             # unlisted names with school/family/work in them use that, else personal
 GLANCE_HIDDEN_CATEGORIES=work # categories left off the TV's Coming up list
@@ -627,6 +634,17 @@ CALENDAR_ALERT_LEAD_MIN=10  # warn this many minutes before a meeting
 
 ## Recently Shipped
 
+- **Wake-up schedule, no fade, snooze; one theme everywhere (TV 6.5, iOS 2.4 /
+  build 106)** — the wake-up is a weekly schedule with its own time per day
+  (`brain/wake_alarm.py`; `set_wake_up` merges days, `cancel_wake_up` takes
+  days) plus a one-off, edited in the phone's Settings > Wake-up
+  (`WakeScheduleView`, `GET`/`PUT /api/wake`). The TV no longer fades the
+  volume up: it plays at the alarm volume and shows `WakeActivity` with I'm
+  up / Snooze 9 min. The colour theme lives on Core (`brain/theme.py`,
+  `GET /api/theme` status:read, `PUT` admin or new client scope
+  `settings:write`); the phone pulls it on launch/foreground and pushes on
+  pick (`ThemeSync`), the TV pushes from its Settings page and follows
+  `/api/glance`. The TV needs `tv/provision.sh` re-run for the new scope.
 - **Wake-up by name, no Spotify on screen, Back in Black (TV 6.4, iOS 2.3 /
   build 105)** — `set_wake_up` takes relative times ("in 3 minutes" makes a
   one-off that disables itself after firing; days "once"/"tomorrow" too) and
@@ -1350,8 +1368,9 @@ TV=10.0.0.46:5555 tv/provision.sh         # Nick, at home: scoped token + Core U
   installed app only upgrades with that same key. d8 34 can't read the
   constructors javac 24 writes for inner (non-static) classes, so nested
   classes in the launcher are static.
-- The token is `nicks-room-tv` with `events:read status:read` only; it can't
-  chat or control anything. Until provisioned, the footer reads "NOT LINKED
+- The token is `nicks-room-tv` with `events:read status:read chat
+  settings:write`: it can read, talk to JARVIS (his confirmation rules
+  apply) and set the shared theme, nothing else. Until provisioned, the footer reads "NOT LINKED
   TO CORE".
 - TCL quirks: reinstalling resets `appops APP_AUTO_START` (deploy.sh re-applies
   it); the firmware restores some removed apps every boot (BootCleanup removes

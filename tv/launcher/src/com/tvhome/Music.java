@@ -64,6 +64,11 @@ final class Music {
         }
     }
 
+    static void pause(Context c) {
+        MediaController m = pick(c, new Now());
+        if (m != null) m.getTransportControls().pause();
+    }
+
     static void next(Context c) {
         MediaController m = pick(c, new Now());
         if (m != null) m.getTransportControls().skipToNext();

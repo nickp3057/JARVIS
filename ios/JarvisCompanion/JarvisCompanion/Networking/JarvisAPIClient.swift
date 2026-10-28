@@ -583,6 +583,31 @@ struct JarvisAPIClient {
         _ = try validate(response, data: data)
     }
 
+    // MARK: - Wake-up schedule and shared theme
+
+    func wakeSchedule() async throws -> WakeSchedule {
+        try await getJSON(WakeSchedule.self, path: "api/wake")
+    }
+
+    func saveWakeSchedule(_ draft: WakeScheduleDraft) async throws -> WakeSchedule {
+        try await sendJSON(WakeSchedule.self, path: "api/wake", method: "PUT", body: draft)
+    }
+
+    struct SharedTheme: Codable {
+        let theme: String
+        var chosen: Bool? = nil
+    }
+
+    /// The colour theme Core shares with the TV; `chosen` is false until
+    /// someone has picked one (Core is then only reporting its default).
+    func sharedTheme() async throws -> SharedTheme {
+        try await getJSON(SharedTheme.self, path: "api/theme")
+    }
+
+    func saveSharedTheme(_ theme: String) async throws {
+        _ = try await sendJSON(SharedTheme.self, path: "api/theme", method: "PUT", body: SharedTheme(theme: theme))
+    }
+
     // MARK: - Maintenance
 
     private struct MaintenanceEnvelope: Decodable { let task: MaintenanceTask }

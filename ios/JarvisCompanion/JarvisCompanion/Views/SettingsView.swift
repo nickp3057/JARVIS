@@ -66,6 +66,25 @@ struct SettingsView: View {
                     }
                     CockpitPanel("Theme", symbol: "paintpalette") {
                         ThemePicker()
+                        Text("Your TV follows this too.").font(.caption).foregroundStyle(.secondary)
+                    }
+                    CockpitPanel("Wake-up", symbol: "alarm") {
+                        NavigationLink {
+                            WakeScheduleView()
+                        } label: {
+                            HStack {
+                                VStack(alignment: .leading, spacing: 3) {
+                                    Text("Wake-up schedule").font(.headline).foregroundStyle(.primary)
+                                    Text("Music on the TV, a different time each day.")
+                                        .font(.caption).foregroundStyle(.secondary)
+                                }
+                                Spacer()
+                                Image(systemName: "chevron.right").font(.footnote.weight(.semibold))
+                                    .foregroundStyle(.secondary)
+                            }
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
                     }
                     CockpitPanel("Study brief", symbol: "graduationcap") {
                         Toggle("Deliver on this phone", isOn: $settings.studyAlertsEnabled).tint(JarvisTheme.cyan)
@@ -183,14 +202,19 @@ struct SettingsView: View {
     }
 }
 
-/// Colour theme choice; the whole app re-themes as soon as one is picked.
+/// Colour theme choice; the whole app re-themes as soon as one is picked,
+/// and JARVIS Core shares it with the TV.
 struct ThemePicker: View {
+    @EnvironmentObject private var settings: AppSettings
     @AppStorage(JarvisPalette.storageKey) private var palette = JarvisPalette.arc.rawValue
 
     var body: some View {
         VStack(spacing: 0) {
             ForEach(JarvisPalette.allCases) { option in
-                Button { palette = option.rawValue } label: {
+                Button {
+                    palette = option.rawValue
+                    Task { await ThemeSync.push(option.rawValue, settings: settings) }
+                } label: {
                     HStack(spacing: 12) {
                         HStack(spacing: -6) {
                             swatch(option.accent)

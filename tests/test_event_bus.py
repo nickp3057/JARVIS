@@ -12,7 +12,7 @@ from fastapi.testclient import TestClient
 
 import app.server as server
 from app import client_tokens
-from brain import event_bus
+from brain import event_bus, theme, wake_alarm
 from brain.notifications import Delivery
 from brain.runtime import JarvisRuntime
 
@@ -71,9 +71,11 @@ class ClientTokenTests(unittest.TestCase):
     def setUp(self) -> None:
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
-        p = patch.object(client_tokens, "_FILE", Path(tmp.name) / "client_tokens.json")
-        p.start()
-        self.addCleanup(p.stop)
+        for target, name in ((client_tokens, "client_tokens.json"), (theme, "theme.json"),
+                             (wake_alarm, "wake_alarm.json")):
+            p = patch.object(target, "_FILE", Path(tmp.name) / name)
+            p.start()
+            self.addCleanup(p.stop)
         env = patch.dict(os.environ, {"JARVIS_API_TOKEN": "admin"})
         env.start()
         self.addCleanup(env.stop)
@@ -130,6 +132,34 @@ class ClientTokenTests(unittest.TestCase):
         self.assertEqual([a["title"] for a in body["alerts"]], ["Disk filling"])
         events_only = {"Authorization": "Bearer " + client_tokens.create("tv2", ["events:read"])}
         self.assertEqual(self.client.get("/api/glance", headers=events_only).status_code, 403)
+
+    def test_theme_is_shared_and_needs_settings_scope(self) -> None:
+        reader = {"Authorization": "Bearer " + client_tokens.create("tv", ["status:read"])}
+        writer = {"Authorization": "Bearer " + client_tokens.create("tv2", ["status:read", "settings:write"])}
+        with patch.dict(os.environ, {"JARVIS_THEME": "markIII"}):
+            self.assertEqual(self.client.get("/api/theme", headers=reader).json()["chosen"], False)
+            self.assertEqual(self.client.put("/api/theme", headers=reader, json={"theme": "arc"}).status_code, 403)
+            self.assertEqual(self.client.put("/api/theme", headers=writer, json={"theme": "pink"}).status_code, 422)
+            body = self.client.put("/api/theme", headers=writer, json={"theme": "hotRod"}).json()
+            self.assertEqual((body["theme"], body["chosen"]), ("hotRod", True))
+            self.assertEqual(self.client.get("/api/theme", headers=reader).json()["theme"], "hotRod")
+        admin = {"Authorization": "Bearer admin"}
+        self.assertEqual(self.client.put("/api/theme", headers=admin, json={"theme": "arc"}).json()["theme"], "arc")
+
+    def test_wake_schedule_editor_is_admin_only(self) -> None:
+        tv = {"Authorization": "Bearer " + client_tokens.create("tv", ["status:read", "settings:write"])}
+        admin = {"Authorization": "Bearer admin"}
+        self.assertEqual(self.client.get("/api/wake", headers=tv).status_code, 401)
+        self.assertEqual(self.client.get("/api/wake", headers=admin).json()["times"], [None] * 7)
+        times = ["6:30", "8:00", "6:30", None, "6:30", "9:00", None]
+        body = self.client.put("/api/wake", headers=admin, json={
+            "times": times, "music": "Back in Black", "volume": 25}).json()
+        self.assertEqual(body["times"], ["06:30", "08:00", "06:30", None, "06:30", "09:00", None])
+        self.assertEqual((body["label"], body["volume"], body["enabled"]), ("Back in Black", 25, True))
+        self.assertIn("6:30 AM Mon, Wed, Fri", body["summary"])
+        bad = self.client.put("/api/wake", headers=admin, json={"times": ["25:00"] + [None] * 6})
+        self.assertEqual(bad.status_code, 422)
+        self.assertEqual(self.client.put("/api/wake", headers=admin, json={"times": [None]}).status_code, 422)
 
     def test_chat_scope_lets_a_client_talk(self) -> None:
         tv = {"Authorization": "Bearer " + client_tokens.create("tv", ["chat"])}

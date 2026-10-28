@@ -1,13 +1,16 @@
-"""Nick's wake-up alarm: music on the TV at a set time on chosen days.
+"""Nick's wake-up alarm: music on the TV, at its own time on each day.
 
-One alarm, kept in ``memory/wake_alarm.json``. Nick sets it by talking to
-JARVIS (``set_wake_up`` / ``cancel_wake_up`` / ``get_wake_up``); the runtime's
+A weekly schedule (a time, or none, per weekday) plus an optional one-off,
+kept in ``memory/wake_alarm.json``. Nick sets it by talking to JARVIS
+(``set_wake_up`` / ``cancel_wake_up`` / ``get_wake_up``) or in the companion
+app's Wake-up editor (``GET``/``PUT /api/wake``); the runtime's
 wake monitor publishes a ``wake_up`` bus event (``push=False``, so the phone
 stays quiet) at the alarm time, and the TV, which follows the event stream,
 turns itself on and plays the music. Music is a Spotify link or URI
 (playlist, album or track), a search Spotify runs itself ("Back in Black
 AC/DC", stored as ``search:...``), or empty to resume whatever Spotify last
-played. A time like "in 3 minutes" makes a one-off alarm unless days are given.
+played. A time like "in 3 minutes" makes the one-off unless days are given.
+Music starts at the alarm's volume (no fade-in); the TV offers I'm up / Snooze.
 """
 from __future__ import annotations
 
@@ -25,12 +28,44 @@ _SPOTIFY_LINK = re.compile(r"open\.spotify\.com/(?:intl-[a-z]+/)?(playlist|album
 _SPOTIFY_URI = re.compile(r"^spotify:(playlist|album|track|artist):[A-Za-z0-9]+$")
 
 
+def _blank() -> dict[str, Any]:
+    return {"times": [None] * 7, "music": "", "label": "", "volume": 30,
+            "enabled": True, "once": None, "last_fired": ""}
+
+
+def _migrate(data: dict[str, Any]) -> dict[str, Any]:
+    """The pre-schedule file (one ``time`` on a list of ``days``) -> ``times``."""
+    if "times" in data:
+        return data
+    new = _blank()
+    for key in ("music", "label", "volume"):
+        new[key] = data.get(key, new[key])
+    if data.get("once"):
+        if data.get("enabled", True) and data.get("days"):
+            hour, minute = (int(x) for x in data["time"].split(":"))
+            today = datetime.now().replace(hour=hour, minute=minute, second=0, microsecond=0)
+            at = today + timedelta(days=(data["days"][0] - today.weekday()) % 7)
+            new["once"] = {"at": at.isoformat(timespec="minutes"), "music": None, "label": ""}
+    else:
+        for day in data.get("days", []):
+            new["times"][day] = data["time"]
+        new["enabled"] = bool(data.get("enabled", True))
+    return new
+
+
 def load() -> dict[str, Any] | None:
+    """The schedule, or None when there is nothing on it at all."""
     try:
         data = json.loads(_FILE.read_text())
-        return data if isinstance(data, dict) and data.get("time") else None
     except (OSError, ValueError):
         return None
+    if not isinstance(data, dict):
+        return None
+    data = _migrate(data)
+    times = data.get("times")
+    if not isinstance(times, list) or len(times) != 7:
+        data["times"] = [None] * 7
+    return data if any(data["times"]) or data.get("once") else None
 
 
 def _save(data: dict[str, Any] | None) -> None:
@@ -95,77 +130,128 @@ def normalize_music(music: str) -> str:
         return ""
     if _SPOTIFY_URI.match(music):
         return music
+    if music.startswith("search:"):
+        return music[:127]
     m = _SPOTIFY_LINK.search(music)
     if m:
         return f"spotify:{m.group(1)}:{m.group(2)}"
     return "search:" + music[:120]
 
 
-def set_alarm(time_text: str, days_text: str | None = None, music: str = "", label: str = "",
-              volume: int = 30, now: datetime | None = None) -> dict[str, Any]:
+def set_alarm(time_text: str, days_text: str | None = None, music: str | None = None,
+              label: str = "", volume: int | None = None, now: datetime | None = None) -> dict[str, Any]:
+    """Put a time on the schedule for some days (other days keep theirs), or
+    set the one-off. ``music`` None keeps what the schedule already plays."""
     now = now or datetime.now()
     relative = relative_time(time_text, now)
     hhmm = relative or parse_time(time_text)
-    once = (days_text or "").strip().lower() in ("once", "one time", "today", "tomorrow") or (
-        relative is not None and not days_text)
-    if once:
+    when = (days_text or "").strip().lower()
+    data = load() or _blank()
+    music = None if music is None else normalize_music(music)
+    label = (label or "").strip() or (music[7:] if music and music.startswith("search:") else "")
+    if when in ("once", "one time", "today", "tomorrow") or (relative is not None and not days_text):
         hour, minute = (int(x) for x in hhmm.split(":"))
         at = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
-        if at <= now or (days_text or "").strip().lower() == "tomorrow":
+        if at <= now or when == "tomorrow":
             at += timedelta(days=1)
-        days = [at.weekday()]
+        data["once"] = {"at": at.isoformat(timespec="minutes"), "music": music, "label": label[:80]}
     else:
-        days = parse_days(days_text or "every day")
-    music = normalize_music(music)
-    data = {
-        "time": hhmm,
-        "days": days,
-        "once": once,
-        "music": music,
-        "label": ((label or "").strip() or (music[7:] if music.startswith("search:") else ""))[:80],
-        "volume": max(5, min(100, int(volume))),
-        "enabled": True,
-        "last_fired": "",
-    }
+        for day in parse_days(days_text or "every day"):
+            data["times"][day] = hhmm
+        data["enabled"] = True
+        if music is not None:
+            data["music"], data["label"] = music, label[:80]
+    if volume is not None:
+        data["volume"] = max(5, min(100, int(volume)))
     _save(data)
     return data
 
 
-def cancel() -> bool:
-    existed = load() is not None
-    _save(None)
+def set_schedule(times: list[str | None], music: str = "", label: str = "", volume: int = 30,
+                 enabled: bool = True) -> dict[str, Any]:
+    """Replace the weekly schedule (the companion app's editor); keeps the one-off."""
+    if len(times) != 7:
+        raise ValueError("A schedule needs a time (or none) for each of the 7 days.")
+    data = load() or _blank()
+    data["times"] = [parse_time(t) if t else None for t in times]
+    music = normalize_music(music)
+    data.update(music=music, label=((label or "").strip() or (music[7:] if music.startswith("search:") else ""))[:80],
+                volume=max(5, min(100, int(volume))), enabled=bool(enabled))
+    _save(data)
+    return data
+
+
+def cancel(days_text: str | None = None) -> bool:
+    """Clear some days (keeping the rest), or the whole schedule and the one-off."""
+    data = load()
+    if data is None:
+        return False
+    if not days_text:
+        _save(None)
+        return True
+    if days_text.strip().lower() in ("once", "one-off", "one off"):
+        existed, data["once"] = data["once"] is not None, None
+    else:
+        days = parse_days(days_text)
+        existed = any(data["times"][d] for d in days)
+        for day in days:
+            data["times"][day] = None
+    _save(data)
     return existed
 
 
-def next_time(data: dict[str, Any], now: datetime | None = None) -> datetime | None:
-    """The next moment the alarm goes off (local time), or None if it's off."""
-    if not data or not data.get("enabled") or not data.get("days"):
+def _at(day: datetime, hhmm: str) -> datetime:
+    hour, minute = (int(x) for x in hhmm.split(":"))
+    return day.replace(hour=hour, minute=minute, second=0, microsecond=0)
+
+
+def _upcoming(data: dict[str, Any], now: datetime) -> tuple[datetime, dict[str, Any]] | None:
+    """(when, what plays) for the next alarm after ``now``."""
+    found: list[tuple[datetime, dict[str, Any]]] = []
+    once = data.get("once")
+    if once:
+        at = datetime.fromisoformat(once["at"])
+        if at > now:
+            found.append((at, {"music": data["music"] if once.get("music") is None else once["music"],
+                               "label": once.get("label") or (data["label"] if once.get("music") is None else ""),
+                               "once": True}))
+    if data.get("enabled", True):
+        for offset in range(8):
+            day = now + timedelta(days=offset)
+            hhmm = data["times"][day.weekday()]
+            if hhmm and _at(day, hhmm) > now:
+                found.append((_at(day, hhmm), {"music": data["music"], "label": data["label"], "once": False}))
+                break
+    return min(found, key=lambda pair: pair[0]) if found else None
+
+
+def next_time(data: dict[str, Any] | None, now: datetime | None = None) -> datetime | None:
+    """The next moment an alarm goes off (local time), or None if nothing is set."""
+    if not data:
         return None
-    now = now or datetime.now()
-    hour, minute = (int(x) for x in data["time"].split(":"))
-    for offset in range(8):
-        day = now + timedelta(days=offset)
-        at = day.replace(hour=hour, minute=minute, second=0, microsecond=0)
-        if at.weekday() in data["days"] and at > now:
-            return at
-    return None
+    upcoming = _upcoming(data, now or datetime.now())
+    return upcoming[0] if upcoming else None
 
 
 def due(now: datetime | None = None) -> dict[str, Any] | None:
-    """The alarm if it should fire now (within 10 minutes of its time, once a day)."""
+    """What to play if an alarm should fire now (within 10 minutes of its
+    time, once per alarm): ``{"music", "label", "volume", "time"}``."""
     data = load()
     now = now or datetime.now()
-    if not data or not data.get("enabled") or now.weekday() not in data.get("days", []):
+    if not data:
         return None
-    hour, minute = (int(x) for x in data["time"].split(":"))
-    at = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
-    if not at <= now < at + timedelta(minutes=10) or data.get("last_fired") == now.date().isoformat():
+    upcoming = _upcoming(data, now - timedelta(minutes=10))
+    if not upcoming or upcoming[0] > now:
         return None
-    data["last_fired"] = now.date().isoformat()
-    if data.get("once"):
-        data["enabled"] = False  # a one-off: done after it goes off
+    at, what = upcoming
+    key = at.isoformat(timespec="minutes")
+    if data.get("last_fired") == key:
+        return None
+    data["last_fired"] = key
+    if what["once"]:
+        data["once"] = None  # a one-off: gone after it goes off
     _save(data)
-    return data
+    return {"music": what["music"], "label": what["label"], "volume": data["volume"], "time": at.strftime("%H:%M")}
 
 
 def days_text(days: list[int], once: bool = False) -> str:
@@ -180,26 +266,66 @@ def days_text(days: list[int], once: bool = False) -> str:
     return ", ".join(DAY_NAMES[d].title() for d in sorted(days))
 
 
-def describe(data: dict[str, Any] | None = None) -> str:
+def _clock(hhmm: str) -> str:
+    return datetime.strptime(hhmm, "%H:%M").strftime("%-I:%M %p")
+
+
+def schedule_text(data: dict[str, Any]) -> str:
+    """"6:30 AM weekdays, 9:00 AM Sat" -- days grouped by shared time."""
+    groups: dict[str, list[int]] = {}
+    for day, hhmm in enumerate(data["times"]):
+        if hhmm:
+            groups.setdefault(hhmm, []).append(day)
+    return "; ".join(f"{_clock(t)} {days_text(d)}" for t, d in sorted(groups.items(), key=lambda g: g[1][0]))
+
+
+def describe(data: dict[str, Any] | None = None, now: datetime | None = None) -> str:
     data = data if data is not None else load()
     if not data:
         return "No wake-up alarm is set, sir."
-    when = datetime.strptime(data["time"], "%H:%M").strftime("%-I:%M %p")
-    music = data.get("label") or ("the Spotify link you gave me" if data.get("music") else "whatever Spotify last played")
-    if not data.get("enabled", True):
-        return f"The one-off wake-up at {when} has already gone off, sir."
-    return f"Wake-up at {when}, {days_text(data['days'], data.get('once', False))}, with {music} on the TV."
+    parts = []
+    if any(data["times"]):
+        music = data.get("label") or ("the Spotify link you gave me" if data.get("music") else "whatever Spotify last played")
+        paused = "" if data.get("enabled", True) else " (paused)"
+        parts.append(f"Wake-up schedule{paused}: {schedule_text(data)}, with {music} on the TV.")
+    if data.get("once"):
+        at = datetime.fromisoformat(data["once"]["at"])
+        parts.append(f"A one-off at {at.strftime('%-I:%M %p')} {at.strftime('%a')}.")
+    return " ".join(parts)
+
+
+def _when(at: datetime, now: datetime) -> str:
+    days = (at.date() - now.date()).days
+    return "Today" if days == 0 else "Tomorrow" if days == 1 else at.strftime("%a")
 
 
 def public(now: datetime | None = None) -> dict[str, Any] | None:
-    """For /api/glance: what the TV shows on its wake-up tile."""
+    """For /api/glance: the next alarm, for the TV's wake-up tile."""
     data = load()
-    if not data or not data.get("enabled", True):
+    now = now or datetime.now()
+    upcoming = _upcoming(data, now) if data else None
+    if not upcoming:
         return None
+    at, what = upcoming
+    return {
+        "time": at.strftime("%H:%M"),
+        "days": _when(at, now),
+        "label": what["label"],
+        "next_at": at.timestamp(),
+    }
+
+
+def editor(now: datetime | None = None) -> dict[str, Any]:
+    """For the companion app's schedule editor (GET/PUT /api/wake)."""
+    data = load() or _blank()
     at = next_time(data, now)
     return {
-        "time": data["time"],
-        "days": days_text(data["days"], data.get("once", False)),
-        "label": data.get("label", ""),
+        "times": data["times"],
+        "music": data["music"],
+        "label": data["label"],
+        "volume": data["volume"],
+        "enabled": data.get("enabled", True),
+        "once_at": data["once"]["at"] if data.get("once") else None,
         "next_at": at.timestamp() if at else None,
+        "summary": describe(data) if load() else "No wake-up set.",
     }
