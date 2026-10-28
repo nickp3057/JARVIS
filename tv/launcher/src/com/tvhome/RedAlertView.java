@@ -16,7 +16,7 @@ import android.view.View;
  * Nothing pulses or flashes (Nick's call); it's menacing through shape and
  * slow, steady motion: heavy armour turning one way, a ring of teeth closing
  * the other, a racing targeting dial, two lock-on arcs, and at the centre a
- * slit-pupilled eye that slowly looks around the room. Red only.
+ * round lens, almost an eye, that blinks once every 30 seconds. Red only.
  */
 final class RedAlertView extends View {
     private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
@@ -115,28 +115,43 @@ final class RedAlertView extends View {
             canvas.restore();
         }
 
-        // The eye: an almond lid, a red iris and a slit pupil that slowly
-        // looks from side to side.
-        float ew = r * 0.42f, eh = r * 0.2f;
-        path.reset();
-        path.moveTo(cx - ew, cy);
-        path.quadTo(cx, cy - eh * 2, cx + ew, cy);
-        path.quadTo(cx, cy + eh * 2, cx - ew, cy);
-        path.close();
+        // The lens: perfectly round, almost an eye but not one. A dark rim, a
+        // red glow deepening to a white-hot point, a glint on the glass. It
+        // doesn't move; once every 30 s it blinks.
+        float lr = r * 0.30f;
         paint.setStyle(Paint.Style.FILL);
-        paint.setShader(new RadialGradient(cx, cy, ew,
-                new int[] {Theme.alpha(hot, 255), Theme.alpha(red, 200), 0xFF100000},
-                new float[] {0f, 0.55f, 1f}, Shader.TileMode.CLAMP));
-        canvas.drawPath(path, paint);
+        paint.setColor(0xFF0A0000);
+        canvas.drawCircle(cx, cy, lr, paint);
+        paint.setShader(new RadialGradient(cx, cy, lr * 0.86f,
+                new int[] {0xFFFFF0E8, Theme.alpha(hot, 255), Theme.alpha(red, 230), 0xFF1A0000},
+                new float[] {0f, 0.12f, 0.5f, 1f}, Shader.TileMode.CLAMP));
+        canvas.drawCircle(cx, cy, lr * 0.86f, paint);
         paint.setShader(null);
-        float look = (float) Math.sin(t * 2 * Math.PI / 7) * ew * 0.35f;
-        paint.setColor(0xFF050000);
-        oval.set(cx + look - r * 0.035f, cy - eh * 0.9f, cx + look + r * 0.035f, cy + eh * 0.9f);
+        paint.setColor(0x33FFFFFF);
+        oval.set(cx - lr * 0.55f, cy - lr * 0.62f, cx + lr * 0.1f, cy - lr * 0.3f);
         canvas.drawOval(oval, paint);
         paint.setStyle(Paint.Style.STROKE);
         paint.setStrokeWidth(r * 0.018f);
-        paint.setColor(hot);
-        canvas.drawPath(path, paint);
+        paint.setColor(Theme.alpha(hot, 220));
+        canvas.drawCircle(cx, cy, lr, paint);
+        paint.setColor(Theme.alpha(red, 140));
+        paint.setStrokeWidth(density);
+        canvas.drawCircle(cx, cy, lr * 0.86f, paint);
+
+        // The blink: lids close from top and bottom and open again, 0.45 s.
+        float phase = t % 30f;
+        if (phase > 29.55f) {
+            float shut = (float) Math.sin(Math.PI * (phase - 29.55f) / 0.45f);
+            canvas.save();
+            path.reset();
+            path.addCircle(cx, cy, lr * 1.02f, Path.Direction.CW);
+            canvas.clipPath(path);
+            paint.setStyle(Paint.Style.FILL);
+            paint.setColor(0xFF070000);
+            canvas.drawRect(cx - lr * 1.1f, cy - lr * 1.1f, cx + lr * 1.1f, cy - lr * 1.1f + lr * 1.1f * shut, paint);
+            canvas.drawRect(cx - lr * 1.1f, cy + lr * 1.1f - lr * 1.1f * shut, cx + lr * 1.1f, cy + lr * 1.1f, paint);
+            canvas.restore();
+        }
 
         if (isAttachedToWindow()) postInvalidateOnAnimation();
     }

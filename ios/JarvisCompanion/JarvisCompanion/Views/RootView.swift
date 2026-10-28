@@ -50,9 +50,14 @@ struct RootView: View {
         .tint(JarvisTheme.reactor)
         .simultaneousGesture(DragGesture(minimumDistance: 30).onChanged(track).onEnded(swipe))
         .sensoryFeedback(.selection, trigger: selection)
-        .task { await ThemeSync.pull(settings) }
-        .onChange(of: scenePhase) { _, phase in
-            if phase == .active { Task { await ThemeSync.pull(settings) } }
+        .task(id: scenePhase) {
+            // Follow the shared theme while the app is open (a pick on the TV,
+            // Barn Door engaging or standing down), not just on launch.
+            guard scenePhase == .active else { return }
+            while !Task.isCancelled {
+                await ThemeSync.pull(settings)
+                try? await Task.sleep(for: .seconds(10))
+            }
         }
         .onChange(of: settings.studyAlertsEnabled) { Task { await hub.updateNotificationPreferences() } }
         .onChange(of: selection) { _, tab in

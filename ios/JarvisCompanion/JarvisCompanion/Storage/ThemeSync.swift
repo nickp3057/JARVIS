@@ -1,8 +1,8 @@
 import Foundation
 
 /// Keeps the colour theme the same on the phone and the TV: the pick lives on
-/// JARVIS Core (`/api/theme`). Pulled when the app comes forward, pushed when
-/// Nick picks one. An older Core without the endpoint leaves the local pick alone.
+/// JARVIS Core (`/api/theme`). Pulled every 10 s while the app is open
+/// (RootView), pushed when Nick picks one. An older Core without the endpoint leaves the local pick alone.
 @MainActor
 enum ThemeSync {
     static func pull(_ settings: AppSettings) async {
