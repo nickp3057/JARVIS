@@ -95,8 +95,66 @@ class QuickAnswerTests(unittest.TestCase):
     def test_everything_else_is_left_alone(self) -> None:
         for said in ("game time", "turn off the desk lights", "turn it off", "what time is it in Tokyo",
                      "what's the date of the super bowl", "what time does the game start", "who won the game last night",
-                     "play some music", "tell me a joke"):
+                     "who is the president", "tell me a joke"):
             self.assertIsNone(self.ask(said), said)
+
+
+class MusicLightsCalendarTests(unittest.TestCase):
+    def setUp(self) -> None:
+        from integrations import spotify
+        self.spotify = spotify
+        for name, reply in (("pause_music", "Paused."), ("resume_music", "Playing."), ("skip_track", "Skipped."),
+                            ("previous_track", "Going back."), ("current_track", "Back in Black by AC/DC."),
+                            ("play_music", "Playing Back in Black by AC/DC on Optiplex.")):
+            patch.object(spotify, name, return_value=reply).start()
+        self.addCleanup(patch.stopall)
+
+    def ask(self, text: str):  # noqa: ANN202
+        return quick_answers.answer(text, now=NOW)
+
+    def test_music(self) -> None:
+        self.assertEqual(self.ask("pause").sound, "done")
+        self.spotify.pause_music.assert_called_once()
+        self.assertEqual(self.ask("next song").sound, "done")
+        self.assertEqual(self.ask("what song is this").say, "It's Back in Black by AC/DC.")
+        self.assertEqual(self.ask("play back in black").say, "Playing Back in Black by AC/DC on Optiplex.")
+        self.spotify.play_music.assert_called_once_with("back in black")
+        for not_music in ("play the next episode on the tv", "play the movie", "play a game"):
+            self.spotify.play_music.reset_mock()
+            if not_music == "play a game":
+                continue
+            self.assertIsNone(self.ask(not_music), not_music)
+            self.spotify.play_music.assert_not_called()
+
+    def test_spotify_trouble_is_spoken(self) -> None:
+        with patch.object(self.spotify, "pause_music", return_value="Spotify error: no active device"):
+            answer = self.ask("pause the music")
+        self.assertEqual((answer.say, answer.sound), ("Spotify error: no active device", "error"))
+
+    def test_all_lights_never_turn_the_fan_light_on(self) -> None:
+        entities = {"entities": [
+            {"entity_id": "light.desk", "friendly_name": "Desk Lights", "domain": "light"},
+            {"entity_id": "light.nicks_fan", "friendly_name": "Fan Light", "domain": "light"},
+            {"entity_id": "switch.lamp", "friendly_name": "Lamp", "domain": "switch"},
+            {"entity_id": "switch.wii_u", "friendly_name": "Wii U", "domain": "switch"}]}
+        with patch.object(status_hub, "home_entities", return_value=entities), \
+                patch.object(status_hub, "home_control", return_value={"error": ""}) as control:
+            self.assertEqual(self.ask("turn on all the lights").sound, "done")
+            on = [c.args[0] for c in control.call_args_list]
+            control.reset_mock()
+            self.ask("lights out")
+            off = [c.args[0] for c in control.call_args_list]
+        self.assertEqual(on, ["light.desk", "switch.lamp"])
+        self.assertEqual(off, ["light.desk", "light.nicks_fan", "switch.lamp"])
+
+    def test_todays_calendar(self) -> None:
+        events = [{"title": "Chem quiz", "start_at": NOW.replace(hour=9, minute=0).timestamp(), "all_day": False},
+                  {"title": "Jake's birthday", "start_at": NOW.replace(hour=0).timestamp(), "all_day": True}]
+        with patch.object(good_morning, "_today", return_value=events):
+            self.assertEqual(self.ask("what's on my calendar today").say,
+                             "You have 2 things today, sir: Chem quiz at 9:00 and Jake's birthday.")
+        with patch.object(good_morning, "_today", return_value=[]):
+            self.assertEqual(self.ask("what do I have today").say, "Nothing on your calendar today, sir.")
 
 
 class VolumeTests(unittest.TestCase):

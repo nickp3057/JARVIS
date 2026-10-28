@@ -846,8 +846,12 @@ CALENDAR_ALERT_LEAD_MIN=10  # warn this many minutes before a meeting
   "tomorrow"/"forecast"/rain questions still go to the model), timers ("set
   a pasta timer for 10 minutes", "an hour and a half timer", "how long's
   left", "cancel the pasta timer"), volume ("volume 4", "70 percent",
-  "louder", "quieter", "max volume", "what's the volume"), "stop" and "say
-  that again". "Good morning" (`speech/good_morning.py`) speaks the time,
+  "louder", "quieter", "max volume", "what's the volume"), Spotify ("pause",
+  "resume", "next", "previous", "what's playing", "play Back in Black"; not
+  "play ... on the TV" or episodes/movies), every light and lamp on or off
+  ("turn off all the lights", "lights out"; on never includes the fan light,
+  and switches like the Wii U are never touched), today's calendar ("what's
+  on my calendar today"), "stop" and "say that again". "Good morning" (`speech/good_morning.py`) speaks the time,
   weather and today's first calendar item, and does what I'm up does
   (snooze cleared, TV wake screen closed, good-morning lights). The room
   voice now owns `runtime.pop_due_reminders()` in server mode: a finished

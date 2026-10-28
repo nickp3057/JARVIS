@@ -1,7 +1,9 @@
 """Questions the room voice answers itself, like a smart speaker, with no
-model in the loop: the time and date, the weather right now, timers ("ten
-minute pasta timer", "how long's left", "cancel the timer"), the speaker's
-volume ("volume 4", "louder"), "stop" and "say that again".
+model in the loop: the time and date, the weather right now, today's
+calendar, timers ("ten minute pasta timer", "how long's left", "cancel the
+timer"), the speaker's volume ("volume 4", "louder"), Spotify ("pause",
+"next", "what's playing", "play Back in Black"), every light on or off,
+"stop" and "say that again".
 
 ``answer(text)`` returns an ``Answer`` or None (not one of these: the
 conversation handles it). Anything about later ("weather tomorrow",
@@ -144,6 +146,23 @@ _VOLUME_DOWN = re.compile(r"^(?:volume down|quieter|softer|turn it down|turn (?:
 _VOLUME_MAX = re.compile(r"^(?:max(?:imum)? volume|full volume|volume max|volume all the way up)$")
 _VOLUME_ASK = re.compile(r"^(?:what's the volume|whats the volume|what is the volume|what volume are you at|"
                          r"how loud are you)$")
+_CALENDAR = re.compile(r"^(?:what's|whats|what is) (?:on )?my (?:calendar|schedule|agenda)(?: today| for today| look like)?$|"
+                       r"^(?:what do i have|what have i got|what's happening|whats happening) today$|"
+                       r"^what does my day look like$|^what's my day look like$|^anything on my calendar(?: today)?$")
+_PAUSE = re.compile(r"^(?:pause|pause it|pause (?:the )?(?:music|song)|stop (?:the )?music|hold the music)$")
+_RESUME = re.compile(r"^(?:resume|unpause|play|resume (?:the )?music|keep playing|continue|play music|"
+                     r"play some music|start the music)$")
+_NEXT = re.compile(r"^(?:next|skip|next song|next track|skip (?:this |the )?(?:song|track)|skip it)$")
+_PREVIOUS = re.compile(r"^(?:previous|previous song|previous track|last song|go back a song|play the last song|"
+                       r"play the previous song)$")
+_NOW_PLAYING = re.compile(r"^(?:what's playing|whats playing|what is playing|what song is this|what's this song|"
+                          r"whats this song|what is this song|who sings this|who is this|what am i listening to)$")
+_PLAY = re.compile(r"^play (?P<q>.+?)(?: on spotify)?$")
+_NOT_SPOTIFY = re.compile(r"\b(?:on|in) (?:the )?(?:tv|television|plex|netflix|youtube|disney|hulu|max)\b|"
+                          r"\b(?:episode|movie|season|show)\b")
+_ALL_LIGHTS = re.compile(r"^(?:turn|switch|shut|put) (?P<a>on|off) (?:all )?(?:of )?(?:the |my )?lights$|"
+                         r"^(?:turn|switch|shut) (?:all )?(?:the |my )?lights (?P<b>on|off)$|"
+                         r"^(?:all )?(?:the )?lights (?P<c>on|off)$|^(?P<out>lights out)$")
 _REPEAT = re.compile(r"^(?:repeat that|repeat|say that again|say again|what did you say|come again|pardon|"
                      r"sorry what|what was that)$")
 
@@ -162,9 +181,18 @@ def answer(text: str, last_reply: str = "", now: datetime | None = None) -> Answ
         return Answer(say=f"It's {_clock(now)}, sir.", kind="time")
     if _DATE.match(said):
         return Answer(say=f"It's {now.strftime('%A, %B')} {_ordinal(now.day)}, sir.", kind="date")
+    if _CALENDAR.match(said):
+        return _calendar(now)
     volume = _volume(said)
     if volume is not None:
         return volume
+    music = _music(said)
+    if music is not None:
+        return music
+    lights = _ALL_LIGHTS.match(said)
+    if lights:
+        action = lights.group("a") or lights.group("b") or lights.group("c") or "off"
+        return _all_lights(action)
     timer = _timer(said)
     if timer is not None:
         return timer
@@ -260,3 +288,65 @@ def _weather() -> Answer | None:
     else:
         line += ", sir."
     return Answer(say=line, kind="weather")
+
+
+def _calendar(now: datetime) -> Answer:
+    from speech import good_morning
+    events = good_morning._today(now)  # noqa: SLF001 - the same calendar view
+    if not events:
+        return Answer(say="Nothing on your calendar today, sir.", kind="calendar")
+    items = []
+    for event in events[:5]:
+        if event.get("all_day"):
+            items.append(event["title"])
+        else:
+            at = datetime.fromtimestamp(float(event["start_at"])).strftime("%I:%M").lstrip("0")
+            items.append(f"{event['title']} at {at}")
+    listed = items[0] if len(items) == 1 else ", ".join(items[:-1]) + " and " + items[-1]
+    count = len(events)
+    return Answer(say=f"You have {count} thing{'s' if count != 1 else ''} today, sir: {listed}.", kind="calendar")
+
+
+def _spotify_reply(result: str, quiet_ok: bool) -> Answer:
+    failed = result.startswith(("Spotify error", "Spotify isn't", "Spotify is not", "I couldn't", "No ",
+                                "I need", "Nothing"))
+    if failed or not quiet_ok:
+        return Answer(say=result, sound="" if not failed else "error", kind="music")
+    return Answer(sound="done", kind="music")
+
+
+def _music(said: str) -> Answer | None:
+    from integrations import spotify
+    if _PAUSE.match(said):
+        return _spotify_reply(spotify.pause_music(), quiet_ok=True)
+    if _RESUME.match(said):
+        return _spotify_reply(spotify.resume_music(), quiet_ok=True)
+    if _NEXT.match(said):
+        return _spotify_reply(spotify.skip_track(), quiet_ok=True)
+    if _PREVIOUS.match(said):
+        return _spotify_reply(spotify.previous_track(), quiet_ok=True)
+    if _NOW_PLAYING.match(said):
+        result = spotify.current_track()
+        return Answer(say=result if result.startswith(("Nothing", "Spotify")) else f"It's {result}", kind="music")
+    play = _PLAY.match(said)
+    if play and not _NOT_SPOTIFY.search(said):
+        query = play.group("q").strip()
+        if query in ("music", "something", "some music", "my music"):
+            return _spotify_reply(spotify.resume_music(), quiet_ok=True)
+        return _spotify_reply(spotify.play_music(query), quiet_ok=False)  # say what's on, like a speaker
+    return None
+
+
+def _all_lights(action: str) -> Answer:
+    """Every dashboard light (and lamp) on or off. Never the fan light on."""
+    from app import status_hub
+    entities = status_hub.home_entities().get("entities", [])
+    targets = [e for e in entities if e.get("domain") == "light" or "lamp" in str(e.get("friendly_name", "")).lower()]
+    if action == "on":
+        targets = [e for e in targets if e["entity_id"] != "light.nicks_fan"]
+    if not targets:
+        return Answer(say="I can't see any lights, sir.", sound="error", kind="lights")
+    failed = [e for e in targets if status_hub.home_control(e["entity_id"], action, settle=False).get("error")]
+    if len(failed) == len(targets):
+        return Answer(say="That didn't work, sir.", sound="error", kind=f"lights {action}")
+    return Answer(sound="done", kind=f"lights {action} ({len(targets) - len(failed)}/{len(targets)})")
