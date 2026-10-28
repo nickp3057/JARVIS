@@ -173,6 +173,18 @@ of each group.
   `JARVIS_THEME` in Core's `.env`; the phone keeps its own local pick),
   media (continue watching / recently added), then v2.
 
+  **Pinned by Nick 2026-10-27 (next TV session)**
+  - [ ] A JARVIS settings page in front of Android Settings (the Settings
+    tile opens it; "Android settings" stays reachable from inside it). Lets
+    Nick change what I set: colour theme (Arc / Mark III / Hot Rod, saved on
+    Core so the phone can follow), which calendar categories show, what the
+    small-print line includes, the nightly refresh, the voice. Needs a write
+    path on Core for those settings (a new client scope, not the admin token).
+  - [ ] Drop the time after "CORE ONLINE" in the footer (keep "LAST SEEN
+    <time>" when Core is unreachable).
+  - [ ] Maybe: Hotschedules shifts live on the personal calendar; ask whether
+    to treat "Hotschedules:" titles as work (hidden).
+
   **Foundation**
   - [x] Boots straight into JARVIS; the remote's Home button always returns
     to it. Plex and YouTube open from it and Back comes home.
