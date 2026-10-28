@@ -58,8 +58,16 @@ every deploy, so edit the repo copy, not the TV's.
   cents from `/api/portfolio` (Core streams the prices).
 - **Continue** (`ContinueWatching`): Plex's Continue Watching straight from
   the NAS (`/hubs/continueWatching/items`, the TV's own Plex token): the
-  newest on a bottom-row tile, the rest in its list; opening one goes to its
-  Plex page (the show's, for an episode). Refreshed with the glance (60 s).
+  newest on a bottom-row tile, the rest in its list (the newest focused);
+  opening one goes to its Plex page (the show's, for an episode) with Resume
+  focused, so it's OK, OK, OK from home to playing. Tested 2026-10-27 on a
+  movie (Interstellar) and an episode (Suits). Refreshed with the glance.
+- **Bottom row**: Plex, Spotify, Wake-up, Continue, Settings, all the same
+  tile (gradient, accent outline, centred text), equal widths spread edge
+  to edge. Continue hides when Plex has nothing in progress.
+- **Plex sign-in**: Nick stays signed in to his Plex profile, so the old PIN
+  auto-entry is gone (2026-10-27); `PlexWatch` only presses Watch/Resume for
+  "play ..." voice requests.
 - **Phone snooze**: `wake_snooze` / `wake_dismiss` bus events (from the
   phone's notification buttons) pause and count down, or close
   `WakeActivity`. Core rings a phone snooze again itself.
@@ -97,7 +105,7 @@ TV=10.0.0.46:5555 tv/provision.sh         # Nick runs it: new token + Core URL
 ```
 
 - Build needs `/opt/homebrew/share/android-commandlinetools` (build-tools 34,
-  platform 31) and javac. Signing key and Plex token/PIN are outside git in
+  platform 31) and javac. Signing key and Plex token are outside git in
   `~/tcl-tv-cleanup`; the TV only accepts upgrades signed with that key.
 - d8 34 can't read inner (non-static) classes compiled by javac 24: keep
   nested classes static, no anonymous classes.

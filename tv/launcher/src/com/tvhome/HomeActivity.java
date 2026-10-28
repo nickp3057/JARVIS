@@ -313,14 +313,13 @@ public class HomeActivity extends Activity {
         apps.setGravity(Gravity.BOTTOM);
         LinearLayout.LayoutParams appsLp = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        appsLp.setMargins(0, dp(16), 0, 0);
+        appsLp.setMargins(-dp(8), dp(16), -dp(8), 0); // tiles carry 8dp each side
         screen.addView(apps, appsLp);
         // YouTube and the HDMI inputs have their own buttons on the remote.
         addPlexTile(apps);
         addSpotifyTile(apps);
         addWakeTile(apps);
         addContinueTile(apps);
-        apps.addView(new View(this), new LinearLayout.LayoutParams(0, 1, 1f));
         addSettingsTile(apps);
 
         setContentView(stage);
@@ -966,11 +965,6 @@ public class HomeActivity extends Activity {
 
     private void wordmarkTile(LinearLayout row, String word, int accentAt, String sub, Runnable open) {
         FrameLayout tile = tileFrame();
-        GradientDrawable bg = new GradientDrawable(GradientDrawable.Orientation.TL_BR,
-                new int[] {theme.raised, theme.deep});
-        bg.setCornerRadius(dp(12));
-        bg.setStroke(dp(1), Theme.alpha(theme.accent, 70));
-        tile.setBackground(bg);
         LinearLayout inner = new LinearLayout(this);
         inner.setOrientation(LinearLayout.VERTICAL);
         inner.setGravity(Gravity.CENTER);
@@ -989,10 +983,11 @@ public class HomeActivity extends Activity {
         s.setGravity(Gravity.CENTER);
         s.setPadding(0, dp(4), 0, 0);
         inner.addView(s);
+        centreText(inner);
         tile.addView(inner, new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
         tile.setOnClickListener(v -> open.run());
-        addTile(row, tile, dp(170), dp(84));
+        addTile(row, tile);
     }
 
     /** The wake-up alarm at a glance; set by asking JARVIS on the phone. */
@@ -1000,8 +995,8 @@ public class HomeActivity extends Activity {
         FrameLayout tile = tileFrame();
         LinearLayout inner = new LinearLayout(this);
         inner.setOrientation(LinearLayout.VERTICAL);
-        inner.setGravity(Gravity.CENTER_VERTICAL);
-        inner.setPadding(dp(16), 0, dp(12), 0);
+        inner.setGravity(Gravity.CENTER);
+        inner.setPadding(dp(12), 0, dp(12), 0);
         TextView eyebrow = label("WAKE-UP", 9, Theme.alpha(theme.accent, 200));
         eyebrow.setLetterSpacing(0.3f);
         inner.addView(eyebrow);
@@ -1012,10 +1007,11 @@ public class HomeActivity extends Activity {
         wakeDays.setSingleLine(true);
         wakeDays.setEllipsize(TextUtils.TruncateAt.END);
         inner.addView(wakeDays);
+        centreText(inner);
         tile.addView(inner, new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
         tile.setOnClickListener(v -> showWake());
-        addTile(row, tile, dp(160), dp(84));
+        addTile(row, tile);
     }
 
     /** Plex's Continue Watching: the newest one on the tile, the rest a press away. */
@@ -1023,8 +1019,8 @@ public class HomeActivity extends Activity {
         FrameLayout tile = tileFrame();
         LinearLayout inner = new LinearLayout(this);
         inner.setOrientation(LinearLayout.VERTICAL);
-        inner.setGravity(Gravity.CENTER_VERTICAL);
-        inner.setPadding(dp(16), 0, dp(12), 0);
+        inner.setGravity(Gravity.CENTER);
+        inner.setPadding(dp(12), 0, dp(12), 0);
         TextView eyebrow = label("CONTINUE", 9, Theme.alpha(theme.accent, 200));
         eyebrow.setLetterSpacing(0.3f);
         inner.addView(eyebrow);
@@ -1035,12 +1031,13 @@ public class HomeActivity extends Activity {
         continueDetail = label("", 10, theme.dim);
         continueDetail.setSingleLine(true);
         inner.addView(continueDetail);
+        centreText(inner);
         tile.addView(inner, new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
         tile.setOnClickListener(v -> showContinueList());
         tile.setVisibility(View.GONE); // until Plex answers with something
         continueTile = tile;
-        addTile(row, tile, dp(170), dp(84));
+        addTile(row, tile);
     }
 
     private void showContinue(List<ContinueWatching.Item> items) {
@@ -1079,6 +1076,7 @@ public class HomeActivity extends Activity {
             rows.add(r);
         }
         openOverlay("Continue watching", rows);
+        rows.get(0).requestFocus(); // the newest is one OK away
     }
 
     private void showWake() {
@@ -1101,19 +1099,39 @@ public class HomeActivity extends Activity {
     /** Small, in the far corner: JARVIS's settings (Android's are behind them). */
     private void addSettingsTile(LinearLayout row) {
         FrameLayout tile = tileFrame();
-        TextView t = label("Settings", 13, theme.dim);
-        t.setGravity(Gravity.CENTER);
-        tile.addView(t, new FrameLayout.LayoutParams(
+        LinearLayout inner = new LinearLayout(this);
+        inner.setOrientation(LinearLayout.VERTICAL);
+        inner.setGravity(Gravity.CENTER);
+        TextView eyebrow = label("JARVIS", 9, Theme.alpha(theme.accent, 200));
+        eyebrow.setLetterSpacing(0.3f);
+        inner.addView(eyebrow);
+        TextView t = label("Settings", 20, theme.text);
+        t.setTypeface(Typeface.create("sans-serif-light", Typeface.NORMAL));
+        inner.addView(t);
+        centreText(inner);
+        tile.addView(inner, new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
         tile.setOnClickListener(v -> startSafely(new Intent(this, SettingsActivity.class)));
-        row.addView(tile, new LinearLayout.LayoutParams(dp(104), dp(48)));
+        addTile(row, tile);
+    }
+
+    /** Bottom-row text sits centred, like the Plex and Spotify wordmarks. */
+    private static void centreText(LinearLayout inner) {
+        for (int i = 0; i < inner.getChildCount(); i++) {
+            if (inner.getChildAt(i) instanceof TextView) ((TextView) inner.getChildAt(i)).setGravity(Gravity.CENTER);
+        }
     }
 
     private FrameLayout tileFrame() {
         FrameLayout tile = new FrameLayout(this);
         tile.setFocusable(true);
         tile.setClickable(true);
-        tile.setBackground(rounded(theme.raised, 0, 0));
+        // Every bottom-row tile looks like the Plex and Spotify ones.
+        GradientDrawable bg = new GradientDrawable(GradientDrawable.Orientation.TL_BR,
+                new int[] {theme.raised, theme.deep});
+        bg.setCornerRadius(dp(12));
+        bg.setStroke(dp(1), Theme.alpha(theme.accent, 70));
+        tile.setBackground(bg);
         tile.setClipToOutline(true);
         tile.setOnFocusChangeListener((v, focused) -> {
             tile.setForeground(focused ? rounded(Color.TRANSPARENT, dp(3), theme.accent) : null);
@@ -1123,9 +1141,10 @@ public class HomeActivity extends Activity {
         return tile;
     }
 
-    private void addTile(LinearLayout row, View tile, int w, int h) {
-        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(w, h);
-        lp.setMargins(0, 0, dp(16), 0);
+    /** Bottom row: every tile the same width, 16dp apart, spread edge to edge. */
+    private void addTile(LinearLayout row, View tile) {
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, dp(84), 1f);
+        lp.setMargins(dp(8), 0, dp(8), 0);
         row.addView(tile, lp);
         if (firstTile == null) firstTile = tile;
     }

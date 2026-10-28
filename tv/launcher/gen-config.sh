@@ -12,8 +12,6 @@ final class Config {
     static final String PLEX_SERVER = "http://10.0.0.147:32400";
     static final String PLEX_SERVER_ID = "cbbd5e0696461c93e8a92f0d6c33d96d16690036";
     static final String PLEX_TOKEN = "$(cat "$SECRETS/plex-token")";
-    static final String PLEX_PROFILE = "Nick Pearson";
-    static final String PLEX_PIN = "$(cat "$SECRETS/plex-pin")";
 
     /** Remote shortcut buttons (by keycode) and the app each should open instead. */
     static final Map<String, String> KEY_TARGETS = Map.of();

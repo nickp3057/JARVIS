@@ -32,8 +32,7 @@ import java.util.regex.Pattern;
  *  - the Assistant's final speech transcript (remote mic), or the query it hands
  *    to YouTube (Google Home / Nest requests): if it names a movie or show in
  *    the Plex library, open that title in Plex;
- *  - remote app-shortcut buttons (Netflix, Prime, ...): send them to Plex/YouTube;
- *  - Plex coming to the foreground: sign in past its profile PIN screen.
+ *  - remote app-shortcut buttons (Netflix, Prime, ...): send them to Plex/YouTube.
  * Needs READ_LOGS and SYSTEM_ALERT_WINDOW, both granted over adb. Also runs the
  * post-boot bloat cleanup once per boot, follows JARVIS Core's alert stream
  * (AlertStream) and arms the nightly audio refresh (NightlyRefresh).
@@ -49,8 +48,6 @@ public class RemoteBridgeService extends Service {
             "DeepLink: \"\\S*[?&]launch=voice&vq=([^&\"]+)");
     private static final Pattern PLAY_VERB = Pattern.compile(
             "^\\s*(play|watch|put on|start|resume)\\b");
-    private static final Pattern PLEX_START = Pattern.compile(
-            "START u0 \\{.*cmp=com\\.plexapp\\.android/");
     private static final Pattern KEY = Pattern.compile(
             "handleKeyBeforeQueueing event=KeyEvent \\{ action=ACTION_DOWN, keyCode=(\\w+),");
     private static final Pattern FILLER = Pattern.compile(
@@ -78,8 +75,6 @@ public class RemoteBridgeService extends Service {
         if (!cleanupStarted) {
             cleanupStarted = true;
             new Thread(() -> BootCleanup.run(this), "cleanup").start();
-            // At boot Plex is launched before this service starts listening.
-            new Thread(() -> PlexAutoLogin.run(this), "login").start();
             AlertStream.start(this);
             NightlyRefresh.scheduleNext(this);
             registerReceiver(new ScreenOffReceiver(), new IntentFilter(Intent.ACTION_SCREEN_OFF));
@@ -132,10 +127,6 @@ public class RemoteBridgeService extends Service {
                     if (m.find()) {
                         String speech = Uri.decode(m.group(1).replace('+', ' '));
                         new Thread(() -> handleSpeech(speech)).start();
-                        continue;
-                    }
-                    if (PLEX_START.matcher(line).find()) {
-                        new Thread(() -> PlexAutoLogin.run(this), "login").start();
                         continue;
                     }
                     m = KEY.matcher(line);
@@ -196,7 +187,7 @@ public class RemoteBridgeService extends Service {
             i.setPackage(PLEX);
             i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
             startActivity(i);
-            if (play) PlexAutoLogin.pressWatch(this);
+            if (play) PlexWatch.pressWatch(this);
         } catch (Exception e) {
             Log.w(TAG, "voice lookup failed", e);
         }

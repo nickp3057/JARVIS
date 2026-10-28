@@ -688,6 +688,12 @@ CALENDAR_ALERT_LEAD_MIN=10  # warn this many minutes before a meeting
 
 ## Recently Shipped
 
+- **TV 7.0: one bottom row, no Plex PIN robot** — every bottom-row tile
+  (Plex, Spotify, Wake-up, Continue, Settings) shares one look and width,
+  spread evenly; Continue's list opens on the newest and lands on Plex's
+  Resume (tested on a movie and an episode). Plex keeps Nick signed in, so
+  the PIN auto-entry (`PlexAutoLogin.run`) is removed; `PlexWatch` keeps
+  pressing Watch for "play ..." voice requests.
 - **Five new themes, phone snooze, Continue Watching (TV 6.9, iOS 3.0 / build
   112)** — Graphite, Malibu, Crimson, Stealth, Mark 85 on phone, TV and Core
   (`JarvisPalette`, `Theme.java`, `brain/theme.py`). The wake-up push now
