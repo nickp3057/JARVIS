@@ -17,6 +17,10 @@ Check these on the phone first. Some of the "weird" may already be gone.
 
 ## Scenes and the wake alarm screen (4.4–4.6, compiled against iphoneos, not run)
 
+- Shared by Home (phone) and Room (iPad): `Views/HomeControls.swift`
+  (`SceneTile`, regular and `large`; `LightSheetID`). Model decoding for
+  entities/lights/scenes/voice is covered by `HomeModelTests` (simulator).
+
 - Home tab: a **Scenes** card under the tiles, every saved HA scene as a
   tile, the last one run lit (like picking a Focus). Tap runs it.
 - Tapping the wake-up push opens `WakeRingingView` (Snooze / I'm up).

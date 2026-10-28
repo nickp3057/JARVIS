@@ -410,7 +410,7 @@ struct HomeScene: Decodable, Identifiable {
             ("night", "moon.stars"), ("bed", "bed.double"), ("sleep", "moon.zzz"),
             ("study", "book"), ("work", "laptopcomputer"), ("focus", "scope"), ("read", "book"),
             ("party", "party.popper"), ("game", "gamecontroller"), ("relax", "sofa"), ("chill", "sofa"),
-            ("off", "power"), ("red", "light.beacon.max"), ("dinner", "fork.knife"),
+            ("off", "power"), ("red", "light.beacon.max"), ("dinner", "fork.knife"), ("peace", "hand.wave"),
         ]
         return table.first { text.contains($0.0) }?.1 ?? "sparkles"
     }

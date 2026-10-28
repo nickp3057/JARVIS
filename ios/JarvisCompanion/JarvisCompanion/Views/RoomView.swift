@@ -22,7 +22,7 @@ struct RoomView: View {
     @State private var showingRemote = false
     @State private var showingWake = false
     @State private var holdsPolling = false
-    @State private var lightSheet: String?
+    @State private var lightSheet: LightSheetID?
     @AppStorage("room.nightScreen") private var nightScreen = true
     @State private var asleep = false
     /// The screen's brightness before the night screen, to put back.
@@ -53,7 +53,7 @@ struct RoomView: View {
         .sheet(isPresented: $showingWake) {
             NavigationStack { WakeScheduleView() }
         }
-        .sheet(item: Binding(get: { lightSheet.map(SheetID.init) }, set: { lightSheet = $0?.id })) { item in
+        .sheet(item: $lightSheet) { item in
             LightSheet(model: model, entityID: item.id)
         }
         .fullScreenCover(isPresented: $asleep) {
@@ -104,8 +104,6 @@ struct RoomView: View {
         .onAppear { UIApplication.shared.isIdleTimerDisabled = keepAwake }
         .onChange(of: keepAwake) { _, on in UIApplication.shared.isIdleTimerDisabled = on }
     }
-
-    private struct SheetID: Identifiable { let id: String }
 
     /// After dark with every light and lamp off (and Keep screen on).
     private var roomIsDark: Bool {
@@ -287,7 +285,7 @@ struct RoomView: View {
         .buttonStyle(CockpitButtonStyle())
         .disabled(!entity.isToggleable || pending != nil)
         .simultaneousGesture(LongPressGesture(minimumDuration: 0.45).onEnded { _ in
-            if entity.light?.dimmable == true { lightSheet = entity.entityID }
+            if entity.light?.dimmable == true { lightSheet = LightSheetID(id: entity.entityID) }
         })
         .sensoryFeedback(.impact(weight: .light), trigger: on)
         .accessibilityLabel(entity.friendlyName)
@@ -324,7 +322,7 @@ struct RoomView: View {
             heading("Scenes", symbol: "sparkles")
             if let scenes = model.scenes.value, !scenes.scenes.isEmpty {
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: 180), spacing: 12)], spacing: 12) {
-                    ForEach(scenes.scenes) { sceneTile($0, lit: $0.entityID == scenes.last) }
+                    ForEach(scenes.scenes) { SceneTile(model: model, scene: $0, lit: $0.entityID == scenes.last, large: true) }
                 }
             } else {
                 Text("No scenes yet. Make one in Home Assistant (Settings › Automations & Scenes › Scenes) and it shows up here.")
@@ -332,36 +330,6 @@ struct RoomView: View {
             }
         }
         .roomPanel()
-    }
-
-    private func sceneTile(_ scene: HomeScene, lit: Bool) -> some View {
-        Button { model.runScene(scene) } label: {
-            HStack(spacing: 14) {
-                ZStack {
-                    if model.runningScene == scene.entityID {
-                        ProgressView()
-                    } else {
-                        Image(systemName: scene.symbol).font(.title3.weight(.semibold))
-                    }
-                }
-                .frame(width: 46, height: 46)
-                .background(lit ? JarvisTheme.cyan.opacity(0.9) : JarvisTheme.panelRaised, in: Circle())
-                .foregroundStyle(lit ? JarvisTheme.backgroundDeep : JarvisTheme.cyan)
-                Text(scene.name)
-                    .font(.headline)
-                    .lineLimit(2)
-                    .multilineTextAlignment(.leading)
-                Spacer(minLength: 0)
-            }
-            .padding(14)
-            .frame(maxWidth: .infinity, minHeight: 76, alignment: .leading)
-            .background(lit ? JarvisTheme.cyan.opacity(0.14) : Color.clear, in: .rect(cornerRadius: 18))
-            .overlay(RoundedRectangle(cornerRadius: 18)
-                .strokeBorder(lit ? JarvisTheme.cyan.opacity(0.7) : JarvisTheme.border))
-        }
-        .buttonStyle(CockpitButtonStyle())
-        .disabled(model.runningScene != nil)
-        .accessibilityLabel(scene.name + (lit ? ", last run" : ""))
     }
 
     private func heading(_ title: String, symbol: String) -> some View {
