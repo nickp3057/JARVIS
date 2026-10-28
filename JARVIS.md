@@ -760,6 +760,18 @@ CALENDAR_ALERT_LEAD_MIN=10  # warn this many minutes before a meeting
   Resume (tested on a movie and an episode). Plex keeps Nick signed in, so
   the PIN auto-entry (`PlexAutoLogin.run`) is removed; `PlexWatch` keeps
   pressing Watch for "play ..." voice requests.
+- **"Jarvis, goodnight" (room voice)** — `speech/goodnight.py`, no model
+  involved: "Goodnight, sir. Your alarm's set for 7:00. Is that fine?" →
+  yes / silence keeps it; a time ("6:30", "make it eight", "half past six")
+  moves the coming morning only (`wake_alarm.set_alarm(hhmm, date)`); "no
+  alarm" / "skip it" / "sleep in" skips that morning; a bare "no" asks
+  "What time, sir?" once. With no alarm set it asks "Want one?". Then HA's
+  Goodnight scene runs (in the background) as he says "Sleep well, sir."
+  After midnight "the morning" is today. The answer is heard without the wake
+  word (the mic queue is drained first so JARVIS doesn't hear itself).
+  Routine lines use `tts.speak(..., cache=True)`: audio kept in
+  `memory/tts_cache/` (per voice/model/speed, newest 200), so from the second
+  night they start instantly.
 - **Faster home calls (2026-10-28 cleanup)** — HA's service catalogue
   (`get_services`, ~60 KB, ~45 ms) is cached for 5 minutes and re-read once
   when a service isn't in it; `status_hub.home_control(..., settle=False)`

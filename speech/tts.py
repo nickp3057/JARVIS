@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import os
 import re
+import shutil
 import struct
 import subprocess
 import sys
@@ -265,12 +266,39 @@ def stop_playback() -> None:
         log.exception("stop_playback failed")
 
 
+# --- Cache for lines said often ---------------------------------------------
+# "Sleep well, sir." and friends: synthesized once per voice/model/speed and
+# replayed, so routine lines start instantly. Only ElevenLabs audio is kept.
+
+_CACHE_DIR = _PROJECT_ROOT / "memory" / "tts_cache"
+_CACHE_MAX_FILES = 200
+
+
+def _cache_path(text: str) -> Path:
+    import hashlib
+    speed = os.getenv("ELEVENLABS_SPEED", str(ELEVENLABS_SPEED))
+    key = "|".join((ELEVENLABS_VOICE_ID, ELEVENLABS_MODEL, speed, text.strip()))
+    return _CACHE_DIR / f"{hashlib.sha1(key.encode()).hexdigest()[:20]}.wav"
+
+
+def _store_in_cache(path: Path) -> None:
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(_OUTPUT_FILE, path)
+        files = sorted(path.parent.glob("*.wav"), key=lambda f: f.stat().st_mtime)
+        for old in files[:-_CACHE_MAX_FILES]:  # oldest go first
+            old.unlink(missing_ok=True)
+    except OSError:
+        log.debug("TTS cache write failed", exc_info=True)
+
+
 # --- Public API -------------------------------------------------------------
 
 def speak(
     text: str,
     interrupt_event: threading.Event | None = None,
     on_envelope: Callable[[list[float], float], None] | None = None,
+    cache: bool = False,
 ) -> None:
     """Speak ``text`` aloud.
 
@@ -282,14 +310,23 @@ def speak(
             where ``envelope`` is a list of normalized [0, 1] RMS values at
             ~30 fps.  Use this to drive audio-reactive UI elements in sync
             with playback.
+        cache: keep (and reuse) this line's audio; for fixed lines said
+            often, like the bedtime routine's.
     """
     if not text or not text.strip():
         return
 
     log.debug("speak(): %s", text)
 
+    cached = _cache_path(text) if cache else None
+    if cached is not None and cached.exists():
+        _play_async_and_wait(cached, interrupt_event)  # no synthesis: starts at once
+        return
+
     t0 = time.perf_counter()
     if _synthesize_elevenlabs(text):
+        if cached is not None:
+            _store_in_cache(cached)
         log.debug("Synthesized via ElevenLabs.")
         log.debug("4. TTS synthesis (ElevenLabs): %.0f ms", (time.perf_counter() - t0) * 1000)
     elif _synthesize_piper(text):

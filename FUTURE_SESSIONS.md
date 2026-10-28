@@ -161,6 +161,12 @@ of each group.
   TTS timing prints are debug logs. Least covered now: `brain/runtime.py`
   (monitor loops), `speech/tts.py`, `integrations/spotify.py`,
   `brain/self_repair.py`, `app/main.py`.
+- **"Jarvis, goodnight" (built 2026-10-28, untested on hardware):** try
+  it the first night: the question should start ~1 s after "goodnight"
+  (instant from night two, cached), "yes" should kill the lights within a
+  second. Check Whisper hears short answers ("yes", "six thirty") reliably;
+  if not, lower `VOICE_SILENCE_END_MS` or add phrasings to
+  `speech/goodnight.py`.
 - **Room voice (built 2026-10-28, not run on the Optiplex yet).** Turn on
   at home, in the Optiplex `.env`:
   `ROOM_VOICE=1`, `AUDIO_OUTPUT_DEVICE=plughw:1,0`, `WHISPER_MODEL=base.en`

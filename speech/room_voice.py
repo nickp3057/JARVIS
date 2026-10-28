@@ -95,6 +95,7 @@ class RoomVoice:
     # --- the loop ------------------------------------------------------------
 
     def _loop(self, stream: MicStream) -> None:
+        self.stream = stream  # routines (goodnight) listen for an answer on it
         need_wake = True
         while not self.stop.is_set():
             stream.drain()
@@ -178,7 +179,7 @@ class RoomVoice:
 
     def _handle(self, audio: np.ndarray) -> bool:
         """Transcribe and act. True keeps a follow-up window open."""
-        from speech import quick_commands
+        from speech import goodnight, quick_commands
         from speech.tts import speak
         voice_presence.update("thinking")
         started = time.perf_counter()
@@ -186,6 +187,12 @@ class RoomVoice:
         log.info("Room voice heard %r (%.0f ms)", text, (time.perf_counter() - started) * 1000)
         voice_presence.update(transcript=text)
         if not text:
+            voice_presence.update("idle")
+            return False
+
+        if goodnight.is_goodnight(text):
+            outcome = goodnight.run(self._say, self._listen_for_answer, self._lights_out)
+            log.info("Goodnight routine: alarm %s", outcome)
             voice_presence.update("idle")
             return False
 
@@ -213,6 +220,44 @@ class RoomVoice:
         voice_presence.update("idle")
         # A question or a chat keeps listening briefly; a finished task doesn't.
         return not self.runtime.last_used_tools
+
+    # --- for routines that hold a short conversation (goodnight) ---------------
+
+    def _say(self, text: str) -> None:
+        from speech.tts import speak
+        voice_presence.update("speaking", reply=text)
+        speak(text, cache=True)  # routine lines repeat: instant from the second time
+
+    def _listen_for_answer(self) -> str | None:
+        """One reply, no wake word needed; None if Nick says nothing."""
+        self.stream.drain()  # what's queued is JARVIS's own question, not the answer
+        voice_presence.update("listening")
+        audio = self._capture(self.stream, None, start_timeout=_seconds("VOICE_FOLLOWUP_S", 5.0))
+        if audio is None:
+            return None
+        voice_presence.update("thinking")
+        text = strip_wake_word(self.final.transcribe(audio)).strip()
+        voice_presence.update(transcript=text)
+        log.info("Room voice answer %r", text)
+        return text
+
+    def _lights_out(self) -> None:
+        """HA's Goodnight scene, in the background so "Sleep well" isn't kept waiting."""
+        from app import status_hub
+
+        def run() -> None:
+            try:
+                scenes = status_hub.home_scenes().get("scenes", [])
+                scene = next((s for s in scenes if s["entity_id"] == "scene.goodnight"
+                              or s["name"].lower().replace(" ", "") == "goodnight"), None)
+                if scene is None:
+                    log.warning("Goodnight routine: no Goodnight scene in Home Assistant")
+                    return
+                status_hub.activate_scene(scene["entity_id"])
+            except Exception:  # noqa: BLE001
+                log.exception("Goodnight scene failed")
+
+        threading.Thread(target=run, name="goodnight-scene", daemon=True).start()
 
     def _finish(self, phase: str, reply: str) -> None:
         voice_presence.update(phase, reply=reply)

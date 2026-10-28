@@ -118,6 +118,33 @@ class SynthesisTests(unittest.TestCase):
         synth.assert_not_called()
 
 
+class CacheTests(unittest.TestCase):
+    def test_routine_lines_are_synthesized_once(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp) / "out.wav"
+            with patch.object(tts, "_OUTPUT_FILE", out), patch.object(tts, "_CACHE_DIR", Path(tmp) / "cache"), \
+                    patch.object(tts, "_synthesize_elevenlabs",
+                                 side_effect=lambda text: write_wav(out, [10] * 20) or True) as synth, \
+                    patch.object(tts, "_play_async_and_wait") as play:
+                tts.speak("Sleep well, sir.", cache=True)
+                tts.speak("Sleep well, sir.", cache=True)
+                tts.speak("Sleep well, sir.")  # uncached call: synthesizes as before
+                self.assertEqual(synth.call_count, 2)
+                cached = tts._cache_path("Sleep well, sir.")
+                self.assertEqual(play.call_args_list[1].args[0], cached)
+                with patch.dict(os.environ, {"ELEVENLABS_SPEED": "1.1"}):
+                    self.assertNotEqual(tts._cache_path("Sleep well, sir."), cached)  # new speed, new audio
+
+    def test_the_cache_stays_small(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp) / "out.wav"
+            write_wav(out, [1] * 10)
+            with patch.object(tts, "_OUTPUT_FILE", out), patch.object(tts, "_CACHE_MAX_FILES", 3):
+                for i in range(5):
+                    tts._store_in_cache(Path(tmp) / "cache" / f"{i}.wav")
+            self.assertEqual(len(list((Path(tmp) / "cache").glob("*.wav"))), 3)
+
+
 class PosixPlaybackTests(unittest.TestCase):
     def setUp(self) -> None:
         patch.object(tts.sys, "platform", "linux").start()
