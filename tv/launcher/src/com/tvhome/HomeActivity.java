@@ -973,7 +973,7 @@ public class HomeActivity extends Activity {
      * Every bottom-row tile is built the same way, so the wordmarks sit on one
      * line and the labels on another: a bold wordmark (one accent letter), its
      * spaced label, and small print that only shows while the tile is
-     * highlighted (a blank line on the others keeps them level).
+     * highlighted (the wordmark and label slide up to make room).
      */
     private FrameLayout wordTile(LinearLayout row, TextView mark, String sub, TextView detail, Runnable open) {
         FrameLayout tile = tileFrame();
@@ -983,8 +983,9 @@ public class HomeActivity extends Activity {
         inner.addView(mark, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(38)));
         inner.addView(tileLabel(sub));
         if (detail == null) detail = tileInfo();
-        detail.setVisibility(View.INVISIBLE);
+        detail.setVisibility(View.GONE); // centred until highlighted
         inner.addView(detail);
+        inner.setLayoutTransition(new android.animation.LayoutTransition()); // slide, don't jump
         tile.setTag(detail);
         centreText(inner);
         tile.addView(inner, new FrameLayout.LayoutParams(
@@ -1142,7 +1143,7 @@ public class HomeActivity extends Activity {
             // A wordTile's small print (its tag) only shows while it's highlighted.
             if (v.getTag() instanceof TextView) {
                 TextView detail = (TextView) v.getTag();
-                detail.setVisibility(focused && detail.length() > 0 ? View.VISIBLE : View.INVISIBLE);
+                detail.setVisibility(focused && detail.length() > 0 ? View.VISIBLE : View.GONE);
             }
             v.animate().scaleX(focused ? 1.08f : 1f).scaleY(focused ? 1.08f : 1f)
                     .translationZ(focused ? dp(8) : 0).setDuration(120).start();

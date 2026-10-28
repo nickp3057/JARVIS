@@ -68,8 +68,8 @@ every deploy, so edit the repo copy, not the TV's.
   (`wordmark`/`setWordmark`, shrinks to fit) on one line, its spaced label
   on the next (plex / LIBRARY, spotify / MUSIC, 8:00am / WAKE-UP,
   interstellar / CONTINUE, settings / JARVIS), and small print (Tomorrow ·
-  Back in Black, 2h 43m left) only while the tile is highlighted; a blank
-  line on the others keeps every row level. One character per wordmark is
+  Back in Black, 2h 43m left) only while the tile is highlighted: the
+  wordmark and label sit centred and slide up to make room for it. One character per wordmark is
   the theme accent: Plex's x (its logo's chevron) and Spotify's i, picked
   from the text itself for the rest so it doesn't jump around. Continue hides when Plex has nothing in
   progress.
