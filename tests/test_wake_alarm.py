@@ -134,3 +134,49 @@ class WakeAlarmTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class GoodMorningTests(unittest.TestCase):
+    STATES = [
+        {"entity_id": "light.desk_lights", "state": "off"},
+        {"entity_id": "light.desk_lights_segment_1", "state": "on"},
+        {"entity_id": "light.old_lamp", "state": "unavailable"},
+        {"entity_id": "light.bedroom_lights", "state": "off"},
+        {"entity_id": "switch.fan", "state": "off"},
+    ]
+
+    def test_every_light_but_segments(self) -> None:
+        self.assertEqual(wake_alarm.good_morning_targets(self.STATES),
+                         ["light.bedroom_lights", "light.desk_lights"])
+
+    def test_lights_on_by_default(self) -> None:
+        with patch.dict("os.environ", {"WAKE_UP_SCENE": "", "WAKE_UP_LIGHTS": ""}), \
+                patch("integrations.home_assistant.get_states", return_value=(True, self.STATES)), \
+                patch("integrations.home_assistant.call_service", return_value=(True, "ok")) as call:
+            self.assertTrue(wake_alarm.good_morning()[0])
+        call.assert_called_once_with("light", "turn_on",
+                                     service_data={"entity_id": ["light.bedroom_lights", "light.desk_lights"]})
+
+    def test_scene_wins_and_off_switch(self) -> None:
+        with patch.dict("os.environ", {"WAKE_UP_SCENE": "scene.good_morning"}), \
+                patch("integrations.home_assistant.call_service", return_value=(True, "ok")) as call:
+            wake_alarm.good_morning()
+        call.assert_called_once_with("scene", "turn_on", "scene.good_morning")
+        with patch.dict("os.environ", {"WAKE_UP_LIGHTS": "off"}), \
+                patch("integrations.home_assistant.call_service") as call:
+            wake_alarm.good_morning()
+        call.assert_not_called()
+
+
+class GrantScopeTests(unittest.TestCase):
+    def test_grant_keeps_token(self) -> None:
+        from app import client_tokens
+        with tempfile.TemporaryDirectory() as tmp, \
+                patch.object(client_tokens, "_FILE", Path(tmp) / "tokens.json"):
+            token = client_tokens.create("tv", ["events:read"])
+            self.assertTrue(client_tokens.grant("tv", ["wake:write"]))
+            self.assertEqual(client_tokens.scopes_for(token),
+                             ("tv", frozenset({"events:read", "wake:write"})))
+            self.assertFalse(client_tokens.grant("nobody", ["wake:write"]))
+            with self.assertRaises(ValueError):
+                client_tokens.grant("tv", ["root"])

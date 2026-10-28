@@ -49,6 +49,7 @@ every deploy, so edit the repo copy, not the TV's.
   opens the link in Spotify itself (`am start VIEW`) and presses play. Volume goes straight to the
   alarm's level (no fade: Nick didn't like it creeping up), then
   `WakeActivity` shows the time with **I'm up** (closes; music plays on;
+  tells Core `POST /api/wake/awake`, which turns on the good-morning lights;
   Back does the same) and **Snooze 9 min** (pauses, then `Wake.run` again,
   resuming the song). The snooze is a main-looper Handler, so it's lost if
   the TV is switched off meanwhile. The last alarm handled is kept in prefs

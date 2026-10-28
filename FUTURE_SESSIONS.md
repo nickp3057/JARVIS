@@ -141,11 +141,18 @@ of each group.
 - **Morning report 2026-10-28:** the TV turned on at 8:00 (proven), but no
   music. HA history: at 08:00:03 Spotify's session was *paused* on "Highway
   to Hell" (last night's track), so `playFromUri` was ignored; the TV went
-  off at 08:00:52. TV 8.1 (built, not installed) falls back to opening the
+  off at 08:00:52. TV 8.2 (built, not installed) falls back to opening the
   link in Spotify. **Install at home:** `TV=10.0.0.46:5555 tv/launcher/deploy.sh`,
   then test with the WakeTestReceiver broadcast after the TV has slept.
   Ask Nick whether he turned the TV off at 08:00:52 or it shut itself off.
-- **iOS 4.4 / build 126 (not installed):** tap the wake-up push → full-screen
+- **Good-morning lights:** Nick turned the TV off himself at 08:00:52.
+  I'm up now turns on every light via Core (live after `git pull` + restart).
+  For the TV's I'm up: install TV 8.2 and run
+  `.venv/bin/python -m app.client_tokens grant nicks-room-tv wake:write` on
+  the Optiplex. Later: build a real `scene.good_morning` in HA (colours,
+  brightness, maybe blinds) and set `WAKE_UP_SCENE`.
+- Schwab shows Live after the open (confirmed 2026-10-28).
+- **iOS 4.5 / build 127 (not installed):** tap the wake-up push → full-screen
   Snooze / I'm up. Install from Xcode when at the Mac.
 - **1337x is IP-banned, not rate-limited.** Prowlarr logs: `403 Forbidden,
   error code: 1006` from `1337x.to` (Cloudflare "your IP is banned" for the

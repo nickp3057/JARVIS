@@ -68,6 +68,25 @@ final class Jarvis {
     }
 
     /**
+     * Blocking: I'm up on the wake screen. Core closes any snooze and turns on
+     * the good-morning lights. Needs the wake:write scope; without it, a 403
+     * is logged and the TV just closes its screen as before.
+     */
+    static void awake(Context c) {
+        try {
+            HttpURLConnection conn = open(base(c), "/api/wake/awake", token(c), 5000);
+            conn.setRequestMethod("POST");
+            try {
+                if (conn.getResponseCode() != 200) Log.w(TAG, "awake not sent: HTTP " + conn.getResponseCode());
+            } finally {
+                conn.disconnect();
+            }
+        } catch (Exception e) {
+            Log.w(TAG, "awake not sent", e);
+        }
+    }
+
+    /**
      * Blocking: save the theme on Core so the phone follows. True if Core took
      * it; false keeps it as a TV-only override.
      */

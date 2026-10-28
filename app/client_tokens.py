@@ -9,12 +9,15 @@ full access. Every other client gets its own token here, limited to scopes:
                    JARVIS's own confirmation rules still apply to risky tools.
 - ``settings:write`` change shared look-and-feel (``PUT /api/theme``), e.g.
                    the TV's Settings page. Nothing else.
+- ``wake:write``   I'm up on the TV's wake screen (``POST /api/wake/awake``),
+                   which also turns on the good-morning lights.
 
 Only a SHA-256 of each token is stored (``memory/client_tokens.json``,
 gitignored); the token itself is printed once at creation. Manage from the
 Optiplex shell::
 
     .venv/bin/python -m app.client_tokens create living-room-tv events:read status:read
+    .venv/bin/python -m app.client_tokens grant nicks-room-tv wake:write
     .venv/bin/python -m app.client_tokens list
     .venv/bin/python -m app.client_tokens revoke living-room-tv
 """
@@ -29,7 +32,7 @@ import sys
 import threading
 import time
 
-SCOPES = frozenset({"events:read", "status:read", "chat", "settings:write"})
+SCOPES = frozenset({"events:read", "status:read", "chat", "settings:write", "wake:write"})
 _FILE = Path(__file__).resolve().parents[1] / "memory" / "client_tokens.json"
 _lock = threading.Lock()
 
@@ -77,6 +80,20 @@ def revoke(name: str) -> bool:
     return removed
 
 
+def grant(name: str, scopes: list[str]) -> bool:
+    """Add scopes to an existing client, keeping its token. False if no such client."""
+    unknown = set(scopes) - SCOPES
+    if not scopes or unknown:
+        raise ValueError(f"need scopes from {sorted(SCOPES)}; unknown: {sorted(unknown)}")
+    with _lock:
+        data = _load()
+        if name not in data:
+            return False
+        data[name]["scopes"] = sorted(set(data[name].get("scopes", [])) | set(scopes))
+        _save(data)
+    return True
+
+
 def listing() -> dict[str, list[str]]:
     return {name: entry.get("scopes", []) for name, entry in _load().items()}
 
@@ -96,6 +113,9 @@ def _main(argv: list[str]) -> int:
     if len(argv) >= 3 and argv[0] == "create":
         token = create(argv[1], argv[2:])
         print(f"Token for {argv[1]} (shown once, store it on the client):\n{token}")
+        return 0
+    if len(argv) >= 3 and argv[0] == "grant":
+        print("granted" if grant(argv[1], argv[2:]) else "no such client")
         return 0
     if argv[:1] == ["list"]:
         for name, scopes in listing().items():

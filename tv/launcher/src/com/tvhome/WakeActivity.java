@@ -1,6 +1,7 @@
 package com.tvhome;
 
 import android.app.Activity;
+import android.content.Context;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
 import android.os.Bundle;
@@ -127,6 +128,8 @@ public class WakeActivity extends Activity {
 
     private void awake() {
         Wake.cancelSnooze();
+        Context app = getApplicationContext();
+        new Thread(() -> Jarvis.awake(app)).start(); // good-morning lights
         finish();
     }
 

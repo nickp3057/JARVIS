@@ -16,6 +16,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta
 import json
+import os
 from pathlib import Path
 import re
 import threading
@@ -238,6 +239,33 @@ def awake() -> None:
     if data and (data.get("once") or {}).get("snooze"):
         data["once"] = None
         _save(data)
+
+
+def good_morning_targets(states: list[dict[str, Any]]) -> list[str]:
+    """Every light, minus per-segment entities of LED strips (the strip itself covers them)."""
+    return sorted(s["entity_id"] for s in states
+                  if s.get("entity_id", "").startswith("light.") and "_segment_" not in s["entity_id"]
+                  and s.get("state") != "unavailable")
+
+
+def good_morning() -> tuple[bool, str]:
+    """I'm up -> the good-morning scene. ``WAKE_UP_SCENE`` (a ``scene.`` or
+    ``script.`` entity) if set, else every light on. ``WAKE_UP_LIGHTS=0`` turns
+    it off. Called off the request thread; Home Assistant can be slow."""
+    if os.getenv("WAKE_UP_LIGHTS", "1").strip().lower() in ("0", "false", "off", "no"):
+        return True, "Good-morning lights are off in settings."
+    from integrations import home_assistant
+    scene = os.getenv("WAKE_UP_SCENE", "").strip()
+    if scene:
+        domain = scene.split(".", 1)[0]
+        return home_assistant.call_service(domain, "turn_on", scene)
+    ok, states = home_assistant.get_states()
+    if not ok or not isinstance(states, list):
+        return False, f"Couldn't read the lights: {states}"
+    lights = good_morning_targets(states)
+    if not lights:
+        return False, "No lights found in Home Assistant."
+    return home_assistant.call_service("light", "turn_on", service_data={"entity_id": lights})
 
 
 def cancel(days_text: str | None = None) -> bool:

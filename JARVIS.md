@@ -36,7 +36,7 @@ The character never breaks. It calls Nick "sir", uses dry British wit, answers i
 Pearson-Stark-Jarvis/
 ├── app/
 │   ├── main.py              Entry point. GUI / text / voice / server modes
-│   ├── client_tokens.py     Scoped per-client tokens (events:read, status:read, chat, settings:write) + CLI; hashes in memory/client_tokens.json
+│   ├── client_tokens.py     Scoped per-client tokens (events:read, status:read, chat, settings:write, wake:write) + CLI (create/grant/list/revoke); hashes in memory/client_tokens.json
 │   └── server.py            Authenticated HTTP bridge for the iOS companion (+ /api/clients/events SSE)
 │
 ├── brain/
@@ -620,6 +620,8 @@ LOCAL_MODEL_API_KEY=         # optional; never logged
 JARVIS_API_TOKEN=           # required bearer token
 JARVIS_SERVER_HOST=0.0.0.0
 JARVIS_SERVER_PORT=8000
+WAKE_UP_LIGHTS=1            # I'm up (phone or TV) turns on every light (strip segments skipped); 0 = off
+WAKE_UP_SCENE=              # optional HA scene./script. entity to run instead (e.g. scene.good_morning)
 # Companion dashboard (read-only status hub endpoints)
 PLEX_URL=                   # Plex base URL for /api/links + /api/status/services
 LINK_REMOTE_HOSTS=          # lan=tailscale host pairs; /api/links adds remote_url (e.g. 10.0.0.147=100.97.179.53)
@@ -727,6 +729,12 @@ CALENDAR_ALERT_LEAD_MIN=10  # warn this many minutes before a meeting
   Resume (tested on a movie and an episode). Plex keeps Nick signed in, so
   the PIN auto-entry (`PlexAutoLogin.run`) is removed; `PlexWatch` keeps
   pressing Watch for "play ..." voice requests.
+- **Good-morning lights (Core, TV 8.2)** — I'm up (phone button, phone alarm
+  screen, or the TV's I'm up / Back) calls `POST /api/wake/awake`, which now
+  also runs `wake_alarm.good_morning()` on a background thread: the
+  `WAKE_UP_SCENE` scene/script if set, else `light.turn_on` on every light
+  except `_segment_` entities. `WAKE_UP_LIGHTS=0` turns it off. The endpoint
+  takes the admin token or a client token with the new `wake:write` scope.
 - **Tap the wake-up push for the alarm screen; Spotify fallback (iOS 4.4 /
   build 126, TV 8.1)** — tapping the WAKE_UP notification itself (not a
   button) opens the app on `WakeRingingView`, full screen, with big Snooze
@@ -1496,8 +1504,10 @@ TV=10.0.0.46:5555 tv/provision.sh         # Nick, at home: scoped token + Core U
   constructors javac 24 writes for inner (non-static) classes, so nested
   classes in the launcher are static.
 - The token is `nicks-room-tv` with `events:read status:read chat
-  settings:write`: it can read, talk to JARVIS (his confirmation rules
-  apply) and set the shared theme, nothing else. Until provisioned, the footer reads "NOT LINKED
+  settings:write wake:write`: it can read, talk to JARVIS (his confirmation rules
+  apply), set the shared theme and press I'm up (good-morning lights), nothing
+  else. Add a scope without re-provisioning:
+  `.venv/bin/python -m app.client_tokens grant nicks-room-tv wake:write`. Until provisioned, the footer reads "NOT LINKED
   TO CORE".
 - TCL quirks: reinstalling resets `appops APP_AUTO_START` (deploy.sh re-applies
   it); the firmware restores some removed apps every boot (BootCleanup removes

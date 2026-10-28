@@ -29,7 +29,9 @@ from app import client_tokens
 from brain import event_bus
 from integrations import media_doctor, media_requests
 from brain import incident_reports, maintenance, self_repair
+from jarvis_logger import get_logger
 
+log = get_logger(__name__)
 _SSE_KEEPALIVE_S = 15.0
 
 _runtime: JarvisRuntime | None = None
@@ -583,12 +585,24 @@ def wake_snooze(_: None = Depends(authorize)) -> dict[str, object]:
 
 
 @app.post("/api/wake/awake")
-def wake_awake(_: None = Depends(authorize)) -> dict[str, object]:
-    """I'm up from the phone: the TV's wake screen closes, music plays on."""
+def wake_awake(_: None = Depends(require_scope("wake:write"))) -> dict[str, object]:
+    """I'm up (phone or TV): the TV's wake screen closes, music plays on, and
+    the good-morning lights come on (``wake_alarm.good_morning``)."""
     from brain import wake_alarm
     wake_alarm.awake()
+    threading.Thread(target=_good_morning, daemon=True).start()
     event_bus.publish("wake_dismiss", "Up and at 'em", "", source="wake-up", severity="info", push=False)
     return {"ok": True}
+
+
+def _good_morning() -> None:
+    from brain import wake_alarm
+    try:
+        ok, detail = wake_alarm.good_morning()
+    except Exception as exc:  # noqa: BLE001
+        ok, detail = False, str(exc)
+    if not ok:
+        log.warning("Good-morning lights failed: %s", detail)
 
 
 # --- Shared colour theme (phone and TV follow one pick; brain/theme.py) -----
