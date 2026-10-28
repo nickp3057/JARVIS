@@ -100,6 +100,16 @@ class WakeAlarmTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             wake_alarm.skip("someday", now=tuesday_night)
 
+    def test_phone_snooze_rings_again_and_im_up_cancels_it(self) -> None:
+        now = datetime(2026, 10, 28, 6, 31, 20)
+        at = wake_alarm.snooze(now)
+        self.assertEqual(at, datetime(2026, 10, 28, 6, 40))
+        fired = wake_alarm.due(datetime(2026, 10, 28, 6, 40, 5))
+        self.assertEqual(fired["music"], "")  # resumes where it paused
+        wake_alarm.snooze(now)
+        wake_alarm.awake()
+        self.assertIsNone(wake_alarm.due(datetime(2026, 10, 28, 6, 40, 5)))
+
     def test_paused_schedule_and_old_file_migrate(self) -> None:
         wake_alarm._FILE.write_text(json.dumps({
             "time": "06:45", "days": [0, 1, 2, 3, 4], "once": False, "music": "search:Back in Black",

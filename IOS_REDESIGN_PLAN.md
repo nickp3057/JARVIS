@@ -60,7 +60,10 @@ toolbar).
 
 ## Themes and motion (1.86, simulator tests pass)
 
-- Settings → Theme: Arc / Mark III / Hot Rod (`JarvisPalette`; Reactor removed in 1.87, Nick disliked the violet; Hot Rod added in 1.91). Mark III's red
+- Settings → Theme (3.0): Arc, Mark III, Hot Rod plus five to try, Graphite
+  (Apple blue on black), Malibu (sunset orange, ocean blue, cyan core),
+  Crimson (calm red on charcoal), Stealth (silver/gunmetal) and Mark 85 (gold
+  and crimson on navy). Nick picks which stay. Earlier: (`JarvisPalette`; Reactor removed in 1.87, Nick disliked the violet; Hot Rod added in 1.91). Mark III's red
   accent sits close to the red "critical" dot; revisit if that confuses.
 - The reactor mark animates at display rate; check smoothness on device with
   Instruments → Animation Hitches (target: no hitches on the Chat empty
@@ -120,6 +123,8 @@ toolbar).
   right = done). Home switches are three-across tap tiles. Reactor glow no
   longer pulses. Chat's suggested prompts removed. Third theme Hot Rod
   (Mark III + cyan `reactor` role for the mark and control tint).
+- Home (3.0): no "tap the reactor" hint; the storage chip is the success
+  colour like Systems; the TV remote lives at the top of Hub, not on Home.
 - Charles Schwab portfolio card on Home (2.5): live value, today, yesterday,
   cash; Log in when Schwab's weekly login is due. Settings > Charles Schwab.
 

@@ -10,7 +10,8 @@ import os
 from pathlib import Path
 import time
 
-THEMES = ("arc", "markIII", "hotRod")
+# Same names as JarvisPalette (iOS) and Theme.java (TV).
+THEMES = ("arc", "markIII", "hotRod", "graphite", "malibu", "crimson", "stealth", "mark85")
 _FILE = Path(__file__).resolve().parents[1] / "memory" / "theme.json"
 
 

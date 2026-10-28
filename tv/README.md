@@ -56,6 +56,15 @@ every deploy, so edit the repo copy, not the TV's.
   and, when Core has a linked Schwab portfolio (`/api/glance` `portfolio`),
   the line under the weather with value and today's change in dollars and
   cents from `/api/portfolio` (Core streams the prices).
+- **Continue** (`ContinueWatching`): Plex's Continue Watching straight from
+  the NAS (`/hubs/continueWatching/items`, the TV's own Plex token): the
+  newest on a bottom-row tile, the rest in its list; opening one goes to its
+  Plex page (the show's, for an episode). Refreshed with the glance (60 s).
+- **Phone snooze**: `wake_snooze` / `wake_dismiss` bus events (from the
+  phone's notification buttons) pause and count down, or close
+  `WakeActivity`. Core rings a phone snooze again itself.
+- **Themes**: Arc, Mark III, Hot Rod, Graphite, Malibu, Crimson, Stealth,
+  Mark 85 (`Theme.java`, dark variants of the phone's `JarvisPalette`).
 - **Weather icon** (`HomeActivity.weatherIcon`): one emoji from the
   description: sun (moon at night), part-cloud, cloud, rain, snow, storm, fog.
 - **Power and remote from the phone** don't touch this app: Core drives the

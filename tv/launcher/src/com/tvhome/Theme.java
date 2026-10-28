@@ -47,9 +47,45 @@ final class Theme {
             RED_WARNING, RED_CRITICAL, ICE,
             RED_SURFACES[0], RED_SURFACES[1], RED_SURFACES[2], RED_SURFACES[3]);
 
+    static final Theme GRAPHITE = new Theme(
+            new float[] {0.04f, 0.52f, 1.0f}, new float[] {0.04f, 0.52f, 1.0f},
+            new float[] {1.0f, 0.62f, 0.04f}, new float[] {1.0f, 0.27f, 0.23f},
+            new float[] {0.19f, 0.82f, 0.35f}, new float[] {0.0f, 0.0f, 0.0f},
+            new float[] {0.0f, 0.0f, 0.0f}, new float[] {0.11f, 0.11f, 0.12f},
+            new float[] {0.17f, 0.17f, 0.18f});
+    static final Theme MALIBU = new Theme(
+            new float[] {1.0f, 0.58f, 0.28f}, new float[] {0.35f, 0.88f, 1.0f},
+            new float[] {1.0f, 0.78f, 0.3f}, new float[] {1.0f, 0.33f, 0.36f},
+            new float[] {0.35f, 0.88f, 0.7f}, new float[] {0.04f, 0.05f, 0.1f},
+            new float[] {0.015f, 0.02f, 0.05f}, new float[] {0.08f, 0.1f, 0.17f},
+            new float[] {0.11f, 0.14f, 0.23f});
+    static final Theme CRIMSON = new Theme(
+            new float[] {0.95f, 0.28f, 0.33f}, new float[] {0.8f, 0.9f, 1.0f},
+            new float[] {1.0f, 0.68f, 0.25f}, new float[] {1.0f, 0.45f, 0.25f},
+            new float[] {0.4f, 0.85f, 0.6f}, new float[] {0.06f, 0.06f, 0.07f},
+            new float[] {0.02f, 0.02f, 0.025f}, new float[] {0.1f, 0.1f, 0.11f},
+            new float[] {0.14f, 0.14f, 0.155f});
+    static final Theme STEALTH = new Theme(
+            new float[] {0.8f, 0.84f, 0.9f}, new float[] {0.4f, 0.9f, 1.0f},
+            new float[] {1.0f, 0.73f, 0.3f}, new float[] {1.0f, 0.36f, 0.38f},
+            new float[] {0.45f, 0.88f, 0.75f}, new float[] {0.05f, 0.055f, 0.065f},
+            new float[] {0.02f, 0.022f, 0.028f}, new float[] {0.09f, 0.1f, 0.115f},
+            new float[] {0.13f, 0.14f, 0.16f});
+    static final Theme MARK_85 = new Theme(
+            new float[] {1.0f, 0.8f, 0.4f}, new float[] {0.35f, 0.88f, 1.0f},
+            new float[] {1.0f, 0.58f, 0.22f}, new float[] {1.0f, 0.3f, 0.34f},
+            new float[] {0.5f, 0.88f, 0.95f}, new float[] {0.035f, 0.045f, 0.085f},
+            new float[] {0.012f, 0.016f, 0.035f}, new float[] {0.07f, 0.085f, 0.14f},
+            new float[] {0.1f, 0.12f, 0.19f});
+
     static Theme named(String name) {
         if ("markIII".equals(name)) return MARK_III;
         if ("hotRod".equals(name)) return HOT_ROD;
+        if ("graphite".equals(name)) return GRAPHITE;
+        if ("malibu".equals(name)) return MALIBU;
+        if ("crimson".equals(name)) return CRIMSON;
+        if ("stealth".equals(name)) return STEALTH;
+        if ("mark85".equals(name)) return MARK_85;
         return ARC;
     }
 

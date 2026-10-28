@@ -218,6 +218,28 @@ def skip(day_text: str = "tomorrow", restore: bool = False, now: datetime | None
     return day
 
 
+SNOOZE_MINUTES = 9
+
+
+def snooze(now: datetime | None = None) -> datetime:
+    """Snoozed from the phone: ring again (resuming the music) in 9 minutes.
+    Core rings it, so the phone gets its I'm up / Snooze buttons again."""
+    now = now or datetime.now()
+    data = load() or _blank()
+    at = (now + timedelta(minutes=SNOOZE_MINUTES)).replace(second=0, microsecond=0)
+    data["once"] = {"at": at.isoformat(timespec="minutes"), "music": "", "label": "", "snooze": True}
+    _save(data)
+    return at
+
+
+def awake() -> None:
+    """I'm up: a pending snooze doesn't ring."""
+    data = load()
+    if data and (data.get("once") or {}).get("snooze"):
+        data["once"] = None
+        _save(data)
+
+
 def cancel(days_text: str | None = None) -> bool:
     """Clear some days (keeping the rest), or the whole schedule and the one-off."""
     data = load()

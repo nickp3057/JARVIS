@@ -620,6 +620,16 @@ struct JarvisAPIClient {
         try await getJSON(WakeSchedule.self, path: "api/wake")
     }
 
+    func snoozeWakeUp() async throws {
+        struct Until: Decodable { let until: Double }
+        _ = try await postJSON(Until.self, path: "api/wake/snooze", body: EmptyBody())
+    }
+
+    func wakeUpAwake() async throws {
+        struct Done: Decodable { let ok: Bool }
+        _ = try await postJSON(Done.self, path: "api/wake/awake", body: EmptyBody())
+    }
+
     func saveWakeSchedule(_ draft: WakeScheduleDraft) async throws -> WakeSchedule {
         try await sendJSON(WakeSchedule.self, path: "api/wake", method: "PUT", body: draft)
     }

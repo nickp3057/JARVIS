@@ -61,6 +61,7 @@ struct HubView: View {
                                 portfolioTile(portfolio)
                             }
                         case .hub:
+                            tvRemoteButton
                             if !attentionAlerts.isEmpty { needsAttentionCard }
                             if !visibleRepairs.isEmpty { repairsCard }
                             nowCard
@@ -196,15 +197,10 @@ struct HubView: View {
             }
 
             ViewThatFits(in: .horizontal) {
-                HStack(spacing: 8) { systemsChip; storageChip; remoteChip }
-                VStack(spacing: 8) { systemsChip; storageChip; remoteChip }
+                HStack(spacing: 8) { systemsChip; storageChip }
+                VStack(spacing: 8) { systemsChip; storageChip }
             }
             if attentionCount > 0 { attentionChip }
-            if onAsk != nil {
-                Text("Tap the reactor for a briefing")
-                    .font(.caption)
-                    .foregroundStyle(.tertiary)
-            }
         }
         .frame(maxWidth: .infinity)
         .padding(.bottom, 8)
@@ -240,14 +236,27 @@ struct HubView: View {
     private var storageChip: some View {
         if let storage = model.storage.value, storage.error.isEmpty {
             heroChip("\(Self.bytes(storage.freeBytes)) free", symbol: "externaldrive",
-                     tint: storage.usedFraction > 0.9 ? JarvisTheme.amber : JarvisTheme.cyan) {
+                     tint: storage.usedFraction > 0.9 ? JarvisTheme.amber : JarvisTheme.success) {
                 openMedia("storage")
             }
         }
     }
 
-    private var remoteChip: some View {
-        heroChip("TV remote", symbol: "av.remote", tint: JarvisTheme.cyan) { showingRemote = true }
+    /// Top of the Hub tab: the TV remote, one tap away.
+    private var tvRemoteButton: some View {
+        Button { showingRemote = true } label: {
+            HStack(spacing: 12) {
+                Image(systemName: "av.remote").font(.title3).foregroundStyle(JarvisTheme.cyan)
+                Text("TV remote").font(.headline)
+                Spacer()
+                Image(systemName: "chevron.right").font(.footnote.weight(.semibold)).foregroundStyle(.secondary)
+            }
+            .padding(16)
+            .background(JarvisTheme.panelGradient, in: .rect(cornerRadius: 20))
+            .overlay(RoundedRectangle(cornerRadius: 20).strokeBorder(JarvisTheme.border))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(CockpitButtonStyle())
     }
 
     private func heroChip(_ text: String, symbol: String, tint: Color, action: @escaping () -> Void) -> some View {

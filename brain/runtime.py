@@ -325,11 +325,12 @@ class JarvisRuntime:
 
     def raise_alert(self, kind: str, title: str, detail: str, *, source: str, severity: str = "warning",
                     push: bool = True, dedupe_key: str | None = None, cooldown_s: float = 0.0,
-                    context: dict | None = None) -> None:
-        """Inbox event plus bus alert: the one call for a new proactive alert."""
+                    context: dict | None = None, **grouping) -> None:
+        """Inbox event plus bus alert: the one call for a new proactive alert.
+        ``grouping`` (thread_id, collapse_id, passive, category) goes to the phone push."""
         self.record_event(kind="alert", source=source, title=title, detail=detail)
         event_bus.publish(kind, title, detail, source=source, severity=severity, push=push,
-                          dedupe_key=dedupe_key, cooldown_s=cooldown_s, context=context)
+                          dedupe_key=dedupe_key, cooldown_s=cooldown_s, context=context, **grouping)
 
     def _deliver_alert_to_phone(self, alert: "event_bus.Alert") -> None:
         """Bus subscriber: companion push first, Home Assistant as fallback.
@@ -1039,8 +1040,10 @@ class JarvisRuntime:
                 alarm = None
             if alarm:
                 music = alarm["label"] or ("your music" if alarm["music"] else "whatever Spotify last played")
-                self.raise_alert("wake_up", "Good morning", f"Wake-up at {alarm['time']} with {music}.",
-                                 source="wake-up", severity="info", push=False,
+                # Info for the TV (no banner); the phone gets it with I'm up / Snooze buttons.
+                self.raise_alert("wake_up", "Good morning, sir", f"{music} is on the TV.",
+                                 source="wake-up", severity="info", push=True, category="WAKE_UP",
+                                 collapse_id="wake-up",
                                  context={"music": alarm["music"], "volume": alarm["volume"],
                                           "label": alarm.get("label", "")})
             if self._stop_monitors.wait(20):

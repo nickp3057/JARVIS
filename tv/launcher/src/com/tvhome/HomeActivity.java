@@ -91,7 +91,9 @@ public class HomeActivity extends Activity {
     private boolean resting;
     private TextView greeting, weather, money;
     private LinearLayout nextUp, legend, school, systems;
-    private TextView systemsState, wakeTime, wakeDays;
+    private TextView systemsState, wakeTime, wakeDays, continueTitle, continueDetail;
+    private View continueTile;
+    private List<ContinueWatching.Item> continueItems = new ArrayList<>();
     private ImageView art;
     private TextView musicLabel, songTitle, songArtist;
     private MediaIcon playIcon;
@@ -220,6 +222,10 @@ public class HomeActivity extends Activity {
 
     private void pollTick() {
         fetch();
+        new Thread(() -> {
+            List<ContinueWatching.Item> items = ContinueWatching.fetch();
+            runOnUiThread(() -> showContinue(items));
+        }, "continue").start();
         handler.postDelayed(poll, REFRESH_MS);
     }
 
@@ -313,6 +319,7 @@ public class HomeActivity extends Activity {
         addPlexTile(apps);
         addSpotifyTile(apps);
         addWakeTile(apps);
+        addContinueTile(apps);
         apps.addView(new View(this), new LinearLayout.LayoutParams(0, 1, 1f));
         addSettingsTile(apps);
 
@@ -985,7 +992,7 @@ public class HomeActivity extends Activity {
         tile.addView(inner, new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
         tile.setOnClickListener(v -> open.run());
-        addTile(row, tile, dp(190), dp(84));
+        addTile(row, tile, dp(170), dp(84));
     }
 
     /** The wake-up alarm at a glance; set by asking JARVIS on the phone. */
@@ -1008,7 +1015,70 @@ public class HomeActivity extends Activity {
         tile.addView(inner, new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
         tile.setOnClickListener(v -> showWake());
+        addTile(row, tile, dp(160), dp(84));
+    }
+
+    /** Plex's Continue Watching: the newest one on the tile, the rest a press away. */
+    private void addContinueTile(LinearLayout row) {
+        FrameLayout tile = tileFrame();
+        LinearLayout inner = new LinearLayout(this);
+        inner.setOrientation(LinearLayout.VERTICAL);
+        inner.setGravity(Gravity.CENTER_VERTICAL);
+        inner.setPadding(dp(16), 0, dp(12), 0);
+        TextView eyebrow = label("CONTINUE", 9, Theme.alpha(theme.accent, 200));
+        eyebrow.setLetterSpacing(0.3f);
+        inner.addView(eyebrow);
+        continueTitle = label("", 15, theme.text);
+        continueTitle.setSingleLine(true);
+        continueTitle.setEllipsize(TextUtils.TruncateAt.END);
+        inner.addView(continueTitle);
+        continueDetail = label("", 10, theme.dim);
+        continueDetail.setSingleLine(true);
+        inner.addView(continueDetail);
+        tile.addView(inner, new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+        tile.setOnClickListener(v -> showContinueList());
+        tile.setVisibility(View.GONE); // until Plex answers with something
+        continueTile = tile;
         addTile(row, tile, dp(170), dp(84));
+    }
+
+    private void showContinue(List<ContinueWatching.Item> items) {
+        if (continueTile == null || isFinishing()) return;
+        continueItems = items;
+        if (items.isEmpty()) {
+            if (continueTile.hasFocus() && firstTile != null) firstTile.requestFocus();
+            continueTile.setVisibility(View.GONE);
+            return;
+        }
+        continueTitle.setText(items.get(0).title);
+        continueDetail.setText(items.get(0).detail);
+        continueTile.setVisibility(View.VISIBLE);
+    }
+
+    private void showContinueList() {
+        if (continueItems.size() == 1) {
+            ContinueWatching.open(this, continueItems.get(0));
+            return;
+        }
+        List<View> rows = new ArrayList<>();
+        for (ContinueWatching.Item item : continueItems) {
+            LinearLayout r = new LinearLayout(this);
+            r.setOrientation(LinearLayout.VERTICAL);
+            r.setPadding(dp(14), dp(8), dp(14), dp(8));
+            r.setFocusable(true);
+            r.setClickable(true);
+            r.addView(label(item.title, 16, theme.text));
+            r.addView(label(item.detail, 11, theme.dim));
+            r.setOnFocusChangeListener((v, focused) ->
+                    v.setBackground(focused ? rounded(Theme.alpha(theme.accent, 40), 0, 0) : null));
+            r.setOnClickListener(v -> {
+                closeOverlay();
+                ContinueWatching.open(this, item);
+            });
+            rows.add(r);
+        }
+        openOverlay("Continue watching", rows);
     }
 
     private void showWake() {
@@ -1023,8 +1093,8 @@ public class HomeActivity extends Activity {
                     + (label.isEmpty() ? "." : ": " + label + "."), theme.text, 16));
         }
         rows.add(sectionView("Change it"));
-        rows.add(lineView("Tell JARVIS on your phone: \"wake me up at 7 on weekdays", theme.dim, 13));
-        rows.add(lineView("with this playlist\", and paste a Spotify link.", theme.dim, 13));
+        rows.add(lineView("Each day's time: Settings > Wake-up in the phone app.", theme.dim, 13));
+        rows.add(lineView("Just one day: tell JARVIS \"skip my alarm tomorrow\" or \"8:30 tomorrow\".", theme.dim, 13));
         openOverlay("Wake-up", rows);
     }
 

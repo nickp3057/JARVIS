@@ -23,13 +23,16 @@ import org.json.JSONObject;
  * stored on the TV (Jarvis.prefs).
  */
 public class SettingsActivity extends Activity {
-    private static final String[] THEMES = {"arc", "markIII", "hotRod"};
-    private static final String[] THEME_NAMES = {"Arc", "Mark III", "Hot Rod"};
+    // Same order as the phone's picker (ios/.../Views/JarvisTheme.swift).
+    private static final String[] THEMES =
+            {"arc", "markIII", "hotRod", "graphite", "malibu", "crimson", "stealth", "mark85"};
+    private static final String[] THEME_NAMES =
+            {"Arc", "Mark III", "Hot Rod", "Graphite", "Malibu", "Crimson", "Stealth", "Mark 85"};
 
     private Theme theme;
     private LinearLayout list;
     private int focusIndex;
-    private String themeNote = "Arc, Mark III or Hot Rod. Your phone follows.";
+    private String themeNote = "Press to try the next one. Your phone follows.";
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {

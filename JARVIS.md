@@ -266,7 +266,7 @@ RMS envelope from ElevenLabs audio drives the orb in real time using a monotonic
 - `home_assistant.call_service` sends `media_player` turn_on/off for any of
   `TV_MEDIA_PLAYERS` (the TV's Cast/group entries) to that remote instead:
   "turning on" a Cast entity opened Home Assistant's cast screen on the TV.
-- Companion remote (Home > TV remote chip, `TVRemoteView`): power, D-pad +
+- Companion remote (top of the Hub tab, `TVRemoteView`): power, D-pad +
   OK, back, home, play/pause, volume, mute → `POST /api/tv/remote {key}`
   (admin) → `remote.send_command` (DPAD_*, BACK, HOME, MEDIA_*, VOLUME_*).
 
@@ -619,7 +619,7 @@ SCHWAB_CALLBACK_URL=https://127.0.0.1:8182   # exactly what the Schwab app has r
 TV_REMOTE_ENTITY=remote.nick_s_room_tv   # HA Android TV Remote entity for Nick's room TV
 TV_MEDIA_PLAYERS=media_player.nicks_room_tv,media_player.nicks_room_tv_2,media_player.nick_s_room_tv,media_player.nicks_room_group,media_player.nick_s_room_display   # on/off for these goes to the remote
 SCHWAB_POLL_SECONDS=30      # holdings/cash refresh in market hours (prices stream live regardless)
-JARVIS_THEME=arc            # arc | markIII | hotRod: default look until someone picks one on the phone or TV (then memory/theme.json via /api/theme)
+JARVIS_THEME=arc            # arc | markIII | hotRod | graphite | malibu | crimson | stealth | mark85: default look until someone picks one on the phone or TV (then memory/theme.json via /api/theme)
 CALENDAR_CATEGORIES=        # calendar name=category pairs, ';'-separated (e.g. Oil/Boil Outs=work);
                             # unlisted names with school/family/work in them use that, else personal
 GLANCE_HIDDEN_CATEGORIES=work # categories left off the TV's Coming up list
@@ -688,6 +688,14 @@ CALENDAR_ALERT_LEAD_MIN=10  # warn this many minutes before a meeting
 
 ## Recently Shipped
 
+- **Five new themes, phone snooze, Continue Watching (TV 6.9, iOS 3.0 / build
+  112)** — Graphite, Malibu, Crimson, Stealth, Mark 85 on phone, TV and Core
+  (`JarvisPalette`, `Theme.java`, `brain/theme.py`). The wake-up push now
+  rings the phone (category WAKE_UP) with I'm up / Snooze 9 min →
+  `/api/wake/awake` / `/api/wake/snooze` (Core rings the snooze again, the TV
+  pauses and closes its wake screen via `wake_snooze`/`wake_dismiss` bus
+  events). TV: a Continue tile from Plex's Continue Watching. Home tidied;
+  the TV remote moved to the top of Hub.
 - **One-day alarm changes, TV remote, weather icons (TV 6.7, iOS 2.9 / build
   111)** — "skip my alarm tomorrow" / "8:30 tomorrow" change one date only
   (`skip_wake_up`, wake `overrides`). `tv_power` and a remote in the phone app

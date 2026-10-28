@@ -30,6 +30,7 @@ final class Wake {
     /** Blocking; call off the main thread. {@code music}: spotify: URI, "search:words", or "" to resume. */
     static void run(Context c, String music, int volumePercent, String label) {
         Log.i(TAG, "waking: music=" + music + " volume=" + volumePercent);
+        cancelSnooze(); // a snooze ending (ours or Core's) lands here
         AudioManager audio = c.getSystemService(AudioManager.class);
         int max = audio.getStreamMaxVolume(AudioManager.STREAM_MUSIC);
         int target = Math.max(1, Math.round(max * volumePercent / 100f));
@@ -76,6 +77,19 @@ final class Wake {
         };
         MAIN.postDelayed(snoozed, SNOOZE_MS);
         Log.i(TAG, "snoozed for " + SNOOZE_MS / 60_000 + " min");
+    }
+
+    /** Snoozed on the phone: pause and count down; Core rings again itself. */
+    static void snoozedByCore(Context c, long untilMs) {
+        cancelSnooze();
+        Music.pause(c);
+        snoozeUntil = untilMs > 0 ? untilMs : System.currentTimeMillis() + SNOOZE_MS;
+    }
+
+    /** I'm up, from the phone: close the wake screen; the music plays on. */
+    static void dismiss() {
+        cancelSnooze();
+        MAIN.post(WakeActivity::closeShowing);
     }
 
     static void cancelSnooze() {

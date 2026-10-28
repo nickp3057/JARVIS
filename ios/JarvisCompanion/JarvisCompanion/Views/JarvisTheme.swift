@@ -7,7 +7,7 @@ typealias RGB = (Double, Double, Double)
 /// the reactor (`reactor`: the mark and the control tint), the secondary (`blue`: Nick's bubbles), the three status colours
 /// (warning, critical, nominal), and the four surfaces, dark and light.
 enum JarvisPalette: String, CaseIterable, Identifiable {
-    case arc, markIII, hotRod
+    case arc, markIII, hotRod, graphite, malibu, crimson, stealth, mark85
 
     static let storageKey = "jarvis.palette"
     var id: String { rawValue }
@@ -17,6 +17,11 @@ enum JarvisPalette: String, CaseIterable, Identifiable {
         case .arc: return "Arc"
         case .markIII: return "Mark III"
         case .hotRod: return "Hot Rod"
+        case .graphite: return "Graphite"
+        case .malibu: return "Malibu"
+        case .crimson: return "Crimson"
+        case .stealth: return "Stealth"
+        case .mark85: return "Mark 85"
         }
     }
 
@@ -25,6 +30,11 @@ enum JarvisPalette: String, CaseIterable, Identifiable {
         case .arc: return "The original cyan HUD."
         case .markIII: return "Gold HUD, hot-rod red, arc-reactor glow."
         case .hotRod: return "Mark III's gold and red, with arc-reactor cyan on the reactor and controls."
+        case .graphite: return "Apple-clean: system blue on true black."
+        case .malibu: return "Sunset over the cliff house: orange, ocean blue, a cyan core."
+        case .crimson: return "Red, but calm: crimson on neutral charcoal."
+        case .stealth: return "The stealth suit: silver and gunmetal, cyan reactor."
+        case .mark85: return "Endgame's suit: gold and crimson on deep navy, no red glare."
         }
     }
 
@@ -32,63 +42,110 @@ enum JarvisPalette: String, CaseIterable, Identifiable {
         JarvisPalette(rawValue: UserDefaults.standard.string(forKey: storageKey) ?? "") ?? .arc
     }
 
-    /// (dark, light) per role.
-    var accent: (RGB, RGB) {
-        switch self {
-        case .arc: return ((0.25, 0.85, 0.95), (0.0, 0.43, 0.54))
-        case .markIII, .hotRod: return ((1.0, 0.77, 0.32), (0.55, 0.37, 0.0))
-        }
+    /// Every colour role, (dark, light). Mirrored for the TV in
+    /// tv/launcher/src/com/tvhome/Theme.java (dark variants only).
+    private struct Roles {
+        let accent, reactor, secondary, warning, critical, success: (RGB, RGB)
+        let background, deep, panel, raised: (RGB, RGB)
     }
 
-    /// The reactor mark and interactive tint (tab bar, toggles, buttons).
-    /// The accent everywhere except Hot Rod, where it's reactor cyan.
-    var reactor: (RGB, RGB) {
-        switch self {
-        case .arc, .markIII: return accent
-        case .hotRod: return ((0.35, 0.88, 1.0), (0.0, 0.45, 0.62))
-        }
-    }
+    private static let arcAccent: (RGB, RGB) = ((0.25, 0.85, 0.95), (0.0, 0.43, 0.54))
+    private static let gold: (RGB, RGB) = ((1.0, 0.77, 0.32), (0.55, 0.37, 0.0))
+    private static let cyanCore: (RGB, RGB) = ((0.35, 0.88, 1.0), (0.0, 0.45, 0.62))
+    private static let redSecondary: (RGB, RGB) = ((0.86, 0.14, 0.16), (0.70, 0.07, 0.10))
+    private static let redSurfaces: [(RGB, RGB)] = [
+        ((0.075, 0.035, 0.035), (0.97, 0.955, 0.95)), ((0.025, 0.012, 0.014), (0.93, 0.91, 0.90)),
+        ((0.12, 0.065, 0.06), (1, 1, 1)), ((0.17, 0.09, 0.08), (1, 0.985, 0.98))]
 
-    var secondary: (RGB, RGB) {
-        switch self {
-        case .arc: return ((0.25, 0.50, 1.0), (0.08, 0.33, 0.85))
-        case .markIII, .hotRod: return ((0.86, 0.14, 0.16), (0.70, 0.07, 0.10))
-        }
-    }
-
-    /// Due soon, stalled, needs a look.
-    var warning: (RGB, RGB) {
-        switch self {
-        case .arc: return ((1, 0.73, 0.30), (0.69, 0.40, 0.0))
-        case .markIII, .hotRod: return ((1.0, 0.50, 0.18), (0.76, 0.30, 0.0))
-        }
-    }
-
-    /// Overdue, down, failed.
-    var critical: (RGB, RGB) {
-        switch self {
-        case .arc: return ((1.0, 0.36, 0.38), (0.78, 0.10, 0.14))
-        case .markIII, .hotRod: return ((1.0, 0.22, 0.27), (0.80, 0.03, 0.09))
-        }
-    }
-
-    /// Nominal. Mark III glows reactor blue-white against the gold.
-    var success: (RGB, RGB) {
-        switch self {
-        case .arc: return ((0.30, 0.88, 0.62), (0.0, 0.48, 0.28))
-        case .markIII, .hotRod: return ((0.55, 0.90, 1.0), (0.0, 0.45, 0.62))
-        }
-    }
-
-    var surfaces: (background: (RGB, RGB), deep: (RGB, RGB), panel: (RGB, RGB), raised: (RGB, RGB)) {
+    private var roles: Roles {
         switch self {
         case .arc:
-            return (((0.025, 0.045, 0.075), (0.95, 0.965, 0.985)), ((0.008, 0.018, 0.035), (0.90, 0.93, 0.96)),
-                    ((0.055, 0.085, 0.125), (1, 1, 1)), ((0.075, 0.12, 0.17), (0.975, 0.985, 1)))
+            return Roles(accent: Self.arcAccent, reactor: Self.arcAccent,
+                         secondary: ((0.25, 0.50, 1.0), (0.08, 0.33, 0.85)),
+                         warning: ((1, 0.73, 0.30), (0.69, 0.40, 0.0)),
+                         critical: ((1.0, 0.36, 0.38), (0.78, 0.10, 0.14)),
+                         success: ((0.30, 0.88, 0.62), (0.0, 0.48, 0.28)),
+                         background: ((0.025, 0.045, 0.075), (0.95, 0.965, 0.985)),
+                         deep: ((0.008, 0.018, 0.035), (0.90, 0.93, 0.96)),
+                         panel: ((0.055, 0.085, 0.125), (1, 1, 1)),
+                         raised: ((0.075, 0.12, 0.17), (0.975, 0.985, 1)))
         case .markIII, .hotRod:
-            return (((0.075, 0.035, 0.035), (0.97, 0.955, 0.95)), ((0.025, 0.012, 0.014), (0.93, 0.91, 0.90)),
-                    ((0.12, 0.065, 0.06), (1, 1, 1)), ((0.17, 0.09, 0.08), (1, 0.985, 0.98)))
+            return Roles(accent: Self.gold, reactor: self == .hotRod ? Self.cyanCore : Self.gold,
+                         secondary: Self.redSecondary,
+                         warning: ((1.0, 0.50, 0.18), (0.76, 0.30, 0.0)),
+                         critical: ((1.0, 0.22, 0.27), (0.80, 0.03, 0.09)),
+                         success: ((0.55, 0.90, 1.0), (0.0, 0.45, 0.62)),
+                         background: Self.redSurfaces[0], deep: Self.redSurfaces[1],
+                         panel: Self.redSurfaces[2], raised: Self.redSurfaces[3])
+        case .graphite:
+            let blue: (RGB, RGB) = ((0.04, 0.52, 1.0), (0.0, 0.40, 0.85))
+            return Roles(accent: blue, reactor: blue, secondary: blue,
+                         warning: ((1.0, 0.62, 0.04), (0.75, 0.40, 0.0)),
+                         critical: ((1.0, 0.27, 0.23), (0.84, 0.12, 0.10)),
+                         success: ((0.19, 0.82, 0.35), (0.0, 0.55, 0.20)),
+                         background: ((0.0, 0.0, 0.0), (0.95, 0.95, 0.97)),
+                         deep: ((0.0, 0.0, 0.0), (0.90, 0.90, 0.92)),
+                         panel: ((0.11, 0.11, 0.12), (1, 1, 1)),
+                         raised: ((0.17, 0.17, 0.18), (0.98, 0.98, 0.99)))
+        case .malibu:
+            return Roles(accent: ((1.0, 0.58, 0.28), (0.72, 0.33, 0.0)), reactor: Self.cyanCore,
+                         secondary: ((0.16, 0.45, 0.85), (0.08, 0.33, 0.70)),
+                         warning: ((1.0, 0.78, 0.30), (0.66, 0.42, 0.0)),
+                         critical: ((1.0, 0.33, 0.36), (0.80, 0.08, 0.12)),
+                         success: ((0.35, 0.88, 0.70), (0.0, 0.50, 0.38)),
+                         background: ((0.04, 0.05, 0.10), (0.97, 0.955, 0.94)),
+                         deep: ((0.015, 0.02, 0.05), (0.93, 0.91, 0.89)),
+                         panel: ((0.08, 0.10, 0.17), (1, 1, 1)),
+                         raised: ((0.11, 0.14, 0.23), (1, 0.985, 0.975)))
+        case .crimson:
+            return Roles(accent: ((0.95, 0.28, 0.33), (0.75, 0.07, 0.13)),
+                         reactor: ((0.80, 0.90, 1.0), (0.20, 0.35, 0.55)),
+                         secondary: ((0.70, 0.12, 0.18), (0.62, 0.06, 0.12)),
+                         warning: ((1.0, 0.68, 0.25), (0.70, 0.38, 0.0)),
+                         critical: ((1.0, 0.45, 0.25), (0.80, 0.18, 0.0)),
+                         success: ((0.40, 0.85, 0.60), (0.0, 0.50, 0.28)),
+                         background: ((0.06, 0.06, 0.07), (0.97, 0.96, 0.96)),
+                         deep: ((0.02, 0.02, 0.025), (0.92, 0.91, 0.91)),
+                         panel: ((0.10, 0.10, 0.11), (1, 1, 1)),
+                         raised: ((0.14, 0.14, 0.155), (0.99, 0.98, 0.98)))
+        case .stealth:
+            return Roles(accent: ((0.80, 0.84, 0.90), (0.25, 0.28, 0.33)),
+                         reactor: ((0.40, 0.90, 1.0), (0.0, 0.45, 0.62)),
+                         secondary: ((0.35, 0.42, 0.52), (0.30, 0.36, 0.45)),
+                         warning: ((1.0, 0.73, 0.30), (0.69, 0.40, 0.0)),
+                         critical: ((1.0, 0.36, 0.38), (0.78, 0.10, 0.14)),
+                         success: ((0.45, 0.88, 0.75), (0.0, 0.48, 0.36)),
+                         background: ((0.05, 0.055, 0.065), (0.95, 0.955, 0.965)),
+                         deep: ((0.02, 0.022, 0.028), (0.90, 0.91, 0.925)),
+                         panel: ((0.09, 0.10, 0.115), (1, 1, 1)),
+                         raised: ((0.13, 0.14, 0.16), (0.975, 0.98, 0.99)))
+        case .mark85:
+            return Roles(accent: ((1.0, 0.80, 0.40), (0.58, 0.40, 0.0)), reactor: Self.cyanCore,
+                         secondary: ((0.78, 0.12, 0.16), (0.66, 0.06, 0.10)),
+                         warning: ((1.0, 0.58, 0.22), (0.76, 0.32, 0.0)),
+                         critical: ((1.0, 0.30, 0.34), (0.80, 0.05, 0.10)),
+                         success: ((0.50, 0.88, 0.95), (0.0, 0.45, 0.60)),
+                         background: ((0.035, 0.045, 0.085), (0.96, 0.96, 0.975)),
+                         deep: ((0.012, 0.016, 0.035), (0.91, 0.915, 0.935)),
+                         panel: ((0.07, 0.085, 0.14), (1, 1, 1)),
+                         raised: ((0.10, 0.12, 0.19), (0.98, 0.98, 0.995)))
         }
+    }
+
+    var accent: (RGB, RGB) { roles.accent }
+    /// The reactor mark and interactive tint (tab bar, toggles, buttons).
+    var reactor: (RGB, RGB) { roles.reactor }
+    var secondary: (RGB, RGB) { roles.secondary }
+    /// Due soon, stalled, needs a look.
+    var warning: (RGB, RGB) { roles.warning }
+    /// Overdue, down, failed.
+    var critical: (RGB, RGB) { roles.critical }
+    /// Nominal.
+    var success: (RGB, RGB) { roles.success }
+
+    var surfaces: (background: (RGB, RGB), deep: (RGB, RGB), panel: (RGB, RGB), raised: (RGB, RGB)) {
+        let r = roles
+        return (r.background, r.deep, r.panel, r.raised)
     }
 }
 

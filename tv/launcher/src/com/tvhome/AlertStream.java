@@ -94,6 +94,15 @@ final class AlertStream {
             if (!SEEN.add(id + "@" + alert.optDouble("created_at"))) return;
             if (SEEN.size() > 500) SEEN.clear();
         }
+        String kind = alert.optString("kind");
+        if ("wake_snooze".equals(kind) || "wake_dismiss".equals(kind)) {
+            // Snooze / I'm up pressed on the phone. Core rings the snooze itself.
+            JSONObject ctx = alert.optJSONObject("context");
+            long until = ctx != null ? (long) (ctx.optDouble("until") * 1000) : 0;
+            if ("wake_snooze".equals(kind)) Wake.snoozedByCore(c, until);
+            else Wake.dismiss();
+            return;
+        }
         if (wake) {
             // Replays after a restart or reboot must not wake him twice; the
             // in-memory SEEN set doesn't survive those, so remember it on disk.

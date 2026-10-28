@@ -23,6 +23,8 @@ import java.util.Locale;
  * I'm up; play/pause on the remote still works.
  */
 public class WakeActivity extends Activity {
+    /** The one on screen, so I'm up on the phone can close it (main thread only). */
+    private static WakeActivity showing;
     private final Handler handler = new Handler(Looper.getMainLooper());
     private Theme theme;
     private TextView clock, status;
@@ -76,6 +78,17 @@ public class WakeActivity extends Activity {
         root.addView(hint);
         setContentView(root);
         upButton.requestFocus();
+        showing = this;
+    }
+
+    @Override
+    protected void onDestroy() {
+        if (showing == this) showing = null;
+        super.onDestroy();
+    }
+
+    static void closeShowing() {
+        if (showing != null) showing.finish();
     }
 
     @Override

@@ -144,7 +144,8 @@ of each group.
   (3 last), cash fields for Nick's account type, the in-app login
   catching the `https://127.0.0.1:8182` redirect. The `tailscale serve`
   route for `/api/schwab/callback` set up on 2026-10-27 is unused now.
-- [ ] **Schwab trading** (Nick wants it, 2026-10-27): "if NVIDIA hits X,
+- [ ] **Schwab trading** (Nick wants it, 2026-10-27; parked until the rest
+  feels solid: "too janky to let it take my money"): "if NVIDIA hits X,
   sell; at 170, buy". Place real limit/stop orders at Schwab (they run even
   if Core is down), not price-watching in JARVIS. Agreed guardrails: every
   order confirmed on the phone with the exact order and dollar amount;
@@ -164,6 +165,11 @@ of each group.
   ("google this") and price watching (track a product URL, alert through
   `runtime.raise_alert` when it drops below a target). Price watching is a
   monitor, not a UI poll.
+
+- [ ] **"Hey Google" replacement on the Optiplex** (Nick, 2026-10-27): the
+  Optiplex has a mic and speakers (and maybe ElevenLabs set up already, to
+  verify), so `--voice` mode could run there as the house's always-listening
+  JARVIS once Nick wants it.
 
 ### Companion apps
 
@@ -204,9 +210,10 @@ of each group.
     tomorrow", "8:30 tomorrow"; back to normal the week after.
   - [x] (6.7 / iOS 2.9) Phone TV remote, `tv_power`, weather icon, cents,
     5-second theme follow.
+  - [x] (6.8 / iOS 3.0) I'm up / Snooze from the phone: the wake-up push
+    (category WAKE_UP) has both buttons; `/api/wake/snooze` and `/awake`.
   - [ ] Wake-up options Nick may want once he's lived with it ("idk what i
-    want yet"): snooze length, stop music on I'm up, a gentler start,
-    snooze from the phone.
+    want yet"): snooze length, stop music on I'm up, a gentler start.
 
   **Foundation**
   - [x] Boots straight into JARVIS; the remote's Home button always returns
@@ -241,8 +248,8 @@ of each group.
   - [x] Money: live portfolio line under the weather (6.6); value and today.
   - [x] To-dos count and list; "things need you" alerts (plus live banners
     over any app from the SSE stream).
-  - [ ] Media: Plex continue-watching / recently added, downloads in
-    progress (from Core's media status). (Downloads done, in Needs you.)
+  - [x] Media: Plex Continue Watching tile (6.9; the TV asks Plex itself).
+    Nick doesn't want recently added (2026-10-27). Downloads are in Systems.
   - [x] App row: Plex, Spotify, Wake-up, Settings in the corner (6.0). Nick
     dropped YouTube and the inputs (the remote has buttons for them). House
     is v3.

@@ -572,11 +572,30 @@ def tv_remote_press(request: TvRemoteRequest, _: None = Depends(authorize)) -> d
     return {"ok": True}
 
 
+@app.post("/api/wake/snooze")
+def wake_snooze(_: None = Depends(authorize)) -> dict[str, object]:
+    """Snooze from the phone: the TV pauses now, Core rings again in 9 min."""
+    from brain import wake_alarm
+    at = wake_alarm.snooze()
+    event_bus.publish("wake_snooze", "Snoozed", f"Back at {at.strftime('%-I:%M')}.", source="wake-up",
+                      severity="info", push=False, context={"until": at.timestamp()})
+    return {"until": at.timestamp()}
+
+
+@app.post("/api/wake/awake")
+def wake_awake(_: None = Depends(authorize)) -> dict[str, object]:
+    """I'm up from the phone: the TV's wake screen closes, music plays on."""
+    from brain import wake_alarm
+    wake_alarm.awake()
+    event_bus.publish("wake_dismiss", "Up and at 'em", "", source="wake-up", severity="info", push=False)
+    return {"ok": True}
+
+
 # --- Shared colour theme (phone and TV follow one pick; brain/theme.py) -----
 
 
 class ThemeRequest(BaseModel):
-    theme: str = Field(pattern="^(arc|markIII|hotRod)$")
+    theme: str = Field(pattern="^(arc|markIII|hotRod|graphite|malibu|crimson|stealth|mark85)$")
 
 
 @app.get("/api/theme")

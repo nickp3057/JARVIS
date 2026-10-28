@@ -92,7 +92,31 @@ final class PushAppDelegate: NSObject, UIApplicationDelegate, UNUserNotification
     func application(_ application: UIApplication,
                      didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
         UNUserNotificationCenter.current().delegate = self
+        // The wake-up push (category WAKE_UP) gets I'm up / Snooze buttons.
+        let awake = UNNotificationAction(identifier: Self.wakeAwake, title: "I'm up", options: [])
+        let snooze = UNNotificationAction(identifier: Self.wakeSnooze, title: "Snooze 9 min", options: [])
+        UNUserNotificationCenter.current().setNotificationCategories([
+            UNNotificationCategory(identifier: "WAKE_UP", actions: [awake, snooze], intentIdentifiers: [])])
         return true
+    }
+
+    static let wakeAwake = "WAKE_AWAKE", wakeSnooze = "WAKE_SNOOZE"
+
+    /// A button on the wake-up push: tell JARVIS Core, which tells the TV.
+    func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse,
+                                withCompletionHandler completionHandler: @escaping () -> Void) {
+        let action = response.actionIdentifier
+        guard action == Self.wakeAwake || action == Self.wakeSnooze else {
+            completionHandler()
+            return
+        }
+        Task { @MainActor in
+            if let client = try? JarvisAPIClient.make(from: AppSettings()) {
+                if action == Self.wakeSnooze { try? await client.snoozeWakeUp() }
+                else { try? await client.wakeUpAwake() }
+            }
+            completionHandler()
+        }
     }
 
     func application(_ application: UIApplication, didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data) {

@@ -183,7 +183,7 @@ def _apns_post(environment: str, device: str, payload: bytes, headers: dict[str,
 
 
 def _send_apns(title: str, message: str, *, thread_id: str = "", collapse_id: str = "",
-               passive: bool = False) -> tuple[bool, str]:
+               passive: bool = False, category: str = "") -> tuple[bool, str]:
     """Push to every registered device; success if at least one accepted it.
 
     ``thread_id`` groups notifications on the phone; ``collapse_id`` makes a
@@ -198,6 +198,8 @@ def _send_apns(title: str, message: str, *, thread_id: str = "", collapse_id: st
         aps["sound"] = "default"
     if thread_id:
         aps["thread-id"] = thread_id[:64]
+    if category:
+        aps["category"] = category[:64]  # the app registers these (PushAppDelegate)
     body = {"aps": aps, "source": "jarvis"}
     payload = json.dumps(body, ensure_ascii=False).encode("utf-8")
     with _apns_lock:
@@ -262,7 +264,7 @@ def ha_service() -> str:
 
 
 def _send_home_assistant(title: str, message: str, *, thread_id: str = "", collapse_id: str = "",
-                         passive: bool = False) -> tuple[bool, str]:
+                         passive: bool = False, category: str = "") -> tuple[bool, str]:
     service = ha_service()
     if not service:
         return False, "No HA mobile_app notify service configured"
@@ -288,9 +290,11 @@ def configured() -> bool:
 
 
 def send(title: str, message: str, *, thread_id: str = "", collapse_id: str = "",
-         passive: bool = False) -> Delivery:
-    """Deliver to the phone through the first working channel."""
-    grouping = {k: v for k, v in (("thread_id", thread_id), ("collapse_id", collapse_id), ("passive", passive)) if v}
+         passive: bool = False, category: str = "") -> Delivery:
+    """Deliver to the phone through the first working channel. ``category``
+    picks the companion's action buttons (e.g. WAKE_UP: I'm up / Snooze)."""
+    grouping = {k: v for k, v in (("thread_id", thread_id), ("collapse_id", collapse_id), ("passive", passive),
+                                  ("category", category)) if v}
     message = (message or "").strip()
     if not message:
         return Delivery(False, None, "empty message")
