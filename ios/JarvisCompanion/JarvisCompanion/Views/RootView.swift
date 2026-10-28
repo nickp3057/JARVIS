@@ -26,7 +26,11 @@ struct RootView: View {
     /// first (its default): the tablet is mainly a panel for the room.
     enum RootTab: Hashable, CaseIterable { case room, media, hub, home, chat, settings }
 
+    /// True on the Mac too (Mac Catalyst runs the iPad layout, Room tab included).
     static let isPad = UIDevice.current.userInterfaceIdiom == .pad
+    /// The laptop app: no night screen, no wall-panel habits.
+    static let isMac = ProcessInfo.processInfo.isMacCatalystApp
+    static let tabsInOrder = tabs
     private static let tabs = RootTab.allCases.filter { isPad || $0 != .room }
 
     var body: some View {
@@ -69,11 +73,13 @@ struct RootView: View {
         .simultaneousGesture(TapGesture().onEnded { touches &+= 1 })
         .task(id: "\(selection)-\(touches)-\(autoReturn)") {
             // Chat is left alone: a half-typed message shouldn't be yanked away.
-            guard Self.isPad, autoReturn, selection != .room, selection != .chat else { return }
+            guard Self.isPad, !Self.isMac, autoReturn, selection != .room, selection != .chat else { return }
             try? await Task.sleep(for: .seconds(180))
             if !Task.isCancelled, !wakeRinging.showing { selection = .room }
         }
         .sensoryFeedback(.selection, trigger: selection)
+        .focusedSceneValue(\.rootTab, $selection)
+        .onAppear(perform: sizeMacWindow)
         .fullScreenCover(isPresented: $wakeRinging.showing) { WakeRingingView().environmentObject(settings) }
         .task(id: scenePhase) {
             // Follow the shared theme while the app is open (a pick on the TV,
@@ -87,6 +93,14 @@ struct RootView: View {
         .onChange(of: settings.studyAlertsEnabled) { Task { await hub.updateNotificationPreferences() } }
         .onChange(of: selection) { _, tab in
             if tab == .chat { chat.refreshConnectionStatus() }
+        }
+    }
+
+    /// Mac: keep the window big enough for the Room tab's two columns.
+    private func sizeMacWindow() {
+        guard Self.isMac else { return }
+        for case let scene as UIWindowScene in UIApplication.shared.connectedScenes {
+            scene.sizeRestrictions?.minimumSize = CGSize(width: 900, height: 640)
         }
     }
 
@@ -155,5 +169,50 @@ private extension View {
     func swipePage(_ offset: CGFloat) -> some View {
         self.offset(x: offset)
             .opacity(1 - min(abs(offset) / 500, 0.3))
+    }
+}
+
+extension RootView.RootTab {
+    var title: String {
+        switch self {
+        case .room: return "Room"
+        case .media: return "Media"
+        case .hub: return "Hub"
+        case .home: return "Home"
+        case .chat: return "Chat"
+        case .settings: return "Settings"
+        }
+    }
+}
+
+private struct RootTabKey: FocusedValueKey {
+    typealias Value = Binding<RootView.RootTab>
+}
+
+extension FocusedValues {
+    /// The front window's tab, for the menu bar's Go menu.
+    var rootTab: Binding<RootView.RootTab>? {
+        get { self[RootTabKey.self] }
+        set { self[RootTabKey.self] = newValue }
+    }
+}
+
+/// Mac (and iPad keyboard) menus: ⌘1… for the tabs, ⌘, for Settings.
+struct RootTabCommands: Commands {
+    @FocusedBinding(\.rootTab) private var tab
+
+    var body: some Commands {
+        CommandGroup(replacing: .appSettings) {
+            Button("Settings…") { tab = .settings }
+                .keyboardShortcut(",")
+                .disabled(tab == nil)
+        }
+        CommandMenu("Go") {
+            ForEach(Array(RootView.tabsInOrder.enumerated()), id: \.element) { index, item in
+                Button(item.title) { tab = item }
+                    .keyboardShortcut(KeyEquivalent(Character(String(index + 1))))
+                    .disabled(tab == nil)
+            }
+        }
     }
 }

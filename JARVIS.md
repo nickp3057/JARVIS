@@ -823,6 +823,12 @@ CALENDAR_ALERT_LEAD_MIN=10  # warn this many minutes before a meeting
   exposed by the Tuya integration, so no scene sets it. I'm up runs
   `scene.good_morning` when it exists. The iPad Room tab has a Peace
   button (shown when `scene.peace` exists) for heading out.
+- **JARVIS on the MacBook (iOS 5.5 / build 148)** — the companion app now
+  also builds for Mac Catalyst: the iPad layout in a window (min 900×640),
+  Room tab first, wall-panel features off (`RootView.isMac`), a Go menu
+  (⌘1–⌘6) and ⌘, for Settings. `JarvisCompanion-Mac.entitlements` adds the
+  sandbox, network client and mic; push uses the same bundle ID. Install
+  steps in `ios/JarvisCompanion/README.md` ("Running on the Mac").
 - **iPad tap-to-wake light, timers, back to Room (iOS 5.4 / build 147)** —
   a tap on the night screen also turns on the Room tab's "Tap the dark
   screen to turn on" light (default `light.bedroom_lights`; never the fan

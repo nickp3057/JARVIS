@@ -20,6 +20,21 @@ The app target uses a file-system-synchronized group, so anything you drop into
 `JarvisCompanion/` is picked up automatically — no need to add files to the
 project manually.
 
+## Running on the Mac
+
+The same target builds for Mac Catalyst (`SUPPORTS_MACCATALYST`, macOS 14+,
+same bundle ID so pushes reach it too). In Xcode pick **My Mac (Mac
+Catalyst)** and Run; the first time, let Xcode register the Mac in the
+developer account (it signs with `JarvisCompanion-Mac.entitlements`:
+sandbox, network client, microphone, push). Then **Product › Archive ›
+Distribute App › Custom › Copy App** gives a `.app` for `/Applications`.
+
+On the Mac it runs the iPad layout, Room tab first, without the wall-panel
+habits (night screen, keep awake, full screen, tap-to-wake, back to Room).
+The menu bar gets a **Go** menu (⌘1–⌘6 for the tabs) and ⌘, opens Settings.
+Connect it exactly like the phone: `http://100.69.8.11:8000` and the API
+token (it has to be on Tailscale away from home).
+
 ## First launch
 
 The app ships with no server baked in. On first launch you get a "Set up your

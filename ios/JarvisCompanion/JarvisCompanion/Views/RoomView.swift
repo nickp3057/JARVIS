@@ -19,6 +19,9 @@ import UIKit
 ///
 /// Full screen hides the tab bar, status bar and home indicator so the iPad
 /// is just the panel; a swipe still reaches the other tabs.
+///
+/// On the Mac (Mac Catalyst) the same tab is a dashboard: no night screen,
+/// keep-awake, full screen or tap-to-wake, so those toggles are hidden.
 struct RoomView: View {
     @EnvironmentObject private var settings: AppSettings
     @ObservedObject var model: HubViewModel
@@ -61,9 +64,9 @@ struct RoomView: View {
             }
         }
         .background { JarvisBackdrop().ignoresSafeArea() }
-        .toolbar(fullScreen ? .hidden : .automatic, for: .tabBar)
-        .statusBarHidden(fullScreen)
-        .persistentSystemOverlays(fullScreen ? .hidden : .automatic)
+        .toolbar(fullScreen && !RootView.isMac ? .hidden : .automatic, for: .tabBar)
+        .statusBarHidden(fullScreen && !RootView.isMac)
+        .persistentSystemOverlays(fullScreen && !RootView.isMac ? .hidden : .automatic)
         .refreshable { await refresh() }
         .sheet(isPresented: $showingRemote) { TVRemoteView() }
         .sheet(isPresented: $showingWake) {
@@ -126,8 +129,8 @@ struct RoomView: View {
         .onChange(of: scenePhase) { _, phase in
             if phase != .active { asleep = false; setDimmed(false) }
         }
-        .onAppear { UIApplication.shared.isIdleTimerDisabled = keepAwake }
-        .onChange(of: keepAwake) { _, on in UIApplication.shared.isIdleTimerDisabled = on }
+        .onAppear { if !RootView.isMac { UIApplication.shared.isIdleTimerDisabled = keepAwake } }
+        .onChange(of: keepAwake) { _, on in if !RootView.isMac { UIApplication.shared.isIdleTimerDisabled = on } }
     }
 
     private static let lightsOutScenes: Set<String> = ["scene.peace", "scene.goodnight"]
@@ -163,7 +166,7 @@ struct RoomView: View {
 
     /// Lights out, and either after dark with Keep screen on or just after Peace/Goodnight.
     private var roomIsDark: Bool {
-        guard nightScreen, scenePhase == .active, !voice.active, !timers.contains(where: { $0.state == "alarming" }),
+        guard !RootView.isMac, nightScreen, scenePhase == .active, !voice.active, !timers.contains(where: { $0.state == "alarming" }),
               lightsOut || (keepAwake && model.sun == "below_horizon") else { return false }
         return lightsAllOff == true
     }
@@ -225,29 +228,31 @@ struct RoomView: View {
                     .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(JarvisTheme.cyan.opacity(0.4)))
             }
             .buttonStyle(CockpitButtonStyle())
-            Toggle("Keep screen on", isOn: $keepAwake)
-                .tint(JarvisTheme.cyan)
-                .font(.subheadline)
-            Toggle("Dark at night when the lights are off", isOn: $nightScreen)
-                .tint(JarvisTheme.cyan)
-                .font(.subheadline)
-                .disabled(!keepAwake)
-            Toggle("Full screen", isOn: $fullScreen)
-                .tint(JarvisTheme.cyan)
-                .font(.subheadline)
-            Toggle("Back to Room after 3 min on another tab", isOn: $autoReturn)
-                .tint(JarvisTheme.cyan)
-                .font(.subheadline)
-            if !wakeLightChoices.isEmpty {
-                LabeledContent("Tap the dark screen to turn on") {
-                    Picker("Tap the dark screen to turn on", selection: $wakeLight) {
-                        Text("Just the screen").tag("")
-                        ForEach(wakeLightChoices) { Text($0.friendlyName).tag($0.entityID) }
-                    }
-                    .labelsHidden()
+            if !RootView.isMac {
+                Toggle("Keep screen on", isOn: $keepAwake)
                     .tint(JarvisTheme.cyan)
+                    .font(.subheadline)
+                Toggle("Dark at night when the lights are off", isOn: $nightScreen)
+                    .tint(JarvisTheme.cyan)
+                    .font(.subheadline)
+                    .disabled(!keepAwake)
+                Toggle("Full screen", isOn: $fullScreen)
+                    .tint(JarvisTheme.cyan)
+                    .font(.subheadline)
+                Toggle("Back to Room after 3 min on another tab", isOn: $autoReturn)
+                    .tint(JarvisTheme.cyan)
+                    .font(.subheadline)
+                if !wakeLightChoices.isEmpty {
+                    LabeledContent("Tap the dark screen to turn on") {
+                        Picker("Tap the dark screen to turn on", selection: $wakeLight) {
+                            Text("Just the screen").tag("")
+                            ForEach(wakeLightChoices) { Text($0.friendlyName).tag($0.entityID) }
+                        }
+                        .labelsHidden()
+                        .tint(JarvisTheme.cyan)
+                    }
+                    .font(.subheadline)
                 }
-                .font(.subheadline)
             }
         }
         .roomPanel()

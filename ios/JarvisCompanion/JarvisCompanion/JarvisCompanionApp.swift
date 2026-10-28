@@ -46,5 +46,6 @@ struct JarvisCompanionApp: App {
                     Task { await PushRegistrar.shared.refresh() }
                 }
         }
+        .commands { RootTabCommands() }
     }
 }
