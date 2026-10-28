@@ -248,6 +248,9 @@ class JarvisAgent:
 
     # Set by the room voice for one turn: the reply is spoken aloud, so short.
     spoken_turn = False
+    # The tools the last finished turn ran, as (name, input); the room voice
+    # learns shortcuts from it (brain/voice_shortcuts.py).
+    turn_tools: tuple = ()
 
     def __init__(self) -> None:
         self._client = _get_client()
@@ -286,6 +289,7 @@ class JarvisAgent:
     def respond(self, user_input: str) -> str:
         """Run one turn of conversation. Returns Jarvis's spoken reply."""
         with self._lock:
+            self.turn_tools = ()
             return self._respond_locked(user_input)
 
     def respond_streaming(self, user_input: str) -> Iterator[str]:
@@ -634,6 +638,7 @@ class JarvisAgent:
         Runs on a worker thread so a slow extraction never delays the reply;
         the offline paths still record habit signals with no model call.
         """
+        self.turn_tools = tuple(getattr(self, "_last_turn_tools", ()))
         try:
             memory_extractor.observe_turn(self._client, user_input, reply, self._last_turn_tools)
         except Exception:  # noqa: BLE001

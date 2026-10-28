@@ -281,11 +281,38 @@ def _cache_path(text: str) -> Path:
     return _CACHE_DIR / f"{hashlib.sha1(key.encode()).hexdigest()[:20]}.wav"
 
 
+_COUNTS_MAX = 500
+_counts_lock = threading.Lock()
+
+
+def _said_before(text: str) -> bool:
+    """Count this line; True from its second time (memory/tts_cache/said.json)."""
+    import json
+    path = _CACHE_DIR / "said.json"
+    key = text.strip().lower()
+    if len(key) > 160:  # long answers rarely repeat word for word
+        return False
+    with _counts_lock:
+        try:
+            counts = json.loads(path.read_text()) if path.exists() else {}
+        except (OSError, ValueError):
+            counts = {}
+        counts[key] = counts.pop(key, 0) + 1  # re-insert: most recent last
+        while len(counts) > _COUNTS_MAX:
+            counts.pop(next(iter(counts)))
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(json.dumps(counts))
+        except OSError:
+            pass
+        return counts[key] >= 2
+
+
 def _store_in_cache(path: Path) -> None:
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(_OUTPUT_FILE, path)
-        files = sorted(path.parent.glob("*.wav"), key=lambda f: f.stat().st_mtime)
+        files = sorted(path.parent.glob("*.wav"), key=lambda f: f.stat().st_mtime)  # said.json isn't a wav
         for old in files[:-_CACHE_MAX_FILES]:  # oldest go first
             old.unlink(missing_ok=True)
     except OSError:
@@ -298,7 +325,7 @@ def speak(
     text: str,
     interrupt_event: threading.Event | None = None,
     on_envelope: Callable[[list[float], float], None] | None = None,
-    cache: bool = False,
+    cache: bool | str = False,
 ) -> None:
     """Speak ``text`` aloud.
 
@@ -310,14 +337,17 @@ def speak(
             where ``envelope`` is a list of normalized [0, 1] RMS values at
             ~30 fps.  Use this to drive audio-reactive UI elements in sync
             with playback.
-        cache: keep (and reuse) this line's audio; for fixed lines said
-            often, like the bedtime routine's.
+        cache: True keeps (and reuses) this line's audio, for fixed lines
+            like the bedtime routine's; "auto" keeps it once the same line
+            has been said before (JARVIS learning his usual answers).
     """
     if not text or not text.strip():
         return
 
     log.debug("speak(): %s", text)
 
+    if cache == "auto":
+        cache = _said_before(text)
     cached = _cache_path(text) if cache else None
     if cached is not None and cached.exists():
         _play_async_and_wait(cached, interrupt_event)  # no synthesis: starts at once

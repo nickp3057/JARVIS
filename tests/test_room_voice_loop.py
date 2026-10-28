@@ -13,7 +13,7 @@ from unittest.mock import Mock, patch
 
 import numpy as np
 
-from brain import voice_presence
+from brain import voice_presence, voice_shortcuts
 from speech import quick_commands, room_sounds, room_voice
 from speech.audio import FRAME_SAMPLES, RMS_THRESHOLD
 from speech.wake_words import strip_wake_word
@@ -114,6 +114,9 @@ def threading_sleep(seconds: float) -> None:
 class HandleTests(unittest.TestCase):
     def setUp(self) -> None:
         voice_presence.reset_for_tests()
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        patch.object(voice_shortcuts, "_FILE", Path(tmp.name) / "shortcuts.json").start()
         self.sounds = patch.object(room_sounds, "play").start()
         self.speak = patch("speech.tts.speak").start()
         patch.object(room_voice.time, "sleep").start()
@@ -150,7 +153,7 @@ class HandleTests(unittest.TestCase):
         runtime.respond.return_value = "Fifty-four and sunny, sir."
         with patch.object(quick_commands, "run", return_value=None):
             follow_up = make_voice("weather tomorrow", runtime)._handle(self.audio)
-        self.speak.assert_called_once_with("Fifty-four and sunny, sir.")
+        self.speak.assert_called_once_with("Fifty-four and sunny, sir.", cache="auto")
         self.assertTrue(follow_up)
         self.assertEqual(voice_presence.current()["reply"], "Fifty-four and sunny, sir.")
 

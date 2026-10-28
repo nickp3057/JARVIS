@@ -768,6 +768,19 @@ def _tool_remove_maintenance_task(args: dict[str, Any]) -> str:
 
 # --- Anthropic tool schemas -------------------------------------------------
 
+def _tool_voice_shortcuts(args: dict[str, Any]) -> str:
+    from brain import voice_shortcuts
+    if args.get("action") == "forget":
+        phrase = str(args.get("phrase") or "").strip()
+        if not phrase:
+            return "Tool error: say which shortcut to forget (or 'all')."
+        gone = voice_shortcuts.forget(phrase)
+        if not gone:
+            return f"I don't have a shortcut for '{phrase}', sir."
+        return "Forgotten every voice shortcut, sir." if phrase.lower() == "all" else f"Forgotten '{phrase}', sir."
+    return voice_shortcuts.describe()
+
+
 _CUSTOM_TOOLS: list[dict[str, Any]] = [
     {
         "name": "restart_arr_stack",
@@ -1496,6 +1509,23 @@ _CUSTOM_TOOLS: list[dict[str, Any]] = [
         },
     },
     {
+        "name": "voice_shortcuts",
+        "description": (
+            "The room voice's learned shortcuts: phrases Nick says to the room "
+            "speaker that now run a home or music action instantly, learned from "
+            "how you handled them before. List them, or forget one (or 'all') "
+            "when Nick asks what you've learned or a shortcut does the wrong thing."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "action": {"type": "string", "enum": ["list", "forget"]},
+                "phrase": {"type": "string", "description": "For forget: the phrase, or 'all'."},
+            },
+            "required": ["action"],
+        },
+    },
+    {
         "name": "system_health",
         "description": (
             "Self-diagnosis: report which of your own tools/integrations are failing "
@@ -2183,6 +2213,7 @@ _DISPATCH: dict[str, Callable[[dict[str, Any]], str]] = {
     "get_setting": _tool_get_setting,
     "update_setting": _tool_update_setting,
     "add_standing_order": _tool_add_standing_order,
+    "voice_shortcuts": _tool_voice_shortcuts,
     "system_health": _tool_system_health,
     "clear_tool_health": _tool_clear_tool_health,
     "diagnose_tool": _tool_diagnose_tool,

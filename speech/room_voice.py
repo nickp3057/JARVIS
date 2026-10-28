@@ -29,10 +29,10 @@ import time
 
 import numpy as np
 
-from brain import voice_presence
+from brain import voice_presence, voice_shortcuts
 from jarvis_logger import get_logger
 from speech import room_sounds
-from speech.audio import FRAME_MS, RMS_THRESHOLD, SAMPLE_RATE, MicStream, rms
+from speech.audio import FRAME_MS, SAMPLE_RATE, MicStream, rms, rms_threshold
 from speech.wake_words import strip_wake_word
 
 log = get_logger(__name__)
@@ -116,7 +116,7 @@ class RoomVoice:
             need_wake = not self._handle(audio)
 
     def _wait_for_wake(self, stream: MicStream) -> bool:
-        from speech.wake import WAKE_THRESHOLD
+        from speech.wake import wake_threshold
         self.detector.reset()
         while not self.stop.is_set():
             frame = stream.read(timeout=1.0)
@@ -127,7 +127,7 @@ class RoomVoice:
             except Exception:  # noqa: BLE001
                 log.exception("openWakeWord predict() failed; skipping frame")
                 continue
-            if any(score >= WAKE_THRESHOLD for score in scores.values()):
+            if any(score >= wake_threshold() for score in scores.values()):
                 return True
         return False
 
@@ -137,10 +137,11 @@ class RoomVoice:
         max_frames = int(_seconds("VOICE_MAX_UTTERANCE_S", 15) * 1000 / FRAME_MS)
         start_frames = int(start_timeout * 1000 / FRAME_MS)
         # Speech before the wake word ("game time, Jarvis"): the preroll minus the wake word itself.
+        loud = rms_threshold()  # live: JARVIS may have retuned it
         before_wake = None
         if preroll is not None and preroll.size > SAMPLE_RATE:
             head = preroll[: -int(SAMPLE_RATE * 0.9)]
-            if any(rms(head[i:i + 1280]) > RMS_THRESHOLD for i in range(0, head.size, 1280)):
+            if any(rms(head[i:i + 1280]) > loud for i in range(0, head.size, 1280)):
                 before_wake = preroll
         if before_wake is not None:
             start_frames = min(start_frames, int(1200 / FRAME_MS))  # it was said already: don't wait long
@@ -155,7 +156,7 @@ class RoomVoice:
                 frame = stream.read(timeout=0.5)
                 if frame is None:
                     continue
-                voiced = rms(frame) > RMS_THRESHOLD
+                voiced = rms(frame) > loud
                 if not started:
                     if voiced:
                         started = True
@@ -206,6 +207,16 @@ class RoomVoice:
             self._finish("done" if quick.ok else "error", "" if quick.ok else "That didn't work, sir.")
             return False
 
+        shortcut = voice_shortcuts.lookup(text)
+        if shortcut is not None:  # learned from how Claude handled this phrase before
+            from brain import tool_health, tools
+            result = tools.execute_tool(*shortcut)
+            worked = not tool_health.looks_like_failure(result) and not result.startswith("Tool error")
+            voice_shortcuts.used(text, worked)
+            log.info("Room voice shortcut %r -> %s: %s", text, shortcut[0], result[:120])
+            self._finish("done" if worked else "error", "" if worked else "That didn't work, sir.")
+            return False
+
         try:
             reply = self.runtime.respond(text, spoken=True)
         except Exception:  # noqa: BLE001
@@ -213,13 +224,24 @@ class RoomVoice:
             self._finish("error", "Something went wrong, sir.")
             return False
         if self.runtime.last_used_tools and reply.strip().lower().rstrip(".!") in _JINGLE_REPLIES:
+            self._learn(text)
             self._finish("done", "")
             return False
         voice_presence.update("speaking", reply=reply)
-        speak(reply)
+        speak(reply, cache="auto")  # a reply said before replays without synthesis
         voice_presence.update("idle")
         # A question or a chat keeps listening briefly; a finished task doesn't.
         return not self.runtime.last_used_tools
+
+    def _learn(self, text: str) -> None:
+        """A simple action Claude did for this phrase: maybe now a shortcut."""
+        try:
+            if voice_shortcuts.observe(text, self.runtime.last_turn_tools):
+                log.info("Room voice learned a shortcut: %r", text)
+                self.runtime.record_event(kind="notice", source="room-voice", title="Learned a voice shortcut",
+                                          detail=f'"{voice_shortcuts.normalize(text)}" now runs instantly.')
+        except Exception:  # noqa: BLE001
+            log.exception("Shortcut learning failed")
 
     # --- for routines that hold a short conversation (goodnight) ---------------
 

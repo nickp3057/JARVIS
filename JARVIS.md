@@ -636,6 +636,7 @@ VOICE_SILENCE_END_MS=550    # silence that ends what you said
 VOICE_START_TIMEOUT_S=4     # wait after the wake word before giving up
 VOICE_FOLLOWUP_S=5          # no-wake-word follow-up window after a spoken answer
 VOICE_PREROLL_S=2           # audio kept from before the wake word ("game time, Jarvis")
+VOICE_SHORTCUT_AFTER=2      # same phrase + same simple action this many times -> instant shortcut
 LIGHT_RAINBOWS=             # light=select:DIY option pairs for the Rainbow button (defaults to Nick's strip + desk)
 WAKE_UP_SCENE=              # optional HA scene./script. to run instead; unset uses scene.good_morning when HA has it
 # Companion dashboard (read-only status hub endpoints)
@@ -760,6 +761,21 @@ CALENDAR_ALERT_LEAD_MIN=10  # warn this many minutes before a meeting
   Resume (tested on a movie and an episode). Plex keeps Nick signed in, so
   the PIN auto-entry (`PlexAutoLogin.run`) is removed; `PlexWatch` keeps
   pressing Watch for "play ..." voice requests.
+- **JARVIS tunes and teaches itself (room voice)** — (1) the room voice
+  reads `WAKE_THRESHOLD` and `MIC_RMS_THRESHOLD` live (`speech/wake.py
+  wake_threshold()`, `speech/audio.py rms_threshold()`), and
+  `VOICE_SILENCE_END_MS`, `VOICE_FOLLOWUP_S`, `VOICE_START_TIMEOUT_S`,
+  `VOICE_SHORTCUT_AFTER` joined the `update_setting` schema, so "you never
+  hear me" / "you cut me off" changes apply to the next "Hey JARVIS"; the
+  persona tells Claude how to map complaints to those knobs. (2)
+  `brain/voice_shortcuts.py`: a room-voice phrase Claude answers with the
+  same single home/music action (`LEARNABLE`) twice becomes a shortcut the
+  room voice runs itself (no model); a failing one is dropped; the
+  `voice_shortcuts` tool lists/forgets them; the runtime's inbox notes each
+  one learned. `JarvisAgent.turn_tools` / `runtime.last_turn_tools` expose
+  the finished turn's tools. (3) `tts.speak(cache="auto")` keeps a reply's
+  audio from the second time JARVIS says it (`memory/tts_cache/said.json`
+  counts, newest 500).
 - **"Jarvis, goodnight" (room voice)** — `speech/goodnight.py`, no model
   involved: "Goodnight, sir. Your alarm's set for 7:00. Is that fine?" →
   yes / silence keeps it; a time ("6:30", "make it eight", "half past six")

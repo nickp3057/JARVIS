@@ -34,7 +34,16 @@ FRAME_MS = 80
 FRAME_SAMPLES = int(SAMPLE_RATE * FRAME_MS / 1000)  # 1280
 
 # Tunables (env-overridable so you can adjust on the fly without code changes).
-RMS_THRESHOLD = float(os.getenv("MIC_RMS_THRESHOLD", "350"))
+RMS_THRESHOLD = float(os.getenv("MIC_RMS_THRESHOLD", "350"))  # at import; rms_threshold() is live
+
+
+def rms_threshold() -> float:
+    """MIC_RMS_THRESHOLD read now, so JARVIS (update_setting) can retune
+    "how loud is speech" without a restart."""
+    try:
+        return float(os.getenv("MIC_RMS_THRESHOLD", "350"))
+    except ValueError:
+        return RMS_THRESHOLD
 SILENCE_END_MS = int(os.getenv("MIC_SILENCE_END_MS", "700"))
 SILENCE_END_FRAMES = max(1, SILENCE_END_MS // FRAME_MS)
 

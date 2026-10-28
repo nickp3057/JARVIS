@@ -76,6 +76,30 @@ SETTINGS_SCHEMA: dict[str, dict[str, Any]] = {
         "max": 3000.0,
         "description": "How loud counts as 'voice' for normal listening.",
     },
+    "VOICE_SILENCE_END_MS": {
+        "type": "int",
+        "min": 250,
+        "max": 2000,
+        "description": "Room voice: how long a pause ends what Nick said. Raise if JARVIS cuts him off.",
+    },
+    "VOICE_FOLLOWUP_S": {
+        "type": "float",
+        "min": 0.0,
+        "max": 15.0,
+        "description": "Room voice: seconds JARVIS keeps listening for an answer or follow-up (no wake word).",
+    },
+    "VOICE_START_TIMEOUT_S": {
+        "type": "float",
+        "min": 1.0,
+        "max": 10.0,
+        "description": "Room voice: how long to wait after 'Hey JARVIS' for Nick to start talking.",
+    },
+    "VOICE_SHORTCUT_AFTER": {
+        "type": "int",
+        "min": 1,
+        "max": 10,
+        "description": "Room voice: same phrase + same simple action this many times becomes an instant shortcut.",
+    },
     "MIC_SILENCE_END_MS": {
         "type": "int",
         "min": 200,

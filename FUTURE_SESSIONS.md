@@ -257,8 +257,8 @@ of each group.
 
 Little things mentioned along the way, roughly smallest first:
 
-- [ ] Room voice: cache the "Yes, sir." / "Done." audio so a spoken ack has
-  no ElevenLabs delay; speak due reminders/timers on the room speaker;
+- [x] Room voice caches repeated replies (`cache="auto"`) and routine lines.
+- [ ] Room voice: speak due reminders/timers on the room speaker;
   barge-in (stop talking when Nick speaks: `tts.stop_playback()` now works
   on Linux); start speaking the first sentence of long answers sooner.
 - [ ] "What scenes do I have?" by voice (list `status_hub.home_scenes`).

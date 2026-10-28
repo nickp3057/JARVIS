@@ -190,6 +190,11 @@ class JarvisRuntime:
     def last_used_tools(self) -> bool:
         return self.agent.last_used_tools
 
+    @property
+    def last_turn_tools(self) -> list[tuple[str, dict]]:
+        """(tool, input) for each tool the last finished turn ran."""
+        return list(getattr(self.agent, "turn_tools", ()) or ())
+
     def mark_no_tools_used(self) -> None:
         """Record that the latest runtime action was conversational only."""
         self.agent.last_used_tools = False

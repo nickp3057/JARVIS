@@ -20,7 +20,16 @@ from speech.audio import MicStream
 
 log = get_logger(__name__)
 
-WAKE_THRESHOLD = float(os.getenv("WAKE_THRESHOLD", "0.5"))
+WAKE_THRESHOLD = float(os.getenv("WAKE_THRESHOLD", "0.5"))  # at import; wake_threshold() is live
+
+
+def wake_threshold() -> float:
+    """WAKE_THRESHOLD read now (lower = easier to wake), so a change by voice
+    or chat applies to the very next "Hey JARVIS"."""
+    try:
+        return float(os.getenv("WAKE_THRESHOLD", "0.5"))
+    except ValueError:
+        return WAKE_THRESHOLD
 WAKE_MODEL_NAME = os.getenv("WAKE_MODEL", "hey_jarvis")
 
 

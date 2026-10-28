@@ -122,6 +122,11 @@ class UnderstandingTests(unittest.TestCase):
 class RoomVoiceRoutineTests(unittest.TestCase):
     def test_goodnight_runs_in_the_room_voice_without_claude(self) -> None:
         voice_presence.reset_for_tests()
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        p = patch.object(__import__("brain.voice_shortcuts", fromlist=["x"]), "_FILE", Path(tmp.name) / "s.json")
+        p.start()
+        self.addCleanup(p.stop)
         runtime = Mock()
         final = Mock()
         final.transcribe.side_effect = ["Hey Jarvis, goodnight.", "Yes."]
