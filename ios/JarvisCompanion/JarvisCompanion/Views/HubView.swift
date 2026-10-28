@@ -191,7 +191,8 @@ struct HubView: View {
                 Text(Self.greeting(at: .now))
                     .font(.largeTitle.weight(.semibold))
                     .multilineTextAlignment(.center)
-                Text(Date.now, format: .dateTime.weekday(.wide).month(.wide).day())
+                (Text(JarvisPalette.current == .mcqueen ? "⚡ " : "")
+                    + Text(Date.now, format: .dateTime.weekday(.wide).month(.wide).day()))
                     .font(.subheadline.weight(.medium))
                     .foregroundStyle(JarvisTheme.cyan)
             }
@@ -207,6 +208,7 @@ struct HubView: View {
     }
 
     static func greeting(at date: Date, calendar: Calendar = .current) -> String {
+        if JarvisPalette.current == .mcqueen { return "Ka-chow, sir." }
         switch calendar.component(.hour, from: date) {
         case 5..<12: return "Good morning, sir."
         case 12..<17: return "Good afternoon, sir."

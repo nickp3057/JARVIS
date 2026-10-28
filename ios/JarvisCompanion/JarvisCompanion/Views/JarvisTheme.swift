@@ -7,7 +7,11 @@ typealias RGB = (Double, Double, Double)
 /// the reactor (`reactor`: the mark and the control tint), the secondary (`blue`: Nick's bubbles), the three status colours
 /// (warning, critical, nominal), and the four surfaces, dark and light.
 enum JarvisPalette: String, CaseIterable, Identifiable {
-    case arc, hotRod, malibu, crimson, mark85, spiderMan, mcqueen
+    case arc, hotRod, malibu, crimson, mark85, spiderMan, mcqueen, barnDoor
+
+    /// What Settings offers; barnDoor is Barn Door Protocol's red alert,
+    /// switched on by JARVIS (brain/protocols.py), never picked.
+    static let pickable: [JarvisPalette] = allCases.filter { $0 != .barnDoor }
 
     static let storageKey = "jarvis.palette"
     var id: String { rawValue }
@@ -21,6 +25,7 @@ enum JarvisPalette: String, CaseIterable, Identifiable {
         case .mark85: return "Mark 85"
         case .spiderMan: return "Spider-Man"
         case .mcqueen: return "Lightning McQueen"
+        case .barnDoor: return "Barn Door Protocol"
         }
     }
 
@@ -32,7 +37,8 @@ enum JarvisPalette: String, CaseIterable, Identifiable {
         case .crimson: return "Red, but calm: crimson on neutral charcoal."
         case .mark85: return "Endgame's suit: gold and crimson on deep navy, no red glare."
         case .spiderMan: return "Suit red and web blue, after dark in Queens."
-        case .mcqueen: return "Ka-chow. Candy red, lightning yellow, a flame-orange core."
+        case .mcqueen: return "Ka-chow. Lightning yellow and candy red on race-day asphalt."
+        case .barnDoor: return "Red alert. Say \"stand down\" to JARVIS to undo."
         }
     }
 
@@ -118,16 +124,27 @@ enum JarvisPalette: String, CaseIterable, Identifiable {
                          panel: ((0.06, 0.08, 0.16), (1, 1, 1)),
                          raised: ((0.09, 0.11, 0.22), (0.98, 0.985, 1.0)))
         case .mcqueen:
-            return Roles(accent: ((1.0, 0.83, 0.18), (0.60, 0.45, 0.0)),
-                         reactor: ((1.0, 0.55, 0.15), (0.75, 0.32, 0.0)),
+            // Race day: asphalt, not red, underneath; red is the paint, yellow the bolt.
+            return Roles(accent: ((1.0, 0.82, 0.15), (0.62, 0.45, 0.0)),
+                         reactor: ((0.96, 0.20, 0.17), (0.78, 0.08, 0.06)),
                          secondary: ((0.88, 0.12, 0.14), (0.72, 0.06, 0.10)),
-                         warning: ((1.0, 0.62, 0.20), (0.76, 0.34, 0.0)),
-                         critical: ((1.0, 0.30, 0.32), (0.80, 0.05, 0.10)),
+                         warning: ((1.0, 0.60, 0.18), (0.76, 0.34, 0.0)),
+                         critical: ((1.0, 0.36, 0.38), (0.80, 0.05, 0.10)),
                          success: ((0.45, 0.88, 0.55), (0.0, 0.50, 0.25)),
-                         background: ((0.09, 0.025, 0.03), (0.98, 0.95, 0.94)),
-                         deep: ((0.035, 0.008, 0.012), (0.94, 0.90, 0.89)),
-                         panel: ((0.15, 0.045, 0.05), (1, 1, 1)),
-                         raised: ((0.21, 0.07, 0.07), (1, 0.98, 0.975)))
+                         background: ((0.075, 0.075, 0.08), (0.97, 0.965, 0.955)),
+                         deep: ((0.03, 0.03, 0.035), (0.92, 0.915, 0.905)),
+                         panel: ((0.12, 0.12, 0.13), (1, 1, 1)),
+                         raised: ((0.17, 0.17, 0.18), (0.99, 0.985, 0.975)))
+        case .barnDoor:
+            let red: (RGB, RGB) = ((1.0, 0.18, 0.16), (0.80, 0.04, 0.04))
+            return Roles(accent: red, reactor: red, secondary: ((0.70, 0.05, 0.06), (0.62, 0.02, 0.04)),
+                         warning: ((1.0, 0.45, 0.30), (0.78, 0.20, 0.08)),
+                         critical: ((1.0, 0.82, 0.80), (0.50, 0.0, 0.0)),
+                         success: ((1.0, 0.55, 0.50), (0.70, 0.12, 0.10)),
+                         background: ((0.10, 0.0, 0.0), (0.98, 0.93, 0.93)),
+                         deep: ((0.04, 0.0, 0.0), (0.94, 0.86, 0.86)),
+                         panel: ((0.16, 0.02, 0.02), (1, 0.97, 0.97)),
+                         raised: ((0.22, 0.03, 0.03), (1, 0.95, 0.95)))
         }
     }
 

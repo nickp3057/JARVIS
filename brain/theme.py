@@ -11,7 +11,8 @@ from pathlib import Path
 import time
 
 # Same names as JarvisPalette (iOS) and Theme.java (TV).
-THEMES = ("arc", "hotRod", "malibu", "crimson", "mark85", "spiderMan", "mcqueen")
+THEMES = ("arc", "hotRod", "malibu", "crimson", "mark85", "spiderMan", "mcqueen", "barnDoor")
+# barnDoor is Barn Door Protocol's red alert (brain/protocols.py), not a pick.
 # Retired picks land on their closest survivor.
 _RETIRED = {"markIII": "hotRod", "graphite": "arc", "stealth": "arc"}
 _FILE = Path(__file__).resolve().parents[1] / "memory" / "theme.json"
@@ -31,11 +32,31 @@ def current() -> dict[str, object]:
     return {"theme": default if default in THEMES else "arc", "chosen": False, "updated_at": 0.0}
 
 
-def choose(theme: str) -> dict[str, object]:
+def choose(theme: str, remember: bool = False) -> dict[str, object]:
+    """Pick the shared theme; ``remember`` keeps the one it replaces for restore()."""
     if theme not in THEMES:
         raise ValueError(f"Theme must be one of {', '.join(THEMES)}.")
+    before = current()["theme"]
+    data: dict[str, object] = {"theme": theme, "updated_at": time.time()}
+    if remember:
+        data["before"] = _saved_before() or before
     _FILE.parent.mkdir(parents=True, exist_ok=True)
     tmp = _FILE.with_suffix(".tmp")
-    tmp.write_text(json.dumps({"theme": theme, "updated_at": time.time()}))
+    tmp.write_text(json.dumps(data))
     tmp.replace(_FILE)
     return current()
+
+
+def _saved_before() -> str | None:
+    try:
+        before = json.loads(_FILE.read_text()).get("before")
+    except (OSError, ValueError, AttributeError):
+        return None
+    return before if before in THEMES else None
+
+
+def restore() -> str:
+    """Back to the theme a remembered choose() replaced (Arc if none)."""
+    previous = _saved_before() or "arc"
+    choose(previous)
+    return previous

@@ -595,7 +595,7 @@ def wake_awake(_: None = Depends(authorize)) -> dict[str, object]:
 
 
 class ThemeRequest(BaseModel):
-    theme: str = Field(pattern="^(arc|hotRod|malibu|crimson|mark85|spiderMan|mcqueen)$")
+    theme: str = Field(pattern="^(arc|hotRod|malibu|crimson|mark85|spiderMan|mcqueen|barnDoor)$")
 
 
 @app.get("/api/theme")

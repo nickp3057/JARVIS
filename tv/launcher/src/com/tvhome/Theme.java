@@ -71,11 +71,17 @@ final class Theme {
             new float[] {0.01f, 0.015f, 0.04f}, new float[] {0.06f, 0.08f, 0.16f},
             new float[] {0.09f, 0.11f, 0.22f});
     static final Theme MCQUEEN = new Theme(
-            new float[] {1.0f, 0.83f, 0.18f}, new float[] {1.0f, 0.55f, 0.15f},
-            new float[] {1.0f, 0.62f, 0.2f}, new float[] {1.0f, 0.3f, 0.32f},
-            new float[] {0.45f, 0.88f, 0.55f}, new float[] {0.09f, 0.025f, 0.03f},
-            new float[] {0.035f, 0.008f, 0.012f}, new float[] {0.15f, 0.045f, 0.05f},
-            new float[] {0.21f, 0.07f, 0.07f});
+            new float[] {1.0f, 0.82f, 0.15f}, new float[] {0.96f, 0.2f, 0.17f},
+            new float[] {1.0f, 0.6f, 0.18f}, new float[] {1.0f, 0.36f, 0.38f},
+            new float[] {0.45f, 0.88f, 0.55f}, new float[] {0.075f, 0.075f, 0.08f},
+            new float[] {0.03f, 0.03f, 0.035f}, new float[] {0.12f, 0.12f, 0.13f},
+            new float[] {0.17f, 0.17f, 0.18f});
+    static final Theme BARN_DOOR = new Theme(
+            new float[] {1.0f, 0.18f, 0.16f}, new float[] {1.0f, 0.18f, 0.16f},
+            new float[] {1.0f, 0.45f, 0.3f}, new float[] {1.0f, 0.82f, 0.8f},
+            new float[] {1.0f, 0.55f, 0.5f}, new float[] {0.1f, 0.0f, 0.0f},
+            new float[] {0.04f, 0.0f, 0.0f}, new float[] {0.16f, 0.02f, 0.02f},
+            new float[] {0.22f, 0.03f, 0.03f});
 
     static Theme named(String name) {
         if ("hotRod".equals(name)) return HOT_ROD;
@@ -84,6 +90,7 @@ final class Theme {
         if ("mark85".equals(name)) return MARK_85;
         if ("spiderMan".equals(name)) return SPIDER_MAN;
         if ("mcqueen".equals(name)) return MCQUEEN;
+        if ("barnDoor".equals(name)) return BARN_DOOR; // Barn Door Protocol, never a pick
         return ARC;
     }
 

@@ -63,8 +63,10 @@ toolbar).
 - Settings → Theme (3.2): Arc, Hot Rod, Malibu (sunset orange, ocean blue,
   cyan core), Crimson (calm red on charcoal), Mark 85 (gold and crimson on
   navy; Nick's favourite), Spider-Man (suit red, web blue) and Lightning
-  McQueen (candy red, lightning yellow). Mark III, Graphite and Stealth were
-  tried and retired in 3.2. Earlier: (`JarvisPalette`; Reactor removed in 1.87, Nick disliked the violet; Hot Rod added in 1.91). Mark III's red
+  McQueen (3.5: lightning yellow and candy red on asphalt charcoal, "Ka-chow,
+  sir." and a ⚡ on Home). Mark III, Graphite and Stealth were tried and
+  retired in 3.2. `barnDoor` (Barn Door Protocol's red alert) is set by
+  JARVIS only and hidden from the picker (`JarvisPalette.pickable`). Earlier: (`JarvisPalette`; Reactor removed in 1.87, Nick disliked the violet; Hot Rod added in 1.91). Mark III's red
   accent sits close to the red "critical" dot; revisit if that confuses.
 - The reactor mark animates at display rate; check smoothness on device with
   Instruments → Animation Hitches (target: no hitches on the Chat empty

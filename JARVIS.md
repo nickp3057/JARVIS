@@ -259,6 +259,15 @@ RMS envelope from ElevenLabs audio drives the orb in real time using a monotonic
 - `todays_agenda` — Google Calendar schedule for the rest of today
 - `next_event` — the next upcoming calendar event
 
+### Barn Door Protocol *(new)*
+- `barn_door_protocol(action?)` — "Barn Door Protocol" / "lockdown": HA
+  snapshots the room (`scene.create` → `scene.barn_door_before`), every
+  colour light in `BARN_DOOR_LIGHTS` (strips, desk, the fan's LEDs) goes full
+  red, `BARN_DOOR_OFF` (the bedroom light) goes dark, the shared theme goes
+  to the hidden red `barnDoor` palette (`brain/theme.py` remembers the old
+  one) and the TV gets a red banner. `stand_down` restores the snapshot and
+  the theme (`brain/protocols.py`).
+
 ### Nick's room TV *(new)*
 - `tv_power(state)` — on/off through Home Assistant's Android TV Remote
   entity (`TV_REMOTE_ENTITY`, default `remote.nick_s_room_tv`), which can
@@ -616,6 +625,8 @@ HOME_DASHBOARD_ENTITIES=    # comma-separated HA entity_ids for /api/home/entiti
 SCHWAB_APP_KEY=             # JARVIS's own Schwab developer app (developer.schwab.com); empty = Schwab off
 SCHWAB_APP_SECRET=
 SCHWAB_CALLBACK_URL=https://127.0.0.1:8182   # exactly what the Schwab app has registered
+BARN_DOOR_LIGHTS=light.nick_strip_lights,light.strip_lights,light.desk_lights,light.desk_lights_2,light.nicks_fan   # go red
+BARN_DOOR_OFF=light.bedroom_lights   # go dark
 TV_REMOTE_ENTITY=remote.nick_s_room_tv   # HA Android TV Remote entity for Nick's room TV
 TV_MEDIA_PLAYERS=media_player.nicks_room_tv,media_player.nicks_room_tv_2,media_player.nick_s_room_tv,media_player.nicks_room_group,media_player.nick_s_room_display   # on/off for these goes to the remote
 SCHWAB_POLL_SECONDS=30      # holdings/cash refresh in market hours (prices stream live regardless)
@@ -688,6 +699,11 @@ CALENDAR_ALERT_LEAD_MIN=10  # warn this many minutes before a meeting
 
 ## Recently Shipped
 
+- **Barn Door Protocol; McQueen redone (TV 7.4, iOS 3.5 / build 117)** —
+  `barn_door_protocol` turns the room red (lights snapshotted and restored on
+  stand-down) and the phone and TV to a hidden red-alert theme. McQueen now
+  sits on asphalt charcoal (lightning-yellow accent, red reactor) with
+  "Ka-chow, sir." and a ⚡ on the date on phone and TV.
 - **TV 7.2: the bottom row is all wordmarks** — Wake-up, Continue and
   Settings use Plex and Spotify's bold lower-case wordmark with one accent
   character, every wordmark and label on one line, and their small print

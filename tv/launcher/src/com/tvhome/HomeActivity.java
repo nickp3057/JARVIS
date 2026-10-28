@@ -358,8 +358,9 @@ public class HomeActivity extends Activity {
         clock.setTypeface(Typeface.create("sans-serif-thin", Typeface.NORMAL));
         time.addView(clock);
         TextClock date = new TextClock(this);
-        date.setFormat12Hour("EEEE, MMMM d");
-        date.setFormat24Hour("EEEE, MMMM d");
+        String dateFormat = (theme == Theme.MCQUEEN ? "'⚡ '" : "") + "EEEE, MMMM d";
+        date.setFormat12Hour(dateFormat);
+        date.setFormat24Hour(dateFormat);
         date.setTextSize(12);
         date.setTextColor(theme.accent);
         date.setLetterSpacing(0.08f);
@@ -529,7 +530,9 @@ public class HomeActivity extends Activity {
             return;
         }
         String address = g != null ? g.optString("address", "sir") : "sir";
-        greeting.setText(greetingText() + ", " + address + ".");
+        // A little ka-chow on the McQueen theme.
+        greeting.setText(theme == Theme.MCQUEEN ? "Ka-chow, " + address + "."
+                : greetingText() + ", " + address + ".");
         weather.setText(g != null ? weatherLine(g.optJSONObject("weather")) : "");
         showMoney(g != null ? g.optJSONObject("portfolio") : null);
         systemsState.setText(statusLine());

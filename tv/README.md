@@ -79,8 +79,9 @@ every deploy, so edit the repo copy, not the TV's.
 - **Phone snooze**: `wake_snooze` / `wake_dismiss` bus events (from the
   phone's notification buttons) pause and count down, or close
   `WakeActivity`. Core rings a phone snooze again itself.
-- **Themes**: Arc, Hot Rod, Malibu, Crimson, Mark 85 (Nick's pick),
-  Spider-Man, McQueen (`Theme.java`, dark variants of the phone's
+- **Themes**: Arc, Hot Rod, Malibu, Crimson, Mark 85, Spider-Man, McQueen
+  ("Ka-chow, sir." and a ⚡ on the date), plus `barnDoor`, Barn Door
+  Protocol's red alert, set by JARVIS and never in the picker (`Theme.java`, dark variants of the phone's
   `JarvisPalette`). Mark III, Graphite and Stealth were retired 2026-10-27;
   Core maps a stored retired pick to Hot Rod / Arc.
 - **Weather icon** (`HomeActivity.weatherIcon`): one emoji from the

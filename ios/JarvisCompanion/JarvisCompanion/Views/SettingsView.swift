@@ -211,7 +211,7 @@ struct ThemePicker: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            ForEach(JarvisPalette.allCases) { option in
+            ForEach(JarvisPalette.pickable) { option in
                 Button {
                     palette = option.rawValue
                     Task { await ThemeSync.push(option.rawValue, settings: settings) }

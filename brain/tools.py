@@ -640,6 +640,13 @@ def _tool_set_wake_up(args: dict[str, Any]) -> str:
     return "Done. " + describe(data)
 
 
+def _tool_barn_door_protocol(args: dict[str, Any]) -> str:
+    from brain import protocols
+    if str(args.get("action", "engage")).lower() == "stand_down":
+        return protocols.stand_down()
+    return protocols.engage()
+
+
 def _tool_tv_power(args: dict[str, Any]) -> str:
     from integrations import tv_remote
     return tv_remote.power(str(args.get("state", "on")).lower() != "off")[1]
@@ -1733,6 +1740,20 @@ _CUSTOM_TOOLS: list[dict[str, Any]] = [
             },
         },
     },
+    # --- Barn Door Protocol -----------------------------------------------
+    {
+        "name": "barn_door_protocol",
+        "description": (
+            "Barn Door Protocol (Tony's lockdown; also 'lockdown', 'red alert'): every light in "
+            "Nick's room, the fan's LEDs included, goes red and the phone and TV go to a full red "
+            "theme. stand_down puts the lights and theme back exactly as they were. Engage "
+            "straight away when he says it; it's harmless and fully reversible."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {"action": {"type": "string", "enum": ["engage", "stand_down"]}},
+        },
+    },
     # --- Nick's room TV ----------------------------------------------------
     {
         "name": "tv_power",
@@ -2169,6 +2190,7 @@ _DISPATCH: dict[str, Callable[[dict[str, Any]], str]] = {
     "skip_wake_up": _tool_skip_wake_up,
     "portfolio_summary": _tool_portfolio_summary,
     "tv_power": _tool_tv_power,
+    "barn_door_protocol": _tool_barn_door_protocol,
     "cancel_wake_up": _tool_cancel_wake_up,
     "watch_price": _tool_watch_price,
     "list_price_watches": _tool_list_price_watches,
