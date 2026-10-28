@@ -428,6 +428,18 @@ def _tool_propose_stack_fix(args: dict[str, Any]) -> str:
         record_hash = str(found[1].get("downloadId") or found[2]).lower()[:16]
         return self_repair.propose_stack_fix(fix, str(args.get("reason") or ""), args.get("_jarvis_session_id"),
                                              params=media_doctor.retry_params(*found), key=record_hash)
+    if fix == "switch_indexer_mirror":
+        import requests
+
+        from brain import stack_fixes
+        try:
+            found = stack_fixes.find_indexer(str(args.get("indexer") or ""))
+        except (requests.RequestException, ValueError) as exc:
+            return f"I couldn't read Prowlarr's indexers, sir ({exc.__class__.__name__})."
+        if found is None:
+            return f"Prowlarr has no indexer called '{args.get('indexer', '')}', sir."
+        return self_repair.propose_stack_fix(fix, str(args.get("reason") or ""), args.get("_jarvis_session_id"),
+                                             params={"indexer_id": found[0], "label": found[1]}, key=str(found[0]))
     return self_repair.propose_stack_fix(fix, str(args.get("reason") or ""), args.get("_jarvis_session_id"))
 
 
@@ -1543,7 +1555,9 @@ _CUSTOM_TOOLS: list[dict[str, Any]] = [
             "Propose one allowlisted NAS-stack fix after diagnosing a failure (e.g. from an incident "
             "report): restart_home_assistant, retest_indexers, refresh_plex, arr_recovery (recreates "
             "gluetun + the arr containers; active downloads disconnect), or retry_download (a stuck download, "
-            "e.g. metadata with no peers: blocklist that release and search again; pass title). Never runs anything: it stages a "
+            "e.g. metadata with no peers: blocklist that release and search again; pass title), or "
+            "switch_indexer_mirror (an indexer whose site is Cloudflare-banned (error 1006) or down: test each of "
+            "Prowlarr's mirrors, save the first that passes; pass indexer). Never runs anything: it stages a "
             "repair and asks Nick, who approves by replying yes / the code, or with the Approve button "
             "in the app. The verified result arrives later as an alert. Say why in reason."
         ),
@@ -1551,8 +1565,9 @@ _CUSTOM_TOOLS: list[dict[str, Any]] = [
             "type": "object",
             "properties": {
                 "fix": {"type": "string", "enum": ["restart_home_assistant", "retest_indexers", "refresh_plex", "arr_recovery",
-                                                   "retry_download"]},
+                                                   "retry_download", "switch_indexer_mirror"]},
                 "title": {"type": "string", "description": "retry_download only: the movie/show title in the queue."},
+                "indexer": {"type": "string", "description": "switch_indexer_mirror only: the Prowlarr indexer name, e.g. 1337x."},
                 "reason": {"type": "string", "description": "One sentence: the evidence that this fix addresses."},
             },
             "required": ["fix", "reason"],

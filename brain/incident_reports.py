@@ -97,6 +97,23 @@ def _prowlarr_logs() -> list[str]:
         return [f'Prowlarr log unavailable: {exc.__class__.__name__}']
 
 
+def _indexer_errors() -> dict[str, str]:
+    """The real HTTP status / Cloudflare code behind each backed-off indexer,
+    quoted from Prowlarr's log so the turn doesn't guess (2026-10-28)."""
+    base = os.getenv('PROWLARR_URL', '').strip().rstrip('/')
+    key = os.getenv('PROWLARR_API_KEY', '').strip()
+    if not base or not key:
+        return {}
+    down = nas_stack.indexer_outages(base, key)
+    if not down:
+        return {}
+    response = requests.get(base + '/api/v1/log', headers={'X-Api-Key': key}, timeout=10, allow_redirects=False,
+                            params={'page': 1, 'pageSize': 500, 'sortKey': 'time', 'sortDirection': 'descending'})
+    response.raise_for_status()
+    records = [r for r in response.json().get('records', []) if isinstance(r, dict)]
+    return nas_stack.indexer_errors(base, key, records, [int(k.split(':')[1]) for k in down])
+
+
 def _qbit_logs() -> list[str]:
     if not qbittorrent.is_configured():
         return []
@@ -146,6 +163,7 @@ def _gather(deadline: float, alert: event_bus.Alert | None = None) -> dict[str, 
         'radarr_log': lambda: _arr_logs('radarr'),
         'sonarr_log': lambda: _arr_logs('sonarr'),
         'prowlarr_log': _prowlarr_logs,
+        'indexer_errors': _indexer_errors,
         'qbit_log': _qbit_logs,
         'ha_log': _ha_logs,
     }
@@ -172,8 +190,12 @@ def _gather(deadline: float, alert: event_bus.Alert | None = None) -> dict[str, 
 # --- analysis ---------------------------------------------------------------
 
 def suspected_causes(health: dict | None, status: tuple[bool, Any] | None, watchdog_tail: list[str],
-                     now: float | None = None, alert_at: float | None = None) -> list[str]:
-    """Ranked, plain-English guesses from fixed rules. Never empty."""
+                     now: float | None = None, alert_at: float | None = None,
+                     indexer_errors: dict[str, str] | None = None) -> list[str]:
+    """Ranked, plain-English guesses from fixed rules. Never empty.
+
+    ``indexer_errors`` (``nas_stack.indexer_errors``) replaces the generic
+    indexer guess with the HTTP status and Cloudflare code Prowlarr logged."""
     now = time.time() if now is None else now
     issues = (health or {}).get('issues') or {}
     status_ok = bool(status and status[0] and isinstance(status[1], dict))
@@ -212,10 +234,16 @@ def suspected_causes(health: dict | None, status: tuple[bool, Any] | None, watch
                           'Usually the VPN provider or upstream internet; a new VPN server often fixes it.')
         else:
             causes.append('qBittorrent has no DHT peers or reports disconnected: the VPN tunnel is likely down.')
-    indexers = [v for k, v in issues.items() if k.startswith('indexer:')]
-    if indexers:
+    indexers = [k for k in issues if k.startswith('indexer:')]
+    quoted = [indexer_errors[k] for k in indexers if indexer_errors and k in indexer_errors]
+    if quoted:
+        causes.append(f'{len(indexers)} Prowlarr indexer(s) in failure backoff. Prowlarr logged: '
+                      + '; '.join(quoted[:3]) + '.')
+    elif indexers:
         causes.append(f'{len(indexers)} Prowlarr indexer(s) in failure backoff: '
-                      + '; '.join(indexers[:3]) + '. Often clears alone; re-saving the indexer in Prowlarr resets it.')
+                      + '; '.join(issues[k] for k in indexers[:3])
+                      + '. No HTTP error for it in Prowlarr\'s recent log; often clears alone, and re-saving '
+                        'the indexer in Prowlarr resets it.')
     if 'prowlarr-health' in issues and 'proxy' in issues['prowlarr-health'].lower():
         causes.append('Prowlarr reports its indexer proxy (Byparr) unavailable; it may still be cold-starting.')
     for service in ('radarr', 'sonarr'):
@@ -285,7 +313,8 @@ def build(alert: event_bus.Alert, *, session_id: str | None = None) -> dict[str,
         None if evidence['status'] is None else (False, str(evidence['status'])))
     tails = (status[1].get('log_tail') or {}) if status and status[0] and isinstance(status[1], dict) else {}
     watchdog_tail = [str(x) for x in tails.get('watchdog.log', [])] + [str(x) for x in tails.get('indexer_watchdog.log', [])]
-    causes = suspected_causes(health, status, watchdog_tail, now, alert.created_at)
+    indexer_errors = evidence.get('indexer_errors') if isinstance(evidence.get('indexer_errors'), dict) else {}
+    causes = suspected_causes(health, status, watchdog_tail, now, alert.created_at, indexer_errors)
     host = nas_host.from_status(status)
 
     if health is None:
@@ -307,6 +336,8 @@ def build(alert: event_bus.Alert, *, session_id: str | None = None) -> dict[str,
         {'title': 'Suspected cause (rule-based, verify before acting)', 'lines': causes},
         *([{'title': 'This download', 'lines': download}] if 'download' in evidence else []),
         {'title': 'Live health now', 'lines': health_lines},
+        *([{'title': "Indexer errors (quoted from Prowlarr's log)", 'lines': list(indexer_errors.values())}]
+          if indexer_errors else []),
         {'title': 'Media pipeline', 'lines': _lines(evidence['media'])},
         {'title': 'NAS host (containers, disks, RAID, volumes)',
          'lines': nas_host.describe(*host) if host else ['not available']},
@@ -328,6 +359,9 @@ def build(alert: event_bus.Alert, *, session_id: str | None = None) -> dict[str,
     if failing:
         prompt_lines.append('Failing now: ' + '; '.join(failing))
     prompt_lines.append(f'Suspected cause: {causes[0]}')
+    if indexer_errors:
+        prompt_lines.append("Indexer errors from Prowlarr's log (quote these, don't guess a different cause): "
+                            + '; '.join(indexer_errors.values()))
     prompt_lines.append('Read the full report (logs, recent changes), tell me what you think is wrong, and propose a fix.')
     return {
         'report_id': stored['id'],

@@ -45,7 +45,7 @@ Pearson-Stark-Jarvis/
 │   ├── automation_workshop.py Staged HA automation drafts, diffs, apply + rollback
 │   ├── clipboard_tool.py    Read/write clipboard via PowerShell Get/Set-Clipboard
 │   ├── debug_reports.py     Durable user-submitted companion failure reports
-│   ├── incident_reports.py  Tap-to-chat incident report: live health, NAS watchdog logs, app log warnings, recent changes, rule-based suspected cause
+│   ├── incident_reports.py  Tap-to-chat incident report: live health, NAS watchdog logs, app log warnings, quoted indexer HTTP/Cloudflare errors, recent changes, rule-based suspected cause
 │   ├── history.py           SQLite conversation history with session support
 │   ├── intents.py           Keyword intent router (fallback if brain offline)
 │   ├── memory.py            JSON long-term memory, correction history, inspection
@@ -69,7 +69,7 @@ Pearson-Stark-Jarvis/
 │   ├── arr_stack.py         Arr alert hysteresis/per-indexer tracking, restart confirmation gate, async recovery follow-up
 │   ├── confirm_gate.py      Generic session-bound "yes"/"approve <code>" gate for side-effecting fixes (media doctor)
 │   ├── arr_incidents.py     Arr push policy: watchdog-recovery hold + summary, minimum downtime, grouped incidents, daily indexer digest
-│   ├── stack_fixes.py       Tier-2 allowlist of NAS-stack fixes (HA restart, indexer re-test, Plex rescan, arr recovery), each with a post-fix check
+│   ├── stack_fixes.py       Tier-2 allowlist of NAS-stack fixes (HA restart, indexer re-test, indexer mirror switch, Plex rescan, arr recovery, download retry), each with a post-fix check
 │   ├── self_repair.py       Governed self-repair: diagnose a subsystem, stage a bounded fix, apply on approval
 │   ├── study_brief.py       Daily quiz/exam countdown: settings, planning, JARVIS-composed text
 │   ├── timers.py            Timer store: set/cancel/pause/resume/dismiss/alarming state
@@ -458,7 +458,10 @@ RMS envelope from ElevenLabs audio drives the orb in real time using a monotonic
   (`brain/stack_fixes.py`): `restart_home_assistant` (then waits until HA
   answers), `retest_indexers` (Prowlarr test-all, then checks none is backed
   off), `refresh_plex`, `arr_recovery` (the existing restricted recovery via
-  `arr_stack`, with its own follow-up). It never runs anything: in chat it
+  `arr_stack`, with its own follow-up), `retry_download` (pass `title`),
+  `switch_indexer_mirror` (pass `indexer`: tests Prowlarr's mirrors without
+  saving, saves the first that passes; `STACK_FIX_MIRROR_TEST_S`, default 90,
+  bounds each test). It never runs anything: in chat it
   opens the confirm gate ("yes" / code) and the app shows it on Home →
   Repairs with Approve / Dismiss. `apply_repair` from the model is refused
   for stack fixes. They run in the background and report the verified
@@ -706,6 +709,19 @@ CALENDAR_ALERT_LEAD_MIN=10  # warn this many minutes before a meeting
 
 ## Recently Shipped
 
+- **Indexer incidents quote the real error; JARVIS can switch mirrors (iOS
+  4.9 / build 131)** — Found 2026-10-28: 1337x.to returned `403 Forbidden,
+  error code: 1006` (Cloudflare banning the VPN exit IP) and JARVIS called it
+  a "429 rate limit". Incident reports now read Prowlarr's log, match each
+  backed-off indexer's newest HTTP error by host, and quote the status and
+  Cloudflare code with what it means (`nas_stack.explain_http_error`:
+  1006-1008 IP ban, 1009 country, 1010 browser signature, 1015 rate limit,
+  1020 firewall), in the suspected cause, an "Indexer errors" section and the
+  chat prompt. New stack fix `switch_indexer_mirror` (pass `indexer`): tests
+  each of Prowlarr's offered mirrors with `/api/v1/indexer/test` (saves
+  nothing), saves the first that passes, and checks the backoff cleared; if
+  none pass it says the ban is on the VPN exit. Confirm-gated like every
+  stack fix. 1337x was moved to `https://1337x.st/` by hand the same day.
 - **TV 7.5: Barn Door takes the screen** — while the protocol is engaged the
   TV home is just a giant reactor, "BARN DOOR PROTOCOL" and the time.
 - **Barn Door Protocol; McQueen redone (TV 7.4, iOS 3.5 / build 117)** —

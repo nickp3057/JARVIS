@@ -119,6 +119,78 @@ def indexer_outages(base: str, key: str, now: float | None = None) -> dict[str, 
     return issues
 
 
+# Cloudflare's own error codes, as Prowlarr logs them ("error code: 1006").
+# Found 2026-10-28: JARVIS called a 1006 IP ban a "429 rate limit", so the
+# report quotes the code and says what it means instead of guessing.
+_CLOUDFLARE = {
+    1006: 'Cloudflare has banned this IP (the VPN exit), not a rate limit; FlareSolverr cannot get past an IP ban. '
+          'Fix: switch_indexer_mirror, or a new VPN server',
+    1007: 'Cloudflare has banned this IP (the VPN exit); fix: switch_indexer_mirror, or a new VPN server',
+    1008: 'Cloudflare has banned this IP (the VPN exit); fix: switch_indexer_mirror, or a new VPN server',
+    1009: "the site bans the VPN exit's country; fix: a VPN server in another country",
+    1010: "Cloudflare banned the client's browser signature; the indexer needs the FlareSolverr tag",
+    1015: 'Cloudflare rate limit; it lifts by itself, search less often',
+    1020: "the site's Cloudflare firewall blocks this request; try switch_indexer_mirror or a new VPN server",
+}
+_HTTP_ERROR = re.compile(r'\[(?:GET|POST)\] (?P<url>\S+?): (?P<status>\d{3})\.(?P<reason>\w+)')
+_CF_CODE = re.compile(r'error code: (\d{3,4})')
+
+
+def explain_http_error(text: str) -> str | None:
+    """'HTTP 403 Forbidden, Cloudflare error 1006 (...)' from a Prowlarr log
+    line or test failure, or None when it holds no HTTP status."""
+    match = _HTTP_ERROR.search(text) or re.search(r'\b(?P<status>[45]\d\d)\b\W+(?P<reason>[A-Z][A-Za-z]+)', text)
+    code = _CF_CODE.search(text)
+    if not match and not code:
+        return None
+    parts = [f"HTTP {match['status']} {match['reason']}"] if match else []
+    if code:
+        number = int(code[1])
+        parts.append(f'Cloudflare error {number}' + (f' ({_CLOUDFLARE[number]})' if number in _CLOUDFLARE else ''))
+    elif match and match['status'] == '429':
+        parts.append('a real rate limit; it lifts by itself')
+    elif match and match['status'] == '403':
+        parts.append('blocked; without a Cloudflare code this is usually a challenge page FlareSolverr should solve')
+    elif match and match['status'].startswith('5'):
+        parts.append('the site itself is failing; try switch_indexer_mirror')
+    return ', '.join(parts)
+
+
+def _hosts(indexer: dict) -> set[str]:
+    urls = [f.get('value') for f in indexer.get('fields') or [] if isinstance(f, dict) and f.get('name') == 'baseUrl']
+    urls += list(indexer.get('indexerUrls') or []) + list(indexer.get('legacyUrls') or [])
+    return {urlsplit(str(u)).netloc.lower() for u in urls if u and urlsplit(str(u)).netloc}
+
+
+def indexer_errors(base: str, key: str, records: list[dict], indexer_ids: list[int]) -> dict[str, str]:
+    """The newest HTTP error Prowlarr logged for each of these indexers,
+    explained: ``{'indexer:6': '1337x: HTTP 403 Forbidden, Cloudflare error
+    1006 (...) from https://1337x.to/... at 2026-10-28 17:18 UTC'}``.
+
+    Log lines name the URL, not the indexer, so they are matched by host."""
+    if not indexer_ids:
+        return {}
+    response = requests.get(base + '/api/v1/indexer', headers={'X-Api-Key': key}, timeout=10, allow_redirects=False)
+    response.raise_for_status()
+    indexers = {x['id']: x for x in response.json() if isinstance(x, dict) and type(x.get('id')) is int}
+    found: dict[str, str] = {}
+    for indexer_id in indexer_ids:
+        indexer = indexers.get(indexer_id)
+        if indexer is None:
+            continue
+        hosts = _hosts(indexer)
+        for record in records:  # newest first
+            message = str(record.get('message') or '')
+            match = _HTTP_ERROR.search(message)
+            if not match or urlsplit(match['url']).netloc.lower() not in hosts:
+                continue
+            when = str(record.get('time', ''))[:16].replace('T', ' ')
+            found[f'indexer:{indexer_id}'] = (f"{indexer.get('name', indexer_id)}: {explain_http_error(message)} "
+                                              f"from {match['url']} at {when} UTC")
+            break
+    return found
+
+
 def poll_health() -> dict[str, Any]:
     """One bounded polling cycle. No model calls and no recovery actions."""
     issues: dict[str, str] = {}

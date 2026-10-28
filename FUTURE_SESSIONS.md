@@ -164,14 +164,20 @@ of each group.
   states), and an iOS widget / Control Center control for scenes.
 - **iOS 4.6 / build 128 (not installed):** tap the wake-up push → full-screen
   Snooze / I'm up. Install from Xcode when at the Mac.
-- **1337x is IP-banned, not rate-limited.** Prowlarr logs: `403 Forbidden,
-  error code: 1006` from `1337x.to` (Cloudflare "your IP is banned" for the
-  VPN exit IP); FlareSolverr can't solve that. JARVIS's own incident read
-  ("429 rate limit, category mismatch") was wrong: teach the arr incident
-  report to quote the real HTTP status/Cloudflare code from Prowlarr's log.
-  Fix options: point the indexer at a mirror (`1337x.st`, `x1337x.ws`,
-  `x1337x.eu`, `x1337x.cc`) or rotate the gluetun server. A `switch_indexer_mirror`
-  stack fix (confirm-gated) would let JARVIS do this itself.
+- **1337x fixed (2026-10-28, afternoon):** it was a Cloudflare 1006 IP ban
+  on the VPN exit, not a rate limit. Nick moved it to `https://1337x.st/`
+  (test passed, saved; Prowlarr backoff cleared). Radarr/Sonarr's
+  "unavailable for more than 6 hours" warning clears after their next RSS
+  sync. Shipped in iOS 4.9 / build 131: incident reports quote the real HTTP
+  status + Cloudflare code from Prowlarr's log, and a confirm-gated
+  `switch_indexer_mirror` stack fix. **Not live-tested yet:** after deploy,
+  open an indexer incident report and check the "Indexer errors" section.
+  If 1337x.st gets banned too, every mirror will likely fail: the fix is a
+  new gluetun server (Nick at the NAS; drops downloads briefly).
+- **Knaben and Torrent9 are disabled by hand**, not by Prowlarr (no
+  failures logged). Torrent9 has a mirror override to `torrent9.la` and is
+  French-language; Knaben is a meta-search that duplicates 1337x/TPB. Ask
+  Nick whether either should come back as a 1337x backup.
 - **NAS powers today:** read-only host health (cron JSON), arr recovery
   script, Prowlarr indexer retest, HA restart, Plex refresh, download retry.
   No arbitrary docker, no image updates, no config edits, by design

@@ -51,6 +51,13 @@ class SuspectedCauseTests(unittest.TestCase):
         causes = incident_reports.suspected_causes({'issues': issues}, None, [], now=1000)
         self.assertIn('Prowlarr indexer', causes[0])
 
+    def test_indexer_backoff_quotes_the_logged_cloudflare_code(self):
+        issues = {'indexer:6': 'Indexer 1337x is down (Prowlarr backed it off after failures; next retry 17:18)'}
+        quoted = {'indexer:6': '1337x: HTTP 403 Forbidden, Cloudflare error 1006 (Cloudflare has banned this IP ...)'}
+        causes = incident_reports.suspected_causes({'issues': issues}, None, [], now=1000, indexer_errors=quoted)
+        self.assertIn('Cloudflare error 1006', causes[0])
+        self.assertNotIn('Often clears alone', causes[0])
+
     def test_nothing_failing_says_so(self):
         causes = incident_reports.suspected_causes({'issues': {}, 'dht_nodes': 300}, None, [], now=1000)
         self.assertEqual(len(causes), 1)
@@ -105,6 +112,16 @@ class BuildTests(unittest.TestCase):
         self.assertEqual(stored['messages'], [])
         self.assertEqual(stored['app_context']['alert_id'], str(alert.id))
 
+    def test_build_quotes_indexer_errors_in_the_prompt(self):
+        alert = event_bus.publish('arr_stack', 'Jarvis — arr stack', 'Indexer 1337x is down', source='arr-stack')
+        evidence = self._evidence(time.time())
+        evidence['indexer_errors'] = {'indexer:6': '1337x: HTTP 403 Forbidden, Cloudflare error 1006 (IP ban)'}
+        with patch.object(incident_reports, '_gather', return_value=evidence):
+            result = incident_reports.build(alert)
+        self.assertIn("don't guess", result['prompt'])
+        self.assertIn('Cloudflare error 1006', result['prompt'])
+        self.assertIn("Indexer errors (quoted from Prowlarr's log)", [s['title'] for s in result['sections']])
+
     def test_host_health_replaces_the_gap_note(self):
         alert = event_bus.publish('arr_stack', 'Jarvis — arr stack', 'qBittorrent unreachable', source='arr-stack')
         now = time.time()
@@ -127,6 +144,7 @@ class BuildTests(unittest.TestCase):
              patch.object(incident_reports, '_media_sweep', return_value=['ok']), \
              patch.object(incident_reports, '_arr_logs', return_value=[]), \
              patch.object(incident_reports, '_prowlarr_logs', return_value=[]), \
+             patch.object(incident_reports, '_indexer_errors', return_value={}), \
              patch.object(incident_reports, '_qbit_logs', return_value=[]), \
              patch.object(incident_reports, '_ha_logs', return_value=[]):
             out = incident_reports._gather(time.monotonic() + 5)
