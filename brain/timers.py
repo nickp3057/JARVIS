@@ -14,13 +14,13 @@ voice. The UI reads list_active() and calls dismiss/pause/resume directly.
 
 from __future__ import annotations
 
-import json
 import threading
 import time
 import uuid
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
+from brain import json_store
 from jarvis_logger import get_logger
 
 log = get_logger(__name__)
@@ -39,6 +39,20 @@ class Timer:
     alarming: bool = False                  # expired, awaiting dismiss
     announced: bool = False                 # voice announcement already made
 
+    @classmethod
+    def from_dict(cls, raw: dict) -> "Timer":
+        """A timer saved by ``asdict``; KeyError/TypeError/ValueError if malformed."""
+        remaining = raw.get("paused_remaining")
+        return cls(
+            id=str(raw["id"]),
+            expires_at=float(raw["expires_at"]),
+            message=str(raw.get("message", "Timer up")),
+            paused=bool(raw.get("paused", False)),
+            paused_remaining=float(remaining) if remaining is not None else None,
+            alarming=bool(raw.get("alarming", False)),
+            announced=bool(raw.get("announced", False)),
+        )
+
     def remaining_seconds(self) -> float:
         if self.paused:
             return max(0.0, self.paused_remaining or 0.0)
@@ -55,48 +69,11 @@ class _TimerStore:
 
     def _persist_locked(self) -> None:
         """Write current timers to disk. Caller must hold the lock."""
-        try:
-            _TIMERS_FILE.parent.mkdir(parents=True, exist_ok=True)
-            tmp_path = _TIMERS_FILE.with_suffix(".json.tmp")
-            payload = {"timers": [asdict(t) for t in self._timers]}
-            with tmp_path.open("w", encoding="utf-8") as handle:
-                json.dump(payload, handle, indent=2)
-            tmp_path.replace(_TIMERS_FILE)
-        except OSError as exc:
-            log.error("Could not persist timers: %s", exc)
+        json_store.save(_TIMERS_FILE, "timers", [asdict(t) for t in self._timers])
 
     def _load_from_disk(self) -> None:
         """Rehydrate timers saved by a previous run, if any."""
-        if not _TIMERS_FILE.exists():
-            return
-        try:
-            with _TIMERS_FILE.open("r", encoding="utf-8") as handle:
-                data = json.load(handle)
-        except (OSError, json.JSONDecodeError) as exc:
-            log.warning("Could not read timers file (%s); starting with none.", exc)
-            return
-
-        restored: list[Timer] = []
-        for raw in data.get("timers", []):
-            try:
-                restored.append(
-                    Timer(
-                        id=str(raw["id"]),
-                        expires_at=float(raw["expires_at"]),
-                        message=str(raw.get("message", "Timer up")),
-                        paused=bool(raw.get("paused", False)),
-                        paused_remaining=(
-                            float(raw["paused_remaining"])
-                            if raw.get("paused_remaining") is not None
-                            else None
-                        ),
-                        alarming=bool(raw.get("alarming", False)),
-                        announced=bool(raw.get("announced", False)),
-                    )
-                )
-            except (KeyError, TypeError, ValueError) as exc:
-                log.warning("Skipping malformed persisted timer %r: %s", raw, exc)
-
+        restored = json_store.load(_TIMERS_FILE, "timers", Timer.from_dict)
         with self._lock:
             self._timers = restored
             # Flag any timer that lapsed while JARVIS was closed so it alarms.
@@ -127,62 +104,62 @@ class _TimerStore:
 
     # --- Cancelling / dismissing --------------------------------------------
 
+    def _remove(self, timer_id: str) -> bool:
+        with self._lock:
+            before = len(self._timers)
+            self._timers = [t for t in self._timers if t.id != timer_id]
+            removed = len(self._timers) != before
+            if removed:
+                self._persist_locked()
+        return removed
+
     def cancel(self, timer_id: str) -> str:
         timer_id = (timer_id or "").strip()
         if not timer_id:
             return "Refused: missing timer id."
-        with self._lock:
-            before = len(self._timers)
-            self._timers = [t for t in self._timers if t.id != timer_id]
-            removed = before - len(self._timers)
-            if removed:
-                self._persist_locked()
-        return f"Cancelled timer {timer_id}." if removed else f"No timer with id {timer_id}."
+        return f"Cancelled timer {timer_id}." if self._remove(timer_id) else f"No timer with id {timer_id}."
 
     def dismiss(self, timer_id: str) -> str:
         """Remove an alarming (expired) timer after the user acknowledges it."""
         timer_id = (timer_id or "").strip()
-        with self._lock:
-            before = len(self._timers)
-            self._timers = [t for t in self._timers if t.id != timer_id]
-            removed = before - len(self._timers)
-            if removed:
-                self._persist_locked()
-        return f"Timer {timer_id} dismissed." if removed else f"No timer with id {timer_id}."
+        return f"Timer {timer_id} dismissed." if self._remove(timer_id) else f"No timer with id {timer_id}."
 
     # --- Pause / resume -----------------------------------------------------
+
+    def _find_locked(self, timer_id: str) -> Timer | None:
+        return next((t for t in self._timers if t.id == timer_id), None)
 
     def pause(self, timer_id: str) -> str:
         timer_id = (timer_id or "").strip()
         with self._lock:
-            for t in self._timers:
-                if t.id == timer_id:
-                    if t.paused:
-                        return f"Timer {timer_id} is already paused."
-                    if t.alarming:
-                        return f"Timer {timer_id} has already expired - dismiss it instead."
-                    t.paused_remaining = max(0.0, t.expires_at - time.time())
-                    t.paused = True
-                    self._persist_locked()
-                    log.info("Timer %s paused (%.0fs remaining)", timer_id, t.paused_remaining)
-                    return f"Paused timer {timer_id} with {_format_duration(t.paused_remaining)} remaining."
-        return f"No active timer with id {timer_id}."
+            t = self._find_locked(timer_id)
+            if t is None:
+                return f"No active timer with id {timer_id}."
+            if t.paused:
+                return f"Timer {timer_id} is already paused."
+            if t.alarming:
+                return f"Timer {timer_id} has already expired - dismiss it instead."
+            t.paused_remaining = max(0.0, t.expires_at - time.time())
+            t.paused = True
+            self._persist_locked()
+        log.info("Timer %s paused (%.0fs remaining)", timer_id, t.paused_remaining)
+        return f"Paused timer {timer_id} with {_format_duration(t.paused_remaining)} remaining."
 
     def resume(self, timer_id: str) -> str:
         timer_id = (timer_id or "").strip()
         with self._lock:
-            for t in self._timers:
-                if t.id == timer_id:
-                    if not t.paused:
-                        return f"Timer {timer_id} is not paused."
-                    remaining = t.paused_remaining or 0.0
-                    t.expires_at = time.time() + remaining
-                    t.paused = False
-                    t.paused_remaining = None
-                    self._persist_locked()
-                    log.info("Timer %s resumed (%.0fs remaining)", timer_id, remaining)
-                    return f"Resumed timer {timer_id}. {_format_duration(remaining)} remaining."
-        return f"No active timer with id {timer_id}."
+            t = self._find_locked(timer_id)
+            if t is None:
+                return f"No active timer with id {timer_id}."
+            if not t.paused:
+                return f"Timer {timer_id} is not paused."
+            remaining = t.paused_remaining or 0.0
+            t.expires_at = time.time() + remaining
+            t.paused = False
+            t.paused_remaining = None
+            self._persist_locked()
+        log.info("Timer %s resumed (%.0fs remaining)", timer_id, remaining)
+        return f"Resumed timer {timer_id}. {_format_duration(remaining)} remaining."
 
     # --- Reading ------------------------------------------------------------
 

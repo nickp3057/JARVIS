@@ -17,6 +17,7 @@ re-reads HUMOR_PERCENT and ADDRESS on every request, so those tune live.
 
 from __future__ import annotations
 
+import math
 import os
 import re
 import shutil
@@ -244,16 +245,10 @@ def _coerce_value(key: str, raw: Any) -> tuple[bool, Any, str]:
         raw = raw.strip()
 
     try:
-        if kind == "int":
-            value = int(float(raw))
-            if "min" in spec and value < spec["min"]:
-                return False, None, f"{key} must be >= {spec['min']}"
-            if "max" in spec and value > spec["max"]:
-                return False, None, f"{key} must be <= {spec['max']}"
-            return True, value, ""
-
-        if kind == "float":
-            value = float(raw)
+        if kind in ("int", "float"):
+            value = int(float(raw)) if kind == "int" else float(raw)
+            if not math.isfinite(value):  # nan slips past every range check
+                return False, None, f"{key} must be a real number"
             if "min" in spec and value < spec["min"]:
                 return False, None, f"{key} must be >= {spec['min']}"
             if "max" in spec and value > spec["max"]:
@@ -261,7 +256,11 @@ def _coerce_value(key: str, raw: Any) -> tuple[bool, Any, str]:
             return True, value, ""
 
         if kind == "string":
-            return True, str(raw), ""
+            value = str(raw)
+            # A line break would write a second KEY=value line into .env.
+            if any(ch in value for ch in "\r\n\x00"):
+                return False, None, f"{key} must be a single line"
+            return True, value, ""
 
         if kind == "choice":
             value = str(raw)

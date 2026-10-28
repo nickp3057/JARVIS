@@ -79,28 +79,28 @@ def _describe_code(code: int) -> str:
 
 # --- Geocoding (lenient) ----------------------------------------------------
 
-def _geocode_query(query: str, count: int = 5) -> list[dict[str, Any]]:
-    """Single API call to Open-Meteo geocoding. Returns the raw results list."""
+def _get_json(url: str, params: dict[str, Any], what: str) -> dict[str, Any] | None:
+    """One Open-Meteo call; None (logged) on a network error, non-200 or bad JSON."""
     try:
-        response = requests.get(
-            _GEOCODE_URL,
-            params={"name": query, "count": count, "language": "en", "format": "json"},
-            timeout=_TIMEOUT_SECONDS,
-        )
+        response = requests.get(url, params=params, timeout=_TIMEOUT_SECONDS)
     except requests.RequestException as exc:
-        log.warning("Geocoding request failed for %r: %s", query, exc)
-        return []
-
+        log.warning("%s request failed: %s", what, exc)
+        return None
     if response.status_code != 200:
-        log.warning("Geocoding returned %s: %s", response.status_code, response.text[:200])
-        return []
-
+        log.warning("%s returned %s: %s", what, response.status_code, response.text[:200])
+        return None
     try:
         data = response.json()
     except ValueError:
-        return []
+        return None
+    return data if isinstance(data, dict) else None
 
-    return data.get("results") or []
+
+def _geocode_query(query: str, count: int = 5) -> list[dict[str, Any]]:
+    """Single API call to Open-Meteo geocoding. Returns the raw results list."""
+    data = _get_json(_GEOCODE_URL, {"name": query, "count": count, "language": "en", "format": "json"},
+                     f"Geocoding {query!r}")
+    return (data or {}).get("results") or []
 
 
 def _admin_match_score(result: dict[str, Any], hint: str) -> int:
@@ -140,12 +140,27 @@ def _format_result(result: dict[str, Any]) -> tuple[float, float, str] | None:
     return float(lat), float(lon), display
 
 
+# Places don't move: remember each resolved location for the process's life
+# (the weather monitor refreshes often). Misses aren't kept, so a typo or an
+# outage can resolve later.
+_geocoded: dict[str, tuple[float, float, str]] = {}
+
+
 def _geocode(location: str) -> tuple[float, float, str] | None:
     """Resolve a free-form location string to (lat, lon, display_name)."""
     location = (location or "").strip()
     if not location:
         return None
+    key = location.lower()
+    if key not in _geocoded:
+        found = _geocode_uncached(location)
+        if found is None:
+            return None
+        _geocoded[key] = found
+    return _geocoded[key]
 
+
+def _geocode_uncached(location: str) -> tuple[float, float, str] | None:
     # Build candidate queries in priority order.
     candidates: list[tuple[str, str]] = []  # (query, region_hint)
     candidates.append((location, ""))
@@ -199,21 +214,10 @@ def _fetch_forecast(lat: float, lon: float) -> dict[str, Any] | None:
         "timezone": "auto",
         "forecast_days": 1,
     }
-    try:
-        response = requests.get(_FORECAST_URL, params=params, timeout=_TIMEOUT_SECONDS)
-    except requests.RequestException as exc:
-        log.warning("Forecast request failed: %s", exc)
-        return None
+    return _get_json(_FORECAST_URL, params, "Forecast")
 
-    if response.status_code != 200:
-        log.warning("Forecast returned %s: %s", response.status_code, response.text[:200])
-        return None
 
-    try:
-        return response.json()
-    except ValueError:
-        return None
-
+# --- Public -----------------------------------------------------------------
 
 def get_weather(location: str | None = None) -> str:
     """Return a short spoken weather summary for ``location`` (or the default)."""
@@ -223,45 +227,16 @@ def get_weather(location: str | None = None) -> str:
             "I don't have a default location set. "
             "Set DEFAULT_LOCATION in the env file or tell me where to check."
         )
-
-    geocoded = _geocode(target)
-    if geocoded is None:
-        return f"I couldn't find a place called {target}."
-
-    lat, lon, display_name = geocoded
-
-    forecast = _fetch_forecast(lat, lon)
-    if forecast is None:
-        return f"I couldn't reach the weather service for {display_name}."
-
-    current = forecast.get("current") or {}
-    daily = forecast.get("daily") or {}
-
-    temp = current.get("temperature_2m")
-    code = current.get("weather_code")
-    wind = current.get("wind_speed_10m")
-    humidity = current.get("relative_humidity_2m")
-
-    daily_max = (daily.get("temperature_2m_max") or [None])[0]
-    daily_min = (daily.get("temperature_2m_min") or [None])[0]
-
-    if temp is None or code is None:
-        return f"The weather data for {display_name} came back empty."
-
-    description = _describe_code(int(code))
-
-    parts = [
-        f"In {display_name} it's currently {round(float(temp))} degrees and {description}."
-    ]
-    if daily_max is not None and daily_min is not None:
-        parts.append(
-            f"Today's high is {round(float(daily_max))}, low {round(float(daily_min))}."
-        )
-    if humidity is not None:
-        parts.append(f"Humidity {round(float(humidity))} percent.")
-    if wind is not None:
-        parts.append(f"Winds around {round(float(wind))} miles per hour.")
-
+    snap = get_weather_snapshot(target)
+    if not snap.online:
+        return snap.error
+    parts = [f"In {snap.location} it's currently {snap.temperature_f} degrees and {snap.description}."]
+    if snap.high_f is not None and snap.low_f is not None:
+        parts.append(f"Today's high is {snap.high_f}, low {snap.low_f}.")
+    if snap.humidity_percent is not None:
+        parts.append(f"Humidity {snap.humidity_percent} percent.")
+    if snap.wind_mph is not None:
+        parts.append(f"Winds around {snap.wind_mph} miles per hour.")
     return " ".join(parts)
 
 

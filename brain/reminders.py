@@ -15,7 +15,6 @@ flows through the existing voice announcement unchanged.
 
 from __future__ import annotations
 
-import json
 import threading
 import time
 import uuid
@@ -23,6 +22,7 @@ from dataclasses import asdict, dataclass
 from datetime import datetime
 from pathlib import Path
 
+from brain import json_store
 from jarvis_logger import get_logger
 
 log = get_logger(__name__)
@@ -49,10 +49,27 @@ class Reminder:
             return False
         return self.due_at <= (now if now is not None else time.time())
 
+    @classmethod
+    def from_dict(cls, raw: dict) -> "Reminder":
+        """A reminder saved by ``asdict``; KeyError/TypeError/ValueError if malformed."""
+        return cls(
+            id=str(raw["id"]),
+            text=str(raw.get("text", "")),
+            due_at=float(raw["due_at"]) if raw.get("due_at") is not None else None,
+            created_at=float(raw.get("created_at", 0.0)),
+            done=bool(raw.get("done", False)),
+            announced=bool(raw.get("announced", False)),
+        )
+
     def remaining_seconds(self) -> float | None:
         if self.due_at is None:
             return None
         return max(0.0, self.due_at - time.time())
+
+
+def _order(r: Reminder) -> tuple[bool, float]:
+    """Timed reminders soonest first, then open to-dos."""
+    return (r.due_at is None, r.due_at or 0.0)
 
 
 class _ReminderStore:
@@ -64,42 +81,12 @@ class _ReminderStore:
     # --- Persistence --------------------------------------------------------
 
     def _persist_locked(self) -> None:
-        try:
-            _REMINDERS_FILE.parent.mkdir(parents=True, exist_ok=True)
-            tmp = _REMINDERS_FILE.with_suffix(".json.tmp")
-            payload = {"reminders": [asdict(r) for r in self._items]}
-            with tmp.open("w", encoding="utf-8") as fh:
-                json.dump(payload, fh, indent=2)
-            tmp.replace(_REMINDERS_FILE)
-        except OSError as exc:
-            log.error("Could not persist reminders: %s", exc)
+        json_store.save(_REMINDERS_FILE, "reminders", [asdict(r) for r in self._items])
 
     def _load_from_disk(self) -> None:
-        if not _REMINDERS_FILE.exists():
-            return
-        try:
-            with _REMINDERS_FILE.open("r", encoding="utf-8") as fh:
-                data = json.load(fh)
-        except (OSError, json.JSONDecodeError) as exc:
-            log.warning("Could not read reminders file (%s); starting empty.", exc)
-            return
-        restored: list[Reminder] = []
-        for raw in data.get("reminders", []):
-            try:
-                restored.append(
-                    Reminder(
-                        id=str(raw["id"]),
-                        text=str(raw.get("text", "")),
-                        due_at=(float(raw["due_at"]) if raw.get("due_at") is not None else None),
-                        created_at=float(raw.get("created_at", 0.0)),
-                        done=bool(raw.get("done", False)),
-                        announced=bool(raw.get("announced", False)),
-                    )
-                )
-            except (KeyError, TypeError, ValueError) as exc:
-                log.warning("Skipping malformed reminder %r: %s", raw, exc)
+        restored = json_store.load(_REMINDERS_FILE, "reminders", Reminder.from_dict)
         with self._lock:
-            self._items = restored
+            self._items = sorted(restored, key=_order)
         if restored:
             log.info("Restored %d reminder(s) from disk.", len(restored))
 
@@ -115,7 +102,7 @@ class _ReminderStore:
         )
         with self._lock:
             self._items.append(reminder)
-            self._items.sort(key=lambda r: (r.due_at is None, r.due_at or 0.0))
+            self._items.sort(key=_order)
             self._persist_locked()
         log.info("Reminder added: id=%s due=%s (%s)", reminder.id, due_at, text)
         return reminder
@@ -130,15 +117,15 @@ class _ReminderStore:
                     return f"Marked done: {r.text}"
         return f"No reminder with id {reminder_id}."
 
-    def delete(self, reminder_id: str) -> str:
+    def delete(self, reminder_id: str) -> bool:
         reminder_id = (reminder_id or "").strip()
         with self._lock:
             before = len(self._items)
             self._items = [r for r in self._items if r.id != reminder_id]
-            removed = before - len(self._items)
+            removed = len(self._items) != before
             if removed:
                 self._persist_locked()
-        return f"Deleted reminder {reminder_id}." if removed else f"No reminder with id {reminder_id}."
+        return removed
 
     # --- Reading ------------------------------------------------------------
 
@@ -172,11 +159,12 @@ def complete_reminder(reminder_id: str) -> str:
     return _store.complete(reminder_id)
 
 def delete_reminder(reminder_id: str) -> str:
-    return _store.delete(reminder_id)
+    reminder_id = (reminder_id or "").strip()
+    return f"Deleted reminder {reminder_id}." if _store.delete(reminder_id) else f"No reminder with id {reminder_id}."
 
 def remove_reminder(reminder_id: str) -> bool:
     """Delete outright (the companion's to-do check: done means gone)."""
-    return _store.delete(reminder_id).startswith("Deleted")
+    return _store.delete(reminder_id)
 
 
 def active_reminders(include_done: bool = False) -> list[Reminder]:
