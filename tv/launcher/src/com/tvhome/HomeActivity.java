@@ -16,6 +16,7 @@ import android.text.TextUtils;
 import android.text.format.DateFormat;
 import android.text.style.ForegroundColorSpan;
 import android.view.Gravity;
+import android.view.KeyEvent;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.FrameLayout;
@@ -83,6 +84,10 @@ public class HomeActivity extends Activity {
     private FrameLayout stage;
     private LinearLayout screen;
     private View firstTile, overlay, focusBeforeOverlay;
+    /** Invisible focus target for "nothing highlighted" (Back on the home screen). */
+    private View rest;
+    private View focusBeforeRest;
+    private boolean resting;
     private TextView greeting, weather;
     private LinearLayout nextUp, legend, school, systems;
     private TextView systemsState, wakeTime, wakeDays;
@@ -110,6 +115,7 @@ public class HomeActivity extends Activity {
         render();
         handler.post(poll);
         handler.post(musicTick);
+        resting = false;
         if (overlay == null && firstTile != null) firstTile.requestFocus();
     }
 
@@ -130,13 +136,44 @@ public class HomeActivity extends Activity {
     protected void onNewIntent(Intent intent) {
         super.onNewIntent(intent);
         closeOverlay();
+        resting = false;
         if (firstTile != null) firstTile.requestFocus();
     }
 
-    // Back closes a detail; otherwise the home screen is the bottom of the stack.
+    // Back closes a detail; otherwise it hides the highlight, so nothing is lit.
     @Override
     public void onBackPressed() {
-        closeOverlay();
+        if (overlay != null) {
+            closeOverlay();
+        } else if (!resting) {
+            focusBeforeRest = getCurrentFocus();
+            resting = true;
+            rest.requestFocus();
+        }
+    }
+
+    /** While resting, the first arrow/OK only brings the highlight back. */
+    @Override
+    public boolean dispatchKeyEvent(KeyEvent event) {
+        if (resting && overlay == null) {
+            switch (event.getKeyCode()) {
+                case KeyEvent.KEYCODE_DPAD_UP:
+                case KeyEvent.KEYCODE_DPAD_DOWN:
+                case KeyEvent.KEYCODE_DPAD_LEFT:
+                case KeyEvent.KEYCODE_DPAD_RIGHT:
+                case KeyEvent.KEYCODE_DPAD_CENTER:
+                case KeyEvent.KEYCODE_ENTER:
+                    if (event.getAction() == KeyEvent.ACTION_UP) {
+                        resting = false;
+                        View back = focusBeforeRest != null ? focusBeforeRest : firstTile;
+                        if (back != null) back.requestFocus();
+                    }
+                    return true;
+                default:
+                    break;
+            }
+        }
+        return super.dispatchKeyEvent(event);
     }
 
     private void pollTick() {
@@ -166,6 +203,9 @@ public class HomeActivity extends Activity {
         screen.setClipChildren(false);
         screen.setClipToPadding(false);
         stage.addView(screen);
+        rest = new View(this);
+        rest.setFocusable(true);
+        stage.addView(rest, new FrameLayout.LayoutParams(1, 1));
 
         screen.addView(header());
 
