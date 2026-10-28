@@ -11,8 +11,7 @@ _JSON_TYPES = {"string", "integer", "number", "boolean", "array", "object"}
 
 class ToolCatalogueTests(unittest.TestCase):
     def setUp(self) -> None:
-        self.specs = [s for s in tools.get_tool_specs() if s.get("type") != "web_search_20250305"
-                      and s["name"] != "web_search"]
+        self.specs = [s for s in tools.get_tool_specs() if s["name"] not in ("web_search", "web_fetch")]
 
     def test_every_advertised_tool_runs_and_every_handler_is_advertised(self) -> None:
         names = [s["name"] for s in self.specs]

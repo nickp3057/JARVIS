@@ -30,3 +30,7 @@ uvicorn>=0.30.0
 # APNs push to the companion (HTTP/2 for httpx; the JWT is signed with the
 # already-present cryptography package)
 h2>=4.1,<5
+# Optional: JARVIS's full browser (clicks, forms, JavaScript pages; brain/browser.py).
+# Without it the browser still reads pages. After installing, run once:
+#   .venv/bin/python -m playwright install --with-deps chromium
+playwright>=1.48

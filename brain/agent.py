@@ -51,7 +51,7 @@ from brain.personality import (
     build_persona_prompt,
     build_standing_orders_section,
 )
-from brain.tools import execute_tool, get_tool_specs
+from brain.tools import execute_tool, get_tool_specs, reject_server_tool
 from brain import tool_health
 from jarvis_logger import get_logger
 
@@ -115,6 +115,12 @@ def tool_status_label(tool_uses: list[Any]) -> str:
 _REFUSAL_REPLY = "I'm afraid that one's off the table for me, sir."
 _MAX_TOOL_TURNS = 6
 _HISTORY_KEEP_TURNS = 20
+
+
+def _rejected_server_tool(exc: Exception) -> str | None:
+    """The web tool a 400 complains about, if any (account or model without it)."""
+    text = str(exc).lower()
+    return next((name for name in ("web_fetch", "web_search") if name in text), None)
 
 
 def _serialize_content_block(block: Any) -> dict[str, Any]:
@@ -414,7 +420,6 @@ class JarvisAgent:
     def _run_tool_loop(self) -> str:
         """Call Claude, execute any tools it wants, repeat until done."""
         system, messages, anchor = self._prepare_turn()
-        tools = get_tool_specs()
         used_tools_this_turn = False
         tool_context: list[dict[str, Any]] = []
         self._last_turn_tools = []
@@ -422,6 +427,7 @@ class JarvisAgent:
         for round_no in range(1, _MAX_TOOL_TURNS + 1):
             started = time.monotonic()
             model = _model()
+            tools = get_tool_specs(model)
             request = dict(
                 model=model,
                 max_tokens=_MAX_TOKENS,
@@ -434,10 +440,18 @@ class JarvisAgent:
                     **request, **model_select.request_kwargs(model),
                 )
             except anthropic.BadRequestError as exc:
-                if not (model_select.request_kwargs(model) and model_select.is_settings_rejection(exc)):
+                rejected = _rejected_server_tool(exc)
+                if rejected:
+                    reject_server_tool(rejected)
+                    request["tools"] = get_tool_specs(model)
+                    response = self._client.messages.create(  # type: ignore[union-attr]
+                        **request, **model_select.request_kwargs(model),
+                    )
+                elif not (model_select.request_kwargs(model) and model_select.is_settings_rejection(exc)):
                     raise
-                model_select.mark_plain(model)
-                response = self._client.messages.create(**request)  # type: ignore[union-attr]
+                else:
+                    model_select.mark_plain(model)
+                    response = self._client.messages.create(**request)  # type: ignore[union-attr]
             _log_round(started, None, getattr(response, "usage", None), round_no)
 
             tool_uses = [b for b in response.content if getattr(b, "type", None) == "tool_use"]
@@ -446,6 +460,13 @@ class JarvisAgent:
             if response.stop_reason == "refusal":
                 self.last_used_tools = used_tools_this_turn
                 return _REFUSAL_REPLY
+
+            if response.stop_reason == "pause_turn":
+                # A long server-side search/fetch paused; sending its content
+                # back (no new user message) lets the server carry on.
+                messages.append({"role": "assistant",
+                                 "content": [_serialize_content_block(b) for b in response.content]})
+                continue
 
             if response.stop_reason == "tool_use" and tool_uses:
                 used_tools_this_turn = True
@@ -474,7 +495,6 @@ class JarvisAgent:
         text so the caller can persist it to history.
         """
         system, messages, anchor = self._prepare_turn()
-        tools = get_tool_specs()
         used_tools_this_turn = False
         text_parts: list[str] = []
         tool_context: list[dict[str, Any]] = []
@@ -489,7 +509,7 @@ class JarvisAgent:
                 model=model,
                 max_tokens=_MAX_TOKENS,
                 system=system,
-                tools=tools,
+                tools=get_tool_specs(model),
                 messages=_with_cache_breakpoints(messages, anchor),
             )
             with contextlib.ExitStack() as stack:
@@ -498,10 +518,18 @@ class JarvisAgent:
                         **request, **model_select.request_kwargs(model),
                     ))
                 except anthropic.BadRequestError as exc:
-                    if not (model_select.request_kwargs(model) and model_select.is_settings_rejection(exc)):
+                    rejected = _rejected_server_tool(exc)
+                    if rejected:
+                        reject_server_tool(rejected)
+                        request["tools"] = get_tool_specs(model)
+                        stream = stack.enter_context(self._client.messages.stream(  # type: ignore[union-attr]
+                            **request, **model_select.request_kwargs(model),
+                        ))
+                    elif not (model_select.request_kwargs(model) and model_select.is_settings_rejection(exc)):
                         raise
-                    model_select.mark_plain(model)
-                    stream = stack.enter_context(self._client.messages.stream(**request))  # type: ignore[union-attr]
+                    else:
+                        model_select.mark_plain(model)
+                        stream = stack.enter_context(self._client.messages.stream(**request))  # type: ignore[union-attr]
                 for delta in stream.text_stream:
                     if delta:
                         first_token_at = first_token_at or time.monotonic()
@@ -532,6 +560,10 @@ class JarvisAgent:
                 self.last_used_tools = used_tools_this_turn
                 yield _REFUSAL_REPLY
                 return _REFUSAL_REPLY
+            if final.stop_reason == "pause_turn":
+                messages.append({"role": "assistant",
+                                 "content": [_serialize_content_block(b) for b in final.content]})
+                continue
             if final.stop_reason == "tool_use" and tool_uses:
                 used_tools_this_turn = True
                 messages.append(

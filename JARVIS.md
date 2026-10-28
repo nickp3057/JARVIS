@@ -422,6 +422,18 @@ RMS envelope from ElevenLabs audio drives the orb in real time using a monotonic
   ELEVENLABS_SPEED, the STUDY_BRIEF_* rules, etc.)
 - `get_setting(key)` / `list_settings`
 - `web_search` — Anthropic server tool (togglable via WEB_SEARCH_ENABLED)
+- `web_fetch` — Anthropic server tool: reads a page whose URL is already in the
+  conversation (WEB_FETCH_ENABLED). Both use the `_20260209` dynamic-filtering
+  versions on Opus/Sonnet 4.6+ and Fable, the basic ones on Haiku
+  (`tools._dynamic_web_tools`). A 400 naming one drops it for the process
+  (`reject_server_tool`) instead of failing every turn; `pause_turn` resumes.
+- `browser_open` / `browser_read` / `browser_act` — JARVIS's own browser
+  (`brain/browser.py`): numbered links, buttons and fields; click, type,
+  type_and_enter, select, scroll, back. Headless Chromium via Playwright when
+  installed, else plain HTTP (read + follow links). Public pages only
+  (re-checked after every navigation), never types into password/card/account
+  fields, and submitting a form that posts data needs `confirmed` (Nick's yes);
+  search boxes don't. Page text is marked untrusted. Closes after BROWSER_IDLE_S.
 
 ### Standing orders *(new)*
 - `add_standing_order(text)` — persist a behavioural directive from Nick
@@ -610,6 +622,13 @@ HABITS_MIN_TURNS=10         # turns logged before the habits digest is injected
 VISION_MODEL=claude-sonnet-4-6
 VISION_ALL_MONITORS=true    # capture the whole virtual desktop
 WEB_SEARCH_MAX_USES=5       # max web_search calls per turn
+WEB_FETCH_ENABLED=true      # Anthropic web_fetch server tool
+WEB_FETCH_MAX_USES=3        # pages read per turn
+WEB_FETCH_MAX_TOKENS=12000  # cap on one fetched page's tokens
+BROWSER_ENGINE=auto         # auto = Playwright Chromium if installed, else http
+BROWSER_IDLE_S=300          # close the browser after this long unused
+BROWSER_TIMEOUT_S=20        # per page load
+BROWSER_TEXT_CHARS=5000     # page text shown to Claude per step
 BOOT_SEQUENCE=true          # movie-style power-up on GUI launch
 
 # Optional local conversational fallback (OpenAI-compatible API)

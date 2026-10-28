@@ -302,7 +302,7 @@ or a much newer CPU), bigger Whisper models, or running cameras/vision
   per-order and daily caps Nick sets; stocks/ETFs only, no options or
   margin; "buy tons" becomes a number before anything is placed. Same app
   (it already has Accounts and Trading).
-- [ ] **Headless browser for JARVIS** (asked 2026-10-27): Playwright on the
+- [x] **Headless browser for JARVIS** (built 2026-10-28 as `brain/browser.py` + `browser_*` tools; needs `pip install playwright` + `python -m playwright install --with-deps chromium` on the Optiplex for clicks/forms) (asked 2026-10-27): Playwright on the
   Optiplex for searching, reading and filling forms. Not for logging into
   banks or brokerages (Nick agreed: no Schwab password on Core).
 - [ ] **Letterboxd** (asked 2026-10-27): pull Nick's diary/ratings (RSS feed
@@ -311,7 +311,7 @@ or a much newer CPU), bigger Whisper models, or running cameras/vision
 - [ ] **Nick's top 5s** (asked 2026-10-27): his top fives in general (films,
   albums, etc.) as standing knowledge. Probably durable profile facts or a
   small dedicated store JARVIS can read and Nick can edit.
-- [ ] **Browser abilities** (asked 2026-10-27): general web search/lookup
+- [x] **Browser abilities** (2026-10-28: web_search + web_fetch server tools, dynamic filtering on Sonnet/Opus; price watching already existed) (asked 2026-10-27): general web search/lookup
   ("google this") and price watching (track a product URL, alert through
   `runtime.raise_alert` when it drops below a target). Price watching is a
   monitor, not a UI poll.
