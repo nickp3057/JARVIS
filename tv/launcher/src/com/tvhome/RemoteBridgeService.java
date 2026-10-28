@@ -160,6 +160,12 @@ public class RemoteBridgeService extends Service {
     }
 
     private void handleSpeech(String speech) {
+        String forJarvis = Voice.request(speech);
+        if (forJarvis != null) {
+            Log.i(TAG, "for JARVIS: \"" + forJarvis + "\"");
+            Voice.ask(this, forJarvis);
+            return;
+        }
         String query = normalize(speech);
         Log.i(TAG, "heard \"" + speech + "\" -> query \"" + query + "\"");
         if (query.isEmpty()) return;

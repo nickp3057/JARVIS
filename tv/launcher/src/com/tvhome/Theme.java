@@ -56,6 +56,7 @@ final class Theme {
     int severity(String severity) {
         if ("critical".equals(severity)) return critical;
         if ("info".equals(severity)) return success;
+        if ("reply".equals(severity)) return accent; // JARVIS answering the remote's mic
         return warning;
     }
 

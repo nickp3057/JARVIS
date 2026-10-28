@@ -92,7 +92,7 @@ class ClientTokenTests(unittest.TestCase):
 
     def test_unknown_scope_rejected(self) -> None:
         with self.assertRaises(ValueError):
-            client_tokens.create("tv", ["chat"])
+            client_tokens.create("tv", ["admin"])
 
     def test_tv_token_is_limited_to_its_scopes(self) -> None:
         tv = {"Authorization": "Bearer " + client_tokens.create("tv", ["status:read"])}
@@ -100,7 +100,7 @@ class ClientTokenTests(unittest.TestCase):
             self.assertEqual(self.client.get("/api/now", headers=tv).status_code, 200)
         self.assertEqual(self.client.get("/api/clients/events", headers=tv).status_code, 403)
         self.assertEqual(self.client.get("/sessions", headers=tv).status_code, 401)
-        self.assertEqual(self.client.post("/chat", headers=tv, json={"message": "hi"}).status_code, 401)
+        self.assertEqual(self.client.post("/chat", headers=tv, json={"message": "hi"}).status_code, 403)
 
     def test_recent_alerts_newest_first_and_scoped(self) -> None:
         for title in ("old", "new"):
@@ -130,6 +130,32 @@ class ClientTokenTests(unittest.TestCase):
         self.assertEqual([a["title"] for a in body["alerts"]], ["Disk filling"])
         events_only = {"Authorization": "Bearer " + client_tokens.create("tv2", ["events:read"])}
         self.assertEqual(self.client.get("/api/glance", headers=events_only).status_code, 403)
+
+    def test_chat_scope_lets_a_client_talk(self) -> None:
+        tv = {"Authorization": "Bearer " + client_tokens.create("tv", ["chat"])}
+        server._runtime.start_session.return_value = "s1"
+        server._runtime.respond_in_session.return_value = "At once, sir."
+        with patch.object(server, "session_exists", return_value=True):
+            reply = self.client.post("/chat", headers=tv, json={"message": "lights off"})
+        self.assertEqual(reply.json(), {"reply": "At once, sir.", "session_id": "s1"})
+        self.assertEqual(self.client.get("/sessions", headers=tv).status_code, 401)
+
+    def test_glance_events_are_categorised_and_work_hidden(self) -> None:
+        from datetime import datetime, timedelta, timezone
+        soon = datetime.now(timezone.utc) + timedelta(hours=3)
+        events = [
+            {"summary": "Fryer filter", "start": soon, "all_day": True, "calendar": "Oil/Boil Outs"},
+            {"summary": "Quiz 4", "start": soon, "all_day": False, "calendar": "School"},
+            {"summary": "Dinner", "start": soon, "all_day": False, "calendar": "Pearson Family Calendar"},
+            {"summary": "Gym", "start": soon, "all_day": False, "calendar": "nick@example.com"},
+            {"summary": "Far off", "start": soon + timedelta(days=30), "all_day": True, "calendar": "School"},
+        ]
+        with patch.dict(os.environ, {"CALENDAR_CATEGORIES": "Oil/Boil Outs=work"}), \
+             patch.object(server.status_hub, "calendar_configured", return_value=True), \
+             patch.object(server.status_hub, "_calendar_events", return_value=events):
+            body = server.status_hub._glance_events()
+        self.assertEqual([(e["title"], e["category"]) for e in body],
+                         [("Quiz 4", "school"), ("Dinner", "family"), ("Gym", "personal")])
 
     def test_event_stream_replays_then_streams_live(self) -> None:
         # Drive the endpoint's generator directly with timeouts: TestClient

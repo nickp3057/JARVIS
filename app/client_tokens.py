@@ -5,6 +5,8 @@ full access. Every other client gets its own token here, limited to scopes:
 
 - ``events:read``  live alert stream (``GET /api/clients/events``)
 - ``status:read``  read-only dashboard/status endpoints
+- ``chat``         talk to JARVIS (``POST /chat``), e.g. the TV remote's mic.
+                   JARVIS's own confirmation rules still apply to risky tools.
 
 Only a SHA-256 of each token is stored (``memory/client_tokens.json``,
 gitignored); the token itself is printed once at creation. Manage from the
@@ -25,7 +27,7 @@ import sys
 import threading
 import time
 
-SCOPES = frozenset({"events:read", "status:read"})
+SCOPES = frozenset({"events:read", "status:read", "chat"})
 _FILE = Path(__file__).resolve().parents[1] / "memory" / "client_tokens.json"
 _lock = threading.Lock()
 

@@ -20,6 +20,7 @@ import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.FrameLayout;
+import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.TextClock;
 import android.widget.TextView;
@@ -32,15 +33,18 @@ import java.util.Date;
 import java.util.Locale;
 
 /**
- * JARVIS on the TV: what the TV boots into and what Home returns to. A glance
- * from the couch (greeting, weather, today, to-dos, what needs attention)
- * from Core's /api/glance, in the phone's theme, over Plex and Settings (the
- * escape hatch to stock Android). YouTube and the inputs are on the remote. Shows the last snapshot when Core is unreachable.
+ * JARVIS on the TV: what the TV boots into and what Home returns to. Kept
+ * calm: greeting, weather and clock; what's coming up on the calendar
+ * (tagged school / personal / family; work hidden by Core); what's playing
+ * on Spotify with play controls; everything else (to-dos, alerts, downloads,
+ * chores) in one line of small print. Then Plex and Settings (the escape
+ * hatch). YouTube and the inputs are on the remote. Data comes from Core's
+ * /api/glance; the last snapshot stays up when Core is unreachable.
  */
 public class HomeActivity extends Activity {
     private static final String PLEX = "com.plexapp.android";
     private static final long REFRESH_MS = 60_000;
-    private static final int MAX_LINES = 5;
+    private static final int MAX_LINES = 6;
 
     private final Handler handler = new Handler(Looper.getMainLooper());
     private final Runnable poll = this::pollTick;
@@ -63,11 +67,17 @@ public class HomeActivity extends Activity {
         }
     }
 
+    private static final int PERSONAL = Color.rgb(184, 150, 255);
+
     private Theme theme;
     private View firstTile;
-    private TextView greeting, weather, footer;
-    private LinearLayout today, todos, attention;
-    private TextView todosTitle;
+    private TextView greeting, weather, footer, strip;
+    private LinearLayout upcoming, legend;
+    private final Runnable musicTick = this::musicTick;
+    private ImageView art;
+    private TextView musicLabel, songTitle, songArtist;
+    private MediaIcon playIcon;
+    private View prevButton, nextButton;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -84,12 +94,14 @@ public class HomeActivity extends Activity {
         registerReceiver(updated, new IntentFilter(Jarvis.ACTION_UPDATED));
         render();
         handler.post(poll);
+        handler.post(musicTick);
         if (firstTile != null) firstTile.requestFocus();
     }
 
     @Override
     protected void onPause() {
         handler.removeCallbacks(poll);
+        handler.removeCallbacks(musicTick);
         unregisterReceiver(updated);
         super.onPause();
     }
@@ -125,7 +137,7 @@ public class HomeActivity extends Activity {
     private void build() {
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
-        root.setPadding(dp(48), dp(30), dp(48), dp(22));
+        root.setPadding(dp(48), dp(28), dp(48), dp(24));
         root.setClipChildren(false);
         root.setClipToPadding(false);
         root.setBackground(new GradientDrawable(GradientDrawable.Orientation.TL_BR,
@@ -133,30 +145,45 @@ public class HomeActivity extends Activity {
 
         root.addView(header());
 
-        LinearLayout panels = new LinearLayout(this);
-        LinearLayout.LayoutParams panelsLp = new LinearLayout.LayoutParams(
+        LinearLayout main = new LinearLayout(this);
+        main.setClipChildren(false);
+        LinearLayout.LayoutParams mainLp = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f);
-        panelsLp.setMargins(0, dp(22), 0, dp(4));
-        root.addView(panels, panelsLp);
-        today = panel(panels, "Today", null);
-        todosTitle = new TextView(this);
-        todos = panel(panels, "To-dos", todosTitle);
-        attention = panel(panels, "Needs you", null);
+        mainLp.setMargins(0, dp(18), 0, 0);
+        root.addView(main, mainLp);
+        LinearLayout coming = panel(main, 1.3f);
+        coming.addView(eyebrow("Coming up"));
+        upcoming = new LinearLayout(this);
+        upcoming.setOrientation(LinearLayout.VERTICAL);
+        coming.addView(upcoming, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
+        legend = new LinearLayout(this);
+        legend.setGravity(Gravity.CENTER_VERTICAL);
+        coming.addView(legend);
+        buildMusic(panel(main, 1f));
 
-        root.addView(sectionLabel("Watch"));
+        // Everything else, small: to-dos, alerts, downloads, chores.
+        LinearLayout status = new LinearLayout(this);
+        status.setGravity(Gravity.CENTER_VERTICAL);
+        strip = label("", 12, theme.dim);
+        strip.setSingleLine(true);
+        strip.setEllipsize(TextUtils.TruncateAt.END);
+        status.addView(strip, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        footer = label("", 10, Theme.alpha(theme.text, 90));
+        footer.setLetterSpacing(0.15f);
+        footer.setPadding(dp(16), 0, 0, 0);
+        status.addView(footer);
+        LinearLayout.LayoutParams statusLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        statusLp.setMargins(dp(4), dp(12), 0, dp(14));
+        root.addView(status, statusLp);
+
         LinearLayout apps = new LinearLayout(this);
         apps.setClipChildren(false);
         root.addView(apps);
         // YouTube and the HDMI inputs have their own buttons on the remote.
         addPlexTile(apps);
         addTextTile(apps, "Settings", null, () -> startSafely(new Intent(Settings.ACTION_SETTINGS)));
-
-        footer = label("", 10, theme.dim);
-        footer.setLetterSpacing(0.15f);
-        footer.setGravity(Gravity.END);
-        footer.setPadding(0, dp(14), 0, 0);
-        root.addView(footer, new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
         setContentView(root);
     }
@@ -201,40 +228,130 @@ public class HomeActivity extends Activity {
         return h;
     }
 
-    private LinearLayout panel(LinearLayout row, String title, TextView titleView) {
+    /** A rounded glass panel in {@code row}; returns it for content. */
+    private LinearLayout panel(LinearLayout row, float weight) {
         LinearLayout p = new LinearLayout(this);
         p.setOrientation(LinearLayout.VERTICAL);
-        p.setPadding(dp(18), dp(14), dp(18), dp(14));
+        p.setPadding(dp(20), dp(16), dp(20), dp(14));
+        p.setClipChildren(false);
         GradientDrawable bg = new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,
-                new int[] {Theme.alpha(theme.raised, 235), Theme.alpha(theme.panel, 235)});
-        bg.setCornerRadius(dp(16));
-        bg.setStroke(dp(1), Theme.alpha(theme.accent, 46));
+                new int[] {Theme.alpha(theme.raised, 225), Theme.alpha(theme.panel, 225)});
+        bg.setCornerRadius(dp(18));
+        bg.setStroke(dp(1), Theme.alpha(theme.accent, 40));
         p.setBackground(bg);
-
-        TextView t = titleView != null ? titleView : new TextView(this);
-        t.setText(title.toUpperCase(Locale.US));
-        t.setTextSize(10);
-        t.setTextColor(theme.accent);
-        t.setLetterSpacing(0.2f);
-        t.setPadding(0, 0, 0, dp(8));
-        p.addView(t);
-
-        LinearLayout body = new LinearLayout(this);
-        body.setOrientation(LinearLayout.VERTICAL);
-        p.addView(body);
-
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0,
-                ViewGroup.LayoutParams.MATCH_PARENT, 1f);
-        lp.setMargins(row.getChildCount() == 0 ? 0 : dp(16), 0, 0, 0);
+                ViewGroup.LayoutParams.MATCH_PARENT, weight);
+        lp.setMargins(row.getChildCount() == 0 ? 0 : dp(18), 0, 0, 0);
         row.addView(p, lp);
-        return body;
+        return p;
     }
 
-    private TextView sectionLabel(String title) {
-        TextView t = label(title.toUpperCase(Locale.US), 10, theme.dim);
+    private TextView eyebrow(String title) {
+        TextView t = label(title.toUpperCase(Locale.US), 10, theme.accent);
         t.setLetterSpacing(0.2f);
-        t.setPadding(dp(2), dp(16), 0, dp(8));
+        t.setPadding(0, 0, 0, dp(8));
         return t;
+    }
+
+    // --- Music ----------------------------------------------------------------
+
+    private void buildMusic(LinearLayout card) {
+        LinearLayout body = new LinearLayout(this);
+        body.setGravity(Gravity.CENTER_VERTICAL);
+        body.setClipChildren(false);
+        card.setGravity(Gravity.CENTER_VERTICAL);
+        card.addView(body, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+
+        art = new ImageView(this);
+        art.setScaleType(ImageView.ScaleType.CENTER_CROP);
+        art.setBackground(rounded(Theme.alpha(theme.accent, 30), 0, 0));
+        art.setClipToOutline(true);
+        body.addView(art, new LinearLayout.LayoutParams(dp(132), dp(132)));
+
+        LinearLayout text = new LinearLayout(this);
+        text.setOrientation(LinearLayout.VERTICAL);
+        text.setClipChildren(false);
+        LinearLayout.LayoutParams textLp = new LinearLayout.LayoutParams(0,
+                ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
+        textLp.setMargins(dp(20), 0, 0, 0);
+        body.addView(text, textLp);
+
+        musicLabel = eyebrow("Music");
+        text.addView(musicLabel);
+        songTitle = label("", 19, theme.text);
+        songTitle.setSingleLine(true);
+        songTitle.setEllipsize(TextUtils.TruncateAt.END);
+        text.addView(songTitle);
+        songArtist = label("", 13, theme.dim);
+        songArtist.setSingleLine(true);
+        songArtist.setEllipsize(TextUtils.TruncateAt.END);
+        songArtist.setPadding(0, dp(2), 0, dp(12));
+        text.addView(songArtist);
+
+        LinearLayout controls = new LinearLayout(this);
+        controls.setGravity(Gravity.CENTER_VERTICAL);
+        controls.setClipChildren(false);
+        text.addView(controls);
+        prevButton = control(controls, new MediaIcon(this, MediaIcon.PREVIOUS, theme.text), false,
+                () -> Music.previous(this));
+        playIcon = new MediaIcon(this, MediaIcon.PLAY, theme.deep);
+        control(controls, playIcon, true, () -> Music.playPause(this));
+        nextButton = control(controls, new MediaIcon(this, MediaIcon.NEXT, theme.text), false,
+                () -> Music.next(this));
+    }
+
+    private View control(LinearLayout row, MediaIcon icon, boolean primary, Runnable action) {
+        FrameLayout b = new FrameLayout(this);
+        b.setFocusable(true);
+        b.setClickable(true);
+        GradientDrawable bg = new GradientDrawable();
+        bg.setShape(GradientDrawable.OVAL);
+        bg.setColor(primary ? theme.accent : Theme.alpha(theme.text, 26));
+        b.setBackground(bg);
+        b.addView(icon, new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+        b.setOnFocusChangeListener((v, focused) -> {
+            GradientDrawable ring = new GradientDrawable();
+            ring.setShape(GradientDrawable.OVAL);
+            ring.setStroke(dp(2), theme.text);
+            b.setForeground(focused ? ring : null);
+            v.animate().scaleX(focused ? 1.12f : 1f).scaleY(focused ? 1.12f : 1f)
+                    .setDuration(120).start();
+        });
+        b.setOnClickListener(v -> {
+            action.run();
+            handler.removeCallbacks(musicTick);
+            handler.postDelayed(musicTick, 350);
+        });
+        int size = primary ? dp(48) : dp(38);
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(size, size);
+        lp.setMargins(0, 0, dp(14), 0);
+        row.addView(b, lp);
+        return b;
+    }
+
+    private void musicTick() {
+        Music.Now n = Music.now(this);
+        if (!n.allowed) {
+            musicLabel.setText("MUSIC");
+            songTitle.setText("Music is switched off");
+            songArtist.setText("Run tv/launcher/deploy.sh once more.");
+        } else if (n.title == null) {
+            musicLabel.setText("MUSIC");
+            songTitle.setText("Nothing playing");
+            songArtist.setText("Press play for Spotify.");
+        } else {
+            musicLabel.setText(n.playing ? "NOW PLAYING" : "PAUSED");
+            songTitle.setText(n.title);
+            songArtist.setText(n.artist != null ? n.artist : "");
+        }
+        art.setImageBitmap(n.art);
+        playIcon.setKind(n.playing ? MediaIcon.PAUSE : MediaIcon.PLAY);
+        float extras = n.title != null ? 1f : 0.35f;
+        prevButton.setAlpha(extras);
+        nextButton.setAlpha(extras);
+        handler.postDelayed(musicTick, 1000);
     }
 
     // --- Content ------------------------------------------------------------
@@ -249,100 +366,138 @@ public class HomeActivity extends Activity {
         greeting.setText(greetingText() + ", " + address + ".");
         weather.setText(g != null ? weatherLine(g.optJSONObject("weather")) : "");
 
-        today.removeAllViews();
-        todos.removeAllViews();
-        attention.removeAllViews();
+        upcoming.removeAllViews();
+        legend.removeAllViews();
         if (g == null) {
-            String note = Jarvis.provisioned(this) ? "Reaching Core…" : "Not linked to Core yet.";
-            line(today, note, theme.dim);
-            todosTitle.setText("TO-DOS");
+            line(upcoming, Jarvis.provisioned(this) ? "Reaching Core…" : "Not linked to Core yet.", theme.dim);
+            strip.setText("");
         } else {
             JSONObject now = g.optJSONObject("now");
-            fillToday(now != null ? now : new JSONObject());
-            fillTodos(now != null ? now.optJSONArray("reminders") : null);
-            fillAttention(g.optJSONArray("alerts"), g.optJSONArray("downloads"));
+            if (now == null) now = new JSONObject();
+            fillUpcoming(now, g.optJSONArray("events"));
+            strip.setText(stripText(now, g.optJSONArray("alerts"), g.optJSONArray("downloads")));
         }
         footer.setText(statusLine());
     }
 
-    private void fillToday(JSONObject now) {
+    private void fillUpcoming(JSONObject now, JSONArray events) {
         int shown = 0;
         JSONArray timers = now.optJSONArray("timers");
         for (int i = 0; timers != null && i < timers.length() && shown < MAX_LINES; i++, shown++) {
             JSONObject t = timers.optJSONObject(i);
-            String state = t.optString("state");
-            String when = "alarming".equals(state) ? "now" : minutes(t.optInt("remaining_seconds"));
-            row(today, when, t.optString("label", "Timer"),
-                    "alarming".equals(state) ? theme.critical : theme.accent);
+            boolean ringing = "alarming".equals(t.optString("state"));
+            row(upcoming, ringing ? "now" : minutes(t.optInt("remaining_seconds")),
+                    t.optString("label", "Timer"), ringing ? theme.critical : theme.accent, 0);
         }
-        JSONObject next = now.optJSONObject("next_event");
-        if (next != null && shown < MAX_LINES) {
-            row(today, eventTime(next), next.optString("title"), theme.accent);
-            shown++;
-        }
-        JSONArray academic = now.optJSONArray("academic_events");
-        for (int i = 0; academic != null && i < academic.length() && shown < MAX_LINES; i++) {
-            JSONObject a = academic.optJSONObject(i);
-            int days = a.optInt("days_left");
-            if (days > 14) continue;
-            row(today, days <= 0 ? "today" : days == 1 ? "1 day" : days + " days",
-                    a.optString("title"), days <= 2 ? theme.warning : theme.accent);
-            shown++;
-        }
-        JSONArray chores = now.optJSONArray("maintenance");
-        for (int i = 0; chores != null && i < chores.length() && shown < MAX_LINES; i++, shown++) {
-            JSONObject m = chores.optJSONObject(i);
-            int days = m.optInt("days_remaining");
-            row(today, days < 0 ? "overdue" : days == 0 ? "due" : days + " days",
-                    m.optString("name"), days <= 0 ? theme.warning : theme.dim);
+        java.util.LinkedHashSet<String> seen = new java.util.LinkedHashSet<>();
+        for (int i = 0; events != null && i < events.length() && shown < MAX_LINES; i++, shown++) {
+            JSONObject e = events.optJSONObject(i);
+            String category = e.optString("category", "personal");
+            seen.add(category);
+            row(upcoming, when(e), e.optString("title"), theme.dim, categoryColor(category));
         }
         if (shown == 0) {
             String err = now.optString("calendar_error");
-            line(today, err.isEmpty() ? "Nothing on the books, sir." : err, theme.dim);
+            line(upcoming, err.isEmpty() ? "Nothing on the books, sir." : err, theme.dim);
+        }
+        for (String category : seen) {
+            legend.addView(dot(categoryColor(category)));
+            TextView name = label(category.substring(0, 1).toUpperCase(Locale.US)
+                    + category.substring(1), 10, theme.dim);
+            name.setPadding(dp(6), 0, dp(16), 0);
+            legend.addView(name);
         }
     }
 
-    private void fillTodos(JSONArray reminders) {
-        int count = reminders != null ? reminders.length() : 0;
-        todosTitle.setText(count > 0 ? "TO-DOS · " + count : "TO-DOS");
-        for (int i = 0; i < Math.min(count, MAX_LINES + 1); i++) {
-            JSONObject r = reminders.optJSONObject(i);
-            if (i == MAX_LINES) {
-                line(todos, "+ " + (count - MAX_LINES) + " more on your phone", theme.dim);
-                break;
-            }
-            boolean due = r.optBoolean("is_due");
-            row(todos, due ? "due" : "·", r.optString("text"), due ? theme.warning : theme.dim);
+    private int categoryColor(String category) {
+        switch (category) {
+            case "school": return theme.accent;
+            case "family": return theme.success;
+            case "work": return theme.warning;
+            default: return PERSONAL;
         }
-        if (count == 0) line(todos, "All clear.", theme.dim);
     }
 
-    private void fillAttention(JSONArray alerts, JSONArray downloads) {
-        int shown = 0;
-        for (int i = 0; alerts != null && i < alerts.length() && shown < 3; i++) {
+    /** "4:30pm" today, "tomorrow", a weekday this week, else "nov 9". */
+    private String when(JSONObject event) {
+        long ms = (long) (event.optDouble("start_at") * 1000);
+        Calendar day = Calendar.getInstance();
+        day.setTimeInMillis(ms);
+        Calendar today = Calendar.getInstance();
+        long days = (startOfDay(day) - startOfDay(today)) / 86_400_000L;
+        if (days <= 0) return event.optBoolean("all_day") ? "today" : clock(ms);
+        if (days == 1) return "tomorrow";
+        if (days < 7) return DateFormat.format("EEEE", ms).toString().toLowerCase(Locale.US);
+        return DateFormat.format("MMM d", ms).toString().toLowerCase(Locale.US);
+    }
+
+    private static long startOfDay(Calendar c) {
+        Calendar d = (Calendar) c.clone();
+        d.set(Calendar.HOUR_OF_DAY, 0);
+        d.set(Calendar.MINUTE, 0);
+        d.set(Calendar.SECOND, 0);
+        d.set(Calendar.MILLISECOND, 0);
+        return d.getTimeInMillis();
+    }
+
+    /** The small print: to-dos, what needs attention, downloads, chores. */
+    private CharSequence stripText(JSONObject now, JSONArray alerts, JSONArray downloads) {
+        android.text.SpannableStringBuilder out = new android.text.SpannableStringBuilder();
+        JSONArray reminders = now.optJSONArray("reminders");
+        int todos = reminders != null ? reminders.length() : 0;
+        append(out, todos == 0 ? "No to-dos" : todos == 1 ? "1 to-do" : todos + " to-dos", 0);
+        for (int i = 0; alerts != null && i < alerts.length(); i++) {
             JSONObject a = alerts.optJSONObject(i);
             if ("info".equals(a.optString("severity"))) continue;
-            row(attention, clock((long) (a.optDouble("created_at") * 1000)),
-                    a.optString("title"), theme.severity(a.optString("severity")));
-            shown++;
+            append(out, a.optString("title"), theme.severity(a.optString("severity")));
+            break;
         }
-        for (int i = 0; downloads != null && i < downloads.length() && shown < MAX_LINES; i++, shown++) {
-            JSONObject d = downloads.optJSONObject(i);
-            row(attention, Math.round(d.optDouble("progress") * 100) + "%",
-                    d.optString("name"), theme.accent);
+        if (downloads != null && downloads.length() > 0) {
+            JSONObject d = downloads.optJSONObject(0);
+            append(out, "↓ " + d.optString("name") + " " + Math.round(d.optDouble("progress") * 100) + "%"
+                    + (downloads.length() > 1 ? " +" + (downloads.length() - 1) : ""), 0);
         }
-        if (shown == 0) line(attention, "All systems nominal.", theme.success);
+        JSONArray chores = now.optJSONArray("maintenance");
+        int due = 0;
+        for (int i = 0; chores != null && i < chores.length(); i++) {
+            if (chores.optJSONObject(i).optInt("days_remaining") <= 0) due++;
+        }
+        if (due > 0) append(out, due == 1 ? "1 chore due" : due + " chores due", 0);
+        return out;
     }
 
-    private void row(LinearLayout parent, String lead, String text, int leadColor) {
+    private void append(android.text.SpannableStringBuilder out, String text, int color) {
+        if (out.length() > 0) out.append("     ·     ");
+        int start = out.length();
+        out.append(text);
+        if (color != 0) out.setSpan(new ForegroundColorSpan(color), start, out.length(), 0);
+    }
+
+    private View dot(int color) {
+        View d = new View(this);
+        GradientDrawable g = new GradientDrawable();
+        g.setShape(GradientDrawable.OVAL);
+        g.setColor(color);
+        d.setBackground(g);
+        d.setLayoutParams(new LinearLayout.LayoutParams(dp(8), dp(8)));
+        return d;
+    }
+
+    private void row(LinearLayout parent, String lead, String text, int leadColor, int dotColor) {
         LinearLayout r = new LinearLayout(this);
         r.setGravity(Gravity.CENTER_VERTICAL);
-        r.setPadding(0, dp(3), 0, dp(3));
+        r.setPadding(0, dp(4), 0, dp(4));
         TextView l = label(lead, 11, leadColor);
         l.setTypeface(Typeface.MONOSPACE);
         l.setSingleLine(true);
-        r.addView(l, new LinearLayout.LayoutParams(dp(62), ViewGroup.LayoutParams.WRAP_CONTENT));
-        TextView t = label(text, 14, theme.text);
+        r.addView(l, new LinearLayout.LayoutParams(dp(78), ViewGroup.LayoutParams.WRAP_CONTENT));
+        if (dotColor != 0) {
+            View d = dot(dotColor);
+            LinearLayout.LayoutParams dl = new LinearLayout.LayoutParams(dp(8), dp(8));
+            dl.setMargins(0, 0, dp(12), 0);
+            r.addView(d, dl);
+        }
+        TextView t = label(text, 15, theme.text);
         t.setSingleLine(true);
         t.setEllipsize(TextUtils.TruncateAt.END);
         r.addView(t, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
@@ -373,21 +528,6 @@ public class HomeActivity extends Activity {
             s.append("  ·  H ").append(w.optInt("high_f")).append("  L ").append(w.optInt("low_f"));
         }
         return s.toString();
-    }
-
-    private String eventTime(JSONObject event) {
-        if (event.optBoolean("all_day")) return "all day";
-        double start = event.optDouble("start_at", 0);
-        if (start <= 0) return "";
-        long ms = (long) (start * 1000);
-        Calendar when = Calendar.getInstance();
-        when.setTimeInMillis(ms);
-        Calendar now = Calendar.getInstance();
-        if (when.get(Calendar.YEAR) == now.get(Calendar.YEAR)
-                && when.get(Calendar.DAY_OF_YEAR) == now.get(Calendar.DAY_OF_YEAR)) {
-            return clock(ms);
-        }
-        return DateFormat.format("EEE", ms).toString().toLowerCase(Locale.US);
     }
 
     private String clock(long ms) {

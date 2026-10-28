@@ -204,18 +204,64 @@ def _weather_uncached() -> dict[str, Any]:
     return asdict(get_weather_snapshot())
 
 
+_GLANCE_EVENT_DAYS = 14
+_GLANCE_EVENT_LIMIT = 8
+
+
+def calendar_category(name: str) -> str:
+    """work / school / family / personal for a calendar's display name.
+    ``CALENDAR_CATEGORIES`` ("Oil/Boil Outs=work;Howard Family=family")
+    wins; otherwise the name decides, and anything else is personal."""
+    for pair in os.getenv("CALENDAR_CATEGORIES", "").split(";"):
+        key, _, value = pair.partition("=")
+        if key.strip() and key.strip().lower() == name.strip().lower() and value.strip():
+            return value.strip().lower()
+    lowered = name.lower()
+    for word in ("work", "school", "family"):
+        if word in lowered:
+            return word
+    return "personal"
+
+
+def _glance_events() -> list[dict[str, Any]]:
+    """The next two weeks of calendar, tagged by category, minus the
+    categories in ``GLANCE_HIDDEN_CATEGORIES`` (default ``work``)."""
+    hidden = {c.strip().lower() for c in os.getenv("GLANCE_HIDDEN_CATEGORIES", "work").split(",") if c.strip()}
+    events = _calendar_events() if calendar_configured() else None
+    out: list[dict[str, Any]] = []
+    horizon = time.time() + _GLANCE_EVENT_DAYS * 86400
+    for event in events or []:
+        start = event.get("start")
+        if start is None or start.timestamp() > horizon:
+            continue
+        category = calendar_category(str(event.get("calendar") or ""))
+        if category in hidden:
+            continue
+        out.append({
+            "title": str(event.get("summary") or "Untitled event"),
+            "start_at": start.timestamp(),
+            "all_day": bool(event.get("all_day", False)),
+            "calendar": str(event.get("calendar") or ""),
+            "category": category,
+        })
+        if len(out) >= _GLANCE_EVENT_LIMIT:
+            break
+    return out
+
+
 def glance_status() -> dict[str, Any]:
     """One snapshot for a screen across the room: who to greet and how to look,
     weather, the Now feed, downloads in flight and alerts from the last day.
     Every section degrades on its own; the call itself never fails."""
     from brain import event_bus
     theme = os.getenv("JARVIS_THEME", "arc").strip()
-    with ThreadPoolExecutor(max_workers=3) as pool:
+    with ThreadPoolExecutor(max_workers=4) as pool:
         now = pool.submit(now_status)
         weather = pool.submit(weather_status)
         torrents = pool.submit(torrents_status)
+        events = pool.submit(_glance_events)
         sections = {}
-        for key, future in (("now", now), ("weather", weather), ("torrents", torrents)):
+        for key, future in (("now", now), ("weather", weather), ("torrents", torrents), ("events", events)):
             try:
                 sections[key] = future.result()
             except Exception as exc:  # noqa: BLE001 - glance must still render
@@ -235,6 +281,7 @@ def glance_status() -> dict[str, Any]:
         "theme": theme if theme in _THEMES else "arc",
         "weather": sections["weather"],
         "now": sections["now"],
+        "events": sections["events"] if isinstance(sections["events"], list) else [],
         "downloads": downloads[:5],
         "alerts": alerts[:5],
     }

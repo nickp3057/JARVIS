@@ -219,13 +219,16 @@ of each group.
   - [ ] Alarm time set from the phone or by asking JARVIS; skips days off.
 
   **Music**
-  - [ ] Simple player: now playing, play/pause/skip, volume.
+  - [x] Simple player: now playing, play/pause/skip (volume is the remote's).
+    Spotify on the TV via its media session; JARVIS starting music by voice
+    still needs Core's Spotify keys (SPOTIFY_CLIENT_ID/SECRET aren't set).
   - [ ] Remote's play/pause works anywhere in the launcher.
 
   **Remote and voice**
   - [x] Everything reachable with the D-pad; clear focus highlight; Back
     always steps out; no dead ends.
-  - [ ] Remote mic (if the TCL remote has one) talks to JARVIS like Chat.
+  - [x] Remote mic talks to JARVIS like Chat ("Jarvis, ..."; TTS voice for
+    now, ElevenLabs later).
 
   **House**
   - [ ] Light/switch tiles like the phone's Hub; timers and reminders pop

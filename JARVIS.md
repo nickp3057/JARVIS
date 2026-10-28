@@ -36,7 +36,7 @@ The character never breaks. It calls Nick "sir", uses dry British wit, answers i
 Pearson-Stark-Jarvis/
 ├── app/
 │   ├── main.py              Entry point. GUI / text / voice / server modes
-│   ├── client_tokens.py     Scoped per-client tokens (events:read, status:read) + CLI; hashes in memory/client_tokens.json
+│   ├── client_tokens.py     Scoped per-client tokens (events:read, status:read, chat) + CLI; hashes in memory/client_tokens.json
 │   └── server.py            Authenticated HTTP bridge for the iOS companion (+ /api/clients/events SSE)
 │
 ├── brain/
@@ -548,6 +548,9 @@ PLEX_TOKEN=                 # X-Plex-Token; enables the media doctor's "is it on
 MEDIA_DOCTOR_STALL_MINUTES=30  # no torrent progress for this long counts as stalled (doctor + download monitor)
 HOME_DASHBOARD_ENTITIES=    # comma-separated HA entity_ids for /api/home/entities
 JARVIS_THEME=arc            # arc | markIII | hotRod: the TV's look, served in /api/glance
+CALENDAR_CATEGORIES=        # calendar name=category pairs, ';'-separated (e.g. Oil/Boil Outs=work);
+                            # unlisted names with school/family/work in them use that, else personal
+GLANCE_HIDDEN_CATEGORIES=work # categories left off the TV's Coming up list
 MEDIA_STORAGE_PATH=         # local mount of the video library; leave blank to
                             # measure the NAS volume via Radarr/Sonarr diskspace
 MEDIA_STORAGE_LABEL=Media storage # friendly Hub label; no key required
@@ -612,6 +615,21 @@ CALENDAR_ALERT_LEAD_MIN=10  # warn this many minutes before a meeting
 ---
 
 ## Recently Shipped
+
+- **JARVIS TV 5.0: calm home, music, "Jarvis, ..." (iOS 1.97 / build 99)** —
+  The TV home screen is two panels now: Coming up (the next two weeks of
+  calendar from `/api/glance`'s new `events`, each with a category dot and
+  legend: school, personal, family; work is hidden by
+  `GLANCE_HIDDEN_CATEGORIES`, categories come from `CALENDAR_CATEGORIES` or
+  the calendar's name) and Now playing (Spotify on the TV via its media
+  session: art, title, artist, previous / play-pause / next on the D-pad;
+  play with nothing loaded opens Spotify). To-dos, alerts, downloads and due
+  chores shrink into one line of small print. The remote's mic talks to
+  JARVIS: say "Jarvis, ..." and the launcher catches the Assistant's
+  transcript, closes its panel, sends the rest to `POST /chat` (new client
+  scope `chat`; the token is re-made by `tv/provision.sh`), shows the answer
+  as a banner and reads it aloud with the TV's TTS (British voice; the
+  ElevenLabs voice is a later step). Spotify for Android TV installed.
 
 - **JARVIS TV: JARVIS is the TV's home screen (iOS 1.94 / build 96)** — The
   TCL TV's custom launcher (`com.tvhome`, previously outside the repo in
@@ -1288,6 +1306,12 @@ TV=10.0.0.46:5555 tv/provision.sh         # Nick, at home: scoped token + Core U
   `in_ms > 0` arms a one-off alarm instead. Outcomes log under
   `TvHomeRefresh` (the TV's log buffer only holds minutes).
 - `--ez clear true` to `.ProvisionReceiver` unlinks the TV from Core.
+- Music: `MediaListener` is an empty NotificationListenerService that deploy.sh
+  enables (`cmd notification allow_listener`) so the launcher can read and
+  control Spotify's media session; no Spotify API keys involved.
+- Voice: `Voice.request` matches "jarvis" and common mishearings (jervis,
+  travis, charvis); one Core chat session per day so follow-ups have context.
+  The Assistant panel is dismissed only if it holds focus (never Back out of Plex).
 - Verified 2026-10-27 against a mock Core on the Mac: glance renders, the
   SSE banner shows over Plex without stealing focus, offline footer reads
   "CORE UNREACHABLE · LAST SEEN ...". Provisioned against the real Core the

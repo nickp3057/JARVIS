@@ -55,16 +55,17 @@ final class Banner {
             TextView head = label(c, title, 16, theme.text);
             head.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
             text.addView(head);
+            boolean reply = "reply".equals(severity);
             if (!message.isEmpty()) {
-                TextView body = label(c, message, 13, theme.dim);
-                body.setMaxLines(2);
+                TextView body = label(c, message, reply ? 15 : 13, reply ? theme.text : theme.dim);
+                body.setMaxLines(reply ? 7 : 2);
                 body.setEllipsize(TextUtils.TruncateAt.END);
                 text.addView(body);
             }
             card.addView(text);
 
             WindowManager.LayoutParams lp = new WindowManager.LayoutParams(
-                    px(d, 380), WindowManager.LayoutParams.WRAP_CONTENT,
+                    px(d, reply ? 460 : 380), WindowManager.LayoutParams.WRAP_CONTENT,
                     WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
                     WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
                             | WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE,
@@ -85,7 +86,8 @@ final class Banner {
             MAIN.postDelayed(() -> {
                 if (current == shown) shown.animate().alpha(0f).setDuration(400)
                         .withEndAction(() -> dismiss(wm)).start();
-            }, "critical".equals(severity) ? 20_000 : 10_000);
+            }, reply ? Math.min(30_000, 6_000 + message.length() * 70L)
+                    : "critical".equals(severity) ? 20_000 : 10_000);
         });
     }
 

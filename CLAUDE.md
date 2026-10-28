@@ -53,7 +53,7 @@ Server API tests use the standard-library runner: `.venv/bin/python -m unittest 
 Config lives in `.env` at the project root (never commit it — see `JARVIS.md` for the full variable list). Settings are read live via `os.getenv()` inside functions, not cached at import time, so `.env` edits (including ones JARVIS makes to itself via `update_setting`) take effect without a restart.
 
 The companion server requires `JARVIS_API_TOKEN`; its bind address and port are
-controlled by `JARVIS_SERVER_HOST` and `JARVIS_SERVER_PORT`. Non-companion clients (TV, dashboards) get their own scoped tokens via `python -m app.client_tokens create <name> events:read status:read`; never hand them `JARVIS_API_TOKEN`.
+controlled by `JARVIS_SERVER_HOST` and `JARVIS_SERVER_PORT`. Non-companion clients (TV, dashboards) get their own scoped tokens via `python -m app.client_tokens create <name> events:read status:read` (add `chat` only for a client that should talk to JARVIS, like the TV's mic); never hand them `JARVIS_API_TOKEN`.
 
 ## Architecture
 

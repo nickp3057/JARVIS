@@ -211,7 +211,7 @@ def _resolve_session(request: ChatRequest) -> str:
 
 
 @app.post("/chat", response_model=ChatResponse)
-def chat(request: ChatRequest, _: None = Depends(authorize)) -> ChatResponse:
+def chat(request: ChatRequest, _: None = Depends(require_scope("chat"))) -> ChatResponse:
     session_id = _resolve_session(request)
     try:
         kwargs = {"request_id": request.request_id} if request.request_id else {}
