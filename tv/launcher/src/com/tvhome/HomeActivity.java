@@ -322,7 +322,41 @@ public class HomeActivity extends Activity {
         addContinueTile(apps);
         addSettingsTile(apps);
 
+        if (theme == Theme.BARN_DOOR) addBarnDoor();
         setContentView(stage);
+    }
+
+    /**
+     * Barn Door Protocol (brain/protocols.py) owns the screen: everything else
+     * goes, leaving a giant reactor, the protocol's name and the time. The
+     * normal home sits underneath (its timers keep running) and comes back
+     * when JARVIS stands down and the theme changes.
+     */
+    private void addBarnDoor() {
+        LinearLayout alert = new LinearLayout(this);
+        alert.setOrientation(LinearLayout.VERTICAL);
+        alert.setGravity(Gravity.CENTER);
+        alert.setBackground(new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,
+                new int[] {theme.background, theme.deep}));
+        alert.setClickable(true);
+        alert.addView(new ReactorView(this, theme.reactor, theme.critical),
+                new LinearLayout.LayoutParams(dp(330), dp(330)));
+        TextView name = label("BARN DOOR PROTOCOL", 30, theme.accent);
+        name.setTypeface(Typeface.create("sans-serif-black", Typeface.BOLD));
+        name.setLetterSpacing(0.25f);
+        name.setShadowLayer(dp(14), 0, 0, Theme.alpha(theme.accent, 160));
+        name.setPadding(0, dp(18), 0, dp(6));
+        alert.addView(name);
+        TextClock time = new TextClock(this);
+        time.setFormat12Hour("h:mm  ·  EEEE");
+        time.setFormat24Hour("HH:mm  ·  EEEE");
+        time.setTextSize(15);
+        time.setTextColor(theme.dim);
+        time.setLetterSpacing(0.1f);
+        alert.addView(time);
+        stage.addView(alert, new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+        screen.setDescendantFocusability(ViewGroup.FOCUS_BLOCK_DESCENDANTS);
     }
 
     /** Greeting on the left, the reactor dead centre, the clock on the right. */

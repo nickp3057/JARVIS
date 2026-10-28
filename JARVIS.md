@@ -699,6 +699,8 @@ CALENDAR_ALERT_LEAD_MIN=10  # warn this many minutes before a meeting
 
 ## Recently Shipped
 
+- **TV 7.5: Barn Door takes the screen** — while the protocol is engaged the
+  TV home is just a giant reactor, "BARN DOOR PROTOCOL" and the time.
 - **Barn Door Protocol; McQueen redone (TV 7.4, iOS 3.5 / build 117)** —
   `barn_door_protocol` turns the room red (lights snapshotted and restored on
   stand-down) and the phone and TV to a hidden red-alert theme. McQueen now

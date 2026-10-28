@@ -166,6 +166,16 @@ of each group.
   `runtime.raise_alert` when it drops below a target). Price watching is a
   monitor, not a UI poll.
 
+- [ ] **Room sentry on the work iPad** (Nick, 2026-10-27; waiting on the
+  iPad). The iPad, propped up running JARVIS, watches the room with Vision's
+  on-device person detection (frames never leave it, nothing recorded).
+  "Not Nick" is the hard part: start with "armed" (Nick says "guard my room",
+  or his phone's HA device_tracker leaves home) + a person in frame;
+  face recognition later only if he wants it (opt-in, his face enrolled on
+  the iPad). Detection → Core → `barn_door_protocol` + one line spoken in
+  unison on TV (Android TTS / ElevenLabs), iPad and the Optiplex speakers
+  ("Barn Door Protocol activated. Get out of Nick's room."); nobody in frame
+  for ~30 s → stand down. Tell the household it exists.
 - [ ] **"Hey Google" replacement on the Optiplex** (Nick, 2026-10-27): the
   Optiplex has a mic and speakers (and maybe ElevenLabs set up already, to
   verify), so `--voice` mode could run there as the house's always-listening

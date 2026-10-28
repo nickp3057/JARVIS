@@ -81,7 +81,10 @@ every deploy, so edit the repo copy, not the TV's.
   `WakeActivity`. Core rings a phone snooze again itself.
 - **Themes**: Arc, Hot Rod, Malibu, Crimson, Mark 85, Spider-Man, McQueen
   ("Ka-chow, sir." and a ⚡ on the date), plus `barnDoor`, Barn Door
-  Protocol's red alert, set by JARVIS and never in the picker (`Theme.java`, dark variants of the phone's
+  Protocol's red alert, set by JARVIS and never in the picker. While it's
+  on, `HomeActivity.addBarnDoor` covers the home screen with a giant
+  reactor, "BARN DOOR PROTOCOL" and the time (the normal home keeps
+  running underneath and returns on stand-down) (`Theme.java`, dark variants of the phone's
   `JarvisPalette`). Mark III, Graphite and Stealth were retired 2026-10-27;
   Core maps a stored retired pick to Hot Rod / Arc.
 - **Weather icon** (`HomeActivity.weatherIcon`): one emoji from the
