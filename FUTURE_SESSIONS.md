@@ -152,6 +152,12 @@ of each group.
   the Optiplex. Later: build a real `scene.good_morning` in HA (colours,
   brightness, maybe blinds) and set `WAKE_UP_SCENE`.
 - Schwab shows Live after the open (confirmed 2026-10-28).
+- **Barn Door rainbow:** the Govee integration exposes Nick's DIY scenes
+  as `select.nick_strip_lights_diy_scene` / `select.desk_lights_diy_scene`
+  (options New Rainbow, Xmas, Real Rainbow). At home: pick the one that
+  matches his rainbow, set `BARN_DOOR_EFFECTS` to the select form (see
+  JARVIS.md), restart, engage + stand down to check. Later: list DIY scenes
+  in the iPad light sheet too.
 - **iPad (iOS 4.8 / build 130, not installed):** Room tab, long-press
   light → brightness/colour, night screen. Untested on hardware: check the
   night screen tonight (sun down, all lights off, wait 45 s; turn a light on

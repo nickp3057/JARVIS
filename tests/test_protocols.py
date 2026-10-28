@@ -20,7 +20,9 @@ class BarnDoorTests(unittest.TestCase):
         effects = patch.object(protocols, "_EFFECTS_FILE", Path(tmp.name) / "effects.json")
         effects.start()
         self.addCleanup(effects.stop)
-        states = {"light.desk_lights_2": {"attributes": {"effect": "Rainbow"}}}
+        states = {"light.desk_lights_2": {"attributes": {"effect": "Rainbow"}},
+                  "select.desk_lights_diy_scene": {"state": "New Rainbow", "attributes": {}},
+                  "select.nick_strip_lights_diy_scene": {"state": "None", "attributes": {}}}
         get = patch.object(protocols.home_assistant, "_request",
                            side_effect=lambda _m, path: (True, states.get(path.rsplit("/", 1)[-1], {"attributes": {}})))
         get.start()
@@ -59,6 +61,18 @@ class BarnDoorTests(unittest.TestCase):
             protocols.stand_down()
         restored = {c.args[2]: c.args[3]["effect"] for c in self.calls("light", "turn_on") if "effect" in c.args[3]}
         self.assertEqual(restored, {"light.nick_strip_lights": "Rainbow-A", "light.desk_lights_2": "Rainbow"})
+
+    def test_govee_diy_scenes_come_back_through_their_dropdowns(self) -> None:
+        with patch.dict("os.environ", {"BARN_DOOR_EFFECTS":
+                                       "select.nick_strip_lights_diy_scene=Real Rainbow,"
+                                       "select.desk_lights_diy_scene=Real Rainbow"}):
+            protocols.engage()
+            protocols.stand_down()
+        picked = {c.args[2]: c.args[3]["option"] for c in self.calls("select", "select_option")}
+        # The strip showed no DIY scene at engage: the configured one. The desk
+        # had New Rainbow running: that wins.
+        self.assertEqual(picked, {"select.nick_strip_lights_diy_scene": "Real Rainbow",
+                                  "select.desk_lights_diy_scene": "New Rainbow"})
 
 
 if __name__ == "__main__":

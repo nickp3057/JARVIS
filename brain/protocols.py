@@ -13,6 +13,12 @@ So stand-down also re-applies each light's effect: the one HA reported at
 engage time, else ``BARN_DOOR_EFFECTS`` ("light.nick_strip_lights=Rainbow-A,
 light.desk_lights_2=Rainbow"). The fan's rotating rainbow isn't exposed by
 its integration, so it can't come back from here.
+
+Govee DIY scenes (Nick's own rainbows, made in the Govee app) aren't light
+effects: the Govee integration shows them as a dropdown per light,
+``select.<light>_diy_scene``. A ``BARN_DOOR_EFFECTS`` entry keyed by that
+select ("select.nick_strip_lights_diy_scene=Real Rainbow") is restored with
+``select.select_option``, and whatever DIY scene was picked at engage wins.
 """
 from __future__ import annotations
 
@@ -50,8 +56,14 @@ def engage() -> str:
 
 
 def _save_effects(entities: list[str]) -> None:
-    """Each light's running effect, which scene snapshots don't bring back."""
+    """Each light's running effect (and each configured DIY-scene dropdown's
+    pick), which scene snapshots don't bring back."""
     running = {}
+    for entity in [s for s in _configured_effects() if s.startswith("select.")]:
+        ok, state = home_assistant._request("GET", f"/api/states/{entity}")
+        option = state.get("state") if ok and isinstance(state, dict) else None
+        if option and str(option).lower() not in ("none", "unknown", "unavailable"):
+            running[entity] = option
     for entity in entities:
         ok, state = home_assistant._request("GET", f"/api/states/{entity}")
         effect = (state.get("attributes") or {}).get("effect") if ok and isinstance(state, dict) else None
@@ -61,12 +73,17 @@ def _save_effects(entities: list[str]) -> None:
     _EFFECTS_FILE.write_text(json.dumps(running))
 
 
-def _effects_to_restore() -> dict[str, str]:
+def _configured_effects() -> dict[str, str]:
     effects = {}
     for pair in os.getenv("BARN_DOOR_EFFECTS", "").split(","):
         entity, _, effect = pair.partition("=")
         if entity.strip() and effect.strip():
             effects[entity.strip()] = effect.strip()
+    return effects
+
+
+def _effects_to_restore() -> dict[str, str]:
+    effects = _configured_effects()
     try:
         effects.update(json.loads(_EFFECTS_FILE.read_text()))  # what was actually running wins
     except (OSError, ValueError):
@@ -77,6 +94,9 @@ def _effects_to_restore() -> dict[str, str]:
 def stand_down() -> str:
     home_assistant.call_service("scene", "turn_on", f"scene.{_SCENE}")
     for entity, effect in _effects_to_restore().items():
-        home_assistant.call_service("light", "turn_on", entity, {"effect": effect})
+        if entity.startswith("select."):  # a Govee DIY scene dropdown
+            home_assistant.call_service("select", "select_option", entity, {"option": effect})
+        else:
+            home_assistant.call_service("light", "turn_on", entity, {"effect": effect})
     restored = theme.restore()
     return f"Standing down, sir. Lights are back and the theme is {restored} again."
