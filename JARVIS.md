@@ -626,6 +626,11 @@ CALENDAR_ALERT_LEAD_MIN=10  # warn this many minutes before a meeting
 
 ## Recently Shipped
 
+- **Fast restarts (iOS 2.0 / build 102)** — `jarvis-api` restarts took 90 s:
+  uvicorn waited for the TV's never-ending SSE stream to close until systemd
+  killed it. `run_server` now passes `timeout_graceful_shutdown=5`; the TV
+  reconnects and replays recent alerts by itself.
+
 - **JARVIS TV 6.0: cards, settings, wake-up music (iOS 1.99 / build 101)** —
   Reactor centred in the header between greeting and clock. Cards: Next up
   (four non-school calendar items; family red, personal yellow, school

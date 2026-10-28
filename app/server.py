@@ -708,4 +708,8 @@ def run_server() -> None:
         host=os.getenv("JARVIS_SERVER_HOST", "0.0.0.0"),
         port=int(os.getenv("JARVIS_SERVER_PORT", "8000")),
         reload=False,
+        # SSE clients (the TV) never close their stream, so without a cap a
+        # restart sat in "Waiting for connections to close" until systemd's
+        # 90 s stop timeout killed it. They reconnect and replay on their own.
+        timeout_graceful_shutdown=5,
     )
