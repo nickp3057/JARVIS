@@ -334,6 +334,7 @@ def snapshot() -> dict[str, Any]:
     if not accounts:
         return out
     value, today, positions = accounts["value"], 0.0, []
+    cost = gain = 0.0
     for symbol, p in accounts["positions"].items():
         last = prices.get(symbol)
         live_value = p["quantity"] * last if last is not None else p["value"]
@@ -343,12 +344,17 @@ def snapshot() -> dict[str, Any]:
         else:
             change = p["day_change"]
         today += change
+        if p["cost"]:  # unrealized gain/loss since bought, at the average price paid
+            cost += p["cost"]
+            gain += live_value - p["cost"]
         positions.append({"symbol": symbol, "quantity": p["quantity"], "value": round(live_value, 2),
                           "today_change": round(change, 2), "last": last})
     positions.sort(key=lambda p: -abs(p["value"]))
     start = value - today
     out.update(value=round(value, 2), cash=round(accounts["cash"], 2), today_change=round(today, 2),
-               today_pct=round(100 * today / start, 2) if start else 0.0, positions=positions[:12])
+               today_pct=round(100 * today / start, 2) if start else 0.0, positions=positions[:12],
+               total_gain=round(gain, 2) if cost else None,
+               total_gain_pct=round(100 * gain / cost, 2) if cost else None)
     return out
 
 
@@ -364,6 +370,8 @@ def describe() -> str:
     parts = [f"Portfolio ${snap['value']:,.2f}, {sign(snap['today_change'])} today ({snap['today_pct']:+.2f}%)"]
     if snap["yesterday_change"] is not None:
         parts.append(f"{sign(snap['yesterday_change'])} yesterday")
+    if snap.get("total_gain") is not None:
+        parts.append(f"{sign(snap['total_gain'])} overall ({snap['total_gain_pct']:+.2f}%) on what you hold")
     parts.append(f"${snap['cash']:,.2f} in cash")
     movers = sorted(snap["positions"], key=lambda p: -abs(p["today_change"]))[:3]
     if movers:

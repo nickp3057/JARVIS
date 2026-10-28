@@ -260,8 +260,9 @@ RMS envelope from ElevenLabs audio drives the orb in real time using a monotonic
 - `next_event` — the next upcoming calendar event
 
 ### Charles Schwab *(new, read-only)*
-- `portfolio_summary` — live value, today's and yesterday's change, cash,
-  biggest movers (`integrations/schwab.py`). JARVIS can't trade.
+- `portfolio_summary` — live value, today's and yesterday's change, overall
+  gain/loss (`total_gain`/`total_gain_pct`: unrealized, live value of what's
+  held vs. Schwab's average price paid), cash, biggest movers (`integrations/schwab.py`). JARVIS can't trade.
 - JARVIS's own Schwab developer app (not the one for Nick's coworker), with
   "Accounts and Trading Production" + "Market Data Production" so trading can
   come later without a new app. Its registered callback is
@@ -676,7 +677,8 @@ CALENDAR_ALERT_LEAD_MIN=10  # warn this many minutes before a meeting
   live line under the weather. iOS 2.6 / build 108: login moved into an
   in-app web view that catches Schwab's redirect to the app's registered
   `https://127.0.0.1:8182` and hands it to `/api/schwab/finish` (Safari +
-  Tailscale callback was refused: the app's callback didn't match). Trading is the next step (see
+  Tailscale callback was refused: the app's callback didn't match).
+  iOS 2.7 / build 109: the Home card adds overall gain/loss. Trading is the next step (see
   FUTURE_SESSIONS.md).
 - **Wake-up schedule, no fade, snooze; one theme everywhere (TV 6.5, iOS 2.4 /
   build 106)** — the wake-up is a weekly schedule with its own time per day

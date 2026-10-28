@@ -98,6 +98,8 @@ class SchwabTests(unittest.TestCase):
         self.assertEqual(snap["value"], 2600.0)  # 10 x 190 replaces the 1800 Schwab last reported
         self.assertEqual(snap["today_change"], 150.0)  # 10 x (190 - 175), plus the fund's 0
         self.assertEqual(snap["positions"][0]["symbol"], "NVDA")
+        # Cost 10 x 120 + 200 x 1 = 1400; worth 1900 + 200 now.
+        self.assertEqual((snap["total_gain"], snap["total_gain_pct"]), (700.0, 50.0))
         self.assertIn("up $150.00 today", schwab.describe())
 
     def test_yesterday_uses_the_last_two_full_days(self) -> None:

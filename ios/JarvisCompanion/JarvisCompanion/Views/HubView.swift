@@ -383,6 +383,9 @@ struct HubView: View {
                     change(today, pct: p.todayPct, label: "today")
                     if let yesterday = p.yesterdayChange { change(yesterday, pct: nil, label: "yesterday") }
                 }
+                if let total = p.totalGain {
+                    change(total, pct: p.totalGainPct, label: "overall")
+                }
                 if let cash = p.cash {
                     Text("\(cash.formatted(.currency(code: "USD"))) cash")
                         .font(.caption.monospacedDigit()).foregroundStyle(.secondary)

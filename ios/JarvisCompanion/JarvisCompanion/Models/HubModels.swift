@@ -579,6 +579,9 @@ struct Portfolio: Decodable, Equatable {
     var todayChange: Double?
     var todayPct: Double?
     var yesterdayChange: Double?
+    /// Unrealized gain/loss on what's held now, against the average price paid.
+    var totalGain: Double?
+    var totalGainPct: Double?
     var positions: [Position]?
 
     enum CodingKeys: String, CodingKey {
@@ -587,6 +590,8 @@ struct Portfolio: Decodable, Equatable {
         case todayChange = "today_change"
         case todayPct = "today_pct"
         case yesterdayChange = "yesterday_change"
+        case totalGain = "total_gain"
+        case totalGainPct = "total_gain_pct"
     }
 
     /// Within a day of Schwab's weekly login running out (or past it).
