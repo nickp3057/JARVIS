@@ -167,8 +167,8 @@ def _play_async_and_wait(
     try:
         import winsound
     except ImportError:
-        # Non-Windows fallback: blocking PowerShell SoundPlayer (no interrupt support).
-        return _play_posix_blocking(wav_path)
+        # Linux / macOS: aplay / afplay, stoppable (interrupt_event, stop_playback).
+        return _play_posix_blocking(wav_path, interrupt_event)
 
     t0 = time.perf_counter()
     try:
@@ -252,6 +252,10 @@ def compute_rms_envelope(wav_path: Path, fps: int = 30) -> list[float]:
 
 def stop_playback() -> None:
     """Force-stop any in-progress TTS playback. Safe to call from any thread."""
+    with _player_lock:
+        player = _current_player
+    if player is not None and player.poll() is None:
+        player.terminate()
     try:
         import winsound
         winsound.PlaySound(None, winsound.SND_PURGE)
@@ -374,8 +378,14 @@ def alsa_device_args() -> list[str]:
     return ["-D", device] if device else []
 
 
-def _play_posix_blocking(wav_path: Path) -> bool:
-    """Linux/macOS playback via aplay (ALSA), with interrupt support."""
+# The aplay/afplay process playing right now, so stop_playback can end it.
+_current_player: subprocess.Popen | None = None
+_player_lock = threading.Lock()
+
+
+def _play_posix_blocking(wav_path: Path, interrupt_event: threading.Event | None = None) -> bool:
+    """Linux/macOS playback via aplay (ALSA) / afplay. Waits for the end, but
+    ``interrupt_event`` or ``stop_playback()`` stops it early."""
     player = "aplay" if sys.platform.startswith("linux") else "afplay"
     t0 = time.perf_counter()
     try:
@@ -393,7 +403,23 @@ def _play_posix_blocking(wav_path: Path) -> bool:
         return False
     log.debug("5. %s playback start (process spawn): %.0f ms", player, (time.perf_counter() - t0) * 1000)
 
-    proc.wait()
+    global _current_player
+    with _player_lock:
+        _current_player = proc
+    try:
+        while proc.poll() is None:
+            if interrupt_event is not None and interrupt_event.is_set():
+                proc.terminate()
+                proc.wait(timeout=2)
+                log.info("TTS interrupted by event.")
+                return True
+            time.sleep(0.04)
+    finally:
+        with _player_lock:
+            if _current_player is proc:
+                _current_player = None
+    if proc.returncode < 0:  # stopped by stop_playback (a signal), not a failure
+        return True
     if proc.returncode != 0:
         stderr = proc.stderr.read().decode(errors="replace") if proc.stderr else ""
         log.error("Audio playback failed (exit %s): %s", proc.returncode, stderr.strip())

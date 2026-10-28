@@ -426,6 +426,10 @@ def apply(proposal_id: str, *, confirmed: bool = False, value: Any = None, appro
         if proposal["action"].get("kind") == "stack_fix" and approved_by not in {"chat", "app"}:
             return (f"Repair {proposal_id} restarts or changes part of the NAS stack, so it needs Nick's own "
                     "approval: his \"yes\" or code in chat, or the Approve button in the app, sir.")
+        action = proposal["action"]
+        if action.get("kind") == "set_setting" and value is None and action.get("value") is None:
+            # Ask before marking it running, or it could never be applied with the value.
+            return f"Repair {proposal_id} needs a value for {action['key']}, sir. Tell me what to set it to."
         proposal["status"] = "running"
         _save(items)
 
@@ -444,17 +448,19 @@ def apply(proposal_id: str, *, confirmed: bool = False, value: Any = None, appro
         if action["kind"] == "set_setting":
             key = action["key"]
             new_value = value if value is not None else action.get("value")
-            if new_value is None:
-                return f"Repair {proposal_id} needs a value for {key}, sir. Tell me what to set it to."
             old_value = os.getenv(key, "")
             outcome = settings_mod.update_setting(key, new_value)
             if not outcome.startswith(f"{key} set to"):
                 raise RuntimeError(outcome)
             after = probe(subsystem)
             if after["reachable"] is False:
-                settings_mod.update_setting(key, old_value) if old_value else None
-                rolled_back = True
-                outcome += f" Still unreachable afterwards ({after['findings'][-1]}), so I rolled {key} back."
+                still = f" Still unreachable afterwards ({after['findings'][-1]})"
+                if old_value:
+                    settings_mod.update_setting(key, old_value)
+                    rolled_back = True
+                    outcome += f"{still}, so I rolled {key} back."
+                else:  # it was unset: nothing to go back to, so say so rather than claim a rollback
+                    outcome += f"{still}; {key} was unset before, so I left the new value in place."
         elif action["kind"] == "run_command":
             command = approved_commands().get(action["name"])
             if not command:
