@@ -41,11 +41,11 @@ class QuickCommandTests(unittest.TestCase):
 
     def test_on_off_and_brightness(self) -> None:
         quick_commands.run("Turn off the desk lights.")
-        self.control.assert_called_with("light.desk_lights_2", "off")
+        self.control.assert_called_with("light.desk_lights_2", "off", settle=False)  # no 2 s wait
         quick_commands.run("lamp on")
-        self.control.assert_called_with("switch.lamp", "on")
+        self.control.assert_called_with("switch.lamp", "on", settle=False)
         quick_commands.run("turn the fan on")
-        self.control.assert_called_with("fan.nicks_fan", "on")
+        self.control.assert_called_with("fan.nicks_fan", "on", settle=False)
         quick_commands.run("set the bedroom light to 40 percent")
         self.light.assert_called_with("light.bedroom_lights", brightness_pct=40)
 

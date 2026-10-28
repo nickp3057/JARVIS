@@ -20,7 +20,6 @@ from __future__ import annotations
 
 import os
 import queue
-import re
 import threading
 import time
 
@@ -33,6 +32,7 @@ from speech.chime import play_chime
 from speech.stt import Transcriber
 from speech.tts import speak, speak_stream
 from speech.wake import WAKE_THRESHOLD, WakeDetector
+from speech.wake_words import strip_wake_word
 
 log = get_logger(__name__)
 
@@ -64,23 +64,6 @@ INTERRUPT_RMS_THRESHOLD = float(os.getenv("INTERRUPT_RMS_THRESHOLD", "1500"))
 INTERRUPT_CONSECUTIVE_FRAMES = int(os.getenv("INTERRUPT_CONSECUTIVE_FRAMES", "3"))
 
 
-_WAKE_PATTERNS = [
-    re.compile(r"^\s*(?:hey|hi|hay|hi,)\s+jarvis[\s,.!?:;-]*", re.IGNORECASE),
-    re.compile(r"[\s,.!?:;-]+(?:hey\s+|hi\s+)?jarvis[\s,.!?:;-]*$", re.IGNORECASE),
-    re.compile(r"^\s*jarvis[\s,.!?:;-]+", re.IGNORECASE),
-    re.compile(r"^\s*jarvis\s*$", re.IGNORECASE),
-]
-
-
-def _strip_wake_word(text: str) -> str:
-    cleaned = text
-    for pattern in _WAKE_PATTERNS:
-        while True:
-            new = pattern.sub(" ", cleaned).strip()
-            if new == cleaned:
-                break
-            cleaned = new
-    return cleaned.strip()
 
 
 def _is_exit_phrase(text: str) -> bool:
@@ -293,7 +276,7 @@ def run_voice_loop(runtime: JarvisRuntime, *, greet: bool = True) -> int:
                 continue
             _log_stage("2. STT (Whisper)", time.perf_counter() - t0)
 
-            text = _strip_wake_word(raw_text).strip()
+            text = strip_wake_word(raw_text).strip()
 
             if text:
                 print(f"You: {text}")
@@ -353,7 +336,7 @@ def run_voice_loop(runtime: JarvisRuntime, *, greet: bool = True) -> int:
                     break
                 _log_stage("2. STT (Whisper)", time.perf_counter() - t0)
 
-                follow_text = _strip_wake_word(follow_text).strip()
+                follow_text = strip_wake_word(follow_text).strip()
                 if not follow_text:
                     break
 

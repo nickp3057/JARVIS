@@ -711,8 +711,11 @@ _HA_SUCCESS_MARKER = "command sent"       # call_service success reply
 _QBT_SUCCESS_MARKER = "accepted for"      # manage_torrent success reply
 
 
-def home_control(entity_id: str, action: str) -> dict[str, Any]:
+def home_control(entity_id: str, action: str, settle: bool = True) -> dict[str, Any]:
     """Turn one allowlisted Home Assistant entity on or off.
+
+    ``settle`` waits (up to 2 s) for HA to report the new state, which the
+    apps' switches need; the room voice skips it so its jingle isn't held up.
 
     Delegates to ``call_discovered_service`` so all its guards (identifier
     validation, blocked admin domains, confirmation-gated domains) stay in
@@ -732,7 +735,8 @@ def home_control(entity_id: str, action: str) -> dict[str, Any]:
         return {"error": message, "entity_id": entity_id, "state": None}
 
     invalidate("entities")
-    return {"error": "", "entity_id": entity_id, "state": _settled_state(entity_id, action)}
+    state = _settled_state(entity_id, action) if settle else None
+    return {"error": "", "entity_id": entity_id, "state": state}
 
 
 def set_light(entity_id: str, brightness_pct: int | None = None,
@@ -801,12 +805,17 @@ def _home_scenes_uncached() -> dict[str, Any]:
     return {"error": "", "scenes": scenes, "last": last}
 
 
+def _scene_ids(listing: dict[str, Any]) -> set[str]:
+    return {s["entity_id"] for s in listing.get("scenes", [])}
+
+
 def activate_scene(entity_id: str) -> dict[str, Any]:
     """Run one saved scene. ValueError (a 400) unless it's in ``home_scenes``."""
     entity_id = (entity_id or "").strip().lower()
-    known = {s["entity_id"] for s in _home_scenes_uncached()["scenes"]}
-    if entity_id not in known:
-        raise ValueError("not a saved Home Assistant scene")
+    if entity_id not in _scene_ids(home_scenes()):  # cached; a scene made since needs a fresh look
+        invalidate("scenes")
+        if entity_id not in _scene_ids(home_scenes()):
+            raise ValueError("not a saved Home Assistant scene")
     message = call_discovered_service("scene", "turn_on", entity_id=entity_id)
     invalidate("scenes")
     invalidate("entities")

@@ -760,6 +760,12 @@ CALENDAR_ALERT_LEAD_MIN=10  # warn this many minutes before a meeting
   Resume (tested on a movie and an episode). Plex keeps Nick signed in, so
   the PIN auto-entry (`PlexAutoLogin.run`) is removed; `PlexWatch` keeps
   pressing Watch for "play ..." voice requests.
+- **Faster home calls (2026-10-28 cleanup)** — HA's service catalogue
+  (`get_services`, ~60 KB, ~45 ms) is cached for 5 minutes and re-read once
+  when a service isn't in it; `status_hub.home_control(..., settle=False)`
+  lets the room voice skip the up-to-2 s wait for HA to report the new state
+  (the apps still wait, for their switches); scene activation validates
+  against the cached list. Wake-word stripping lives in `speech/wake_words.py`.
 - **Room voice: "Hey JARVIS" on the Optiplex, shown on the iPad (iOS 5.0 /
   build 135)** — `speech/room_voice.py` runs inside Core when `ROOM_VOICE=1`
   (started from the server lifespan, same runtime as the apps). openWakeWord

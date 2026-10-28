@@ -18,7 +18,10 @@ from app import status_hub
 
 _FILLER = re.compile(r"\b(please|the|my|jarvis|hey|can you|could you|would you|for me|now|mode|scene)\b")
 _SPACES = re.compile(r"\s+")
-_ON_OFF = re.compile(r"^(?:turn|switch|shut|put)\s+(on|off)\s+(.+)$|^(?:turn|switch|shut|put)\s+(.+?)\s+(on|off)$|^(.+?)\s+(on|off)$")
+_VERB = r"(?:turn|switch|shut|put)\s+"
+# "turn off the lamp", "turn the lamp off", "lamp off"
+_ON_OFF = (re.compile(rf"^{_VERB}(?P<action>on|off)\s+(?P<target>.+)$"),
+           re.compile(rf"^(?:{_VERB})?(?P<target>.+?)\s+(?P<action>on|off)$"))
 _LEVEL = re.compile(r"^(?:set|dim|turn|put|make)?\s*(.+?)\s+(?:to|at)\s+(\d{1,3})\s*(?:%|percent)?$")
 _SCENE_VERBS = re.compile(r"^(?:run|start|activate|set|turn on|do|it's|its|time for)\s+")
 
@@ -81,14 +84,12 @@ def run(text: str) -> QuickResult | None:
                                result.get("error", ""))
         return None
 
-    on_off = _ON_OFF.match(text)
+    on_off = _ON_OFF[0].match(text) or _ON_OFF[1].match(text)
     if on_off:
-        groups = on_off.groups()
-        action, target = (groups[0], groups[1]) if groups[0] else (
-            (groups[3], groups[2]) if groups[3] else (groups[5], groups[4]))
-        entity = _match_entity(target, entities)
+        action = on_off["action"]
+        entity = _match_entity(on_off["target"], entities)
         if entity:
-            result = status_hub.home_control(entity["entity_id"], action)
+            result = status_hub.home_control(entity["entity_id"], action, settle=False)
             return QuickResult(not result.get("error"), f"{entity['entity_id']} {action}",
                                result.get("error", ""))
     return None

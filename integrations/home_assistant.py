@@ -13,6 +13,7 @@ import json
 import math
 import re
 import threading
+import time
 from typing import Any
 from urllib.parse import urlparse, urlunparse
 
@@ -102,9 +103,32 @@ def get_states() -> tuple[bool, Any]:
     return _request("GET", "/api/states")
 
 
-def get_services() -> tuple[bool, Any]:
-    """Return Home Assistant's live service/action catalogue."""
-    return _request("GET", "/api/services")
+# The service catalogue (~60 KB) barely changes, but every guarded call
+# checks it; re-reading it each time cost ~45 ms per voice command.
+_SERVICES_TTL_S = 300.0
+_services_cache: tuple[float, Any] | None = None
+_services_lock = threading.Lock()
+
+
+def get_services(fresh: bool = False) -> tuple[bool, Any]:
+    """Home Assistant's service/action catalogue, cached for five minutes
+    (``fresh`` skips the cache). Failures are never cached."""
+    global _services_cache
+    with _services_lock:
+        cached = _services_cache
+    if not fresh and cached is not None and time.monotonic() - cached[0] < _SERVICES_TTL_S:
+        return True, cached[1]
+    success, payload = _request("GET", "/api/services")
+    if success and isinstance(payload, list):
+        with _services_lock:
+            _services_cache = (time.monotonic(), payload)
+    return success, payload
+
+
+def clear_services_cache() -> None:
+    global _services_cache
+    with _services_lock:
+        _services_cache = None
 
 
 def list_automations() -> tuple[bool, list[dict[str, Any]] | str]:
@@ -286,9 +310,9 @@ def call_service(
     return False, str(payload)
 
 
-def list_services(domain: str | None = None) -> tuple[bool, list[str] | str]:
+def list_services(domain: str | None = None, fresh: bool = False) -> tuple[bool, list[str] | str]:
     """Return discoverable ``domain.service`` names, optionally filtered."""
-    success, result = get_services()
+    success, result = get_services(fresh)
     if not success:
         return False, str(result)
     if not isinstance(result, list):
@@ -384,7 +408,9 @@ def call_discovered_service(
     if not success:
         return f"Could not discover Home Assistant services: {available}"
     full_name = f"{domain}.{service}"
-    if full_name not in available:
+    if full_name not in available:  # maybe added since the cache: look once more
+        success, available = list_services(domain, fresh=True)
+    if not success or full_name not in available:
         return f"Home Assistant does not advertise the service {full_name}."
 
     success, message = call_service(domain, service, entity_id, service_data)

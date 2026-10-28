@@ -33,6 +33,7 @@ from brain import voice_presence
 from jarvis_logger import get_logger
 from speech import room_sounds
 from speech.audio import FRAME_MS, RMS_THRESHOLD, SAMPLE_RATE, MicStream, rms
+from speech.wake_words import strip_wake_word
 
 log = get_logger(__name__)
 
@@ -51,14 +52,19 @@ def _seconds(name: str, default: float) -> float:
 
 
 class RoomVoice:
-    def __init__(self, runtime) -> None:  # noqa: ANN001 (JarvisRuntime; avoids an import cycle)
+    """The listen -> transcribe -> act loop. Detector and transcribers can be
+    passed in (tests); by default they are openWakeWord and faster-whisper."""
+
+    def __init__(self, runtime, *, detector=None, final=None, live=None) -> None:  # noqa: ANN001
         from speech.stt import Transcriber
         from speech.wake import WakeDetector
-        self.runtime = runtime
-        self.detector = WakeDetector()
-        self.final = Transcriber()
-        live_model = os.getenv("VOICE_LIVE_MODEL", "tiny.en").strip()
-        self.live = Transcriber(model_size=live_model) if live_model and live_model != "off" else None
+        self.runtime = runtime  # JarvisRuntime (not imported: avoids a cycle)
+        self.detector = detector or WakeDetector()
+        self.final = final or Transcriber()
+        if live is None:
+            live_model = os.getenv("VOICE_LIVE_MODEL", "tiny.en").strip()
+            live = Transcriber(model_size=live_model) if live_model and live_model != "off" else None
+        self.live = live
         self.stop = threading.Event()
 
     # --- lifecycle -----------------------------------------------------------
@@ -174,10 +180,9 @@ class RoomVoice:
         """Transcribe and act. True keeps a follow-up window open."""
         from speech import quick_commands
         from speech.tts import speak
-        from speech.voice_loop import _strip_wake_word
         voice_presence.update("thinking")
         started = time.perf_counter()
-        text = _strip_wake_word(self.final.transcribe(audio)).strip()
+        text = strip_wake_word(self.final.transcribe(audio)).strip()
         log.info("Room voice heard %r (%.0f ms)", text, (time.perf_counter() - started) * 1000)
         voice_presence.update(transcript=text)
         if not text:
@@ -238,9 +243,8 @@ class _LiveCaptions:
         threading.Thread(target=self._run, args=(audio,), daemon=True).start()
 
     def _run(self, audio: np.ndarray) -> None:
-        from speech.voice_loop import _strip_wake_word
         try:
-            text = _strip_wake_word(self.model.transcribe(audio)).strip()
+            text = strip_wake_word(self.model.transcribe(audio)).strip()
             # A late pass must not overwrite the final transcript.
             if text and not self.stopped and voice_presence.current()["phase"] == "listening":
                 voice_presence.update(transcript=text)

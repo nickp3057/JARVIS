@@ -15,6 +15,10 @@ from integrations import home_assistant as ha
 
 
 class HomeAssistantTests(unittest.TestCase):
+    def setUp(self) -> None:
+        ha.clear_services_cache()  # the catalogue cache must not leak between tests
+        self.addCleanup(ha.clear_services_cache)
+
     def test_explicit_off_wins_over_location_word_on(self) -> None:
         samples = (
             "turn off the light on my desk",
