@@ -668,3 +668,14 @@ struct Portfolio: Decodable, Equatable {
         return loginExpiresAt - Date().timeIntervalSince1970 < 24 * 3600
     }
 }
+
+/// The room voice right now (`/api/voice/stream`): phase is idle, listening,
+/// thinking, speaking, done or error; transcript fills in live while listening.
+struct VoiceState: Decodable, Equatable {
+    let seq: Int
+    let phase: String
+    let transcript: String
+    let reply: String
+
+    static let idle = VoiceState(seq: 0, phase: "idle", transcript: "", reply: "")
+}

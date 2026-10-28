@@ -27,6 +27,7 @@ struct RoomView: View {
     @State private var asleep = false
     /// The screen's brightness before the night screen, to put back.
     @State private var savedBrightness: CGFloat?
+    @ObservedObject private var voice = VoicePresence.shared
 
     var body: some View {
         GeometryReader { geo in
@@ -72,6 +73,8 @@ struct RoomView: View {
             }
         }
         .onChange(of: asleep) { _, sleeping in setDimmed(sleeping) }
+        // "Hey JARVIS" lights the screen back up (the overlay shows above it).
+        .onChange(of: voice.active) { _, active in if active { asleep = false } }
         .task {
             if !holdsPolling {
                 holdsPolling = true
@@ -106,7 +109,7 @@ struct RoomView: View {
 
     /// After dark with every light and lamp off (and Keep screen on).
     private var roomIsDark: Bool {
-        guard keepAwake, nightScreen, scenePhase == .active, model.sun == "below_horizon",
+        guard keepAwake, nightScreen, scenePhase == .active, !voice.active, model.sun == "below_horizon",
               let entities = model.entities.value, model.entities.failureText == nil else { return false }
         let sources = entities.filter { $0.domain == "light" || $0.friendlyName.lowercased().contains("lamp") }
         return !sources.isEmpty && sources.allSatisfy { !(model.pendingEntityStates[$0.entityID] ?? $0.isOn) }

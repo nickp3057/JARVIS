@@ -152,6 +152,18 @@ of each group.
   the Optiplex. Later: build a real `scene.good_morning` in HA (colours,
   brightness, maybe blinds) and set `WAKE_UP_SCENE`.
 - Schwab shows Live after the open (confirmed 2026-10-28).
+- **Room voice (built 2026-10-28, not run on the Optiplex yet).** Turn on
+  at home, in the Optiplex `.env`:
+  `ROOM_VOICE=1`, `AUDIO_OUTPUT_DEVICE=plughw:1,0`, `WHISPER_MODEL=base.en`
+  (small.en is too slow on the i5-6500T), then restart jarvis-api and watch
+  `journalctl -u jarvis-api -f` ("Room voice listening", "Room voice heard
+  ... (N ms)"). First check the speaker: `aplay -D plughw:1,0
+  ~/jarvis/memory/sounds/done.wav` (or `speaker-test -D plughw:1,0 -c 2 -t
+  wav`); if the speakers are on HDMI use that card instead. Tune
+  `MIC_RMS_THRESHOLD` (default 350) if it cuts you off or never stops, and
+  `WAKE_THRESHOLD` if it misfires. Measure: words end → jingle; aim < 1.5 s.
+  Next ideas: speak reminders/timers on the room speaker, barge-in (stop
+  talking when Nick speaks), cache "Yes, sir." audio, stream TTS.
 - **Scenes made 2026-10-28 (not yet run):** Good Morning, Study, Movie,
   Game Time, Goodnight, Peace, Rainbow. At home: tap each once and adjust.
   Check the rainbows come up when a light was off (scene sets on + DIY

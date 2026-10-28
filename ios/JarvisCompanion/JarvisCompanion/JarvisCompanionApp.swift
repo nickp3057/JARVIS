@@ -23,19 +23,25 @@ struct JarvisCompanionApp: App {
         WindowGroup {
             RootView(chat: chat, hub: hub)
                 .environmentObject(settings)
+                // onChange(of: scenePhase) misses the first .active at launch.
+                .task { VoicePresence.shared.start(settings) }
                 .onChange(of: scenePhase) { _, phase in
                     switch phase {
                     case .active:
                         chat.appBecameActive()
                         if settings.isConfigured { Task { await hub.refreshNow() } }
                         Task { await PushRegistrar.shared.refresh() }
+                        VoicePresence.shared.start(settings)  // iPad: "Hey JARVIS" overlay
                     case .inactive, .background:
                         chat.appBecameInactive()
+                        if phase == .background { VoicePresence.shared.stop() }
                     @unknown default:
                         break
                     }
                 }
                 .onChange(of: settings.connectionIdentity) {
+                    VoicePresence.shared.stop()
+                    VoicePresence.shared.start(settings)
                     PushRegistrar.shared.connectionChanged()
                     Task { await PushRegistrar.shared.refresh() }
                 }

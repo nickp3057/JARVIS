@@ -628,6 +628,14 @@ JARVIS_API_TOKEN=           # required bearer token
 JARVIS_SERVER_HOST=0.0.0.0
 JARVIS_SERVER_PORT=8000
 WAKE_UP_LIGHTS=1            # I'm up (phone or TV) turns on every light (strip segments skipped); 0 = off
+ROOM_VOICE=0                # 1 = "Hey JARVIS" on the Optiplex mic/speakers inside Core (speech/room_voice.py)
+AUDIO_OUTPUT_DEVICE=        # ALSA device for aplay; Optiplex: plughw:1,0 (card 0 is the USB mic, no output)
+MIC_DEVICE=                 # sounddevice input name/index; empty = ALSA default (the CMTECK USB mic)
+VOICE_LIVE_MODEL=tiny.en    # Whisper model for live captions on the iPad; "off" to skip
+VOICE_SILENCE_END_MS=550    # silence that ends what you said
+VOICE_START_TIMEOUT_S=4     # wait after the wake word before giving up
+VOICE_FOLLOWUP_S=5          # no-wake-word follow-up window after a spoken answer
+VOICE_PREROLL_S=2           # audio kept from before the wake word ("game time, Jarvis")
 LIGHT_RAINBOWS=             # light=select:DIY option pairs for the Rainbow button (defaults to Nick's strip + desk)
 WAKE_UP_SCENE=              # optional HA scene./script. to run instead; unset uses scene.good_morning when HA has it
 # Companion dashboard (read-only status hub endpoints)
@@ -752,6 +760,26 @@ CALENDAR_ALERT_LEAD_MIN=10  # warn this many minutes before a meeting
   Resume (tested on a movie and an episode). Plex keeps Nick signed in, so
   the PIN auto-entry (`PlexAutoLogin.run`) is removed; `PlexWatch` keeps
   pressing Watch for "play ..." voice requests.
+- **Room voice: "Hey JARVIS" on the Optiplex, shown on the iPad (iOS 5.0 /
+  build 135)** — `speech/room_voice.py` runs inside Core when `ROOM_VOICE=1`
+  (started from the server lifespan, same runtime as the apps). openWakeWord
+  `hey_jarvis` → soft "listen" sound → record to ~0.55 s of silence while a
+  tiny Whisper (`VOICE_LIVE_MODEL`) captions live → final transcript
+  (`WHISPER_MODEL`, base.en recommended on the i5-6500T) →
+  `speech/quick_commands.py` runs plain scenes / on-off / "X to 40%" straight
+  through `status_hub` with a jingle (`speech/room_sounds.py`, no words);
+  anything else is `runtime.respond(text, spoken=True)`, which adds a
+  "spoken reply: one short sentence, 'Done.' after a home action" hint to the
+  turn context; a bare "Done." after tools becomes the jingle. A spoken
+  answer opens a short follow-up window without the wake word. Wake word at
+  the end works ("game time, Jarvis") via a 2 s preroll. State goes to
+  `brain/voice_presence.py` (not the event bus: captions would flood its
+  history) and out on `GET /api/voice/stream` (SSE) / `GET /api/voice/state`
+  (`status:read`). The iPad (`VoicePresence`, `VoiceOverlay.swift`) shows a
+  window above everything — core mark, "Listening…", the live transcript,
+  then the reply or a tick — and wakes the night screen. Checked in the iPad
+  mini simulator against a local Core cycling fake states; the Optiplex mic
+  and speaker path is untested.
 - **Nick's room scenes in HA, Peace on the iPad (iOS 4.12 / build 134)** —
   made 2026-10-28 through HA's scene config API, to Nick's spec: Good
   Morning, Study, Movie, Game Time, Goodnight, Peace (plus Rainbow). Rules:

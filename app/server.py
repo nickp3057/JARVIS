@@ -26,7 +26,7 @@ from brain.debug_reports import create_debug_report
 from brain.agent import stream_round_breaks
 from brain.runtime import JarvisRuntime
 from app import client_tokens
-from brain import event_bus
+from brain import event_bus, voice_presence
 from integrations import media_doctor, media_requests
 from brain import incident_reports, maintenance, self_repair
 from jarvis_logger import get_logger
@@ -42,11 +42,15 @@ _runtime_lock = threading.Lock()
 async def lifespan(_: FastAPI):
     """Start scheduled monitoring even when no companion has connected yet."""
     from integrations.nas_stack import enabled
+    from speech import room_voice
     if enabled("ARR_STACK_MONITOR_ENABLED") or os.getenv("JARVIS_HEALTHCHECKS_URL", "").strip():
         await asyncio.to_thread(runtime)
+    if room_voice.enabled():  # "Hey JARVIS" on the Optiplex's mic, same runtime as the apps
+        room_voice.start(await asyncio.to_thread(runtime))
     try:
         yield
     finally:
+        room_voice.stop()
         if _runtime is not None:
             await asyncio.to_thread(_runtime.stop_monitors)
 
@@ -712,6 +716,37 @@ def maintenance_delete_entry(task_id: int, entry_id: int, _: None = Depends(auth
         raise HTTPException(status_code=404, detail="Unknown log entry")
     _maintenance_changed()
     return Response(status_code=204)
+
+
+@app.get("/api/voice/state")
+def voice_state(_: None = _status_read) -> dict[str, object]:
+    """What the room voice is doing (brain/voice_presence.py)."""
+    return voice_presence.current()
+
+
+@app.get("/api/voice/stream")
+async def voice_stream(request: Request, _: None = _status_read) -> StreamingResponse:
+    """Server-sent events of the room voice's state: one ``voice`` event per
+    change (phase, live transcript, reply), keep-alive every 15 s. The iPad
+    shows JARVIS listening and the live transcript from this."""
+    async def events():
+        state = voice_presence.current()
+        yield f"event: voice\ndata: {json.dumps(state)}\n\n"
+        quiet_since = time.monotonic()
+        # Polls the in-memory state (cheap) rather than parking a worker
+        # thread per screen; 80 ms keeps captions live.
+        while not await request.is_disconnected():
+            await asyncio.sleep(0.08)
+            latest = voice_presence.current()
+            if latest["seq"] != state["seq"]:
+                state, quiet_since = latest, time.monotonic()
+                yield f"event: voice\ndata: {json.dumps(state)}\n\n"
+            elif time.monotonic() - quiet_since > _SSE_KEEPALIVE_S:
+                quiet_since = time.monotonic()
+                yield ": keep-alive\n\n"
+
+    return StreamingResponse(events(), media_type="text/event-stream",
+                             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
 
 @app.get("/api/clients/events")

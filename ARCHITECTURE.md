@@ -615,3 +615,11 @@ ASGI lifespan creates the runtime before accepting requests. Monitor startup
 therefore does not depend on opening the phone app after a reboot. A creation
 lock prevents simultaneous first requests from creating duplicate runtimes;
 server shutdown signals the monitor stop event.
+
+## Room voice (2026-10-28)
+
+`speech/room_voice.py` is a Presence-layer front end like the GUI and the
+apps: it runs inside Core on the shared runtime (`ROOM_VOICE=1`), uses
+`runtime.respond(..., spoken=True)` for conversation and `app.status_hub`
+for its quick home commands, and reports its state through
+`brain/voice_presence.py` (`/api/voice/stream`) so screens can show it.

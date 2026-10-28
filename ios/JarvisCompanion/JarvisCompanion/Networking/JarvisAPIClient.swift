@@ -376,6 +376,26 @@ struct JarvisAPIClient {
         }
     }
 
+    /// The room voice's live state (`GET /api/voice/stream`, server-sent
+    /// events): calls `onState` for every change until cancelled or dropped.
+    func streamVoice(onState: @escaping @MainActor (VoiceState) -> Void) async throws {
+        var request = request(path: "api/voice/stream")
+        request.timeoutInterval = 60  // Core sends a keep-alive every 15 s
+        request.setValue("text/event-stream", forHTTPHeaderField: "Accept")
+        do {
+            let (bytes, response) = try await session.bytes(for: request)
+            _ = try validate(response)
+            for try await line in bytes.lines {
+                try Task.checkCancellation()
+                guard line.hasPrefix("data: "), let data = line.dropFirst(6).data(using: .utf8),
+                      let state = try? JSONDecoder().decode(VoiceState.self, from: data) else { continue }
+                await onState(state)
+            }
+        } catch let error as URLError {
+            throw JarvisAPIError.transport(error)
+        }
+    }
+
     func checkHealth() async throws {
         let request = request(path: "health")
         let (data, response) = try await session.data(for: request)

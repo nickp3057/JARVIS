@@ -246,6 +246,9 @@ def _get_client() -> Any | None:
 class JarvisAgent:
     """Holds conversation state across turns within one session."""
 
+    # Set by the room voice for one turn: the reply is spoken aloud, so short.
+    spoken_turn = False
+
     def __init__(self) -> None:
         self._client = _get_client()
         self._lock = RLock()
@@ -266,8 +269,6 @@ class JarvisAgent:
         self._recent_tool_context: dict[str, str] = {}
         # Tools executed during the most recent turn, for background learning.
         self._last_turn_tools: list[tuple[str, dict[str, Any]]] = []
-        # Set by the room voice for one turn: the reply is spoken aloud.
-        self.spoken_turn = False
 
     # --- Public ----------------------------------------------------------
 
