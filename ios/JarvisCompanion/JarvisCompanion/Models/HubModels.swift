@@ -376,9 +376,11 @@ struct LightDetails: Decodable, Equatable {
     let kelvin: Int?
     let minKelvin: Int?
     let maxKelvin: Int?
+    /// Nick's own Govee rainbow is set up for this light (Core's LIGHT_RAINBOWS).
+    let rainbow: Bool?
 
     enum CodingKeys: String, CodingKey {
-        case dimmable, color, temperature, rgb, kelvin
+        case dimmable, color, temperature, rgb, kelvin, rainbow
         case brightnessPct = "brightness_pct"
         case minKelvin = "min_kelvin"
         case maxKelvin = "max_kelvin"

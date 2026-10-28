@@ -306,10 +306,12 @@ final class HubViewModel: ObservableObject {
     // MARK: - Light brightness and colour
 
     /// Brightness and/or colour for one light; re-reads the room after.
-    func setLight(_ entity: HomeEntity, brightness: Int? = nil, rgb: [Int]? = nil, kelvin: Int? = nil) {
+    func setLight(_ entity: HomeEntity, brightness: Int? = nil, rgb: [Int]? = nil, kelvin: Int? = nil,
+                  rainbow: Bool = false) {
         Task {
             do {
-                let error = try await client().setLight(entity.entityID, brightness: brightness, rgb: rgb, kelvin: kelvin)
+                let error = try await client().setLight(entity.entityID, brightness: brightness, rgb: rgb,
+                                                        kelvin: kelvin, rainbow: rainbow)
                 if !error.isEmpty { actionError = error }
             } catch {
                 actionError = error.localizedDescription

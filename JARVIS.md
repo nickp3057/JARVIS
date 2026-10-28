@@ -628,6 +628,7 @@ JARVIS_API_TOKEN=           # required bearer token
 JARVIS_SERVER_HOST=0.0.0.0
 JARVIS_SERVER_PORT=8000
 WAKE_UP_LIGHTS=1            # I'm up (phone or TV) turns on every light (strip segments skipped); 0 = off
+LIGHT_RAINBOWS=             # light=select:DIY option pairs for the Rainbow button (defaults to Nick's strip + desk)
 WAKE_UP_SCENE=              # optional HA scene./script. entity to run instead (e.g. scene.good_morning)
 # Companion dashboard (read-only status hub endpoints)
 PLEX_URL=                   # Plex base URL for /api/links + /api/status/services
@@ -751,6 +752,14 @@ CALENDAR_ALERT_LEAD_MIN=10  # warn this many minutes before a meeting
   Resume (tested on a movie and an episode). Plex keeps Nick signed in, so
   the PIN auto-entry (`PlexAutoLogin.run`) is removed; `PlexWatch` keeps
   pressing Watch for "play ..." voice requests.
+- **Rainbow in the light sheet, on phone and iPad (iOS 4.11 / build 133)** —
+  lights in `LIGHT_RAINBOWS` (default: Nick Strip Lights → its DIY "Real
+  Rainbow", Desk Lights → "New Rainbow", via `select.<light>_diy_scene`)
+  report `light.rainbow: true`; `POST /api/home/light {"rainbow": true}`
+  turns the light on and picks that DIY scene. The sheet shows a Rainbow
+  button; the phone's light tiles (Hub/Home quick actions) now open the same
+  `LightSheet` on long-press. HA also has `scene.rainbow` (made 2026-10-28
+  through HA's scene config API) doing both lights at once.
 - **Light brightness/colour and the iPad night screen (iOS 4.8 / build 130)**
   — `/api/home/entities` now gives each light a `light` block (dimmable,
   color, temperature, brightness_pct, rgb, kelvin, min/max kelvin) and the

@@ -1,6 +1,7 @@
 import SwiftUI
 
-/// Long-press a light on the iPad's Room tab: brightness, whites and colours
+/// Long-press a light (iPad Room tab, phone Home tab): brightness, Rainbow
+/// (Nick's own Govee rainbow, where Core has one set), whites and colours
 /// for that one light (`POST /api/home/light`). Shows only what the light
 /// supports; the bedroom light is brightness only.
 struct LightSheet: View {
@@ -71,6 +72,20 @@ struct LightSheet: View {
                         }
                         .tint(JarvisTheme.amber)
                     }
+                }
+
+                if light.rainbow == true {
+                    Button { model.setLight(entity, rainbow: true) } label: {
+                        Label("Rainbow", systemImage: "rainbow")
+                            .font(.headline)
+                            .foregroundStyle(.white)
+                            .frame(maxWidth: .infinity, minHeight: 54)
+                            .background(LinearGradient(colors: [.red, .orange, .yellow, .green, .cyan, .blue, .purple],
+                                                       startPoint: .leading, endPoint: .trailing)
+                                .opacity(0.85), in: .rect(cornerRadius: 14))
+                            .shadow(color: .black.opacity(0.35), radius: 1)
+                    }
+                    .buttonStyle(CockpitButtonStyle())
                 }
 
                 if light.temperature {

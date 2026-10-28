@@ -745,21 +745,24 @@ struct JarvisAPIClient {
         }
     }
 
-    func setLight(_ entityID: String, brightness: Int?, rgb: [Int]?, kelvin: Int?) async throws -> String {
+    func setLight(_ entityID: String, brightness: Int?, rgb: [Int]?, kelvin: Int?,
+                  rainbow: Bool = false) async throws -> String {
         struct Body: Encodable {
             let entityID: String
             let brightnessPct: Int?
             let rgb: [Int]?
             let kelvin: Int?
+            let rainbow: Bool
             enum CodingKeys: String, CodingKey {
-                case rgb, kelvin
+                case rgb, kelvin, rainbow
                 case entityID = "entity_id"
                 case brightnessPct = "brightness_pct"
             }
         }
         struct Result: Decodable { let error: String }
         return try await postJSON(Result.self, path: "api/home/light",
-                                  body: Body(entityID: entityID, brightnessPct: brightness, rgb: rgb, kelvin: kelvin)).error
+                                  body: Body(entityID: entityID, brightnessPct: brightness, rgb: rgb, kelvin: kelvin,
+                                            rainbow: rainbow)).error
     }
 
     func homeScenes() async throws -> HomeScenes {

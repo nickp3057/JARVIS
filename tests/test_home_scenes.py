@@ -65,6 +65,12 @@ class LightControlTests(unittest.TestCase):
             self.assertEqual(status_hub.set_light("light.desk", 40, kelvin=2700)["error"], "")
         call.assert_called_once_with("light", "turn_on", entity_id="light.desk",
                                      service_data={"brightness_pct": 40, "color_temp_kelvin": 2700})
+        with patch.object(status_hub, "call_discovered_service", return_value="Turn On command sent.") as call, \
+                patch.dict("os.environ", {"LIGHT_RAINBOWS": "light.desk=select.desk_diy_scene:New Rainbow"}):
+            self.assertEqual(status_hub.set_light("light.desk", rainbow=True)["error"], "")
+        self.assertEqual(call.call_args.args[:2], ("select", "select_option"))
+        self.assertEqual(call.call_args.kwargs, {"entity_id": "select.desk_diy_scene",
+                                                  "service_data": {"option": "New Rainbow"}})
         for bad in ("switch.lamp", "light.kitchen"):
             with self.assertRaises(ValueError):
                 status_hub.set_light(bad, 50)

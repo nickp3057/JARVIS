@@ -659,14 +659,32 @@ def _home_entities_uncached() -> dict[str, Any]:
             "state": str(entity.get("state", "unknown")),
         }
         if entity_id.startswith("light."):
-            item["light"] = _light_details(attributes)
+            item["light"] = _light_details(attributes, entity_id)
         entities.append(item)
     # The iPad's night screen dims only after dark (sun.sun), lights all off.
     sun = by_id.get("sun.sun")
     return {"error": "", "entities": entities, "sun": str(sun.get("state", "")) if sun else ""}
 
 
-def _light_details(attributes: dict[str, Any]) -> dict[str, Any]:
+# Nick's rainbows are Govee DIY scenes picked through each light's dropdown
+# (the Govee app's own pick never shows in HA). LIGHT_RAINBOWS overrides:
+# "light.x=select.x_diy_scene:Name,...".
+_DEFAULT_RAINBOWS = ("light.nick_strip_lights=select.nick_strip_lights_diy_scene:Real Rainbow,"
+                     "light.desk_lights_2=select.desk_lights_diy_scene:New Rainbow")
+
+
+def rainbows() -> dict[str, tuple[str, str]]:
+    """light entity -> (DIY-scene select, option) for the Rainbow button."""
+    found = {}
+    for pair in os.getenv("LIGHT_RAINBOWS", _DEFAULT_RAINBOWS).split(","):
+        light, _, target = pair.partition("=")
+        select, _, option = target.partition(":")
+        if light.strip() and select.strip().startswith("select.") and option.strip():
+            found[light.strip().lower()] = (select.strip(), option.strip())
+    return found
+
+
+def _light_details(attributes: dict[str, Any], entity_id: str = "") -> dict[str, Any]:
     """What a light can do and where it is now, for the brightness/colour sheet."""
     modes = [str(m) for m in attributes.get("supported_color_modes") or []]
     brightness = attributes.get("brightness")
@@ -680,6 +698,7 @@ def _light_details(attributes: dict[str, Any]) -> dict[str, Any]:
         "kelvin": attributes.get("color_temp_kelvin"),
         "min_kelvin": attributes.get("min_color_temp_kelvin"),
         "max_kelvin": attributes.get("max_color_temp_kelvin"),
+        "rainbow": entity_id in rainbows(),
     }
 
 
@@ -717,12 +736,24 @@ def home_control(entity_id: str, action: str) -> dict[str, Any]:
 
 
 def set_light(entity_id: str, brightness_pct: int | None = None,
-              rgb: list[int] | None = None, kelvin: int | None = None) -> dict[str, Any]:
-    """Brightness and/or colour for one allowlisted light (turns it on).
-    ValueError (a 400) for anything off the allowlist or not a light."""
+              rgb: list[int] | None = None, kelvin: int | None = None,
+              rainbow: bool = False) -> dict[str, Any]:
+    """Brightness and/or colour (or Nick's rainbow) for one allowlisted light,
+    turning it on. ValueError (a 400) for anything off the allowlist or not a light."""
     entity_id = (entity_id or "").strip().lower()
     if not entity_id.startswith("light.") or entity_id not in _dashboard_allowlist():
         raise ValueError("entity_id is not an allowlisted light")
+    if rainbow:
+        if entity_id not in rainbows():
+            raise ValueError("this light has no rainbow set (LIGHT_RAINBOWS)")
+        select, option = rainbows()[entity_id]
+        call_discovered_service("light", "turn_on", entity_id=entity_id,
+                                service_data={"brightness_pct": brightness_pct or 100})
+        message = call_discovered_service("select", "select_option", entity_id=select,
+                                          service_data={"option": option})
+        invalidate("entities")
+        ok = _HA_SUCCESS_MARKER in message.lower()
+        return {"error": "" if ok else message, "entity_id": entity_id}
     data: dict[str, Any] = {}
     if brightness_pct is not None:
         data["brightness_pct"] = max(1, min(100, int(brightness_pct)))

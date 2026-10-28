@@ -27,6 +27,8 @@ struct HubView: View {
     }
     @State private var holdsPolling = false
     @State private var schwabLoggingIn = false
+    /// Long-pressed light: its brightness/colour/rainbow sheet.
+    @State private var lightSheet: LightSheetID?
     @State private var showingRemote = false
     private let focus: HubFocus
 
@@ -99,6 +101,7 @@ struct HubView: View {
             }
             .sheet(isPresented: $showingSettings) { SettingsView() }
             .sheet(isPresented: $showingRemote) { TVRemoteView() }
+            .sheet(item: $lightSheet) { LightSheet(model: model, entityID: $0.id) }
             .sheet(isPresented: $schwabLoggingIn) {
                 SchwabLoginView { Task { await model.refreshPortfolio() } }
             }
@@ -1038,6 +1041,9 @@ struct HubView: View {
         }
         .buttonStyle(CockpitButtonStyle())
         .disabled(!entity.isToggleable || pending != nil || model.entities.failureText != nil)
+        .simultaneousGesture(LongPressGesture(minimumDuration: 0.45).onEnded { _ in
+            if entity.light?.dimmable == true { lightSheet = LightSheetID(id: entity.entityID) }
+        })
         .animation(.easeOut(duration: 0.2), value: on)
         .accessibilityLabel(entity.friendlyName)
         .accessibilityValue(entity.state.capitalized)
@@ -1158,6 +1164,8 @@ struct HubView: View {
         return "\(prefix)\(hours)h \(minutes % 60)m remaining"
     }
 }
+
+struct LightSheetID: Identifiable { let id: String }
 
 private extension View {
     /// The half-width Home tiles: a smaller CockpitPanel.
