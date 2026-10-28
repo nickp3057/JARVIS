@@ -115,9 +115,9 @@ final class RedAlertView extends View {
             canvas.restore();
         }
 
-        // The lens: perfectly round, almost an eye but not one. A dark rim, a
-        // red glow deepening to a white-hot point, a glint on the glass. It
-        // doesn't move; once every 30 s it blinks.
+        // The lens: perfectly round, almost an eye but not one. A dark rim and
+        // a red glow deepening to a white-hot point; flat like the shapes
+        // around it (no glint). It doesn't move; once every 30 s it blinks.
         float lr = r * 0.30f;
         paint.setStyle(Paint.Style.FILL);
         paint.setColor(0xFF0A0000);
@@ -127,9 +127,6 @@ final class RedAlertView extends View {
                 new float[] {0f, 0.12f, 0.5f, 1f}, Shader.TileMode.CLAMP));
         canvas.drawCircle(cx, cy, lr * 0.86f, paint);
         paint.setShader(null);
-        paint.setColor(0x33FFFFFF);
-        oval.set(cx - lr * 0.55f, cy - lr * 0.62f, cx + lr * 0.1f, cy - lr * 0.3f);
-        canvas.drawOval(oval, paint);
         paint.setStyle(Paint.Style.STROKE);
         paint.setStrokeWidth(r * 0.018f);
         paint.setColor(Theme.alpha(hot, 220));

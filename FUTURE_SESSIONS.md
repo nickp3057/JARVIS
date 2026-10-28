@@ -172,7 +172,9 @@ of each group.
   Door Protocol becomes one of them. Shape: named scenes in a small store
   (entity → state/colour/effect/fan %) that JARVIS runs by name, editable in
   the app; expose them to Google Home through HA scripts so "Hey Google,
-  game time" works too. Remember Govee app modes (rainbows) aren't visible to
+  game time" works too. Nick's idea for one: a "love" scene that reuses
+  Barn Door's takeover (soft pinks on the lights, a warm screen instead of
+  the red alert); not now (2026-10-27). Remember Govee app modes (rainbows) aren't visible to
   HA; use the effect names HA lists.
 - [ ] **Room sentry on the work iPad** (Nick, 2026-10-27; waiting on the
   iPad). The iPad, propped up running JARVIS, watches the room with Vision's

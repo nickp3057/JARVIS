@@ -84,8 +84,8 @@ every deploy, so edit the repo copy, not the TV's.
   Protocol's red alert, set by JARVIS and never in the picker. While it's
   on, `HomeActivity.addBarnDoor` covers the home screen with `RedAlertView`
   (the reactor gone hostile: turning armour, a ring of fangs, a racing
-  dial, lock-on arcs and a perfectly round lens at the centre, almost an
-  eye but not one, that never moves and blinks once every 30 s; no
+  dial, lock-on arcs and a perfectly round, flat lens at the centre (no
+  glint), almost an eye but not one, that never moves and blinks once every 30 s; no
   pulsing, flashing or scanning, Nick's call), a "LOCKDOWN ACTIVE" line and
   "BARN DOOR PROTOCOL" across the bottom; no time or date. Home just comes
   back to it; only "stand down" (or a theme pick) ends it. Preview any
