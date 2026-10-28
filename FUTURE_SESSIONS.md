@@ -152,12 +152,22 @@ of each group.
   the Optiplex. Later: build a real `scene.good_morning` in HA (colours,
   brightness, maybe blinds) and set `WAKE_UP_SCENE`.
 - Schwab shows Live after the open (confirmed 2026-10-28).
-- **Barn Door rainbow:** the Govee integration exposes Nick's DIY scenes
-  as `select.nick_strip_lights_diy_scene` / `select.desk_lights_diy_scene`
-  (options New Rainbow, Xmas, Real Rainbow). At home: pick the one that
-  matches his rainbow, set `BARN_DOOR_EFFECTS` to the select form (see
-  JARVIS.md), restart, engage + stand down to check. Later: list DIY scenes
-  in the iPad light sheet too.
+- **Nick's rainbows (picked 2026-10-28, in the Govee app):** Nick Strip
+  Lights = DIY **Real Rainbow**; Desk Lights (`light.desk_lights_2`) = DIY
+  **New Rainbow**; both 100% brightness. HA can't see a DIY pick made in the
+  Govee app (the dropdown stays "None", the light still reports the built-in
+  Rainbow-A / Rainbow), so set them by name. At home, put this in the
+  Optiplex `.env` and restart:
+  `BARN_DOOR_EFFECTS=select.nick_strip_lights_diy_scene=Real Rainbow,select.desk_lights_diy_scene=New Rainbow`
+  then engage + stand down to check. In HA scenes, add the two dropdowns by
+  hand in YAML (the scene editor would capture "None"):
+  ```yaml
+  entities:
+    light.nick_strip_lights: {state: "on", brightness: 255}
+    light.desk_lights_2: {state: "on", brightness: 255}
+    select.nick_strip_lights_diy_scene: Real Rainbow
+    select.desk_lights_diy_scene: New Rainbow
+  ```
 - **iPad (iOS 4.8 / build 130, not installed):** Room tab, long-press
   light → brightness/colour, night screen. Untested on hardware: check the
   night screen tonight (sun down, all lights off, wait 45 s; turn a light on
