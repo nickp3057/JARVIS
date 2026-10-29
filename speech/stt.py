@@ -55,6 +55,10 @@ class Transcriber:
         self._model: Any | None = None
         # The room voice runs a tiny model for live captions beside the main one.
         self._model_size = model_size or WHISPER_MODEL_SIZE
+        # Words Whisper should expect (the room's lights and scenes): a short
+        # example sentence steers short commands toward them. WHISPER_PROMPT
+        # overrides; "off" disables.
+        self.prompt = ""
 
     def _ensure_loaded(self) -> None:
         if self._model is not None:
@@ -101,6 +105,7 @@ class Transcriber:
                 language="en",
                 beam_size=WHISPER_BEAM_SIZE,
                 vad_filter=False,
+                initial_prompt=self._initial_prompt(),
                 **_decode_options(),
             )
             # segments is a lazy generator: decoding happens while joining.
@@ -112,6 +117,12 @@ class Transcriber:
         # Per-utterance timing so latency can be measured on the real host.
         log.info(
             "STT %.2fs for %.1fs of audio (%s, %s)",
-            time.monotonic() - started, audio_f32.size / 16000.0, WHISPER_MODEL_SIZE, WHISPER_COMPUTE_TYPE,
+            time.monotonic() - started, audio_f32.size / 16000.0, self._model_size, WHISPER_COMPUTE_TYPE,
         )
         return text
+
+    def _initial_prompt(self) -> str | None:
+        override = os.getenv("WHISPER_PROMPT", "").strip()
+        if override.lower() == "off":
+            return None
+        return override or self.prompt or None

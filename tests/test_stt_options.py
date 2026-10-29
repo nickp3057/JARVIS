@@ -37,3 +37,18 @@ class DecodeOptionTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class PromptTests(unittest.TestCase):
+    def test_room_words_steer_whisper_and_can_be_overridden(self) -> None:
+        import os
+        from unittest.mock import patch
+        from speech.stt import Transcriber
+        t = Transcriber("tiny.en")
+        self.assertIsNone(t._initial_prompt())
+        t.prompt = "Hey Jarvis, Desk Lights."
+        self.assertEqual(t._initial_prompt(), "Hey Jarvis, Desk Lights.")
+        with patch.dict(os.environ, {"WHISPER_PROMPT": "off"}):
+            self.assertIsNone(t._initial_prompt())
+        with patch.dict(os.environ, {"WHISPER_PROMPT": "Lamp."}):
+            self.assertEqual(t._initial_prompt(), "Lamp.")

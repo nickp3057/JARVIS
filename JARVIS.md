@@ -652,7 +652,11 @@ ROOM_VOICE=0                # 1 = "Hey JARVIS" on the Optiplex mic/speakers insi
 AUDIO_OUTPUT_DEVICE=        # ALSA device for aplay; Optiplex: plughw:1,0 (card 0 is the USB mic, no output)
 MIC_DEVICE=CMTECK           # sounddevice input name/index. Set it: left empty, Core's room voice opened the onboard jack (hw:1,0). Rates it refuses are converted (48 kHz -> 16 kHz)
 VOICE_LIVE_MODEL=tiny.en    # Whisper model for live captions on the iPad; "off" to skip
-VOICE_SILENCE_END_MS=550    # silence that ends what you said
+VOICE_SILENCE_END_MS=750    # silence that ends what you said
+VOICE_MIN_UTTERANCE_MS=1000 # never end a command sooner than this (a pause after "turn" isn't the end)
+VOICE_MIN_RMS=90            # speech is at least this loud...
+VOICE_NOISE_RATIO=2.5       # ...and this many times the room's learned background (capped by MIC_RMS_THRESHOLD)
+WHISPER_PROMPT=             # words Whisper should expect; empty = the room's scene/device names; off = none
 VOICE_START_TIMEOUT_S=4     # wait after the wake word before giving up
 VOICE_FOLLOWUP_S=5          # no-wake-word follow-up window after a spoken answer
 VOICE_PREROLL_S=2           # audio kept from before the wake word ("game time, Jarvis")

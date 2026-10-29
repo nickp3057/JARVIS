@@ -62,15 +62,34 @@ def make_voice(text: str = "", runtime=None, live=None) -> room_voice.RoomVoice:
 class CaptureTests(unittest.TestCase):
     def setUp(self) -> None:
         voice_presence.reset_for_tests()
-        env = patch.dict(os.environ, {"VOICE_SILENCE_END_MS": "240", "VOICE_MAX_UTTERANCE_S": "3"})
+        env = patch.dict(os.environ, {"VOICE_SILENCE_END_MS": "240", "VOICE_MAX_UTTERANCE_S": "3",
+                                      "VOICE_MIN_UTTERANCE_MS": "0"})
         env.start()
         self.addCleanup(env.stop)
 
     def test_speech_then_silence_is_one_utterance(self) -> None:
         voice = make_voice()
         audio = voice._capture(FakeStream([QUIET, LOUD, LOUD, LOUD, QUIET, QUIET, QUIET, LOUD]), None, 2.0)
-        # Leading quiet is dropped; it stops after 3 quiet frames (240 ms), before the last LOUD.
-        self.assertEqual(audio.size, 6 * FRAME_SAMPLES)
+        # One quiet frame of lead-in is kept (the soft start of the first word);
+        # it stops after 3 quiet frames (240 ms), before the last LOUD.
+        self.assertEqual(audio.size, 7 * FRAME_SAMPLES)
+
+    def test_a_short_pause_early_doesnt_end_it(self) -> None:
+        with patch.dict(os.environ, {"VOICE_MIN_UTTERANCE_MS": "800"}):
+            audio = make_voice()._capture(FakeStream([LOUD, QUIET, QUIET, QUIET, LOUD, LOUD] + [QUIET] * 6), None, 2.0)
+        self.assertEqual(audio.size, 10 * FRAME_SAMPLES)  # "turn ... the TV on" stays one command
+
+    def test_speech_level_follows_the_room(self) -> None:
+        voice = make_voice()
+        with patch.dict(os.environ, {"MIC_RMS_THRESHOLD": "350", "VOICE_MIN_RMS": "90"}):
+            self.assertEqual(voice._speech_level(), 350)  # nothing learned yet
+            for _ in range(200):
+                voice._learn_noise(np.full(FRAME_SAMPLES, 40, dtype=np.int16))
+            self.assertAlmostEqual(voice._speech_level(), 100, delta=2)  # 2.5x a quiet room
+            voice._learn_noise(np.full(FRAME_SAMPLES, 9000, dtype=np.int16))  # a door slams
+            self.assertLess(voice._speech_level(), 110)
+            voice._noise = 400.0  # a loud fan: capped at the configured threshold
+            self.assertEqual(voice._speech_level(), 350)
 
     def test_nobody_speaks(self) -> None:
         self.assertIsNone(make_voice()._capture(FakeStream([]), None, 0.5))

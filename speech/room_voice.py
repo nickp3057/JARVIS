@@ -61,6 +61,21 @@ _JINGLE_REPLIES = {"done", "yes sir", "yes, sir", "ok", "okay"}
 _DISMISS = re.compile(r"\b(stop|cancel|dismiss|enough|off|okay|ok|thanks|thank you|got it|i'm up|shut up|quiet)\b")
 
 
+def _vocabulary_prompt() -> str:
+    """A sentence of the room's own words (scene and device names, timers,
+    volume) so Whisper hears "desk lights" rather than "this flights"."""
+    names: list[str] = []
+    try:
+        from app import status_hub
+        names += [s["name"] for s in status_hub.home_scenes().get("scenes", [])][:10]
+        names += [e["friendly_name"] for e in status_hub.home_entities().get("entities", [])][:12]
+    except Exception:  # noqa: BLE001 - Home Assistant down: the generic words still help
+        log.debug("No HA names for the Whisper prompt", exc_info=True)
+    listed = ", ".join(dict.fromkeys(n.replace("’", "'") for n in names if n))
+    base = "Hey Jarvis, turn on the lights. Set a timer for 10 minutes. Volume up. What's the weather? Pause the music."
+    return f"{base} {listed}." if listed else base
+
+
 def enabled() -> bool:
     return os.getenv("ROOM_VOICE", "").strip().lower() in ("1", "true", "yes", "on")
 
@@ -95,11 +110,16 @@ class RoomVoice:
         self._next_ring = 0.0
         self._next_duties = 0.0
         self._spoke = False
+        self._noise = 0.0  # the room's background level (RMS), learned between commands
 
     # --- lifecycle -----------------------------------------------------------
 
     def preload(self) -> None:
         """Load models up front so the first "Hey JARVIS" isn't slow."""
+        prompt = _vocabulary_prompt()
+        for model in (self.final, self.live):
+            if model is not None and hasattr(model, "prompt"):
+                model.prompt = prompt
         self.detector._ensure_loaded()  # noqa: SLF001
         silence = np.zeros(SAMPLE_RATE // 2, dtype=np.int16)
         self.final.transcribe(silence)
@@ -166,6 +186,7 @@ class RoomVoice:
             frame = stream.read(timeout=0.5)
             if frame is None:
                 continue
+            self._learn_noise(frame)
             if self._heard_wake(frame):
                 if self._ringing_since is not None:  # "Hey JARVIS" while a timer rings: that's stop
                     self._dismiss_alarms()
@@ -285,13 +306,29 @@ class RoomVoice:
                 return True
         return False
 
+    def _learn_noise(self, frame: np.ndarray) -> None:
+        """Track the room's background level while nobody's talking to JARVIS
+        (a slow average, so a word now and then barely moves it)."""
+        level = rms(frame)
+        self._noise = level if self._noise == 0.0 else self._noise * 0.98 + min(level, self._noise * 3) * 0.02
+
+    def _speech_level(self) -> float:
+        """RMS that counts as speech: a few times the room's background, never
+        stricter than MIC_RMS_THRESHOLD (a mic across the room is quiet)."""
+        ceiling = rms_threshold()  # live: JARVIS may have retuned it
+        if self._noise <= 0:
+            return ceiling
+        floor = _seconds("VOICE_MIN_RMS", 90)
+        return min(ceiling, max(floor, self._noise * _seconds("VOICE_NOISE_RATIO", 2.5)))
+
     def _capture(self, stream: MicStream, preroll: np.ndarray | None, start_timeout: float) -> np.ndarray | None:
         """One utterance, captioned live; None if nobody spoke."""
-        silence_end = int(_seconds("VOICE_SILENCE_END_MS", 550) / FRAME_MS)
+        silence_end = int(_seconds("VOICE_SILENCE_END_MS", 750) / FRAME_MS)
+        min_frames = int(_seconds("VOICE_MIN_UTTERANCE_MS", 1000) / FRAME_MS)
         max_frames = int(_seconds("VOICE_MAX_UTTERANCE_S", 15) * 1000 / FRAME_MS)
         start_frames = int(start_timeout * 1000 / FRAME_MS)
         # Speech before the wake word ("game time, Jarvis"): the preroll minus the wake word itself.
-        loud = rms_threshold()  # live: JARVIS may have retuned it
+        loud = self._speech_level()
         before_wake = None
         if preroll is not None and preroll.size > SAMPLE_RATE:
             head = preroll[: -int(SAMPLE_RATE * 0.9)]
@@ -301,7 +338,8 @@ class RoomVoice:
             start_frames = min(start_frames, int(1200 / FRAME_MS))  # it was said already: don't wait long
 
         frames: list[np.ndarray] = []
-        started, quiet, waited = False, 0, 0
+        lead_in: deque[np.ndarray] = deque(maxlen=3)  # the quiet start of the first word
+        started, quiet, waited, peak = False, 0, 0, 0.0
         captions = _LiveCaptions(self.live, before_wake)
         try:
             for _ in range(max_frames):
@@ -310,12 +348,16 @@ class RoomVoice:
                 frame = stream.read(timeout=0.5)
                 if frame is None:
                     continue
-                voiced = rms(frame) > loud
+                level = rms(frame)
+                peak = max(peak, level)
+                voiced = level > loud
                 if not started:
                     if voiced:
                         started = True
+                        frames.extend(lead_in)
                         frames.append(frame)
                     else:
+                        lead_in.append(frame)
                         waited += 1
                         if waited >= start_frames:
                             break
@@ -323,11 +365,13 @@ class RoomVoice:
                 frames.append(frame)
                 captions.feed(frames)
                 quiet = 0 if voiced else quiet + 1
-                if quiet >= silence_end:
+                if quiet >= silence_end and len(frames) >= min_frames:
                     break
         finally:
             captions.stop()
         if frames:
+            log.info("Room voice captured %.1f s (peak %.0f, room %.0f, speech above %.0f)",
+                     len(frames) * FRAME_MS / 1000, peak, self._noise, loud)
             audio = np.concatenate(frames)
             return np.concatenate([before_wake, audio]) if before_wake is not None else audio
         return before_wake
