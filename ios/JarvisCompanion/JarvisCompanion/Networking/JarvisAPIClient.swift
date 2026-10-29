@@ -396,6 +396,27 @@ struct JarvisAPIClient {
         }
     }
 
+    /// Home Assistant changes (`GET /api/home/stream`, server-sent events):
+    /// calls `onChange` with Core's change counter for each `home` event.
+    func streamHome(onChange: @escaping @MainActor (Int) -> Void) async throws {
+        struct Pulse: Decodable { let seq: Int }
+        var request = request(path: "api/home/stream")
+        request.timeoutInterval = 60  // Core sends a keep-alive every 15 s
+        request.setValue("text/event-stream", forHTTPHeaderField: "Accept")
+        do {
+            let (bytes, response) = try await session.bytes(for: request)
+            _ = try validate(response)
+            for try await line in bytes.lines {
+                try Task.checkCancellation()
+                guard line.hasPrefix("data: "), let data = line.dropFirst(6).data(using: .utf8),
+                      let pulse = try? JSONDecoder().decode(Pulse.self, from: data) else { continue }
+                await onChange(pulse.seq)
+            }
+        } catch let error as URLError {
+            throw JarvisAPIError.transport(error)
+        }
+    }
+
     func checkHealth() async throws {
         let request = request(path: "health")
         let (data, response) = try await session.data(for: request)

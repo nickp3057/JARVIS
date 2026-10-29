@@ -113,6 +113,26 @@ def invalidate(key: str) -> None:
         _cache.pop(key, None)
 
 
+# The apps' room screens follow this instead of polling: Core's HA live feed
+# calls ``home_changed`` for every dashboard entity or scene change, and
+# ``GET /api/home/stream`` sends a ``home`` event when the number moves, so
+# the phone, iPad and TV refetch within a fraction of a second.
+_home_seq = 0
+
+
+def home_changed(scenes: bool = False) -> None:
+    global _home_seq
+    invalidate("entities")
+    if scenes:
+        invalidate("scenes")
+    with _cache_lock:
+        _home_seq += 1
+
+
+def home_seq() -> int:
+    return _home_seq
+
+
 # --- Now snapshot ----------------------------------------------------------
 
 def now_status() -> dict[str, Any]:

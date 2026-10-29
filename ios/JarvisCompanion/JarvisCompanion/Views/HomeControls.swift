@@ -20,8 +20,13 @@ struct SceneTile: View {
                     if model.runningScene == scene.entityID {
                         ProgressView()
                     } else {
+                        // Sized to fit: wide symbols (the game controller,
+                        // the film) used to run past the circle at a font size.
                         Image(systemName: scene.symbol)
-                            .font((large ? Font.title3 : Font.body).weight(.semibold))
+                            .resizable()
+                            .scaledToFit()
+                            .fontWeight(.semibold)
+                            .frame(width: large ? 24 : 18, height: large ? 24 : 18)
                     }
                 }
                 .frame(width: large ? 46 : 34, height: large ? 46 : 34)

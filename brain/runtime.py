@@ -108,8 +108,10 @@ class HomeSnapshot:
 def _invalidate_app_home_cache(entity_id: str) -> None:
     try:
         from app import status_hub
-        if entity_id in status_hub._dashboard_allowlist():  # noqa: SLF001 - only what the apps show
-            status_hub.invalidate("entities")
+        if entity_id.startswith("scene."):  # a scene ran: its state is when
+            status_hub.home_changed(scenes=True)
+        elif entity_id in status_hub._dashboard_allowlist():  # noqa: SLF001 - only what the apps show
+            status_hub.home_changed()
     except Exception:  # noqa: BLE001 - the apps' cache is a nicety, never break the monitor
         pass
 
@@ -886,6 +888,8 @@ class JarvisRuntime:
 
             def _changed(data: dict[str, Any]) -> None:
                 entity_id = str(data.get("entity_id", ""))
+                if entity_id.startswith("scene."):
+                    _invalidate_app_home_cache(entity_id)  # the apps light the scene that ran
                 if not entity_id or entity_id.split(".", 1)[0] not in watched_domains:
                     return
                 old_entity = data.get("old_state") or entities.get(entity_id) or {}

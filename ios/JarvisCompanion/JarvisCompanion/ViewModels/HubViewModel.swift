@@ -73,6 +73,7 @@ final class HubViewModel: ObservableObject {
     private let makeClient: () throws -> JarvisAPIClient
     private let homeProbe: (URL) async -> Bool
     private var pollTask: Task<Void, Never>?
+    private var homeStreamTask: Task<Void, Never>?
     private let snapshotDefaults: UserDefaults
     private let academicNotifications: AcademicNotificationScheduling?
     private var connectionIdentity: String
@@ -492,6 +493,7 @@ final class HubViewModel: ObservableObject {
     /// server's 5s TTL; stops entirely when the view goes away.
     func startPolling() {
         guard pollTask == nil, settings.isConfigured else { return }
+        startHomeStream()
         pollTask = Task { [weak self] in
             await self?.refreshAll()
             var tick = 0
@@ -522,6 +524,41 @@ final class HubViewModel: ObservableObject {
         }
     }
 
+    /// Core's `home` events (`GET /api/home/stream`): a light, switch or
+    /// scene changed anywhere (phone, iPad, voice, wall switch, HA), so the
+    /// lights and scenes refetch at once rather than on the next poll. Events
+    /// in a burst share one refetch. Reconnects every few seconds if dropped;
+    /// an older Core without the stream just leaves the poll doing the work.
+    private func startHomeStream() {
+        guard homeStreamTask == nil else { return }
+        homeStreamTask = Task { [weak self] in
+            while !Task.isCancelled {
+                guard let client = try? self?.client() else { return }
+                self?.lastHomeSeq = nil  // a reconnect's first event may hide a missed change
+                try? await client.streamHome { [weak self] seq in self?.homeChanged(seq) }
+                guard !Task.isCancelled else { return }
+                await self?.refreshEntities()
+                try? await Task.sleep(for: .seconds(3))
+            }
+        }
+    }
+
+    private var lastHomeSeq: Int?
+    private var homeRefetch: Task<Void, Never>?
+
+    private func homeChanged(_ seq: Int) {
+        defer { lastHomeSeq = seq }
+        guard let last = lastHomeSeq, last != seq else { return }  // the first event is just "connected"
+        homeRefetch?.cancel()
+        homeRefetch = Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(120))
+            guard !Task.isCancelled, let self else { return }
+            async let entities: Void = self.refreshEntities()
+            async let scenes: Void = self.refreshScenes()
+            _ = await (entities, scenes)
+        }
+    }
+
     /// Visible Hub views (Home and Media tabs share this model). SwiftUI may
     /// show the next tab before hiding the last, so polling follows a count
     /// rather than each view's appear/disappear.
@@ -540,6 +577,8 @@ final class HubViewModel: ObservableObject {
     func stopPolling() {
         pollTask?.cancel()
         pollTask = nil
+        homeStreamTask?.cancel()
+        homeStreamTask = nil
         nowSnapshotIsStale = now.value != nil
     }
 

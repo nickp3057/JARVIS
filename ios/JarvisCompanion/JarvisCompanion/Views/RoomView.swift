@@ -4,20 +4,20 @@ import UIKit
 /// The iPad's Room tab: a wall-panel for Nick's room, all on one screen (no
 /// scrolling in landscape). Left: the clock and battery, the reactor (three
 /// quick taps: Barn Door Protocol), what's next, the TV remote and the
-/// panel's settings (a sheet, to keep the toggles out of sight). Right: the
-/// light/switch tiles with a small Peace square in the top corner, and Nick's
-/// favourite scenes (Game Time, Movie, Study) plus a menu holding the rest
-/// (and showing the current one). Portrait (iPad mini) stacks and scrolls.
-/// Long-press a light for brightness and colour (`LightSheet`); the hold
-/// doesn't also toggle it. Lights refresh every 1.5 s while this shows, and
-/// Core clears its cache the moment HA reports a change, so a wall switch
-/// shows up within a couple of seconds.
+/// panel's settings (a sheet, to keep the toggles out of sight). The battery
+/// sits above the clock (top left). Right: the light/switch tiles with a
+/// Peace square in the top corner, and Nick's favourite scenes (Game Time,
+/// Movie, Study) in one row; the rest are voice-only. Portrait (iPad mini)
+/// stacks and scrolls. Long-press a light for brightness and colour
+/// (`LightSheet`); the hold doesn't also toggle it. Core pushes every Home
+/// Assistant change (`/api/home/stream`), so a switch flipped on the phone or
+/// the wall shows here within about half a second.
 ///
 /// Night screen: with Keep screen on, after dark (HA's `sun.sun`) and every
 /// light (and lamp) off for 45 s, the screen goes black at its lowest
-/// brightness, so the iPad isn't a night light. Peace or Goodnight (from
-/// here, by voice or in HA) does the same a few seconds after the lights go
-/// out, day or night. Any light coming on, sunrise or a timer going off
+/// brightness, so the iPad isn't a night light. The lights going out from
+/// anywhere (the phone, voice, Peace, Goodnight, a wall switch) does the
+/// same 3 s later, day or night. Any light coming on, sunrise or a timer going off
 /// brings it back. A tap anywhere wakes it and turns on the tap-to-wake light
 /// (Bedroom Lights unless changed); with the room still dark it sleeps again
 /// 45 s later (after dark). iPads don't let apps read their light sensor, so
@@ -118,7 +118,11 @@ struct RoomView: View {
         .onChange(of: model.scenes.value?.last) { _, last in
             if let last, Self.lightsOutScenes.contains(last), model.runningScene == nil { lightsOut = true }
         }
-        .onChange(of: lightsAllOff) { _, off in if off == false { lightsOut = false } }
+        // The room going dark from anywhere (the phone, voice, a wall switch)
+        // darkens the panel too, day or night, a few seconds later.
+        .onChange(of: lightsAllOff) { was, off in
+            if off == false { lightsOut = false } else if off == true, was == false { lightsOut = true }
+        }
         // "Hey JARVIS" lights the screen back up (the overlay shows above it).
         .onChange(of: voice.active) { _, active in if active { asleep = false } }
         .task {
@@ -129,10 +133,10 @@ struct RoomView: View {
             await refresh()
         }
         .task(id: scenePhase) {
-            // A wall switch should show up quickly: Core's cache is cleared by
-            // HA's live feed, so a short poll is cheap.
+            // Core pushes every change (HubViewModel's home stream); this
+            // poll is only the fallback for a dropped stream.
             while scenePhase == .active, !Task.isCancelled {
-                try? await Task.sleep(for: .seconds(1.5))
+                try? await Task.sleep(for: .seconds(5))
                 await model.refreshEntities()
             }
         }
@@ -228,23 +232,27 @@ struct RoomView: View {
 
     private func clockPanel(fill: Bool) -> some View {
         VStack(alignment: .leading, spacing: 16) {
-            HStack(alignment: .top) {
+            VStack(alignment: .leading, spacing: 6) {
+                if !RootView.isMac { BatteryBadge() }
                 TimelineView(.everyMinute) { context in
                     VStack(alignment: .leading, spacing: 2) {
+                        // One line: "11:47 PM" used to drop the PM below.
                         Text(context.date, format: .dateTime.hour().minute())
                             .font(.system(size: 64, weight: .thin, design: .rounded))
                             .monospacedDigit()
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.6)
                         Text(context.date, format: .dateTime.weekday(.wide).month(.wide).day())
                             .font(.title3)
                             .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.8)
                     }
                 }
-                Spacer(minLength: 0)
-                if !RootView.isMac { BatteryBadge() }
             }
             // The reactor: its glow lifts while "Hey JARVIS" is listening;
             // three quick taps engage (or stand down) Barn Door Protocol.
-            JarvisCoreMark(size: 130, active: voice.active)
+            JarvisCoreMark(size: fill ? 200 : 170, active: voice.active)
                 .barnDoorTaps()
                 .frame(maxWidth: .infinity)
                 .accessibilityLabel("JARVIS. Triple-tap for Barn Door Protocol.")
@@ -283,13 +291,13 @@ struct RoomView: View {
                     if model.runningScene == peace.entityID {
                         ProgressView()
                     } else {
-                        Image(systemName: "hand.wave.fill").font(.title3)
+                        Image(systemName: "hand.wave.fill").font(.title)
                     }
                 }
                 .foregroundStyle(JarvisTheme.amber)
-                .frame(width: 46, height: 46)
-                .background(JarvisTheme.amber.opacity(0.14), in: .rect(cornerRadius: 12))
-                .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(JarvisTheme.amber.opacity(0.5)))
+                .frame(width: 58, height: 58)
+                .background(JarvisTheme.amber.opacity(0.14), in: .rect(cornerRadius: 14))
+                .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(JarvisTheme.amber.opacity(0.5)))
             }
             .buttonStyle(CockpitButtonStyle())
             .disabled(model.runningScene != nil)
@@ -459,22 +467,19 @@ struct RoomView: View {
         favoriteScenes.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
     }
 
-    /// Nick's favourites as big tiles, then one menu tile for every other
-    /// scene; it shows the current scene when that isn't a favourite.
+    /// Nick's favourites (Game Time, Movie, Study) in one row, and nothing
+    /// else: the other scenes are for "Hey JARVIS". With no favourite found
+    /// (renamed in HA) the menu stands in so the panel isn't empty.
     private var scenesPanel: some View {
         VStack(alignment: .leading, spacing: 12) {
             heading("Scenes", symbol: "sparkles")
             if let scenes = model.scenes.value, !scenes.scenes.isEmpty {
                 let favorites = favoriteIDs.compactMap { id in scenes.scenes.first { $0.entityID == id } }
-                let others = HomeScenes(error: scenes.error,
-                                        scenes: scenes.scenes.filter { !favoriteIDs.contains($0.entityID)
-                                            && $0.entityID != "scene.peace" },
-                                        last: scenes.last)
-                HStack(spacing: 12) {
-                    ForEach(favorites) { SceneTile(model: model, scene: $0, lit: $0.entityID == scenes.last, large: true) }
-                    if !others.scenes.isEmpty {
-                        SceneFocusMenu(model: model, scenes: others, title: favorites.isEmpty ? "Scene" : "More")
-                            .frame(minHeight: 76)
+                if favorites.isEmpty {
+                    SceneFocusMenu(model: model, scenes: scenes, title: "Scene").frame(minHeight: 76)
+                } else {
+                    HStack(spacing: 12) {
+                        ForEach(favorites) { SceneTile(model: model, scene: $0, lit: $0.entityID == scenes.last, large: true) }
                     }
                 }
             } else {
@@ -580,7 +585,7 @@ private struct RoomSettingsView: View {
                     } header: {
                         Text("Scene tiles")
                     } footer: {
-                        Text("Up to three get their own tile; the rest are in the menu beside them. Peace has its own button.")
+                        Text("Up to three get a tile on the panel; the rest are for \"Hey JARVIS\". Peace has its own button.")
                     }
                 }
             }

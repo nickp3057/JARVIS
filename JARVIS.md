@@ -879,6 +879,27 @@ CALENDAR_ALERT_LEAD_MIN=10  # warn this many minutes before a meeting
   exposed by the Tuya integration, so no scene sets it. I'm up runs
   `scene.good_morning` when it exists. The iPad Room tab has a Peace
   button (shown when `scene.peace` exists) for heading out.
+- **Live room sync, iPad polish, scene fix (iOS 5.13 / build 156)** —
+  `GET /api/home/stream` (SSE, `status:read`) sends a `home` event whenever
+  a `HOME_DASHBOARD_ENTITIES` entity or any scene changes in HA
+  (`status_hub.home_changed`, called from the runtime's HA live feed). The
+  phone and iPad (`HubViewModel.startHomeStream`, while the Hub/Room is
+  showing) refetch lights and scenes ~0.1 s later instead of waiting on the
+  5 s poll; the Room tab's own poll is now a 5 s fallback. The TV shows no
+  light state, so it needs nothing new. iPad Room: battery above the clock
+  (top left), the time stays on one line, a 200 pt reactor, a bigger Peace
+  square, scene icons scale to fit their circle, and the scenes row is just
+  the three favourites (others are voice-only). The panel goes dark 3 s
+  after every light goes out from anywhere (phone, voice, wall), not only
+  after Peace/Goodnight run on the iPad. `ops/optiplex/room_fixups.py` (run
+  once on the Optiplex) adds `direction`/`preset_mode` to the HA scenes that
+  run the fan (HA 2026.10 otherwise calls `fan.set_direction` with None:
+  "string value is None at 'direction'") and renames the room's entities
+  (Strip Lights, Desk Lights, Bedroom Lights, Nick's Fan, Fan Light, Lamp,
+  Avengers Tower, Scentsy, Wii U; entity ids unchanged). The fan's light is
+  one Tuya light with modes white/colour/scene/music: colour mode
+  (`light.nicks_fan` with `rgb_color`/`hs_color`) is likely the RGB ring;
+  scene mode (its rainbow) isn't reachable through HA's Tuya integration.
 - **iPad panel and phone glance redone (iOS 5.12 / build 155)** — iPad Room
   fits one landscape screen: clock + battery (full screen hides the status
   bar), the reactor, wake-up / next up / timers, TV remote and a **Room

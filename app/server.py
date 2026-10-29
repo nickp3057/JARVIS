@@ -790,6 +790,31 @@ async def voice_stream(request: Request, _: None = _status_read) -> StreamingRes
                              headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
 
+@app.get("/api/home/stream")
+async def home_stream(request: Request, _: None = _status_read) -> StreamingResponse:
+    """Server-sent ``home`` events: one whenever a dashboard entity or a
+    scene changes in Home Assistant (app/status_hub.py ``home_changed``), so
+    the room screens refetch at once instead of on their next poll. A burst
+    (a scene flipping eight lights) arrives as a few events, not eight."""
+    await asyncio.to_thread(runtime)  # the HA live feed runs on the runtime
+    async def events():
+        seq = status_hub.home_seq()
+        yield f"event: home\ndata: {json.dumps({'seq': seq})}\n\n"
+        quiet_since = time.monotonic()
+        while not await request.is_disconnected():
+            await asyncio.sleep(0.15)
+            latest = status_hub.home_seq()
+            if latest != seq:
+                seq, quiet_since = latest, time.monotonic()
+                yield f"event: home\ndata: {json.dumps({'seq': seq})}\n\n"
+            elif time.monotonic() - quiet_since > _SSE_KEEPALIVE_S:
+                quiet_since = time.monotonic()
+                yield ": keep-alive\n\n"
+
+    return StreamingResponse(events(), media_type="text/event-stream",
+                             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
+
 @app.get("/api/clients/events")
 async def client_events(
     request: Request,
