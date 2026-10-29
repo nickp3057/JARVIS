@@ -770,6 +770,13 @@ CALENDAR_ALERT_LEAD_MIN=10  # warn this many minutes before a meeting
 
 ## Recently Shipped
 
+- **Profile memory cached (2026-10-29, iOS 5.16 / build 159)** —
+  `brain/memory.py:_load()` reuses the parsed `profile.json` until its
+  path, mtime or size changes, handing each caller a deep copy (they mutate
+  then `_save`). Hand edits and other processes' writes still show up.
+  Measured on the Mac's 14-fact profile: 0.03 → 0.01 ms per load (small;
+  grows with the profile). Tests: `tests/test_memory_cache.py`.
+
 - **"What scenes do I have?" and "save this as a scene" (iOS 5.15 / build
   158)** — `list_scenes` and confirm-gated `save_scene` tools
   (`app/status_hub.py`: `capture_scene`, `describe_capture`, `save_scene`).
@@ -1718,10 +1725,11 @@ in value order:
   Cheap fix: cache facts behind an mtime check and skip rebuilds when the
   data is unchanged. Right fix per ARCHITECTURE.md: panels subscribe to
   runtime change events instead of owning QTimers.
-- **Per-turn memory disk reads** — `render_memory_block()` re-reads
-  `profile.json` and re-tokenizes every fact each turn. Bounded and fine at
-  60 facts; add an in-memory cache invalidated on write before the vault
-  grows (the roadmap's indexed store supersedes this).
+- **Per-turn memory tokenizing** — `brain/memory.py:_load()` now keeps the
+  parsed `profile.json` and re-reads only when its mtime/size changes
+  (2026-10-29), which also covers the GUI panels' fact reads. Every fact is
+  still re-tokenized each turn; fine at 60 facts (the roadmap's indexed store
+  supersedes this).
 - **Per-turn SQLite housekeeping** — `append_turn()` still runs the summary
   refresh, an `updated_at` update, and the prune DELETE-with-subquery every
   turn on a fresh connection (connections are dropped, not `.close()`d —

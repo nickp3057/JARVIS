@@ -19,6 +19,7 @@ Design notes:
 
 from __future__ import annotations
 
+import copy
 import json
 import os
 import re
@@ -47,19 +48,37 @@ def _empty_memory() -> dict[str, Any]:
     return {"facts": []}
 
 
+# The profile is read every turn (``render_memory_block``) but changes rarely,
+# so the parsed file is kept and re-read only when its path, mtime or size
+# changes (a hand edit or another process's write still shows up). Callers
+# mutate what ``_load`` returns before ``_save``, so they each get a copy.
+_cache: tuple[tuple[str, int, int], dict[str, Any]] | None = None
+
+
 def _load() -> dict[str, Any]:
-    if not _MEMORY_FILE.exists():
+    global _cache
+    try:
+        stat = _MEMORY_FILE.stat()
+    except FileNotFoundError:
         return _empty_memory()
+    except OSError as exc:
+        log.warning("Could not read memory file (%s); using empty memory.", exc)
+        return _empty_memory()
+    key = (str(_MEMORY_FILE), stat.st_mtime_ns, stat.st_size)
+    cached = _cache
+    if cached is not None and cached[0] == key:
+        return copy.deepcopy(cached[1])
     try:
         with _MEMORY_FILE.open("r", encoding="utf-8") as handle:
             data = json.load(handle)
         if "facts" not in data or not isinstance(data["facts"], list):
             log.warning("Memory file shape unexpected; resetting in-memory copy.")
             return _empty_memory()
-        return data
     except (OSError, json.JSONDecodeError) as exc:
         log.warning("Could not read memory file (%s); using empty memory.", exc)
         return _empty_memory()
+    _cache = (key, data)
+    return copy.deepcopy(data)
 
 
 def _save(data: dict[str, Any]) -> bool:

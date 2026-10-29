@@ -607,7 +607,6 @@ the monitor. Pair with the health dashboard so restarts are visible.
 
 Ordered as in `JARVIS.md` "Performance debt":
 - UI panels poll and rebuild; move to runtime change events.
-- Per-turn memory disk reads; cache behind an mtime check.
 - Per-turn SQLite housekeeping; shared connection, prune every N turns.
 - Streaming still opt-in (`STREAMING_TTS=false`); make it default once
   trusted.
