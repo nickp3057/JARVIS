@@ -504,6 +504,19 @@ improve itself without being told twice. Everything below serves that.
 
 ## Tier 1: highest value, build next
 
+**Asked for 2026-10-29 (queued at bedtime, do these first):**
+- **Barn Door reactor on the iPad matches the TV's.** Port `tv/launcher/src/com/tvhome/RedAlertView.java`
+  (armour, closing teeth, targeting dial, lock-on arcs, the lens that blinks every 30 s; no pulsing)
+  to a SwiftUI `Canvas`, shown in place of `JarvisCoreMark` on iPad Room while the palette is `barnDoor`.
+- **Plex movie picker in iPad movie mode.** Grid of Nick's Plex movies (posters) with a search bar;
+  a tap starts it on the TV's Plex app (Plex client `playMedia` via the TV's Plex player, or HA
+  `media_player.play_media`). Needs a Core endpoint for the library and one to play.
+- **Fan ring rotating rainbow** — waiting on Nick's Tuya IoT Access ID/Secret (iot.tuya.com cloud
+  project, Western America, Smart Life app linked); then send `work_mode=scene` via Tuya's cloud API.
+- **Confirm cloud STT** (`STT_PROVIDER=elevenlabs`, set 2026-10-29): jarvis.log should show
+  `STT …s (elevenlabs cloud)` lines; `Cloud STT (elevenlabs) failed` means the plan/key lacks Scribe.
+
+
 ### 1. Source-level self-modification (governed)
 The roadmap's "governed self-modification" item, minus the config half that
 shipped. Design:
