@@ -52,11 +52,22 @@ struct RoomView: View {
     @StateObject private var holds = HoldSuppressor()
     @State private var showingSettings = false
     @AppStorage(RoomView.favoritesKey) private var favoriteScenes = RoomView.defaultFavorites
+    /// "Back to the panel" during a movie; cleared when the scene changes.
+    @State private var movieDismissed = false
+
+    /// Movie is on: the panel becomes a dark, quiet movie remote.
+    private var movieMode: Bool {
+        !RootView.isMac && !movieDismissed && model.scenes.value?.current == "scene.movie"
+    }
 
     var body: some View {
         GeometryReader { geo in
             let wide = geo.size.width > geo.size.height
-            if wide {
+            if movieMode {
+                MovieModeView(model: model, showRemote: { showingRemote = true },
+                              backToPanel: { withAnimation(.easeInOut(duration: 0.4)) { movieDismissed = true } })
+                    .transition(.opacity)
+            } else if wide {
                 HStack(alignment: .top, spacing: 18) {
                     clockPanel(fill: true)
                         .frame(width: min(340, geo.size.width * 0.3))
@@ -120,6 +131,8 @@ struct RoomView: View {
         }
         // The room going dark from anywhere (the phone, voice, a wall switch)
         // darkens the panel too, day or night, a few seconds later.
+        .onChange(of: model.scenes.value?.current) { _, _ in movieDismissed = false }
+        .animation(.easeInOut(duration: 0.4), value: movieMode)
         .onChange(of: lightsAllOff) { was, off in
             if off == false { lightsOut = false } else if off == true, was == false { lightsOut = true }
         }
@@ -447,6 +460,9 @@ struct RoomView: View {
 
     private static func symbol(for entity: HomeEntity) -> String {
         let name = entity.friendlyName.lowercased()
+        if entity.domain == "light" && (name.contains("fan") || entity.entityID == "light.nicks_fan") {
+            return "fan.and.light.ceiling.fill"  // the fan's RGB ring
+        }
         if name.contains("lamp") { return "lamp.table.fill" }
         if name.contains("strip") { return "light.strip.2.fill" }
         if name.contains("desk") { return "lamp.desk.fill" }
@@ -470,16 +486,32 @@ struct RoomView: View {
     /// Nick's favourites (Game Time, Movie, Study) in one row, and nothing
     /// else: the other scenes are for "Hey JARVIS". With no favourite found
     /// (renamed in HA) the menu stands in so the panel isn't empty.
+    /// The room's scene when it isn't one of the tiles, so something always
+    /// says where the room is.
+    private var otherCurrentScene: HomeScene? {
+        guard let scenes = model.scenes.value, let current = scenes.current,
+              !favoriteIDs.contains(current) else { return nil }
+        return scenes.scenes.first { $0.entityID == current }
+    }
+
     private var scenesPanel: some View {
         VStack(alignment: .leading, spacing: 12) {
-            heading("Scenes", symbol: "sparkles")
+            HStack(alignment: .firstTextBaseline, spacing: 10) {
+                heading("Scenes", symbol: "sparkles")
+                if let other = otherCurrentScene {
+                    Text("Current scene: \(other.name)")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+            }
             if let scenes = model.scenes.value, !scenes.scenes.isEmpty {
                 let favorites = favoriteIDs.compactMap { id in scenes.scenes.first { $0.entityID == id } }
                 if favorites.isEmpty {
                     SceneFocusMenu(model: model, scenes: scenes, title: "Scene").frame(minHeight: 76)
                 } else {
                     HStack(spacing: 12) {
-                        ForEach(favorites) { SceneTile(model: model, scene: $0, lit: $0.entityID == scenes.last, large: true) }
+                        ForEach(favorites) { SceneTile(model: model, scene: $0, lit: $0.entityID == scenes.current, large: true) }
                     }
                 }
             } else {
@@ -503,6 +535,111 @@ private extension View {
             .frame(maxWidth: .infinity, maxHeight: fill ? .infinity : nil, alignment: .topLeading)
             .background(JarvisTheme.panelGradient, in: .rect(cornerRadius: 24))
             .overlay(RoundedRectangle(cornerRadius: 24).strokeBorder(JarvisTheme.border))
+    }
+}
+
+/// Movie scene: the panel steps back. A big dim clock, the TV's playback and
+/// volume, the bedroom light for a snack run, the full remote, and a way
+/// back to the normal panel (the scene keeps running). Dark and still: no
+/// pulsing, nothing bright.
+private struct MovieModeView: View {
+    @EnvironmentObject private var settings: AppSettings
+    @ObservedObject var model: HubViewModel
+    let showRemote: () -> Void
+    let backToPanel: () -> Void
+    @State private var tick = 0
+
+    private var bedroom: HomeEntity? {
+        model.entities.value?.first { $0.entityID == "light.bedroom_lights" }
+    }
+
+    var body: some View {
+        VStack(spacing: 28) {
+            HStack {
+                Label("Movie night", systemImage: "film")
+                    .font(.headline)
+                    .foregroundStyle(JarvisTheme.amber.opacity(0.8))
+                Spacer()
+                Button(action: backToPanel) {
+                    Label("Back to panel", systemImage: "square.grid.2x2")
+                        .font(.subheadline.weight(.semibold))
+                        .padding(.horizontal, 16).padding(.vertical, 10)
+                        .background(Color.white.opacity(0.06), in: .capsule)
+                }
+                .buttonStyle(CockpitButtonStyle())
+                .foregroundStyle(.secondary)
+            }
+            Spacer(minLength: 0)
+            TimelineView(.everyMinute) { context in
+                Text(context.date, format: .dateTime.hour().minute())
+                    .font(.system(size: 120, weight: .ultraLight, design: .rounded))
+                    .monospacedDigit()
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.5)
+                    .foregroundStyle(.white.opacity(0.55))
+            }
+            HStack(spacing: 22) {
+                control("gobackward", "Rewind", key: "rewind")
+                control("playpause.fill", "Play or pause", key: "play_pause", big: true)
+                control("goforward", "Fast forward", key: "fast_forward")
+            }
+            HStack(spacing: 22) {
+                control("speaker.minus", "Volume down", key: "volume_down", repeats: true)
+                control("speaker.slash", "Mute", key: "mute")
+                control("speaker.plus", "Volume up", key: "volume_up", repeats: true)
+            }
+            Spacer(minLength: 0)
+            HStack(spacing: 14) {
+                if let bedroom {
+                    let on = model.pendingEntityStates[bedroom.entityID] ?? bedroom.isOn
+                    wide(on ? "Bedroom light off" : "Bedroom light on", symbol: on ? "lightbulb.slash" : "lightbulb") {
+                        model.toggle(bedroom, to: !on)
+                    }
+                }
+                wide("TV remote", symbol: "appletvremote.gen4", action: showRemote)
+            }
+        }
+        .padding(28)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color.black.opacity(0.82).ignoresSafeArea())
+        .sensoryFeedback(.impact(weight: .light), trigger: tick)
+    }
+
+    private func control(_ symbol: String, _ label: String, key: String,
+                         big: Bool = false, repeats: Bool = false) -> some View {
+        Button { press(key) } label: {
+            Image(systemName: symbol)
+                .font(big ? .largeTitle : .title2)
+                .frame(width: big ? 104 : 80, height: big ? 104 : 80)
+                .foregroundStyle(JarvisTheme.cyan.opacity(0.8))
+                .background(Color.white.opacity(0.05), in: .circle)
+                .overlay(Circle().strokeBorder(JarvisTheme.cyan.opacity(0.25)))
+        }
+        .buttonStyle(CockpitButtonStyle())
+        .buttonRepeatBehavior(repeats ? .enabled : .disabled)
+        .accessibilityLabel(label)
+    }
+
+    private func wide(_ title: String, symbol: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Label(title, systemImage: symbol)
+                .font(.headline)
+                .frame(maxWidth: .infinity, minHeight: 56)
+                .foregroundStyle(.white.opacity(0.7))
+                .background(Color.white.opacity(0.06), in: .rect(cornerRadius: 16))
+        }
+        .buttonStyle(CockpitButtonStyle())
+    }
+
+    private func press(_ key: String) {
+        tick += 1
+        Task {
+            do {
+                try await JarvisAPIClient.make(from: settings).pressTVRemote(key)
+            } catch {
+                model.actionError = "The TV didn't get that: \(error.localizedDescription)"
+            }
+        }
     }
 }
 

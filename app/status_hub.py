@@ -704,9 +704,22 @@ def rainbows() -> dict[str, tuple[str, str]]:
     return found
 
 
+# Lights that are only ever colour: the fan's light is one Tuya light whose
+# white mode is the LED Nick hates and whose colour mode is its RGB ring, so
+# from the apps it only ever gets a colour (RING_LIGHTS overrides).
+_RING_DEFAULT_RGB = [0, 200, 255]
+_ring_rgb: dict[str, list[int]] = {}
+
+
+def ring_lights() -> set[str]:
+    return {e.strip().lower() for e in os.getenv("RING_LIGHTS", "light.nicks_fan").split(",") if e.strip()}
+
+
 def _light_details(attributes: dict[str, Any], entity_id: str = "") -> dict[str, Any]:
     """What a light can do and where it is now, for the brightness/colour sheet."""
     modes = [str(m) for m in attributes.get("supported_color_modes") or []]
+    if entity_id in ring_lights():
+        modes = [m for m in modes if m != "color_temp"]  # no white: the sheet hides it
     brightness = attributes.get("brightness")
     rgb = attributes.get("rgb_color")
     return {
@@ -750,6 +763,9 @@ def home_control(entity_id: str, action: str, settle: bool = True) -> dict[str, 
         raise ValueError("entity_id is not in the HOME_DASHBOARD_ENTITIES allowlist")
 
     domain = entity_id.split(".", 1)[0]
+    if action == "on" and entity_id in ring_lights():  # colour, never the white LED
+        return {**set_light(entity_id, rgb=_ring_rgb.get(entity_id, _RING_DEFAULT_RGB)),
+                "state": "on"}
     message = call_discovered_service(domain, f"turn_{action}", entity_id=entity_id)
     if _HA_SUCCESS_MARKER not in message.lower():
         return {"error": message, "entity_id": entity_id, "state": None}
@@ -779,6 +795,11 @@ def set_light(entity_id: str, brightness_pct: int | None = None,
         ok = _HA_SUCCESS_MARKER in message.lower()
         return {"error": "" if ok else message, "entity_id": entity_id}
     data: dict[str, Any] = {}
+    if entity_id in ring_lights():
+        if kelvin is not None and rgb is None:
+            raise ValueError("this light is colour-only (RING_LIGHTS): no white")
+        rgb = rgb or _ring_rgb.get(entity_id, _RING_DEFAULT_RGB)  # brightness alone mustn't wake white
+        _ring_rgb[entity_id] = [max(0, min(255, int(c))) for c in rgb[:3]]
     if brightness_pct is not None:
         data["brightness_pct"] = max(1, min(100, int(brightness_pct)))
     if rgb is not None:
@@ -798,6 +819,9 @@ def home_scenes() -> dict[str, Any]:
     Saved scenes carry an ``id`` attribute; snapshots JARVIS takes with
     ``scene.create`` (Barn Door's ``barn_door_before``) don't, so they stay
     hidden. A scene's state is when it last ran: ``last`` is the most recent.
+    ``current`` is the scene the room is "in": ``last``, unless that was a
+    resting scene (``RESTING_SCENES``: Normal, Peace, Goodnight), which
+    means no scene at all.
     """
     return _cached("scenes", _ENTITIES_TTL_S, _home_scenes_uncached)
 
@@ -822,26 +846,79 @@ def _home_scenes_uncached() -> dict[str, Any]:
     scenes.sort(key=lambda s: s["name"].lower())
     ran = [s for s in scenes if s["last_activated"]]
     last = max(ran, key=lambda s: s["last_activated"])["entity_id"] if ran else None
-    return {"error": "", "scenes": scenes, "last": last}
+    current = last if last and last not in _resting_scenes() else None
+    return {"error": "", "scenes": scenes, "last": last, "current": current}
+
+
+_NORMAL_SCENE = "scene.normal"
+
+
+def _resting_scenes() -> set[str]:
+    raw = os.getenv("RESTING_SCENES", f"{_NORMAL_SCENE},scene.peace,scene.goodnight")
+    return {e.strip().lower() for e in raw.split(",") if e.strip()}
+
+
+def _scene_matches(entity_id: str) -> bool:
+    """Every entity in the saved scene is on/off (and each dropdown on its
+    option) the way the scene sets it. Brightness and colour don't count."""
+    from integrations.home_assistant import _request
+    ok, config = _request("GET", f"/api/config/scene/config/{entity_id.split('.', 1)[1]}")
+    wanted = (config or {}).get("entities") if ok and isinstance(config, dict) else None
+    ok, states = get_states()
+    if not wanted or not ok or not isinstance(states, list):
+        return False
+    now = {str(e.get("entity_id")): str(e.get("state")) for e in states}
+    for target, spec in wanted.items():
+        state = str(spec.get("state") if isinstance(spec, dict) else spec)
+        if now.get(target) in (None, "unavailable", "unknown"):
+            continue  # a device that's offline can't break the match
+        if now.get(target) != state:
+            return False
+    return True
+
+
+def _leave_scene(entity_id: str) -> str:
+    """Out of a scene to the everyday room: HA's Normal scene when there is
+    one, else the bedroom light on and the rest of that scene off."""
+    if _NORMAL_SCENE in _scene_ids(home_scenes()):
+        return call_discovered_service("scene", "turn_on", entity_id=_NORMAL_SCENE)
+    from integrations.home_assistant import _request
+    ok, config = _request("GET", f"/api/config/scene/config/{entity_id.split('.', 1)[1]}")
+    entities = list(((config or {}).get("entities") or {}).keys()) if ok and isinstance(config, dict) else []
+    bedroom = os.getenv("NORMAL_LIGHT", "light.bedroom_lights").strip().lower()
+    message = call_discovered_service("light", "turn_on", entity_id=bedroom)
+    for target in entities:
+        domain = target.split(".", 1)[0]
+        if target == bedroom or target == "switch.wii_u" or domain not in ("light", "switch", "fan"):
+            continue
+        call_discovered_service(domain, "turn_off", entity_id=target)
+    return message
 
 
 def _scene_ids(listing: dict[str, Any]) -> set[str]:
     return {s["entity_id"] for s in listing.get("scenes", [])}
 
 
-def activate_scene(entity_id: str) -> dict[str, Any]:
-    """Run one saved scene. ValueError (a 400) unless it's in ``home_scenes``."""
+def activate_scene(entity_id: str, toggle: bool = False) -> dict[str, Any]:
+    """Run one saved scene. ValueError (a 400) unless it's in ``home_scenes``.
+
+    ``toggle`` (the apps' scene tiles): pressing the scene the room is in
+    while everything is still as it set it leaves the scene (``_leave_scene``,
+    ``left`` true); if something changed since, it runs again to put it back.
+    """
     entity_id = (entity_id or "").strip().lower()
     if entity_id not in _scene_ids(home_scenes()):  # cached; a scene made since needs a fresh look
         invalidate("scenes")
         if entity_id not in _scene_ids(home_scenes()):
             raise ValueError("not a saved Home Assistant scene")
-    message = call_discovered_service("scene", "turn_on", entity_id=entity_id)
+    invalidate("scenes")
+    left = bool(toggle) and home_scenes().get("current") == entity_id and _scene_matches(entity_id)
+    message = _leave_scene(entity_id) if left else call_discovered_service("scene", "turn_on", entity_id=entity_id)
     invalidate("scenes")
     invalidate("entities")
     if _HA_SUCCESS_MARKER not in message.lower():
-        return {"error": message, "entity_id": entity_id}
-    return {"error": "", "entity_id": entity_id}
+        return {"error": message, "entity_id": entity_id, "left": left}
+    return {"error": "", "entity_id": entity_id, "left": left}
 
 
 # Home Assistant acknowledges a service call before the device reports back,

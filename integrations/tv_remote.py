@@ -21,6 +21,13 @@ KEYS = {
     "play_pause": "MEDIA_PLAY_PAUSE", "rewind": "MEDIA_REWIND", "fast_forward": "MEDIA_FAST_FORWARD",
     "volume_up": "VOLUME_UP", "volume_down": "VOLUME_DOWN", "mute": "VOLUME_MUTE",
 }
+# Companion quick-launch button -> Android TV package (remote.turn_on activity).
+APPS = {
+    "app_plex": "com.plexapp.android",
+    "app_youtube": "com.google.android.youtube.tv",
+    "app_spotify": "com.spotify.tv.android",
+    "app_settings": "com.android.tv.settings",
+}
 _DEFAULT_PLAYERS = ("media_player.nicks_room_tv,media_player.nicks_room_tv_2,media_player.nick_s_room_tv,"
                     "media_player.nicks_room_group,media_player.nick_s_room_display")
 
@@ -42,9 +49,12 @@ def power(on: bool) -> tuple[bool, str]:
 
 
 def press(key: str) -> tuple[bool, str]:
-    """One companion-remote button; power_on / power_off switch the TV."""
+    """One companion-remote button; power_on / power_off switch the TV and
+    app_* (``APPS``) open Plex, YouTube, Spotify or Settings."""
     if key in ("power_on", "power_off"):
         return power(key == "power_on")
+    if key in APPS:  # wakes the TV if needed and opens the app
+        return home_assistant.call_service("remote", "turn_on", entity(), {"activity": APPS[key]})
     code = KEYS.get(key)
     if code is None:
         raise ValueError(f"Unknown button {key!r}.")

@@ -117,11 +117,11 @@ struct SceneFocusMenu: View {
     }
 
     var body: some View {
-        let current = choices.first { $0.entityID == scenes.last }
+        let current = choices.first { $0.entityID == scenes.current }
         Menu {
             ForEach(choices) { scene in
                 Button { model.runScene(scene) } label: {
-                    Label(scene.name, systemImage: scene.entityID == scenes.last ? "checkmark" : scene.symbol)
+                    Label(scene.name, systemImage: scene.entityID == scenes.current ? "checkmark" : scene.symbol)
                 }
             }
         } label: {

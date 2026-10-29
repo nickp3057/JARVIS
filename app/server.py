@@ -795,18 +795,25 @@ async def home_stream(request: Request, _: None = _status_read) -> StreamingResp
     """Server-sent ``home`` events: one whenever a dashboard entity or a
     scene changes in Home Assistant (app/status_hub.py ``home_changed``), so
     the room screens refetch at once instead of on their next poll. A burst
-    (a scene flipping eight lights) arrives as a few events, not eight."""
+    (a scene flipping eight lights) arrives as a few events, not eight.
+    Each event also carries the shared ``theme``: the TV follows it here, so
+    Barn Door reaches it at once instead of on its 5 s theme poll."""
     await asyncio.to_thread(runtime)  # the HA live feed runs on the runtime
+    from brain import theme
+
+    def pulse() -> dict[str, object]:
+        return {"seq": status_hub.home_seq(), "theme": theme.current()["theme"]}
+
     async def events():
-        seq = status_hub.home_seq()
-        yield f"event: home\ndata: {json.dumps({'seq': seq})}\n\n"
+        state = pulse()
+        yield f"event: home\ndata: {json.dumps(state)}\n\n"
         quiet_since = time.monotonic()
         while not await request.is_disconnected():
             await asyncio.sleep(0.15)
-            latest = status_hub.home_seq()
-            if latest != seq:
-                seq, quiet_since = latest, time.monotonic()
-                yield f"event: home\ndata: {json.dumps({'seq': seq})}\n\n"
+            latest = pulse()
+            if latest != state:
+                state, quiet_since = latest, time.monotonic()
+                yield f"event: home\ndata: {json.dumps(state)}\n\n"
             elif time.monotonic() - quiet_since > _SSE_KEEPALIVE_S:
                 quiet_since = time.monotonic()
                 yield ": keep-alive\n\n"
@@ -924,12 +931,13 @@ def home_scenes(_: None = Depends(authorize)) -> dict[str, object]:
 
 class SceneRequest(BaseModel):
     entity_id: str = Field(min_length=7, max_length=200, pattern=r"^scene\.[a-z0-9_]+$")
+    toggle: bool = False  # a tile press: the scene the room is in, untouched, leaves it
 
 
 @app.post("/api/home/scenes/activate")
 def home_scene_activate(request: SceneRequest, _: None = Depends(authorize)) -> dict[str, object]:
     try:
-        return status_hub.activate_scene(request.entity_id)
+        return status_hub.activate_scene(request.entity_id, toggle=request.toggle)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 

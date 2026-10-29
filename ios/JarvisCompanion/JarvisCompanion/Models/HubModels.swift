@@ -392,6 +392,26 @@ struct HomeScenes: Decodable {
     let error: String
     let scenes: [HomeScene]
     let last: String?
+    /// The scene the room is in: nil after Normal, Peace or Goodnight (Core
+    /// says so); an older Core without the field means the last one run.
+    let current: String?
+
+    init(error: String, scenes: [HomeScene], last: String?, current: String? = nil) {
+        self.error = error
+        self.scenes = scenes
+        self.last = last
+        self.current = current
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        error = try c.decode(String.self, forKey: .error)
+        scenes = try c.decode([HomeScene].self, forKey: .scenes)
+        last = try c.decodeIfPresent(String.self, forKey: .last)
+        current = c.contains(.current) ? try c.decodeIfPresent(String.self, forKey: .current) : last
+    }
+
+    enum CodingKeys: String, CodingKey { case error, scenes, last, current }
 }
 
 struct HomeScene: Decodable, Identifiable {

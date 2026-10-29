@@ -701,7 +701,7 @@ struct HubView: View {
             tileHeading("Scenes", symbol: "sparkles")
             LazyVGrid(columns: [GridItem(.adaptive(minimum: 140), spacing: 10)], spacing: 10) {
                 ForEach(scenes.scenes) { scene in
-                    SceneTile(model: model, scene: scene, lit: scene.entityID == scenes.last)
+                    SceneTile(model: model, scene: scene, lit: scene.entityID == scenes.current)
                 }
             }
         }

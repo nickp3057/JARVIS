@@ -77,7 +77,9 @@ public class HomeActivity extends Activity {
 
         @Override
         public void onReceive(Context context, Intent intent) {
-            home.render();
+            // A new shared theme (ThemeStream: Barn Door) rebuilds the screen.
+            if (Jarvis.theme(home) != home.theme) home.recreate();
+            else home.render();
         }
     }
 

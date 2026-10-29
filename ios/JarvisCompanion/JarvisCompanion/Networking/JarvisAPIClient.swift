@@ -828,13 +828,17 @@ struct JarvisAPIClient {
                           query: [URLQueryItem(name: "kind", value: kind == "movie" ? "movie" : "tv")])
     }
 
-    func activateScene(_ entityID: String) async throws -> String {
+    /// `toggle`: pressing the scene the room is in, untouched since, leaves it
+    /// (Core runs Normal); otherwise the scene runs (again).
+    func activateScene(_ entityID: String, toggle: Bool = true) async throws -> String {
         struct Body: Encodable {
             let entityID: String
-            enum CodingKeys: String, CodingKey { case entityID = "entity_id" }
+            let toggle: Bool
+            enum CodingKeys: String, CodingKey { case entityID = "entity_id", toggle }
         }
         struct Result: Decodable { let error: String }
-        return try await postJSON(Result.self, path: "api/home/scenes/activate", body: Body(entityID: entityID)).error
+        return try await postJSON(Result.self, path: "api/home/scenes/activate",
+                                  body: Body(entityID: entityID, toggle: toggle)).error
     }
 
     func homeControl(entityID: String, turnOn: Bool) async throws -> HomeControlResult {

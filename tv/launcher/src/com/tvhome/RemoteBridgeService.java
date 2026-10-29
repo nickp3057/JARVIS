@@ -76,6 +76,7 @@ public class RemoteBridgeService extends Service {
             cleanupStarted = true;
             new Thread(() -> BootCleanup.run(this), "cleanup").start();
             AlertStream.start(this);
+            ThemeStream.start(this);
             NightlyRefresh.scheduleNext(this);
             registerReceiver(new ScreenOffReceiver(), new IntentFilter(Intent.ACTION_SCREEN_OFF));
         }

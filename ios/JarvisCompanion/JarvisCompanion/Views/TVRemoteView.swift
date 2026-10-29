@@ -2,7 +2,8 @@ import SwiftUI
 
 /// A remote for the TV in Nick's room: each press goes to JARVIS Core
 /// (`POST /api/tv/remote`), which sends it through Home Assistant's Android
-/// TV Remote connection, so it works whatever app is on screen.
+/// TV Remote connection, so it works whatever app is on screen. A 2x2 at the
+/// bottom opens Plex, YouTube, Spotify or the TV's Settings.
 struct TVRemoteView: View {
     @EnvironmentObject private var settings: AppSettings
     @Environment(\.dismiss) private var dismiss
@@ -11,7 +12,7 @@ struct TVRemoteView: View {
 
     var body: some View {
         NavigationStack {
-            VStack(spacing: 28) {
+            VStack(spacing: 22) {
                 HStack(spacing: 16) {
                     pill("On", symbol: "power", key: "power_on")
                     pill("Off", symbol: "poweroff", key: "power_off")
@@ -27,6 +28,7 @@ struct TVRemoteView: View {
                     round("speaker.slash", label: "Mute", key: "mute")
                     round("speaker.plus", label: "Volume up", key: "volume_up", repeats: true)
                 }
+                apps
                 if let error {
                     Label(error, systemImage: "exclamationmark.triangle")
                         .font(.footnote).foregroundStyle(JarvisTheme.amber)
@@ -41,6 +43,28 @@ struct TVRemoteView: View {
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
             .sensoryFeedback(.impact(weight: .light), trigger: tick)
         }
+    }
+
+    /// Quick launch: opens the app on the TV (waking it if needed).
+    private var apps: some View {
+        LazyVGrid(columns: [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)], spacing: 12) {
+            app("Plex", symbol: "play.rectangle.fill", key: "app_plex")
+            app("YouTube", symbol: "play.tv.fill", key: "app_youtube")
+            app("Spotify", symbol: "music.note", key: "app_spotify")
+            app("Settings", symbol: "gearshape.fill", key: "app_settings")
+        }
+        .frame(maxWidth: 360)
+    }
+
+    private func app(_ title: String, symbol: String, key: String) -> some View {
+        Button { press(key) } label: {
+            Label(title, systemImage: symbol).font(.subheadline.weight(.semibold))
+                .frame(maxWidth: .infinity, minHeight: 46)
+                .background(JarvisTheme.panelGradient, in: .rect(cornerRadius: 14))
+                .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(JarvisTheme.border))
+        }
+        .buttonStyle(CockpitButtonStyle())
+        .accessibilityLabel("Open \(title) on the TV")
     }
 
     private var dpad: some View {

@@ -29,6 +29,9 @@ every deploy, so edit the repo copy, not the TV's.
   live alert stream `GET /api/clients/events` (SSE). Token `nicks-room-tv`,
   scopes `events:read status:read chat` (never the admin token). Set by
   `tv/provision.sh` (run by Nick: SSH writes to the Optiplex need him).
+- **Theme** (`ThemeStream`): follows Core's `/api/home/stream`, whose events
+  carry the shared theme, so Barn Door turns the screen red at once (the 5 s
+  `/api/theme` poll is the fallback).
 - **Banners** (`AlertStream`, `Banner`): fresh warning/critical alerts appear
   top-right over any app, Plex included, without taking focus.
 - **Voice** (`Voice`, via `RemoteBridgeService`): "Jarvis, ..." on the remote

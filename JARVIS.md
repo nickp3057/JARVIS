@@ -598,6 +598,9 @@ FOLLOWUP_TIMEOUT_S=10.0
 FOLLOWUP_TASK_S=2.5
 INTERRUPT_RMS_THRESHOLD=1500
 WHISPER_MODEL=small.en
+STT_PROVIDER=local          # elevenlabs (Scribe, uses ELEVENLABS_API_KEY) or openai: the command after the wake word goes to the cloud
+STT_MODEL=                  # cloud model override (scribe_v1 / gpt-4o-mini-transcribe)
+STT_TIMEOUT_S=6             # slower than this (or any error) falls back to local Whisper
 # Default is one deterministic decode (fast, stable latency on CPU); true
 # restores faster-whisper's re-decode-on-low-confidence temperature schedule.
 WHISPER_TEMPERATURE_FALLBACK=false
@@ -668,6 +671,9 @@ ROOM_QUIET_HOURS=22-7       # night mode hours; empty turns night mode off
 ROOM_NIGHT_VOLUME=3         # 0-10 speaker level in quiet hours (voice changes at night override)
 ROOM_VOLUME_CONTROL=Master  # ALSA mixer control for "volume 4" / "louder"
 LIGHT_RAINBOWS=             # light=select:DIY option pairs for the Rainbow button (defaults to Nick's strip + desk)
+RING_LIGHTS=light.nicks_fan # colour-only lights: the apps never send white (the fan's RGB ring)
+RESTING_SCENES=scene.normal,scene.peace,scene.goodnight  # running one means "no scene"
+NORMAL_LIGHT=light.bedroom_lights  # left on when a scene tile leaves its scene and HA has no Normal scene
 WAKE_UP_SCENE=              # optional HA scene./script. to run instead; unset uses scene.good_morning when HA has it
 # Companion dashboard (read-only status hub endpoints)
 PLEX_URL=                   # Plex base URL for /api/links + /api/status/services
@@ -879,6 +885,26 @@ CALENDAR_ALERT_LEAD_MIN=10  # warn this many minutes before a meeting
   exposed by the Tuya integration, so no scene sets it. I'm up runs
   `scene.good_morning` when it exists. The iPad Room tab has a Peace
   button (shown when `scene.peace` exists) for heading out.
+- **Scenes you can leave, fan ring, movie mode, cloud STT (iOS 5.14 / build 157, TV 8.3)** —
+  `/api/home/scenes` adds `current`: the last scene unless it was a resting
+  one (`RESTING_SCENES`), so after Normal/Peace/Goodnight nothing is lit.
+  `POST /api/home/scenes/activate {"toggle": true}` (every app tile): the
+  current scene, untouched since (`status_hub._scene_matches`: on/off and
+  dropdown options vs HA's saved scene config), leaves to `scene.normal`
+  (bedroom light on, the rest off; added by `ops/optiplex/room_fixups.py`)
+  and answers `left: true`; changed since, it runs again. iPad Room shows a
+  quiet "Current scene: X" beside Scenes when X isn't a tile, and Movie turns
+  the panel into a dark movie remote (clock, playback, volume, bedroom
+  light, TV remote) with "Back to panel". `RING_LIGHTS` (the fan light):
+  the apps only ever turn it on in colour (its RGB ring), never white; the
+  light sheet hides white. Put it on the iPad in place of the Wii U via
+  `HOME_DASHBOARD_ENTITIES`. TV remote: a 2x2 quick launch (Plex, YouTube,
+  Spotify, Settings: `app_*` keys, HA `remote.turn_on` with `activity`).
+  Barn Door: theme and TV wake go first, lights in parallel; the home
+  stream's events carry `theme` and the TV follows them (`ThemeStream`), so
+  the red screen no longer waits on its 5 s theme poll. Cloud STT:
+  `STT_PROVIDER` (speech/stt.py). `ios/install.sh` builds Release once and
+  installs on every connected iPhone/iPad.
 - **Live room sync, iPad polish, scene fix (iOS 5.13 / build 156)** —
   `GET /api/home/stream` (SSE, `status:read`) sends a `home` event whenever
   a `HOME_DASHBOARD_ENTITIES` entity or any scene changes in HA

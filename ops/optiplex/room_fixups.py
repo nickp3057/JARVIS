@@ -6,7 +6,11 @@
    HA 2026.10's fan reproduce-state compares every fan attribute and, when
    the scene leaves one out while the fan is already running, calls
    ``fan.set_direction`` with None: "string value is None at 'direction'".
-2. Renames the room's entities (display names only; entity ids, and so
+2. Adds a "Normal" scene, the everyday room: bedroom light on, the rest
+   off. Pressing the scene the room is in (untouched) on the iPad or phone
+   runs it, and running it means "no scene". Leaves the fan, the Scentsy and
+   the Wii U alone; edit it in HA to taste (the script won't overwrite it).
+3. Renames the room's entities (display names only; entity ids, and so
    every scene, automation and .env list, stay as they are).
 
 Safe to run twice. Never touches switch.wii_u's state (Nick's rule).
@@ -55,7 +59,30 @@ def fix_scenes() -> None:
             fan.setdefault(key, value)
         ok, reply = ha._request("POST", f"/api/config/scene/config/{scene_id}", json=config)
         print(f"scene {scene_id}: {'fixed' if ok else f'FAILED {reply}'}")
-    ha.call_service("scene", "reload")
+
+
+NORMAL = {
+    "id": "normal",
+    "name": "Normal",
+    "icon": "mdi:lightbulb-on",
+    "entities": {
+        "light.bedroom_lights": {"state": "on", "brightness": 255},
+        "light.nick_strip_lights": {"state": "off"},
+        "light.desk_lights_2": {"state": "off"},
+        "light.nicks_fan": {"state": "off"},
+        "switch.lamp": {"state": "off"},
+        "switch.avengers_tower_socket_1": {"state": "off"},
+    },
+}
+
+
+def add_normal() -> None:
+    ok, _ = ha._request("GET", "/api/config/scene/config/normal")
+    if ok:
+        print("scene normal: already there (left as is)")
+        return
+    ok, reply = ha._request("POST", "/api/config/scene/config/normal", json=NORMAL)
+    print(f"scene normal: {'added' if ok else f'FAILED {reply}'}")
 
 
 def rename() -> None:
@@ -79,4 +106,6 @@ def rename() -> None:
 
 if __name__ == "__main__":
     fix_scenes()
+    add_normal()
+    ha.call_service("scene", "reload")
     rename()

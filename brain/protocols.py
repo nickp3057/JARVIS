@@ -9,6 +9,11 @@ brain/theme.py remembers the old one) and the TV hands its whole screen to
 the red-alert view. Stand down: the snapshot and the old theme come back
 (the TV stays on).
 
+Speed: the theme flips and the TV wake goes out first (the TV hears the
+theme over ``/api/home/stream`` at once), then the lights change in
+parallel; they used to go one by one with the theme last, so the TV lagged
+every slow Govee call.
+
 The fan light (``light.nicks_fan``) is only ever turned off (Nick's rule),
 so it goes dark with the bedroom light rather than red.
 
@@ -29,6 +34,8 @@ from __future__ import annotations
 
 import json
 import os
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from brain import theme
@@ -46,19 +53,31 @@ def _ids(key: str, default: str) -> list[str]:
 
 def engage() -> str:
     colour, off = _ids("BARN_DOOR_LIGHTS", _COLOUR), _ids("BARN_DOOR_OFF", _OFF)
-    if theme.current()["theme"] != "barnDoor":  # engaging twice must not snapshot the red
+    first = theme.current()["theme"] != "barnDoor"  # engaging twice must not snapshot the red
+    if first:
         home_assistant.call_service("scene", "create", service_data={
             "scene_id": _SCENE, "snapshot_entities": colour + off})
-        _save_effects(colour)
-    failed = [e for e in colour if not home_assistant.call_service(
-        "light", "turn_on", e, {"rgb_color": [255, 0, 0], "brightness": 255})[0]]
-    for entity in off:
-        home_assistant.call_service(entity.split(".", 1)[0], "turn_off", entity)
-    if os.getenv("BARN_DOOR_TV", "1").strip().lower() not in ("0", "off", "false", "no"):
-        from integrations import tv_remote
-        tv_remote.power(True)  # the red-alert screen needs the TV awake
     # No alert: the red room and the TV taking over say it (Nick's call).
     theme.choose("barnDoor", remember=True)
+    if os.getenv("BARN_DOOR_TV", "1").strip().lower() not in ("0", "off", "false", "no"):
+        from integrations import tv_remote
+        # The red-alert screen needs the TV awake; it takes seconds, so not inline.
+        threading.Thread(target=tv_remote.power, args=(True,), daemon=True, name="barn-door-tv").start()
+    if first:
+        _save_effects(colour)
+
+    def red(entity: str) -> bool:
+        return home_assistant.call_service(
+            "light", "turn_on", entity, {"rgb_color": [255, 0, 0], "brightness": 255})[0]
+
+    def dark(entity: str) -> None:
+        home_assistant.call_service(entity.split(".", 1)[0], "turn_off", entity)
+
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        darkened = [pool.submit(dark, e) for e in off]
+        failed = [e for e, ok in zip(colour, pool.map(red, colour)) if not ok]
+        for job in darkened:
+            job.result()
     note = f" {len(failed)} light(s) didn't answer." if failed else ""
     return f"Barn Door Protocol engaged, sir. Everything's red.{note}"
 
@@ -100,11 +119,11 @@ def _effects_to_restore() -> dict[str, str]:
 
 
 def stand_down() -> str:
+    restored = theme.restore()  # first, so the TV lets go at once
     home_assistant.call_service("scene", "turn_on", f"scene.{_SCENE}")
     for entity, effect in _effects_to_restore().items():
         if entity.startswith("select."):  # a Govee DIY scene dropdown
             home_assistant.call_service("select", "select_option", entity, {"option": effect})
         else:
             home_assistant.call_service("light", "turn_on", entity, {"effect": effect})
-    restored = theme.restore()
     return f"Standing down, sir. Lights are back and the theme is {restored} again."
