@@ -899,6 +899,83 @@ def _scene_ids(listing: dict[str, Any]) -> set[str]:
     return {s["entity_id"] for s in listing.get("scenes", [])}
 
 
+_NEVER_IN_SCENES = {"switch.wii_u"}  # powered only when Nick plays (a Wii burned out on standby)
+_FAN_DEFAULTS = {"direction": "forward", "preset_mode": "fresh"}  # HA 2026.10 fan scenes need both
+
+
+def scene_slug(name: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "_", (name or "").strip().lower()).strip("_")
+
+
+def capture_scene() -> dict[str, Any]:
+    """The room as it is now, as a Home Assistant scene's ``entities`` block.
+
+    Only the app's allowlisted lights, switches and fans. The Wii U plug is
+    never included; ring lights (the fan light) are only ever saved off, so
+    a saved scene can't turn on the LED Nick hates. Offline devices are left
+    out rather than saved as "unavailable". Govee DIY rainbows can't be read
+    back from HA, so a rainbow light is saved at its plain colour.
+    """
+    ok, payload = get_states()
+    if not ok or not isinstance(payload, list):
+        raise RuntimeError(str(payload))
+    allowed = set(_dashboard_allowlist()) - _NEVER_IN_SCENES
+    entities: dict[str, dict[str, Any]] = {}
+    for entity in payload:
+        entity_id = str(entity.get("entity_id", "")).lower()
+        domain = entity_id.split(".", 1)[0]
+        state = str(entity.get("state", ""))
+        if entity_id not in allowed or domain not in ("light", "switch", "fan") or state not in ("on", "off"):
+            continue
+        attributes = entity.get("attributes", {}) or {}
+        spec: dict[str, Any] = {"state": state}
+        if state == "on" and domain == "light":
+            if entity_id in ring_lights():
+                spec = {"state": "off"}
+            else:
+                if attributes.get("brightness") is not None:
+                    spec["brightness"] = int(attributes["brightness"])
+                if attributes.get("color_mode") == "color_temp" and attributes.get("color_temp_kelvin"):
+                    spec["color_temp_kelvin"] = int(attributes["color_temp_kelvin"])
+                elif attributes.get("rgb_color"):
+                    spec["rgb_color"] = [int(c) for c in attributes["rgb_color"][:3]]
+        elif state == "on" and domain == "fan":
+            if attributes.get("percentage") is not None:
+                spec["percentage"] = int(attributes["percentage"])
+            for key, default in _FAN_DEFAULTS.items():
+                spec[key] = attributes.get(key) or default
+        entities[entity_id] = spec
+    return entities
+
+
+def describe_capture(entities: dict[str, dict[str, Any]]) -> str:
+    """'3 lights on, 2 off, fan at 35%' for the confirmation prompt."""
+    lights_on = sum(1 for e, s in entities.items() if e.startswith("light.") and s["state"] == "on")
+    lights_off = sum(1 for e, s in entities.items() if e.startswith("light.") and s["state"] == "off")
+    plugs_on = sum(1 for e, s in entities.items() if e.startswith("switch.") and s["state"] == "on")
+    parts = [f"{lights_on} light{'s' if lights_on != 1 else ''} on", f"{lights_off} off"]
+    if plugs_on:
+        parts.append(f"{plugs_on} plug{'s' if plugs_on != 1 else ''} on")
+    for entity_id, spec in entities.items():
+        if entity_id.startswith("fan."):
+            parts.append(f"fan at {spec.get('percentage', 100)}%" if spec["state"] == "on" else "fan off")
+    return ", ".join(parts)
+
+
+def save_scene(name: str, entities: dict[str, dict[str, Any]]) -> dict[str, Any]:
+    """Write (or replace) a saved HA scene through HA's scene config API,
+    which reloads scenes itself. The scene's id is its name's slug, so it
+    becomes ``scene.<slug>`` like the scenes made in the HA editor."""
+    from integrations.home_assistant import _request
+    slug = scene_slug(name)
+    if not slug or not entities:
+        raise ValueError("a scene needs a name and at least one device")
+    ok, result = _request("POST", f"/api/config/scene/config/{slug}",
+                          json={"id": slug, "name": name.strip(), "entities": entities})
+    invalidate("scenes")
+    return {"error": "" if ok else str(result), "entity_id": f"scene.{slug}"}
+
+
 def activate_scene(entity_id: str, toggle: bool = False) -> dict[str, Any]:
     """Run one saved scene. ValueError (a 400) unless it's in ``home_scenes``.
 

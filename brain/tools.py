@@ -130,6 +130,44 @@ def _tool_activate_home_action(args: dict[str, Any]) -> str:
     return activate_home_action(args.get("kind", ""), args.get("name", ""))
 
 
+def _tool_list_scenes(_: dict[str, Any]) -> str:
+    from app import status_hub
+    listing = status_hub.home_scenes()
+    if listing.get("error"):
+        return f"Tool error: {listing['error']}"
+    scenes = listing.get("scenes", [])
+    if not scenes:
+        return "There are no saved Home Assistant scenes."
+    names = ", ".join(s["name"] for s in scenes)
+    current = next((s["name"] for s in scenes if s["entity_id"] == listing.get("current")), None)
+    return f"Saved scenes: {names}." + (f" The room is in {current}." if current else "")
+
+
+def _tool_save_scene(args: dict[str, Any]) -> str:
+    from app import status_hub
+    from brain import confirm_gate
+    name = str(args.get("name") or "").strip()
+    if not status_hub.scene_slug(name):
+        return "A scene needs a name, sir."
+    try:
+        entities = status_hub.capture_scene()
+    except RuntimeError as exc:
+        return f"I couldn't read the room from Home Assistant, sir ({exc})."
+    if not entities:
+        return "None of the room's devices are online to capture, sir."
+    exists = f"scene.{status_hub.scene_slug(name)}" in {s["entity_id"] for s in status_hub.home_scenes().get("scenes", [])}
+
+    def run() -> str:
+        result = status_hub.save_scene(name, entities)
+        if result["error"]:
+            return f"Home Assistant refused the scene, sir: {result['error']}"
+        return f"Saved. '{name}' is {result['entity_id']}, sir."
+
+    verb = "replace the scene" if exists else "save the room as a new scene"
+    return confirm_gate.propose(args.get("_jarvis_session_id"),
+                                f"{verb} '{name}' ({status_hub.describe_capture(entities)})", run)
+
+
 def _tool_list_home_services(args: dict[str, Any]) -> str:
     domain = args.get("domain")
     success, result = describe_services(domain)
@@ -899,6 +937,28 @@ _CUSTOM_TOOLS: list[dict[str, Any]] = [
                 },
             },
             "required": ["kind", "name"],
+        },
+    },
+    {
+        "name": "list_scenes",
+        "description": (
+            "List Nick's saved Home Assistant scenes and which one the room is in. "
+            "Use for \"what scenes do I have?\"."
+        ),
+        "input_schema": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "save_scene",
+        "description": (
+            "Save the room's current lights, plugs and fan as a Home Assistant scene with this name "
+            "(\"save this as a scene called Reading\"). Captures now and proposes; Nick approves "
+            "with \"yes\" or the code before anything is written. An existing name is replaced. "
+            "The Wii U plug is never included and the fan light is always saved off."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {"name": {"type": "string", "description": "The scene's name, e.g. Reading."}},
+            "required": ["name"],
         },
     },
     {
@@ -2243,6 +2303,8 @@ _DISPATCH: dict[str, Callable[[dict[str, Any]], str]] = {
     "home_status": _tool_home_status,
     "test_home_assistant": _tool_test_home_assistant,
     "activate_home_action": _tool_activate_home_action,
+    "list_scenes": _tool_list_scenes,
+    "save_scene": _tool_save_scene,
     "list_home_services": _tool_list_home_services,
     "call_home_service": _tool_call_home_service,
     "list_automations": _tool_list_automations,

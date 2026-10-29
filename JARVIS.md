@@ -192,6 +192,15 @@ RMS envelope from ElevenLabs audio drives the orb in real time using a monotonic
   explicit off phrases take precedence over location wording such as "on my desk"
 - `activate_home_action(kind, name)` — fuzzy-match and activate an existing HA
   scene, script, or automation
+- `list_scenes()` — Nick's saved HA scenes and which one the room is in
+  ("what scenes do I have?")
+- `save_scene(name)` — capture the room's allowlisted lights, plugs and fan
+  (`HOME_DASHBOARD_ENTITIES`) and save them as an HA scene via
+  `/api/config/scene/config/<slug>`; confirm-gated (`brain/confirm_gate.py`),
+  replaces a scene of the same name. Never includes `switch.wii_u`; ring lights
+  (`RING_LIGHTS`, the fan light) are always saved off; fans get HA 2026.10's
+  required `direction`/`preset_mode`. Govee DIY rainbows can't be read back,
+  so a rainbow light is saved at its plain colour
 - `list_devices(domain?)` — list HA entities, including scene/script/automation
   domains when requested
 - `home_status(query?)` — answer read-only live-state questions with friendly
@@ -760,6 +769,15 @@ CALENDAR_ALERT_LEAD_MIN=10  # warn this many minutes before a meeting
 ---
 
 ## Recently Shipped
+
+- **"What scenes do I have?" and "save this as a scene" (iOS 5.15 / build
+  158)** — `list_scenes` and confirm-gated `save_scene` tools
+  (`app/status_hub.py`: `capture_scene`, `describe_capture`, `save_scene`).
+  The proposal reads like "save the room as a new scene 'Reading' (3 lights
+  on, 2 off, fan at 35%)"; the room captured at proposal time is what gets
+  written. Not run against live HA yet. Also: `tests/__init__.py` points
+  `tool_health._FILE` at a temp dir, so the suite (`python -m unittest`)
+  no longer writes the real `memory/tool_health.json` (12 modules did).
 
 - **Indexer incidents quote the real error; JARVIS can switch mirrors (iOS
   4.9 / build 131)** — Found 2026-10-28: 1337x.to returned `403 Forbidden,

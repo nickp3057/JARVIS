@@ -274,9 +274,11 @@ Little things mentioned along the way, roughly smallest first:
 - [ ] Room voice: start speaking the first sentence of long answers sooner
   (skipped 2026-10-28: spoken replies are one sentence, so streaming saves
   little; `tts.speak_stream` + `respond_streaming(spoken=True)` if needed).
-- [ ] "What scenes do I have?" by voice (list `status_hub.home_scenes`).
+- [x] "What scenes do I have?" by voice (`list_scenes`, 2026-10-29).
 - [ ] Govee effects (Aurora, Candlelight, Starry Sky...) in the light sheet.
-- [ ] "Save this as a scene": the current room becomes an HA scene by name.
+- [x] "Save this as a scene": the current room becomes an HA scene by name
+  (`save_scene`, confirm-gated, 2026-10-29; not run on live HA yet: try
+  "save this as a scene called Test", approve, check HA's scene list, run it).
 - [ ] Scenes on the iPhone Home Screen / Control Center (widget target).
 - [ ] iPad Room tab: a now-playing / music card.
 - [ ] Fan's RGB rainbow: try the HACS "Tuya Local" integration.
@@ -525,7 +527,7 @@ shipped. Design:
   wording, a new `brain/skills/*.py` folder), stores it as a proposal with a
   rationale and the test command that should pass.
 - Apply flow: write to a git worktree or branch, run
-  `python -m unittest discover -s tests`, report pass/fail, and only on
+  `python -m unittest`, report pass/fail, and only on
   Nick's approval of the id merge it and hot-reload the affected module
   (`importlib.reload` for tool handlers; a restart for anything else).
 - Rollback: keep the pre-patch commit hash; `rollback_patch` resets to it.
@@ -609,8 +611,6 @@ Ordered as in `JARVIS.md` "Performance debt":
 - Per-turn SQLite housekeeping; shared connection, prune every N turns.
 - Streaming still opt-in (`STREAMING_TTS=false`); make it default once
   trusted.
-- `tests/test_runtime_monitors.py` writes the real `memory/tool_health.json`;
-  patch `tool_health._FILE` in setUp.
 
 ## How to spend a short session on this repo
 

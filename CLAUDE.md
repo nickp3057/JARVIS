@@ -48,7 +48,7 @@ python create_shortcut.py
 TV=10.0.0.46:5555 tv/launcher/deploy.sh
 ```
 
-Server API tests use the standard-library runner: `.venv/bin/python -m unittest tests.test_server -v`. There is no linter, formatter, or CI configured. Verify desktop changes by running `python -m app.main --text` and exercising the relevant tool/command manually, or `--voice`/GUI mode when the change touches speech or UI. Type-check iOS sources with the device SDK when a matching Simulator runtime is unavailable.
+Tests use the standard-library runner: the full suite is `.venv/bin/python -m unittest` from the repo root (not `discover -s tests`, which skips `tests/__init__.py`'s isolation of `memory/tool_health.json`); one module is e.g. `.venv/bin/python -m unittest tests.test_server -v`. There is no linter, formatter, or CI configured. Verify desktop changes by running `python -m app.main --text` and exercising the relevant tool/command manually, or `--voice`/GUI mode when the change touches speech or UI. Type-check iOS sources with the device SDK when a matching Simulator runtime is unavailable.
 
 Config lives in `.env` at the project root (never commit it — see `JARVIS.md` for the full variable list). Settings are read live via `os.getenv()` inside functions, not cached at import time, so `.env` edits (including ones JARVIS makes to itself via `update_setting`) take effect without a restart.
 
