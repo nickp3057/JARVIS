@@ -793,6 +793,20 @@ struct JarvisAPIClient {
         try await getJSON(HomeScenes.self, path: "api/home/scenes")
     }
 
+    /// Barn Door Protocol: "engage" or "stand_down" (three taps on the reactor).
+    @discardableResult
+    func barnDoor(_ action: String) async throws -> String {
+        struct Body: Encodable { let action: String }
+        struct Result: Decodable { let message: String }
+        return try await postJSON(Result.self, path: "api/protocols/barn-door", body: Body(action: action)).message
+    }
+
+    /// Radarr/Sonarr quality profile names for the request picker.
+    func mediaProfiles(kind: String) async throws -> MediaProfiles {
+        try await getJSON(MediaProfiles.self, path: "api/media/profiles",
+                          query: [URLQueryItem(name: "kind", value: kind == "movie" ? "movie" : "tv")])
+    }
+
     func activateScene(_ entityID: String) async throws -> String {
         struct Body: Encodable {
             let entityID: String

@@ -27,12 +27,23 @@ final class MediaRequestModel: ObservableObject {
     /// Last outcome or error, shown under the search field.
     @Published var notice: String?
     @Published private(set) var noticeIsError = false
+    /// Quality profiles for the current kind (Radarr's for movies, Sonarr's
+    /// for shows) and the picked one; Core's default until Nick changes it.
+    @Published private(set) var profiles: [String] = []
+    @Published var profile = ""
 
     private let makeClient: () throws -> JarvisAPIClient
     private var searchTask: Task<Void, Never>?
 
     init(makeClient: @escaping () throws -> JarvisAPIClient) {
         self.makeClient = makeClient
+    }
+
+    func loadProfiles() async {
+        let kind = kind.rawValue
+        guard let response = try? await makeClient().mediaProfiles(kind: kind), kind == self.kind.rawValue else { return }
+        profiles = response.profiles
+        profile = response.profiles.contains(response.default) ? response.default : (response.profiles.first ?? "")
     }
 
     func search() {
@@ -70,7 +81,8 @@ final class MediaRequestModel: ObservableObject {
             guard let self else { return }
             defer { busyID = nil }
             do {
-                let response = try await makeClient().requestMedia(kind: item.kind, id: item.id)
+                let quality = profiles.contains(profile) ? profile : nil
+                let response = try await makeClient().requestMedia(kind: item.kind, id: item.id, quality: quality)
                 if response.status == "needs_confirmation", let code = response.code {
                     proposal = Proposal(title: item.title, description: response.description ?? "Add \(item.title)", code: code)
                 } else {

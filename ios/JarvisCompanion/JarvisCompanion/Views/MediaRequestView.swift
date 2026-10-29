@@ -19,6 +19,14 @@ struct MediaRequestView: View {
                         ForEach(MediaRequestModel.Kind.allCases) { Text($0.label).tag($0) }
                     }
                     .pickerStyle(.segmented)
+                    if model.profiles.count > 1 {
+                        Picker("Profile", selection: $model.profile) {
+                            ForEach(model.profiles, id: \.self) { Text($0).tag($0) }
+                        }
+                        .tint(JarvisTheme.cyan)
+                    } else if let only = model.profiles.first {
+                        LabeledContent("Profile", value: only)
+                    }
                     HStack {
                         TextField("Title, optionally with year", text: $model.query)
                             .textInputAutocapitalization(.words)
@@ -53,7 +61,11 @@ struct MediaRequestView: View {
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) { Button("Done") { dismiss() } }
             }
-            .onChange(of: model.kind) { model.search() }
+            .onChange(of: model.kind) {
+                model.search()
+                Task { await model.loadProfiles() }
+            }
+            .task { await model.loadProfiles() }
             .confirmationDialog(
                 model.proposal?.title ?? "Add",
                 isPresented: Binding(get: { model.proposal != nil }, set: { if !$0 { model.proposal = nil } }),

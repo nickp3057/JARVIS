@@ -14,6 +14,7 @@ struct HubView: View {
     var onSend: ((String) -> Void)? = nil
     @State private var deskWidth: CGFloat = 0
     @State private var deskQuestion = ""
+    @StateObject private var holds = HoldSuppressor()
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.dynamicTypeSize) private var typeSize
     @State private var isVisible = false
@@ -68,13 +69,15 @@ struct HubView: View {
                         LazyVStack(spacing: 16) {
                             switch focus {
                             case .home:
+                                // A glance, no scrolling: the reactor, next up
+                                // and to-dos, the scene picker, the portfolio line.
                                 hero
                                 homeTiles
                                 if let scenes = model.scenes.value, !scenes.scenes.isEmpty {
-                                    scenesCard(scenes)
+                                    SceneFocusMenu(model: model, scenes: scenes)
                                 }
                                 if let portfolio = model.portfolio.value, portfolio.configured {
-                                    portfolioTile(portfolio)
+                                    portfolioStrip(portfolio)
                                 }
                             case .hub:
                                 tvRemoteButton
@@ -104,6 +107,7 @@ struct HubView: View {
                 .onChange(of: model.mediaScrollTarget) { jump(proxy) }
             }
             .refreshable { await model.refreshAll() }
+            .scrollBounceBehavior(.basedOnSize)  // Home fits the screen: it doesn't scroll at all
             .background { JarvisBackdrop() }
             .navigationTitle(focus == .media ? "Media" : focus == .hub ? "Hub" : focus == .desk ? "Desk" : "Home")
             .toolbar(focus == .home || focus == .desk ? .hidden : .automatic, for: .navigationBar)
@@ -164,6 +168,15 @@ struct HubView: View {
             holdsPolling = true
             model.retainPolling(start: scenePhase == .active)
         }
+        .task(id: "\(scenePhase)-\(isVisible)") {
+            // Hub's and Desk's switches follow a wall switch within ~2 s
+            // (Core's cache is cleared by HA's live feed).
+            guard focus == .hub || focus == .desk else { return }
+            while scenePhase == .active, isVisible, !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(2))
+                await model.refreshEntities()
+            }
+        }
         .onChange(of: settings.isConfigured) { _, configured in
             if configured, isVisible { model.startPolling() }
             else { model.stopPolling() }
@@ -202,14 +215,14 @@ struct HubView: View {
     /// The reactor is the centrepiece; tapping it starts a briefing.
     private var hero: some View {
         VStack(spacing: 16) {
-            Button { onAsk?("Give me a briefing on my day and anything that needs my attention.") } label: {
-                JarvisCoreMark(size: typeSize.isAccessibilitySize ? 150 : 220)
-            }
-            .buttonStyle(CockpitButtonStyle())
-            .disabled(onAsk == nil)
-            .accessibilityLabel("Brief me")
-            .accessibilityHint("Starts a briefing with JARVIS")
-            .padding(.top, 6)
+            // One tap: a briefing. Three quick taps: Barn Door Protocol.
+            JarvisCoreMark(size: typeSize.isAccessibilitySize ? 130 : 170)
+                .barnDoorTaps(onSingleTap: onAsk.map { ask in
+                    { ask("Give me a briefing on my day and anything that needs my attention.") }
+                })
+                .accessibilityLabel("Brief me")
+                .accessibilityHint("Starts a briefing with JARVIS. Triple-tap for Barn Door Protocol.")
+                .padding(.top, 6)
 
             VStack(spacing: 6) {
                 Text(Self.greeting(at: .now))
@@ -640,6 +653,37 @@ struct HubView: View {
         }
         .homeTile()
         .fixedSize(horizontal: false, vertical: true)
+    }
+
+    /// Home's portfolio: one compact line (value and today), or the login
+    /// prompt when Schwab needs it.
+    private func portfolioStrip(_ p: Portfolio) -> some View {
+        HStack(spacing: 12) {
+            Image(systemName: "chart.line.uptrend.xyaxis")
+                .foregroundStyle(JarvisTheme.cyan)
+            if !p.linked || p.loginDueSoon {
+                Text(p.linked ? "Schwab login runs out soon" : "Schwab needs a login")
+                    .font(.subheadline.weight(.semibold))
+                Spacer(minLength: 0)
+                Button("Log in") { schwabLoggingIn = true }
+                    .font(.footnote.weight(.semibold)).foregroundStyle(JarvisTheme.cyan)
+            } else if let value = p.value {
+                Text(value, format: .currency(code: "USD"))
+                    .font(.headline.monospacedDigit())
+                    .contentTransition(.numericText(value: value))
+                    .animation(.snappy, value: value)
+                Spacer(minLength: 0)
+                if let today = p.todayChange { change(today, pct: p.todayPct, label: "today") }
+            } else {
+                Text(p.error?.isEmpty == false ? p.error! : "Fetching your accounts…")
+                    .font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                Spacer(minLength: 0)
+            }
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
+        .background(JarvisTheme.panelGradient, in: .rect(cornerRadius: 16))
+        .overlay(RoundedRectangle(cornerRadius: 16).strokeBorder(JarvisTheme.border))
     }
 
     private func change(_ amount: Double, pct: Double?, label: String) -> some View {
@@ -1207,7 +1251,10 @@ struct HubView: View {
         let pending = model.pendingEntityStates[entity.entityID]
         let on = pending ?? entity.isOn
         let tint = on ? JarvisTheme.amber : Color.secondary
-        return Button { model.toggle(entity, to: !on) } label: {
+        return Button {
+            guard !holds.swallows(entity.entityID) else { return }
+            model.toggle(entity, to: !on)
+        } label: {
             VStack(alignment: .leading, spacing: 6) {
                 HStack {
                     Image(systemName: Self.homeIcon(for: entity.domain))
@@ -1230,7 +1277,9 @@ struct HubView: View {
         .buttonStyle(CockpitButtonStyle())
         .disabled(!entity.isToggleable || pending != nil || model.entities.failureText != nil)
         .simultaneousGesture(LongPressGesture(minimumDuration: 0.45).onEnded { _ in
-            if entity.light?.dimmable == true { lightSheet = LightSheetID(id: entity.entityID) }
+            guard entity.light?.dimmable == true else { return }
+            holds.hold(entity.entityID)  // the release mustn't toggle it
+            lightSheet = LightSheetID(id: entity.entityID)
         })
         .animation(.easeOut(duration: 0.2), value: on)
         .accessibilityLabel(entity.friendlyName)

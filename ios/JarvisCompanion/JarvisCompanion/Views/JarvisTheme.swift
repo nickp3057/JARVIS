@@ -235,30 +235,40 @@ struct JarvisBackdrop: View {
 /// brighter while `active` (JARVIS is thinking). Drawn in the palette's
 /// reactor colour.
 ///
-/// Each moving part gets one `repeatForever` animation, scoped with
-/// `.animation(_:body:)` so it never leaks into layout, instead of rebuilding
-/// the whole mark every frame. Leaving the screen stops it at rest and it
-/// starts again from there, so tab switches and scrolling never make it
-/// jump. Reduce Motion, Low Power Mode, or `animated: false` draw the still
-/// pose.
+/// Every angle is computed from the clock inside one `TimelineView`, rather
+/// than by `repeatForever` animations: those restarted (and stacked, so the
+/// rings sped up or jumped) whenever the view was rebuilt mid-turn. Off
+/// screen the timeline pauses; Reduce Motion, Low Power Mode, or
+/// `animated: false` draw the still pose.
 struct JarvisCoreMark: View {
     var size: CGFloat = 112
     var animated = true
     var active = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var running = false
+    @State private var visible = false
 
     private var moving: Bool {
-        running && animated && !reduceMotion && !ProcessInfo.processInfo.isLowPowerModeEnabled
-    }
-
-    private func spin(_ seconds: Double) -> Animation? {
-        moving ? .linear(duration: seconds).repeatForever(autoreverses: false) : nil
+        animated && !reduceMotion && !ProcessInfo.processInfo.isLowPowerModeEnabled
     }
 
     var body: some View {
+        TimelineView(.animation(minimumInterval: 1.0 / 30, paused: !(moving && visible))) { context in
+            mark(seconds: moving ? context.date.timeIntervalSinceReferenceDate : 0)
+        }
+        .frame(width: size, height: size)
+        .onAppear { visible = true }
+        .onDisappear { visible = false }
+        .accessibilityHidden(true)
+    }
+
+    /// One full turn every `period` seconds, from the clock.
+    private func turn(_ seconds: Double, every period: Double) -> Double {
+        (seconds / period).truncatingRemainder(dividingBy: 1) * 360
+    }
+
+    private func mark(seconds: Double) -> some View {
         let dial = Double.pi * size * 0.92
-        ZStack {
+        return ZStack {
             Circle().fill(RadialGradient(colors: [JarvisTheme.reactor.opacity(active ? 0.30 : 0.22), .clear],
                                          center: .center, startRadius: 4, endRadius: size / 2))
             Circle().fill(RadialGradient(colors: [JarvisTheme.success.opacity(0.16), .clear],
@@ -270,25 +280,21 @@ struct JarvisCoreMark: View {
                     .stroke(JarvisTheme.reactor.opacity(0.28),
                             style: StrokeStyle(lineWidth: size * 0.025, dash: [1, dial / 60 - 1]))
                     .padding(size * 0.04)
-                    .animation(spin(40)) { $0.rotationEffect(.degrees(moving ? -360 : 0)) }
+                    .rotationEffect(.degrees(-turn(seconds, every: 40)))
             }
             Circle().trim(from: 0.05, to: 0.82)
                 .stroke(JarvisTheme.reactor.opacity(0.6), style: StrokeStyle(lineWidth: max(1.5, size / 56), lineCap: .round))
                 .padding(size * 0.13)
-                .animation(spin(16)) { $0.rotationEffect(.degrees(-60 + (moving ? 360 : 0))) }
+                .rotationEffect(.degrees(-60 + turn(seconds, every: 16)))
             Circle().trim(from: 0.12, to: 0.92)
                 .stroke(JarvisTheme.reactor.opacity(0.3), lineWidth: 1)
                 .padding(size * 0.21)
-                .animation(spin(10)) { $0.rotationEffect(.degrees(90 - (moving ? 360 : 0))) }
+                .rotationEffect(.degrees(90 - turn(seconds, every: 10)))
             Image(systemName: "waveform")
                 .font(.system(size: size * 0.25, weight: .light))
                 .foregroundStyle(JarvisTheme.reactor)
         }
-        .frame(width: size, height: size)
         .compositingGroup()
-        .onAppear { running = true }
-        .onDisappear { running = false }
-        .accessibilityHidden(true)
     }
 }
 

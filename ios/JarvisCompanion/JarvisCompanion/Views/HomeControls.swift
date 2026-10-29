@@ -45,3 +45,129 @@ struct SceneTile: View {
         .accessibilityLabel(scene.name + (lit ? ", last run" : ""))
     }
 }
+
+
+/// Three quick taps on the reactor: Barn Door Protocol (three more stand it
+/// down). A single tap still does `onSingleTap` (the phone's briefing), just
+/// after a short wait to be sure it isn't the start of three.
+struct BarnDoorTaps: ViewModifier {
+    @EnvironmentObject private var settings: AppSettings
+    var onSingleTap: (() -> Void)?
+    @State private var taps: [Date] = []
+    @State private var single: Task<Void, Never>?
+    @State private var fired = 0
+
+    func body(content: Content) -> some View {
+        content
+            .contentShape(Circle())
+            .onTapGesture(perform: tap)
+            .sensoryFeedback(.impact(weight: .heavy), trigger: fired)
+            .accessibilityAddTraits(.isButton)
+            .accessibilityAction(named: "Barn Door Protocol") { trigger() }
+    }
+
+    private func tap() {
+        let now = Date()
+        taps = taps.filter { now.timeIntervalSince($0) < 0.9 } + [now]
+        single?.cancel()
+        if taps.count >= 3 {
+            taps = []
+            trigger()
+        } else if taps.count == 1, let onSingleTap {
+            single = Task { @MainActor in
+                try? await Task.sleep(for: .milliseconds(450))
+                guard !Task.isCancelled, taps.count == 1 else { return }
+                taps = []
+                onSingleTap()
+            }
+        }
+    }
+
+    private func trigger() {
+        fired += 1
+        let action = JarvisPalette.current == .barnDoor ? "stand_down" : "engage"
+        Task {
+            _ = try? await JarvisAPIClient.make(from: settings).barnDoor(action)
+            await ThemeSync.pull(settings)  // red (or back) now, not at the next 10 s sync
+        }
+    }
+}
+
+extension View {
+    func barnDoorTaps(onSingleTap: (() -> Void)? = nil) -> some View {
+        modifier(BarnDoorTaps(onSingleTap: onSingleTap))
+    }
+}
+
+/// The scenes as one control, like Focus in Control Center: the current
+/// scene (the last one run) with a menu of the rest.
+struct SceneFocusMenu: View {
+    @ObservedObject var model: HubViewModel
+    let scenes: HomeScenes
+    var title = "Scene"
+
+    /// Barn Door's before-snapshot is a scene in HA but not one to pick.
+    private var choices: [HomeScene] {
+        scenes.scenes.filter { $0.entityID != "scene.barn_door_before" }
+    }
+
+    var body: some View {
+        let current = choices.first { $0.entityID == scenes.last }
+        Menu {
+            ForEach(choices) { scene in
+                Button { model.runScene(scene) } label: {
+                    Label(scene.name, systemImage: scene.entityID == scenes.last ? "checkmark" : scene.symbol)
+                }
+            }
+        } label: {
+            HStack(spacing: 12) {
+                ZStack {
+                    if model.runningScene != nil {
+                        ProgressView()
+                    } else {
+                        Image(systemName: current?.symbol ?? "sparkles").font(.body.weight(.semibold))
+                    }
+                }
+                .frame(width: 38, height: 38)
+                .background(current != nil ? JarvisTheme.cyan.opacity(0.9) : JarvisTheme.panelRaised, in: Circle())
+                .foregroundStyle(current != nil ? JarvisTheme.backgroundDeep : JarvisTheme.cyan)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(title).font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                    Text(current?.name ?? "Pick a scene").font(.headline).foregroundStyle(.primary)
+                }
+                Spacer(minLength: 0)
+                Image(systemName: "chevron.up.chevron.down")
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(.secondary)
+            }
+            .padding(12)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(JarvisTheme.panelGradient, in: .rect(cornerRadius: 18))
+            .overlay(RoundedRectangle(cornerRadius: 18).strokeBorder(JarvisTheme.border))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(CockpitButtonStyle())
+        .disabled(model.runningScene != nil)
+        .accessibilityLabel("Scene, \(current?.name ?? "none")")
+    }
+}
+
+/// A press-and-hold that opened a light's sheet must not also toggle the
+/// light when the finger lifts (the button's tap fires on release). The
+/// hold records the entity; the tap that follows it is swallowed.
+@MainActor
+final class HoldSuppressor: ObservableObject {
+    private var held: String?
+    private var heldAt = Date.distantPast
+
+    func hold(_ id: String) {
+        held = id
+        heldAt = .now
+    }
+
+    /// True when this tap is the release of a hold (and should do nothing).
+    func swallows(_ id: String) -> Bool {
+        defer { held = nil }
+        return held == id && Date.now.timeIntervalSince(heldAt) < 2
+    }
+}

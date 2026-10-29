@@ -386,3 +386,43 @@ class AnnounceEndpointTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class AppEndpointTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.client = TestClient(server.app)
+        self.headers = {"Authorization": "Bearer t"}
+        patch.dict(os.environ, {"JARVIS_API_TOKEN": "t"}).start()
+        self.addCleanup(patch.stopall)
+
+    def test_barn_door_from_the_reactor(self) -> None:
+        from brain import protocols
+        with patch.object(protocols, "engage", return_value="engaged") as engage, \
+                patch.object(protocols, "stand_down", return_value="down") as down:
+            self.assertEqual(self.client.post("/api/protocols/barn-door", json={}, headers=self.headers).json(),
+                             {"message": "engaged"})
+            self.client.post("/api/protocols/barn-door", json={"action": "stand_down"}, headers=self.headers)
+            self.assertEqual(self.client.post("/api/protocols/barn-door", json={"action": "nuke"},
+                                              headers=self.headers).status_code, 422)
+        engage.assert_called_once()
+        down.assert_called_once()
+
+    def test_quality_profiles_for_the_picker(self) -> None:
+        from integrations import servarr_common
+        profiles = [{"name": "Keep"}, {"name": "Standard"}, {"name": "Favorite 4K"}, {"name": "Locked"}]
+        with patch.object(servarr_common, "get_quality_profiles", return_value=(True, profiles)), \
+                patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("RADARR_DEFAULT_QUALITY", None)
+            body = self.client.get("/api/media/profiles?kind=movie", headers=self.headers).json()
+        self.assertEqual(body, {"profiles": ["Keep", "Standard", "Favorite 4K", "Locked"], "default": "Standard",
+                                "error": ""})
+        self.assertEqual(self.client.get("/api/media/profiles?kind=book", headers=self.headers).status_code, 422)
+
+    def test_a_wall_switch_clears_the_apps_cache(self) -> None:
+        from brain import runtime
+        with patch.dict(os.environ, {"HOME_DASHBOARD_ENTITIES": "light.bedroom_lights"}), \
+                patch.object(status_hub, "invalidate") as invalidate:
+            runtime._invalidate_app_home_cache("media_player.tv")
+            invalidate.assert_not_called()
+            runtime._invalidate_app_home_cache("light.bedroom_lights")
+            invalidate.assert_called_once_with("entities")

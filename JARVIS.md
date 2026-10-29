@@ -879,6 +879,27 @@ CALENDAR_ALERT_LEAD_MIN=10  # warn this many minutes before a meeting
   exposed by the Tuya integration, so no scene sets it. I'm up runs
   `scene.good_morning` when it exists. The iPad Room tab has a Peace
   button (shown when `scene.peace` exists) for heading out.
+- **iPad panel and phone glance redone (iOS 5.12 / build 155)** — iPad Room
+  fits one landscape screen: clock + battery (full screen hides the status
+  bar), the reactor, wake-up / next up / timers, TV remote and a **Room
+  settings** sheet (full screen, keep awake, night screen, tap-to-wake
+  light, back to Room, which scenes get tiles); lights with a small Peace
+  square (waving hand) in the top-right; scenes are three favourites
+  (`room.favoriteScenes`, default Game Time, Movie, Study) plus a menu with
+  the rest that shows the current one. Phone Home doesn't scroll: a 170 pt
+  reactor, next up / to-dos, a Focus-style scene picker (`SceneFocusMenu`)
+  and a one-line portfolio strip. Three quick taps on the reactor (iPad
+  Room, phone Home) engage Barn Door Protocol, three more stand it down
+  (`POST /api/protocols/barn-door`); one tap on the phone still briefs.
+  `JarvisCoreMark` now computes its angles from a `TimelineView` clock (the
+  `repeatForever` animations stacked and sped up or jumped). A long press
+  that opens the light sheet no longer also toggles the light
+  (`HoldSuppressor`). Wall switches show up within ~2 s: HA's live feed
+  clears Core's entity cache (`runtime._invalidate_app_home_cache`, only for
+  `HOME_DASHBOARD_ENTITIES`) and Room/Hub/Desk poll entities every 1.5-2 s.
+  Quick add has a quality-profile picker (`GET /api/media/profiles`,
+  default Standard for movies, TV for shows). Barn Door now turns the TV on
+  (`BARN_DOOR_TV`) and turns the fan light off instead of red.
 - **Desk on the Mac (iOS 5.6 / build 149)** — on the Mac, Room and Home are
   replaced by **Desk** (the default tab): a header with the reactor (tap
   for a briefing), greeting, live clock, the system/storage/attention chips

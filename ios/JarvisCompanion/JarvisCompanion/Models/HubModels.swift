@@ -752,3 +752,11 @@ struct GlanceEvent: Decodable, Identifiable {
         category = try? values.decodeIfPresent(String.self, forKey: .category)
     }
 }
+
+/// `GET /api/media/profiles`: the service's quality profiles and the one a
+/// request uses when none is picked.
+struct MediaProfiles: Decodable {
+    let profiles: [String]
+    let `default`: String
+    let error: String?
+}

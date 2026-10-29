@@ -1,11 +1,17 @@
 import SwiftUI
 import UIKit
 
-/// The iPad's Room tab: a wall-panel for Nick's room. A clock and what's
-/// next on one side; big light/switch tiles and the Home Assistant scenes
-/// (picked like Focus modes) on the other. Side by side in landscape,
-/// stacked in portrait (iPad mini). Same Core calls as the phone's Home tab.
-/// Long-press a light for brightness and colour (`LightSheet`).
+/// The iPad's Room tab: a wall-panel for Nick's room, all on one screen (no
+/// scrolling in landscape). Left: the clock and battery, the reactor (three
+/// quick taps: Barn Door Protocol), what's next, the TV remote and the
+/// panel's settings (a sheet, to keep the toggles out of sight). Right: the
+/// light/switch tiles with a small Peace square in the top corner, and Nick's
+/// favourite scenes (Game Time, Movie, Study) plus a menu holding the rest
+/// (and showing the current one). Portrait (iPad mini) stacks and scrolls.
+/// Long-press a light for brightness and colour (`LightSheet`); the hold
+/// doesn't also toggle it. Lights refresh every 1.5 s while this shows, and
+/// Core clears its cache the moment HA reports a change, so a wall switch
+/// shows up within a couple of seconds.
 ///
 /// Night screen: with Keep screen on, after dark (HA's `sun.sun`) and every
 /// light (and lamp) off for 45 s, the screen goes black at its lowest
@@ -43,24 +49,33 @@ struct RoomView: View {
     /// The screen's brightness before the night screen, to put back.
     @State private var savedBrightness: CGFloat?
     @ObservedObject private var voice = VoicePresence.shared
+    @StateObject private var holds = HoldSuppressor()
+    @State private var showingSettings = false
+    @AppStorage(RoomView.favoritesKey) private var favoriteScenes = RoomView.defaultFavorites
 
     var body: some View {
         GeometryReader { geo in
             let wide = geo.size.width > geo.size.height
-            ScrollView {
-                let layout = wide
-                    ? AnyLayout(HStackLayout(alignment: .top, spacing: 20))
-                    : AnyLayout(VStackLayout(spacing: 20))
-                layout {
-                    clockPanel
-                        .frame(width: wide ? min(360, geo.size.width * 0.36) : nil)
-                    VStack(spacing: 20) {
-                        peaceButton
+            if wide {
+                HStack(alignment: .top, spacing: 18) {
+                    clockPanel(fill: true)
+                        .frame(width: min(340, geo.size.width * 0.3))
+                    VStack(spacing: 18) {
                         devicesPanel
                         scenesPanel
                     }
+                    .frame(maxHeight: .infinity, alignment: .top)
                 }
-                .padding(24)
+                .padding(20)
+            } else {
+                ScrollView {
+                    VStack(spacing: 18) {
+                        clockPanel(fill: false)
+                        devicesPanel
+                        scenesPanel
+                    }
+                    .padding(20)
+                }
             }
         }
         .background { JarvisBackdrop().ignoresSafeArea() }
@@ -69,6 +84,9 @@ struct RoomView: View {
         .persistentSystemOverlays(fullScreen && !RootView.isMac ? .hidden : .automatic)
         .refreshable { await refresh() }
         .sheet(isPresented: $showingRemote) { TVRemoteView() }
+        .sheet(isPresented: $showingSettings) {
+            RoomSettingsView(model: model, wakeLightChoices: wakeLightChoices)
+        }
         .sheet(isPresented: $showingWake) {
             NavigationStack { WakeScheduleView() }
         }
@@ -111,6 +129,14 @@ struct RoomView: View {
             await refresh()
         }
         .task(id: scenePhase) {
+            // A wall switch should show up quickly: Core's cache is cleared by
+            // HA's live feed, so a short poll is cheap.
+            while scenePhase == .active, !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(1.5))
+                await model.refreshEntities()
+            }
+        }
+        .task(id: scenePhase) {
             // The next alarm changes rarely; once a minute is plenty.
             while scenePhase == .active, !Task.isCancelled {
                 try? await Task.sleep(for: .seconds(60))
@@ -134,6 +160,8 @@ struct RoomView: View {
     }
 
     private static let lightsOutScenes: Set<String> = ["scene.peace", "scene.goodnight"]
+    static let favoritesKey = "room.favoriteScenes"
+    static let defaultFavorites = "scene.game_time,scene.movie,scene.study"
     /// Shared with `RootView`: slide back to Room after a while on another tab.
     static let autoReturnKey = "room.autoReturn"
 
@@ -198,28 +226,35 @@ struct RoomView: View {
 
     // MARK: - Clock and what's next
 
-    private var clockPanel: some View {
-        VStack(alignment: .leading, spacing: 18) {
-            TimelineView(.everyMinute) { context in
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(context.date, format: .dateTime.hour().minute())
-                        .font(.system(size: 72, weight: .thin, design: .rounded))
-                        .monospacedDigit()
-                    Text(context.date, format: .dateTime.weekday(.wide).month(.wide).day())
-                        .font(.title3)
-                        .foregroundStyle(.secondary)
+    private func clockPanel(fill: Bool) -> some View {
+        VStack(alignment: .leading, spacing: 16) {
+            HStack(alignment: .top) {
+                TimelineView(.everyMinute) { context in
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(context.date, format: .dateTime.hour().minute())
+                            .font(.system(size: 64, weight: .thin, design: .rounded))
+                            .monospacedDigit()
+                        Text(context.date, format: .dateTime.weekday(.wide).month(.wide).day())
+                            .font(.title3)
+                            .foregroundStyle(.secondary)
+                    }
                 }
+                Spacer(minLength: 0)
+                if !RootView.isMac { BatteryBadge() }
             }
-            // The reactor; its glow lifts while "Hey JARVIS" is listening or thinking.
-            JarvisCoreMark(size: 150, active: voice.active)
+            // The reactor: its glow lifts while "Hey JARVIS" is listening;
+            // three quick taps engage (or stand down) Barn Door Protocol.
+            JarvisCoreMark(size: 130, active: voice.active)
+                .barnDoorTaps()
                 .frame(maxWidth: .infinity)
+                .accessibilityLabel("JARVIS. Triple-tap for Barn Door Protocol.")
             Divider().overlay(JarvisTheme.border)
             infoRow("alarm", title: "Wake-up", value: wakeText) { showingWake = true }
             if let event = model.now.value?.nextEvent {
                 infoRow("calendar", title: "Next up", value: eventText(event))
             }
-            ForEach(timers) { timerRow($0) }
-            Divider().overlay(JarvisTheme.border)
+            ForEach(timers.prefix(2)) { timerRow($0) }
+            if fill { Spacer(minLength: 0) }
             Button { showingRemote = true } label: {
                 Label("TV remote", systemImage: "appletvremote.gen4")
                     .font(.headline)
@@ -228,52 +263,37 @@ struct RoomView: View {
                     .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(JarvisTheme.cyan.opacity(0.4)))
             }
             .buttonStyle(CockpitButtonStyle())
-            if !RootView.isMac {
-                Toggle("Keep screen on", isOn: $keepAwake)
-                    .tint(JarvisTheme.cyan)
-                    .font(.subheadline)
-                Toggle("Dark at night when the lights are off", isOn: $nightScreen)
-                    .tint(JarvisTheme.cyan)
-                    .font(.subheadline)
-                    .disabled(!keepAwake)
-                Toggle("Full screen", isOn: $fullScreen)
-                    .tint(JarvisTheme.cyan)
-                    .font(.subheadline)
-                Toggle("Back to Room after 3 min on another tab", isOn: $autoReturn)
-                    .tint(JarvisTheme.cyan)
-                    .font(.subheadline)
-                if !wakeLightChoices.isEmpty {
-                    LabeledContent("Tap the dark screen to turn on") {
-                        Picker("Tap the dark screen to turn on", selection: $wakeLight) {
-                            Text("Just the screen").tag("")
-                            ForEach(wakeLightChoices) { Text($0.friendlyName).tag($0.entityID) }
-                        }
-                        .labelsHidden()
-                        .tint(JarvisTheme.cyan)
-                    }
-                    .font(.subheadline)
-                }
+            Button { showingSettings = true } label: {
+                Label("Room settings", systemImage: "gearshape")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, minHeight: 40)
             }
+            .buttonStyle(CockpitButtonStyle())
         }
-        .roomPanel()
+        .roomPanel(fill: fill)
     }
 
     /// Heading out: everything off, plugs too (HA's Peace scene), then the
-    /// night screen. Top of the right-hand column.
-    @ViewBuilder private var peaceButton: some View {
+    /// night screen. A small square in the top-right corner.
+    @ViewBuilder private var peaceSquare: some View {
         if let peace = model.scenes.value?.scenes.first(where: { $0.entityID == "scene.peace" }) {
             Button { model.runScene(peace) } label: {
-                HStack {
-                    if model.runningScene == peace.entityID { ProgressView() }
-                    Label("Peace", systemImage: "hand.wave")
+                ZStack {
+                    if model.runningScene == peace.entityID {
+                        ProgressView()
+                    } else {
+                        Image(systemName: "hand.wave.fill").font(.title3)
+                    }
                 }
-                .font(.title3.weight(.semibold))
-                .frame(maxWidth: .infinity, minHeight: 60)
-                .background(JarvisTheme.amber.opacity(0.16), in: .rect(cornerRadius: 14))
-                .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(JarvisTheme.amber.opacity(0.5)))
+                .foregroundStyle(JarvisTheme.amber)
+                .frame(width: 46, height: 46)
+                .background(JarvisTheme.amber.opacity(0.14), in: .rect(cornerRadius: 12))
+                .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(JarvisTheme.amber.opacity(0.5)))
             }
             .buttonStyle(CockpitButtonStyle())
             .disabled(model.runningScene != nil)
+            .accessibilityLabel("Peace")
             .accessibilityHint("Turns everything off for when you leave")
         }
     }
@@ -345,9 +365,13 @@ struct RoomView: View {
 
     private var devicesPanel: some View {
         VStack(alignment: .leading, spacing: 12) {
-            heading("Lights & switches", symbol: "lightbulb.2")
+            HStack {
+                heading("Lights & switches", symbol: "lightbulb.2")
+                Spacer()
+                peaceSquare
+            }
             if let entities = model.entities.value, !entities.isEmpty {
-                LazyVGrid(columns: [GridItem(.adaptive(minimum: 150), spacing: 12)], spacing: 12) {
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 160), spacing: 12)], spacing: 12) {
                     ForEach(entities) { deviceTile($0) }
                 }
             } else if let failure = model.entities.failureText {
@@ -365,8 +389,11 @@ struct RoomView: View {
     private func deviceTile(_ entity: HomeEntity) -> some View {
         let pending = model.pendingEntityStates[entity.entityID]
         let on = pending ?? entity.isOn
-        return Button { model.toggle(entity, to: !on) } label: {
-            VStack(alignment: .leading, spacing: 14) {
+        return Button {
+            guard !holds.swallows(entity.entityID) else { return }
+            model.toggle(entity, to: !on)
+        } label: {
+            VStack(alignment: .leading, spacing: 12) {
                 HStack {
                     Image(systemName: Self.symbol(for: entity))
                         .font(.title2)
@@ -385,7 +412,7 @@ struct RoomView: View {
                 }
             }
             .padding(16)
-            .frame(maxWidth: .infinity, minHeight: 120, alignment: .topLeading)
+            .frame(maxWidth: .infinity, minHeight: 108, alignment: .topLeading)
             .background(on ? JarvisTheme.amber.opacity(0.16) : JarvisTheme.cyan.opacity(0.05),
                         in: .rect(cornerRadius: 18))
             .overlay(RoundedRectangle(cornerRadius: 18)
@@ -394,7 +421,9 @@ struct RoomView: View {
         .buttonStyle(CockpitButtonStyle())
         .disabled(!entity.isToggleable || pending != nil)
         .simultaneousGesture(LongPressGesture(minimumDuration: 0.45).onEnded { _ in
-            if entity.light?.dimmable == true { lightSheet = LightSheetID(id: entity.entityID) }
+            guard entity.light?.dimmable == true else { return }
+            holds.hold(entity.entityID)  // the release mustn't toggle it
+            lightSheet = LightSheetID(id: entity.entityID)
         })
         .sensoryFeedback(.impact(weight: .light), trigger: on)
         .accessibilityLabel(entity.friendlyName)
@@ -426,19 +455,34 @@ struct RoomView: View {
 
     // MARK: - Scenes
 
+    private var favoriteIDs: [String] {
+        favoriteScenes.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+    }
+
+    /// Nick's favourites as big tiles, then one menu tile for every other
+    /// scene; it shows the current scene when that isn't a favourite.
     private var scenesPanel: some View {
         VStack(alignment: .leading, spacing: 12) {
             heading("Scenes", symbol: "sparkles")
             if let scenes = model.scenes.value, !scenes.scenes.isEmpty {
-                LazyVGrid(columns: [GridItem(.adaptive(minimum: 180), spacing: 12)], spacing: 12) {
-                    ForEach(scenes.scenes) { SceneTile(model: model, scene: $0, lit: $0.entityID == scenes.last, large: true) }
+                let favorites = favoriteIDs.compactMap { id in scenes.scenes.first { $0.entityID == id } }
+                let others = HomeScenes(error: scenes.error,
+                                        scenes: scenes.scenes.filter { !favoriteIDs.contains($0.entityID)
+                                            && $0.entityID != "scene.peace" },
+                                        last: scenes.last)
+                HStack(spacing: 12) {
+                    ForEach(favorites) { SceneTile(model: model, scene: $0, lit: $0.entityID == scenes.last, large: true) }
+                    if !others.scenes.isEmpty {
+                        SceneFocusMenu(model: model, scenes: others, title: favorites.isEmpty ? "Scene" : "More")
+                            .frame(minHeight: 76)
+                    }
                 }
             } else {
                 Text("No scenes yet. Make one in Home Assistant (Settings › Automations & Scenes › Scenes) and it shows up here.")
                     .font(.subheadline).foregroundStyle(.secondary)
             }
         }
-        .roomPanel()
+        .roomPanel(fill: false)
     }
 
     private func heading(_ title: String, symbol: String) -> some View {
@@ -449,10 +493,113 @@ struct RoomView: View {
 }
 
 private extension View {
-    func roomPanel() -> some View {
+    func roomPanel(fill: Bool = false) -> some View {
         padding(20)
-            .frame(maxWidth: .infinity, alignment: .topLeading)
+            .frame(maxWidth: .infinity, maxHeight: fill ? .infinity : nil, alignment: .topLeading)
             .background(JarvisTheme.panelGradient, in: .rect(cornerRadius: 24))
             .overlay(RoundedRectangle(cornerRadius: 24).strokeBorder(JarvisTheme.border))
+    }
+}
+
+/// The iPad's battery, since full screen hides the status bar.
+private struct BatteryBadge: View {
+    var body: some View {
+        TimelineView(.periodic(from: .now, by: 60)) { _ in
+            let device = UIDevice.current
+            let level = device.batteryLevel  // -1 when unknown
+            let charging = device.batteryState == .charging || device.batteryState == .full
+            if level >= 0 {
+                HStack(spacing: 4) {
+                    Image(systemName: charging ? "battery.100.bolt" : Self.symbol(level))
+                    Text("\(Int((level * 100).rounded()))%").monospacedDigit()
+                }
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(level < 0.2 && !charging ? JarvisTheme.amber : .secondary)
+                .accessibilityElement(children: .combine)
+                .accessibilityLabel("Battery \(Int((level * 100).rounded())) percent\(charging ? ", charging" : "")")
+            }
+        }
+        .onAppear { UIDevice.current.isBatteryMonitoringEnabled = true }
+    }
+
+    private static func symbol(_ level: Float) -> String {
+        switch level {
+        case 0.88...: return "battery.100"
+        case 0.62...: return "battery.75"
+        case 0.37...: return "battery.50"
+        case 0.12...: return "battery.25"
+        default: return "battery.0"
+        }
+    }
+}
+
+/// The Room tab's settings, out of the way behind "Room settings".
+private struct RoomSettingsView: View {
+    @ObservedObject var model: HubViewModel
+    let wakeLightChoices: [HomeEntity]
+    @Environment(\.dismiss) private var dismiss
+    @AppStorage("room.keepAwake") private var keepAwake = false
+    @AppStorage("room.nightScreen") private var nightScreen = true
+    @AppStorage("room.fullScreen") private var fullScreen = false
+    @AppStorage("room.wakeLight") private var wakeLight = "light.bedroom_lights"
+    @AppStorage(RoomView.autoReturnKey) private var autoReturn = true
+    @AppStorage(RoomView.favoritesKey) private var favoriteScenes = RoomView.defaultFavorites
+
+    private var favorites: [String] {
+        favoriteScenes.split(separator: ",").map(String.init)
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("Screen") {
+                    Toggle("Full screen", isOn: $fullScreen)
+                    Toggle("Keep screen on", isOn: $keepAwake)
+                    Toggle("Dark at night when the lights are off", isOn: $nightScreen)
+                    if !wakeLightChoices.isEmpty {
+                        Picker("Tap the dark screen to turn on", selection: $wakeLight) {
+                            Text("Just the screen").tag("")
+                            ForEach(wakeLightChoices) { Text($0.friendlyName).tag($0.entityID) }
+                        }
+                    }
+                    Toggle("Back to Room after 3 min on another tab", isOn: $autoReturn)
+                }
+                if let scenes = model.scenes.value?.scenes, !scenes.isEmpty {
+                    Section {
+                        ForEach(scenes.filter { $0.entityID != "scene.peace" }) { scene in
+                            Button { toggleFavorite(scene.entityID) } label: {
+                                HStack {
+                                    Label(scene.name, systemImage: scene.symbol).foregroundStyle(.primary)
+                                    Spacer()
+                                    if favorites.contains(scene.entityID) {
+                                        Image(systemName: "checkmark").foregroundStyle(JarvisTheme.cyan)
+                                    }
+                                }
+                            }
+                        }
+                    } header: {
+                        Text("Scene tiles")
+                    } footer: {
+                        Text("Up to three get their own tile; the rest are in the menu beside them. Peace has its own button.")
+                    }
+                }
+            }
+            .tint(JarvisTheme.cyan)
+            .navigationTitle("Room settings")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Done") { dismiss() } } }
+        }
+    }
+
+    private func toggleFavorite(_ id: String) {
+        var list = favorites
+        if let index = list.firstIndex(of: id) {
+            list.remove(at: index)
+        } else if list.count < 3 {
+            list.append(id)
+        } else {
+            list[list.count - 1] = id
+        }
+        favoriteScenes = list.joined(separator: ",")
     }
 }

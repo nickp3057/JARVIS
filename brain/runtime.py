@@ -105,6 +105,15 @@ class HomeSnapshot:
 
 
 
+def _invalidate_app_home_cache(entity_id: str) -> None:
+    try:
+        from app import status_hub
+        if entity_id in status_hub._dashboard_allowlist():  # noqa: SLF001 - only what the apps show
+            status_hub.invalidate("entities")
+    except Exception:  # noqa: BLE001 - the apps' cache is a nicety, never break the monitor
+        pass
+
+
 def _monitor_on(name: str) -> bool:
     """A monitor's on/off switch in .env; monitors are on unless switched off."""
     return os.getenv(name, "true").strip().lower() in ("1", "true", "yes", "on")
@@ -888,6 +897,7 @@ class JarvisRuntime:
                     return
                 known = entity_id in entities
                 entities[entity_id] = new_entity
+                _invalidate_app_home_cache(entity_id)  # the apps see a wall switch flip now, not in 5 s
                 new_state = str(new_entity.get("state", "unknown"))
                 if known and old_state == new_state:
                     # Attribute-only update (media position, brightness,

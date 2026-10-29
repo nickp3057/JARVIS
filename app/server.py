@@ -718,6 +718,33 @@ def maintenance_delete_entry(task_id: int, entry_id: int, _: None = Depends(auth
     return Response(status_code=204)
 
 
+class ProtocolRequest(BaseModel):
+    action: str = Field(default="engage", pattern="^(engage|stand_down)$")
+
+
+@app.post("/api/protocols/barn-door")
+def barn_door(request: ProtocolRequest, _: None = Depends(authorize)) -> dict[str, object]:
+    """Barn Door Protocol from the apps (three quick taps on the reactor)."""
+    from brain import protocols
+    message = protocols.stand_down() if request.action == "stand_down" else protocols.engage()
+    return {"message": message}
+
+
+@app.get("/api/media/profiles")
+def media_profiles(kind: str, _: None = Depends(authorize)) -> dict[str, object]:
+    """Quality profile names for a request's picker, and the default one."""
+    from integrations import servarr_common
+    kind = "tv" if kind == "show" else kind
+    if kind not in ("movie", "tv"):
+        raise HTTPException(status_code=422, detail="kind must be movie or tv")
+    service = "radarr" if kind == "movie" else "sonarr"
+    ok, profiles = servarr_common.get_quality_profiles(service)
+    if not ok:
+        return {"profiles": [], "default": servarr_common.default_quality(service), "error": str(profiles)}
+    return {"profiles": [p.get("name", "") for p in profiles if p.get("name")],
+            "default": servarr_common.default_quality(service), "error": ""}
+
+
 class AnnounceRequest(BaseModel):
     text: str = Field(min_length=1, max_length=400)
 

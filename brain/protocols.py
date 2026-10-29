@@ -3,9 +3,14 @@
 Engage: Home Assistant snapshots the room's lights (``scene.create``), every
 colour light in ``BARN_DOOR_LIGHTS`` goes full red, everything in
 ``BARN_DOOR_OFF`` that can't be red (the bedroom light, the Avengers tower)
-goes dark, the shared theme switches to the red ``barnDoor``
-palette (phone and TV follow; brain/theme.py remembers the old one) and
-the TV hands its whole screen to the red-alert view. Stand down: the snapshot and the old theme come back.
+goes dark, the TV turns on (``BARN_DOOR_TV``, on by default), the shared
+theme switches to the red ``barnDoor`` palette (phone and TV follow;
+brain/theme.py remembers the old one) and the TV hands its whole screen to
+the red-alert view. Stand down: the snapshot and the old theme come back
+(the TV stays on).
+
+The fan light (``light.nicks_fan``) is only ever turned off (Nick's rule),
+so it goes dark with the bedroom light rather than red.
 
 A scene snapshot restores colour and brightness but not animated modes, and
 Govee's app modes (Nick's rainbow) don't show up in Home Assistant at all.
@@ -30,8 +35,8 @@ from brain import theme
 from integrations import home_assistant
 
 _SCENE = "barn_door_before"
-_COLOUR = "light.nick_strip_lights,light.strip_lights,light.desk_lights,light.desk_lights_2,light.nicks_fan"
-_OFF = "light.bedroom_lights,switch.avengers_tower_socket_1"  # not red: dark
+_COLOUR = "light.nick_strip_lights,light.strip_lights,light.desk_lights,light.desk_lights_2"
+_OFF = "light.bedroom_lights,light.nicks_fan,switch.avengers_tower_socket_1"  # not red: dark
 _EFFECTS_FILE = Path(__file__).resolve().parents[1] / "memory" / "barn_door_effects.json"
 
 
@@ -49,6 +54,9 @@ def engage() -> str:
         "light", "turn_on", e, {"rgb_color": [255, 0, 0], "brightness": 255})[0]]
     for entity in off:
         home_assistant.call_service(entity.split(".", 1)[0], "turn_off", entity)
+    if os.getenv("BARN_DOOR_TV", "1").strip().lower() not in ("0", "off", "false", "no"):
+        from integrations import tv_remote
+        tv_remote.power(True)  # the red-alert screen needs the TV awake
     # No alert: the red room and the TV taking over say it (Nick's call).
     theme.choose("barnDoor", remember=True)
     note = f" {len(failed)} light(s) didn't answer." if failed else ""
