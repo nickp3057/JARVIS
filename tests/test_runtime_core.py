@@ -146,6 +146,27 @@ class MonitorLoopTests(unittest.TestCase):
         self.addCleanup(event_bus.reset_for_tests)
         self.addCleanup(memory_extractor.remove_listener, self.rt._on_memory_change)
 
+    def test_boot_raid_alert_is_delivered_after_grace_once(self) -> None:
+        import tempfile
+        import time
+        from pathlib import Path
+        from integrations import nas_host
+        with tempfile.TemporaryDirectory() as directory:
+            watch = nas_host.HostWatch(Path(directory) / "host.json")
+            now = time.time()
+            snapshot = (True, {"observed_at": now, "host_health": {
+                "generated_at": now, "containers": [], "disks": [], "volumes": [], "errors": [],
+                "raid": [{"name": "md1", "degraded": True, "slots": "2/1", "members": [], "sync": ""}]}})
+            self.rt._stop_monitors = StopAfter(3)
+            with patch.object(self.rt, "_in_startup_grace", side_effect=[True, False, False]), \
+                    patch("integrations.nas_host.HostWatch", return_value=watch), \
+                    patch("integrations.nas_stack.watchdog_status", return_value=snapshot) as poll, \
+                    patch.object(self.rt, "raise_alert") as publish:
+                self.rt._nas_host_monitor_loop()
+            self.assertEqual(poll.call_count, 2)
+            publish.assert_called_once()
+            self.assertIn("md1", publish.call_args.args[2])
+
     def test_wake_monitor_rings_the_phone_and_tv(self) -> None:
         self.rt._stop_monitors = StopAfter(1)
         alarm = {"music": "spotify:track:1", "volume": 30, "label": "Back in Black"}

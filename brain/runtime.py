@@ -412,15 +412,20 @@ class JarvisRuntime:
         from integrations import nas_host, nas_stack
         watch = nas_host.HostWatch()
         while not self._stop_monitors.is_set():
+            # step() persists delivery state. Do not consume transitions until
+            # startup grace ends and we can actually publish their alerts.
+            if self._in_startup_grace():
+                if self._stop_monitors.wait(5):
+                    break
+                continue
             try:
                 alerts = watch.step(nas_stack.watchdog_status())
             except Exception:  # noqa: BLE001 - a bad snapshot must not kill the monitor
                 log.exception("NAS host monitor poll failed")
                 alerts = []
-            if not self._in_startup_grace():
-                for alert in alerts:
-                    self.raise_alert("nas_host", alert.title, alert.message, source="nas-host",
-                                     severity=alert.severity, push=alert.push)
+            for alert in alerts:
+                self.raise_alert("nas_host", alert.title, alert.message, source="nas-host",
+                                 severity=alert.severity, push=alert.push)
             if self._stop_monitors.wait(nas_stack.seconds("NAS_HOST_MONITOR_INTERVAL_S", 300, 60)):
                 break
 
