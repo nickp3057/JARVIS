@@ -51,7 +51,7 @@ _pending_logins: dict[str, float] = {}
 _state: dict[str, Any] = {
     "accounts": None,       # parsed holdings (see _parse_accounts)
     "accounts_at": 0.0,
-    "prices": {},           # symbol -> live last price
+    "prices": {},           # symbol -> (live last price, received_at)
     "yesterday": None,      # {"date": "YYYY-MM-DD", "change": float}
     "streaming": False,
     "error": "",
@@ -252,7 +252,7 @@ def _apply_quotes(message: dict[str, Any]) -> None:
             for quote in block.get("content", []):
                 symbol = quote.get("key")
                 if "3" in quote:
-                    _state["prices"][symbol] = float(quote["3"])
+                    _state["prices"][symbol] = (float(quote["3"]), time.time())
 
 
 def stream_forever(stop: threading.Event) -> None:
@@ -333,7 +333,9 @@ def snapshot() -> dict[str, Any]:
     value, today, positions = accounts["value"], 0.0, []
     cost = gain = 0.0
     for symbol, p in accounts["positions"].items():
-        last = prices.get(symbol)
+        quote = prices.get(symbol)
+        last = (quote[0] if quote is not None and quote[1] >= out["updated_at"]
+                and 0 <= time.time() - quote[1] <= 60 else None)
         live_value = p["quantity"] * last if last is not None else p["value"]
         value += live_value - p["value"]
         # Schwab's own day gain/loss (which knows shares bought today, e.g. the

@@ -102,6 +102,22 @@ class SchwabTests(unittest.TestCase):
         self.assertEqual((snap["total_gain"], snap["total_gain_pct"]), (700.0, 50.0))
         self.assertIn("up $120.00 today", schwab.describe())
 
+    def test_old_stream_quote_cannot_override_newer_accounts_or_live_forever(self) -> None:
+        with patch.object(schwab, "_get", return_value=ACCOUNTS), \
+                patch.object(schwab.time, "time", return_value=100):
+            schwab.refresh_accounts()
+        with patch.object(schwab.time, "time", return_value=101):
+            schwab._apply_quotes({"data": [{"service": "LEVELONE_EQUITIES",
+                "content": [{"key": "NVDA", "3": 190.0}]}]})
+            self.assertEqual(schwab.snapshot()["value"], 2600)
+        with patch.object(schwab.time, "time", return_value=162):
+            self.assertEqual(schwab.snapshot()["value"], 2500)
+        with patch.object(schwab, "_get", return_value=ACCOUNTS), \
+                patch.object(schwab.time, "time", return_value=110):
+            schwab.refresh_accounts()
+            self.assertEqual(schwab.snapshot()["value"], 2500)
+            self.assertIsNone(schwab.snapshot()["positions"][0]["last"])
+
     def test_a_deposit_is_value_not_gain(self) -> None:
         self.link()
         with patch.object(schwab.requests, "get", return_value=response(ACCOUNTS)):

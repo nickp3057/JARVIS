@@ -637,3 +637,4 @@ for its quick home commands, and reports its state through
 - Watchdog correction (2026-10-29): indexer recovery attempts start cooldown before execution, including failures. DHT login/state requests have 3-second connect and 10-second total limits while holding `stack.lock`; credentials are form-encoded.
 
 - Chromium egress uses `brain/browser_proxy.py`: every HTTP request and HTTPS tunnel resolves and pins a public destination before connecting, including redirected requests and subresources. Implicit Chromium loopback bypass and non-proxied WebRTC UDP are disabled; service workers are blocked. The proxy closes with the browser.
+- Schwab quotes carry receipt timestamps. Only quotes at least as recent as the account snapshot and no older than 60 seconds override account values; stale quotes fall back to the REST holdings.
