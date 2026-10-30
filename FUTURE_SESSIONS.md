@@ -136,6 +136,28 @@ of each group.
 - [ ] Check the iPhone app's server address in Settings; if it's 10.0.0.80,
   switch it to the Tailscale address `100.69.8.11`.
 
+### Voice fixes from Nick's 2026-10-29 logs (check after deploy)
+
+- **Fake tool calls:** Haiku 5.5 sometimes wrote `[calls control_device ...]`
+  as text (copied from the persona's style examples), so "fan to 30%" and
+  "add Captain Phillips" + "yes" did nothing. Examples reworded; the agent now
+  hides such text, asks once for the real call, and scrubs it from history.
+  Watch jarvis.log for "Model wrote a tool call as text": if it keeps firing,
+  pin `ANTHROPIC_MODEL` to a Sonnet.
+- **Approval codes:** `confirm_gate` held one proposal per session, so
+  staging two media fixes killed the first code. Now several at once; "yes"
+  approves everything staged that turn; "approve 1631, approve 5774" works;
+  "Hey Jarvis, yes" counts as yes.
+- **Fewer movie confirms:** a plain top match adds straight away.
+- **Room voice timing:** silence that ends a command 750 → 1000 ms, follow-up
+  window 5 → 8 s. Still clipped? Raise `VOICE_SILENCE_END_MS` in the
+  Optiplex `.env` and restart. Cloud STT returning ''
+  for a real 1.5 s+ utterance now retries on local Whisper.
+- **"Fan to 30"** is a quick command now (`status_hub.set_fan`). Also fixed:
+  "turn the fan on" had been ambiguous with the Fan Light and went to the model.
+- **Not looked at:** "errors on my phone" (which errors? ask Nick for a
+  screenshot).
+
 ### Next session starts here (left 2026-10-28, from school)
 
 - **Built 2026-10-28 evening, from work (none of it run on hardware yet):**

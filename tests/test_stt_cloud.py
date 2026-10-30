@@ -26,6 +26,19 @@ class CloudSttTests(unittest.TestCase):
         with mock.patch.dict(os.environ, env), mock.patch.object(stt, "cloud_transcribe", return_value=None):
             self.assertEqual(local.transcribe(audio), "local")
 
+    def test_empty_cloud_text_for_a_real_utterance_tries_local(self):
+        env = {"STT_PROVIDER": "elevenlabs", "ELEVENLABS_API_KEY": "k"}
+        local = stt.Transcriber()
+        local._model = mock.Mock()
+        local._model.transcribe.return_value = ([mock.Mock(text="yes")], None)
+        utterance = (np.sin(np.linspace(0, 1200, 3 * 16000)) * 8000).astype(np.int16)
+        blip = (np.sin(np.linspace(0, 400, 16000)) * 8000).astype(np.int16)
+        with mock.patch.dict(os.environ, env), mock.patch.object(stt, "cloud_transcribe", return_value=""):
+            self.assertEqual(local.transcribe(utterance), "yes")
+            local._model.transcribe.reset_mock()
+            self.assertEqual(local.transcribe(blip), "")  # a 1 s blip is noise
+        local._model.transcribe.assert_not_called()
+
     def test_live_model_never_goes_to_cloud(self):
         live = stt.Transcriber(model_size="tiny.en")
         live._model = mock.Mock()

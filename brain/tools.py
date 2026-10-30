@@ -2091,8 +2091,10 @@ _CUSTOM_TOOLS: list[dict[str, Any]] = [
             "Search Radarr for a movie by title. Use this FIRST whenever Nick "
             "asks to add / download / get a movie. It only searches - it never "
             "adds anything. Returns the best match(es) with year and TMDB id, "
-            "or says no match / lists several. Show Nick the result(s) and wait "
-            "for him to confirm which one before calling add_movie."
+            "or says no match / lists several. If Nick asked to add it and one "
+            "result is plainly the film he named (the top result, no other with "
+            "the same title), call add_movie straight away in the same turn. "
+            "Only ask which one when several plausible titles compete."
         ),
         "input_schema": {
             "type": "object",
@@ -2105,10 +2107,11 @@ _CUSTOM_TOOLS: list[dict[str, Any]] = [
     {
         "name": "add_movie",
         "description": (
-            "Add a movie to Radarr and start searching for it. ONLY call this "
-            "after find_movie has returned a specific match AND Nick has "
-            "explicitly confirmed that exact title in a prior turn. Never call "
-            "it on an ambiguous or unconfirmed result. 'quality' is a natural "
+            "Add a movie to Radarr and start searching for it. Call it only "
+            "with an id from find_movie: straight away when Nick asked to add "
+            "a title and the match is plain, or after he picks one of several. "
+            "The runtime asks Nick for a yes itself when the pick is "
+            "ambiguous, so don't add your own confirmation round. 'quality' is a natural "
             "phrase like '4k efficient' or '1080p' - it's fuzzy-matched to a "
             "configured quality profile; omit it to use the default. The runtime "
             "will reject any ID not returned by this session's latest lookup."
@@ -2119,7 +2122,7 @@ _CUSTOM_TOOLS: list[dict[str, Any]] = [
                 "tmdb_id": {"type": "integer", "description": "TMDB id from a find_movie result."},
                 "quality": {"type": "string", "description": "Natural-language quality phrase, e.g. '4k efficient', '1080p'. Optional."},
                 "root_folder": {"type": "string", "description": "Root folder path override. Optional - defaults to the configured / first folder."},
-                "confirmed": {"type": "boolean", "description": "Must be true, and only set it once Nick has explicitly confirmed this exact movie."},
+                "confirmed": {"type": "boolean", "description": "Must be true: Nick asked to add this exact movie (by naming it or picking it)."},
             },
             "required": ["tmdb_id", "confirmed"],
         },
@@ -2130,8 +2133,10 @@ _CUSTOM_TOOLS: list[dict[str, Any]] = [
             "Search Sonarr for a TV show by title. Use this FIRST whenever Nick "
             "asks to add / download / get a show or series. It only searches - "
             "it never adds anything. Returns the best match(es) with year and "
-            "TVDB id, or says no match / lists several. Show Nick the result(s) "
-            "and wait for him to confirm which one before calling add_series."
+            "TVDB id, or says no match / lists several. If Nick asked to add it "
+            "and one result is plainly the show he named, call add_series "
+            "straight away in the same turn. Only ask which one when several "
+            "plausible titles compete."
         ),
         "input_schema": {
             "type": "object",
@@ -2144,10 +2149,11 @@ _CUSTOM_TOOLS: list[dict[str, Any]] = [
     {
         "name": "add_series",
         "description": (
-            "Add a TV show to Sonarr and start searching. ONLY call this after "
-            "find_series has returned a specific match AND Nick has explicitly "
-            "confirmed that exact title in a prior turn. Never call it on an "
-            "ambiguous or unconfirmed result. 'quality' is a natural phrase "
+            "Add a TV show to Sonarr and start searching. Call it only with an "
+            "id from find_series: straight away when Nick asked to add a show "
+            "and the match is plain, or after he picks one of several. The "
+            "runtime asks Nick for a yes itself when the pick is ambiguous, so "
+            "don't add your own confirmation round. 'quality' is a natural phrase "
             "fuzzy-matched to a quality profile. 'monitor' controls which "
             "episodes to watch for: default 'future' (new episodes only); use "
             "'all' for the whole back catalogue, or 'firstSeason' / 'pilot' / "
@@ -2162,7 +2168,7 @@ _CUSTOM_TOOLS: list[dict[str, Any]] = [
                 "root_folder": {"type": "string", "description": "Root folder path override. Optional."},
                 "monitor": {"type": "string", "description": "Monitor strategy: 'future' (default), 'all', 'firstSeason', 'latestSeason', 'lastSeason', 'pilot', 'none', or natural phrasing like 'whole series'."},
                 "season_folder": {"type": "boolean", "description": "Organise episodes into per-season folders. Default true."},
-                "confirmed": {"type": "boolean", "description": "Must be true, and only set it once Nick has explicitly confirmed this exact show."},
+                "confirmed": {"type": "boolean", "description": "Must be true: Nick asked to add this exact show (by naming it or picking it)."},
             },
             "required": ["tvdb_id", "confirmed"],
         },

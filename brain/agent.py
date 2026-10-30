@@ -22,6 +22,7 @@ import contextlib
 import contextvars
 import os
 import json
+import re
 from concurrent.futures import ThreadPoolExecutor
 import copy
 from pathlib import Path
@@ -114,6 +115,11 @@ def tool_status_label(tool_uses: list[Any]) -> str:
 # Newer models can decline (stop_reason "refusal") with no text at all.
 _REFUSAL_REPLY = "I'm afraid that one's off the table for me, sir."
 _MAX_TOOL_TURNS = 6
+# A tool call written out as text ("[calls control_device with ...]"): the
+# model imitating a transcript instead of calling the tool, so nothing ran.
+_PSEUDO_CALL_RE = re.compile(r"\[\s*call(?:s|ed|ing)?\s+[a-z_]+\b[^\]]*\]", re.IGNORECASE)
+_PSEUDO_CALL_NUDGE = ("(JARVIS runtime: your last reply wrote a tool call out as text, so nothing "
+                      "ran and Nick heard nothing. Make the real tool call now, then reply.)")
 _HISTORY_KEEP_TURNS = 20
 
 
@@ -167,13 +173,60 @@ def _as_blocks(content: Any) -> list[dict[str, Any]]:
     return [dict(block) for block in content]
 
 
+class _PseudoCallGuard:
+    """Holds streamed text inside an open "[" until it closes, so a fake tool
+    call ("[calls control_device ...]") never reaches the speaker or screen.
+    Once one is seen, the rest of that round (narration of a call that never
+    happened) is dropped too."""
+
+    def __init__(self) -> None:
+        self.held = ""
+        self.tripped = False
+
+    def feed(self, delta: str) -> str:
+        if self.tripped:
+            return ""
+        text = self.held + delta
+        start = text.find("[")
+        if start < 0:
+            self.held = ""
+            return text
+        close = text.find("]", start)
+        if close < 0 and len(text) - start < 200:
+            self.held = text[start:]
+            return text[:start]
+        if _PSEUDO_CALL_RE.match(text, start):
+            self.tripped = True
+            self.held = ""
+            return text[:start]
+        # An ordinary bracket: release it, keep scanning after it.
+        self.held = ""
+        cut = (close if close >= 0 else start) + 1
+        return text[:cut] + self.feed(text[cut:])
+
+    def flush(self) -> str:
+        held, self.held = self.held, ""
+        return "" if self.tripped else held
+
+
+def _clean_history_text(text: str, role: str | None) -> str:
+    """Drop round markers and, from replies, fake tool calls written as text.
+
+    Left in history, a "[calls ...]" reply teaches the model to keep writing
+    them instead of calling tools."""
+    text = text.replace(ROUND_BREAK, " ")
+    if role == "assistant" and _PSEUDO_CALL_RE.search(text):
+        text = " ".join(_PSEUDO_CALL_RE.sub(" ", text).split()) or "..."
+    return text
+
+
 def _turn_messages(history: list[dict[str, Any]], turn_context: str) -> list[dict[str, Any]]:
     """History as sent this turn: per-turn context rides on the newest user
     message instead of the system prompt, so the system prompt and earlier
     history stay byte-identical from turn to turn and can be read from cache."""
     messages = [
-        {**m, "content": m["content"].replace(ROUND_BREAK, " ")}
-        if isinstance(m.get("content"), str) and ROUND_BREAK in m["content"] else m
+        {**m, "content": _clean_history_text(m["content"], m.get("role"))}
+        if isinstance(m.get("content"), str) else m
         for m in history
     ]
     if turn_context and messages and messages[-1].get("role") == "user":
@@ -421,6 +474,7 @@ class JarvisAgent:
         """Call Claude, execute any tools it wants, repeat until done."""
         system, messages, anchor = self._prepare_turn()
         used_tools_this_turn = False
+        nudged = False
         tool_context: list[dict[str, Any]] = []
         self._last_turn_tools = []
 
@@ -480,6 +534,13 @@ class JarvisAgent:
                 continue
 
             text = "".join(getattr(b, "text", "") for b in text_blocks).strip()
+            if _PSEUDO_CALL_RE.search(text) and not nudged and round_no < _MAX_TOOL_TURNS:
+                nudged = True
+                log.warning("Model wrote a tool call as text; asking for the real call: %s", text[:120])
+                messages.append({"role": "assistant", "content": text})
+                messages.append({"role": "user", "content": _PSEUDO_CALL_NUDGE})
+                continue
+            text = " ".join(_PSEUDO_CALL_RE.sub(" ", text).split())
             self.last_used_tools = used_tools_this_turn
             self._save_tool_context(tool_context)
             return text or "..."
@@ -496,12 +557,37 @@ class JarvisAgent:
         """
         system, messages, anchor = self._prepare_turn()
         used_tools_this_turn = False
+        nudged = False
         text_parts: list[str] = []
         tool_context: list[dict[str, Any]] = []
         self._last_turn_tools = []
 
         for round_no in range(1, _MAX_TOOL_TURNS + 1):
             at_round_start = True
+            guard = _PseudoCallGuard()
+
+            def emit(delta: str) -> Iterator[str]:
+                nonlocal at_round_start
+                # Claude can emit a short sentence before a tool call,
+                # then begin the post-tool answer without leading
+                # whitespace. Those are separate API rounds, so direct
+                # concatenation produced text such as ``Done.Here's``
+                # in the companion and persisted history. Keep normal
+                # deltas byte-for-byte intact, but separate distinct
+                # model rounds when neither side supplied whitespace.
+                separator = _stream_round_separator(text_parts, delta, at_round_start)
+                if at_round_start and text_parts and stream_round_breaks.get():
+                    # The companion shows each round as its own
+                    # bubble; the marker is saved too, so history
+                    # replays split the same way.
+                    separator = ROUND_BREAK
+                if separator:
+                    text_parts.append(separator)
+                    yield separator
+                at_round_start = False
+                text_parts.append(delta)
+                yield delta
+
             started = time.monotonic()
             first_token_at: float | None = None
             model = _model()
@@ -533,25 +619,12 @@ class JarvisAgent:
                 for delta in stream.text_stream:
                     if delta:
                         first_token_at = first_token_at or time.monotonic()
-                        # Claude can emit a short sentence before a tool call,
-                        # then begin the post-tool answer without leading
-                        # whitespace. Those are separate API rounds, so direct
-                        # concatenation produced text such as ``Done.Here's``
-                        # in the companion and persisted history. Keep normal
-                        # deltas byte-for-byte intact, but separate distinct
-                        # model rounds when neither side supplied whitespace.
-                        separator = _stream_round_separator(text_parts, delta, at_round_start)
-                        if at_round_start and text_parts and stream_round_breaks.get():
-                            # The companion shows each round as its own
-                            # bubble; the marker is saved too, so history
-                            # replays split the same way.
-                            separator = ROUND_BREAK
-                        if separator:
-                            text_parts.append(separator)
-                            yield separator
-                        at_round_start = False
-                        text_parts.append(delta)
-                        yield delta
+                        delta = guard.feed(delta)
+                        if delta:
+                            yield from emit(delta)
+                tail = guard.flush()
+                if tail:
+                    yield from emit(tail)
                 final = stream.get_final_message()
             _log_round(started, first_token_at, getattr(final, "usage", None), round_no)
 
@@ -577,6 +650,14 @@ class JarvisAgent:
                     # counted as reply text.
                     yield TOOL_STATUS + tool_status_label(tool_uses) + TOOL_STATUS
                 messages.append({"role": "user", "content": self._run_tools(tool_uses, tool_context)})
+                continue
+            if guard.tripped and not nudged and round_no < _MAX_TOOL_TURNS:
+                nudged = True
+                said = "".join(getattr(b, "text", "") for b in final.content
+                               if getattr(b, "type", None) == "text").strip()
+                log.warning("Model wrote a tool call as text; asking for the real call: %s", said[:120])
+                messages.append({"role": "assistant", "content": said or "..."})
+                messages.append({"role": "user", "content": _PSEUDO_CALL_NUDGE})
                 continue
 
             self.last_used_tools = used_tools_this_turn

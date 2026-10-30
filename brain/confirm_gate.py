@@ -4,11 +4,15 @@ Same rules as the arr restart gate in ``brain.arr_stack`` (which keeps its own
 tuned implementation): a tool may only *propose* an action; it runs only after
 a message Nick himself sends.
 
-- One open proposal per session, valid for ``_TTL_S``.
-- A bare "yes" approves only as the very next message after the prompt;
-  every message disarms it.
-- "approve <code>" approves any time before expiry. The verb differs from
-  the restart gate's "confirm <code>" so the two never answer each other.
+- Several open proposals per session, each with its own code, valid for
+  ``_TTL_S``. A turn that stages two fixes keeps both codes alive.
+- A bare "yes" approves every proposal staged since Nick's last message, and
+  only as the very next message; every message disarms it.
+- "approve <code>" approves any time before expiry, and one message may
+  carry several ("approve 1631, approve 5774"). The verb differs from the
+  restart gate's "confirm <code>" so the two never answer each other.
+- A leading wake phrase ("Hey Jarvis, yes") is ignored: voice transcripts
+  often keep it.
 - The proposal is consumed before the action runs, so a failure or a
   repeated "yes" can never run it twice.
 
@@ -28,9 +32,12 @@ from jarvis_logger import get_logger
 log = get_logger(__name__)
 
 _TTL_S = 600
-_CODE_RE = re.compile(r"(?:approve )?(\d{4})")
+_CODE_WORD_RE = re.compile(r"\d{4}")
+_CODE_FILLER = frozenset({"approve", "and", "code", "codes"})
+_WAKE_RE = re.compile(r"^(?:(?:hey|hi|ok|okay)[ ,]+)?jarvis[ ,.!]*")
 _YES = frozenset({"yes", "y", "yeah", "yep", "yup", "yes please", "yes sir", "yes do it", "do it",
-                  "go", "go ahead", "proceed", "ok", "okay", "approve", "approved"})
+                  "go", "go ahead", "proceed", "ok", "okay", "approve", "approved",
+                  "approve both", "approve all", "yes to both", "both", "do both"})
 _CANCEL = frozenset({"cancel", "no", "nope", "nevermind", "never mind", "not now"})
 
 
@@ -42,76 +49,120 @@ class Proposal(NamedTuple):
 
 
 _lock = threading.Lock()
-_pending: dict[str, Proposal] = {}
-_armed: set[str] = set()
+# session -> {code: proposal}, oldest first.
+_pending: dict[str, dict[str, Proposal]] = {}
+# session -> codes a bare "yes" would approve (staged since Nick's last message).
+_armed: dict[str, list[str]] = {}
 
 
-def _live(session_id: str, now: float) -> Proposal | None:
+def _live(session_id: str, now: float) -> dict[str, Proposal]:
     """Caller holds _lock. Drops expired entries as a side effect."""
-    for key, proposal in list(_pending.items()):
-        if now - proposal.created > _TTL_S:
+    for key in list(_pending):
+        alive = {code: p for code, p in _pending[key].items() if now - p.created <= _TTL_S}
+        if alive:
+            _pending[key] = alive
+        else:
             _pending.pop(key, None)
-    return _pending.get(session_id)
+    return _pending.get(session_id, {})
 
 
 def propose(session_id: str | None, description: str, run: Callable[[], str]) -> str:
-    """Open (or replace) this session's proposal; return the prompt for Nick."""
+    """Open a proposal for this session; return the prompt for Nick."""
     if not session_id:
         return "Refused: a conversation session is required to approve fixes, sir."
     with _lock:
-        proposal = Proposal(time.monotonic(), f"{secrets.randbelow(10000):04d}", description, run)
-        _pending[session_id] = proposal
-        _armed.add(session_id)
-    return (f'Proposed: {description}. Reply "yes" now, or "approve {proposal.code}" '
+        now = time.monotonic()
+        live = _live(session_id, now)
+        # Re-staging the same action replaces its old code instead of
+        # leaving two live codes for one fix.
+        for code, old in list(live.items()):
+            if old.description == description:
+                live.pop(code)
+        code = f"{secrets.randbelow(10000):04d}"
+        while code in live:
+            code = f"{secrets.randbelow(10000):04d}"
+        live[code] = Proposal(now, code, description, run)
+        _pending[session_id] = live
+        armed = [c for c in _armed.get(session_id, []) if c in live]
+        _armed[session_id] = armed + [code]
+    return (f'Proposed: {description}. Reply "yes" now, or "approve {code}" '
             f"within {_TTL_S // 60} minutes, sir. Nothing has been changed yet.")
 
 
 def pending_code(session_id: str | None) -> str | None:
-    """The open proposal's approval code (for non-chat clients that show it)."""
+    """The newest open proposal's approval code (for non-chat clients)."""
     if not session_id:
         return None
     with _lock:
-        proposal = _live(session_id, time.monotonic())
-    return proposal.code if proposal else None
+        live = _live(session_id, time.monotonic())
+    return list(live)[-1] if live else None
 
 
 def pending_description(session_id: str | None) -> str | None:
     if not session_id:
         return None
     with _lock:
-        proposal = _live(session_id, time.monotonic())
-    return proposal.description if proposal else None
+        live = _live(session_id, time.monotonic())
+    return list(live.values())[-1].description if live else None
 
 
-def conversation_action(text: str, session_id: str, *, handled: bool = False) -> str | None:
-    """Approve, cancel or ignore Nick's message. ``handled`` only disarms."""
+def _normalize(text: str) -> str:
     normalized = " ".join(text.lower().strip().split()).rstrip(".!?")
-    with _lock:
-        armed = session_id in _armed
-        _armed.discard(session_id)
-        proposal = _live(session_id, time.monotonic())
-    if handled or proposal is None:
-        return None
-    if normalized == "cancel fix" or (armed and normalized in _CANCEL):
-        with _lock:
-            _pending.pop(session_id, None)
-        return f"Cancelled: {proposal.description}. Nothing was changed, sir."
-    match = _CODE_RE.fullmatch(normalized)
-    if match is None and not (armed and normalized in _YES):
-        return None
-    if match is not None and match[1] != proposal.code:
-        return (f'That code does not match. Reply "approve {proposal.code}" to {proposal.description}, '
-                "sir. Nothing was changed.")
-    with _lock:
-        if _pending.get(session_id) is not proposal:
-            return None
-        _pending.pop(session_id, None)
+    return _WAKE_RE.sub("", normalized).strip().rstrip(".!?")
+
+
+def _codes(normalized: str) -> list[str] | None:
+    """Every code in a message made only of codes ("approve 1631, 5774"), else None."""
+    words = re.split(r"[\s,.;]+", normalized)
+    codes = [w for w in words if _CODE_WORD_RE.fullmatch(w)]
+    filler = [w for w in words if w and w not in codes and w not in _CODE_FILLER]
+    return codes if codes and not filler else None
+
+
+def _run(proposal: Proposal, session_id: str) -> str:
     log.info("Approved fix for session %s: %s", session_id, proposal.description)
     try:
         return proposal.run()
     except Exception as exc:  # noqa: BLE001
         log.exception("Approved fix failed: %s", proposal.description)
         return f"The fix failed ({exc}). It will not be retried automatically, sir."
+
+
+def conversation_action(text: str, session_id: str, *, handled: bool = False) -> str | None:
+    """Approve, cancel or ignore Nick's message. ``handled`` only disarms."""
+    normalized = _normalize(text)
+    with _lock:
+        armed = _armed.pop(session_id, [])
+        live = dict(_live(session_id, time.monotonic()))
+    if handled or not live:
+        return None
+    if normalized == "cancel fix" or (armed and normalized in _CANCEL):
+        with _lock:
+            _pending.pop(session_id, None)
+        what = "; ".join(p.description for p in live.values())
+        return f"Cancelled: {what}. Nothing was changed, sir."
+    codes = _codes(normalized)
+    if codes is None:
+        if not (armed and normalized in _YES):
+            return None
+        codes = [c for c in armed if c in live]
+    unknown = [c for c in codes if c not in live]
+    chosen: list[Proposal] = []
+    with _lock:
+        current = _pending.get(session_id, {})
+        for code in dict.fromkeys(codes):
+            proposal = current.pop(code, None)
+            if proposal is not None and live.get(code) is proposal:
+                chosen.append(proposal)
+        if not current:
+            _pending.pop(session_id, None)
+    replies = [_run(p, session_id) for p in chosen]
+    if unknown:
+        still = [p for c, p in live.items() if c not in codes]
+        hint = " ".join(f'Reply "approve {p.code}" to {p.description}.' for p in still)
+        replies.append(f"Code {', '.join(unknown)} does not match anything open, sir. {hint}".strip()
+                       + (" Nothing else was changed." if not chosen else ""))
+    return " ".join(replies) if replies else None
 
 
 def clear_for_tests() -> None:

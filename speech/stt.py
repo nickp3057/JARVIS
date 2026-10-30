@@ -165,7 +165,12 @@ class Transcriber:
             if text is not None:
                 log.info("STT %.2fs for %.1fs of audio (%s cloud)",
                          time.monotonic() - started, audio_f32.size / 16000.0, provider)
-                return text
+            if text or (text == "" and audio_f32.size < 1.5 * 16000):
+                return text  # a short blip the cloud calls empty is just noise
+            if text == "":
+                # Cloud heard nothing in a real utterance: let local Whisper
+                # try rather than ignore Nick.
+                log.info("Cloud STT returned nothing; trying local Whisper")
 
         self._ensure_loaded()
         assert self._model is not None  # for type checkers

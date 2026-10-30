@@ -1,7 +1,7 @@
 """Home commands the room voice runs itself, without asking Claude.
 
 The point is speed: "game time", "peace", "desk lights off", "turn on the
-lamp", "bedroom light to 40" go straight to Home Assistant (through the same
+lamp", "bedroom light to 40", "fan to 30" go straight to Home Assistant (through the same
 guarded ``app.status_hub`` calls the apps use) and answer with a jingle,
 like a smart speaker. Anything that doesn't clearly match returns None and
 goes to the normal conversation.
@@ -60,11 +60,15 @@ def _match_entity(target: str, entities: list[dict]) -> dict | None:
     loose = [e for e in entities
              if target and (target in _squash(normalize(e["friendly_name"]))
                             or _squash(normalize(e["friendly_name"])).rstrip("s") == target.rstrip("s"))]
+    if len(loose) > 1:
+        # "fan" matches Nick's Fan and the Fan Light: the noun names the domain.
+        noun = target.rstrip("s")
+        loose = [e for e in loose if e["domain"] == noun] or loose
     return loose[0] if len(loose) == 1 else None
 
 
 def run(text: str) -> QuickResult | None:
-    """Run ``text`` if it is plainly a scene, an on/off or a brightness; else None."""
+    """Run ``text`` if it is plainly a scene, an on/off, a brightness or a fan speed; else None."""
     text = normalize(text)
     if not text or len(text.split()) > 8:
         return None
@@ -77,8 +81,14 @@ def run(text: str) -> QuickResult | None:
     entities = status_hub.home_entities().get("entities", [])
     level = _LEVEL.match(text)
     if level:
-        entity = _match_entity(level.group(1), entities)
-        if entity and entity["domain"] == "light":
+        # Fans first: "fan to 30" means the fan's speed, never its light.
+        fan = _match_entity(level.group(1), [e for e in entities if e["domain"] == "fan"])
+        if fan:
+            result = status_hub.set_fan(fan["entity_id"], int(level.group(2)))
+            return QuickResult(not result.get("error"), f"{fan['entity_id']} {level.group(2)}%",
+                               result.get("error", ""))
+        entity = _match_entity(level.group(1), [e for e in entities if e["domain"] == "light"])
+        if entity:
             result = status_hub.set_light(entity["entity_id"], brightness_pct=int(level.group(2)))
             return QuickResult(not result.get("error"), f"{entity['entity_id']} {level.group(2)}%",
                                result.get("error", ""))

@@ -7,7 +7,7 @@ on the same runtime the apps use, so the iPad can show it live
 Built for smart-speaker speed:
 
 1. openWakeWord ``hey_jarvis`` on every 80 ms frame; a soft "listen" sound.
-2. Record until ~0.55 s of silence (``VOICE_SILENCE_END_MS``). While you
+2. Record until ~1 s of silence (``VOICE_SILENCE_END_MS``). While you
    talk, a tiny Whisper model (``VOICE_LIVE_MODEL``, tiny.en) captions it
    live for the iPad; the main model (``WHISPER_MODEL``; base.en suits the
    Optiplex) makes the final transcript.
@@ -162,7 +162,7 @@ class RoomVoice:
                 audio = self._capture(stream, preroll, start_timeout=_seconds("VOICE_START_TIMEOUT_S", 4.0))
             else:  # follow-up: no wake word, a shorter wait
                 voice_presence.update("listening")
-                audio = self._capture(stream, None, start_timeout=_seconds("VOICE_FOLLOWUP_S", 5.0))
+                audio = self._capture(stream, None, start_timeout=_seconds("VOICE_FOLLOWUP_S", 8.0))
             if audio is None:
                 voice_presence.update("idle")
                 need_wake = True
@@ -323,7 +323,7 @@ class RoomVoice:
 
     def _capture(self, stream: MicStream, preroll: np.ndarray | None, start_timeout: float) -> np.ndarray | None:
         """One utterance, captioned live; None if nobody spoke."""
-        silence_end = int(_seconds("VOICE_SILENCE_END_MS", 750) / FRAME_MS)
+        silence_end = int(_seconds("VOICE_SILENCE_END_MS", 1000) / FRAME_MS)
         min_frames = int(_seconds("VOICE_MIN_UTTERANCE_MS", 1000) / FRAME_MS)
         max_frames = int(_seconds("VOICE_MAX_UTTERANCE_S", 15) * 1000 / FRAME_MS)
         start_frames = int(start_timeout * 1000 / FRAME_MS)
@@ -485,7 +485,7 @@ class RoomVoice:
         """One reply, no wake word needed; None if Nick says nothing."""
         self.stream.drain()  # what's queued is JARVIS's own question, not the answer
         voice_presence.update("listening")
-        audio = self._capture(self.stream, None, start_timeout=_seconds("VOICE_FOLLOWUP_S", 5.0))
+        audio = self._capture(self.stream, None, start_timeout=_seconds("VOICE_FOLLOWUP_S", 8.0))
         if audio is None:
             return None
         voice_presence.update("thinking")

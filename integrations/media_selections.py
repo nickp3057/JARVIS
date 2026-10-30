@@ -64,13 +64,30 @@ def narrow(service: str, session_id: str | None, media_id: int) -> dict[str, Any
     return dict(chosen)
 
 
-def candidate_count(service: str, session_id: str | None) -> int:
-    """How many titles the session's latest lookup offered (0 if none)."""
+def is_clear_pick(service: str, session_id: str | None, media_id: int) -> bool:
+    """True when ``media_id`` needs no extra yes from Nick.
+
+    That is a lookup with one title, or a pick of the top-ranked result when
+    no other result shares its title (so "Captain Phillips" adds straight
+    away, but either "Gold" still asks which one).
+    """
     if not session_id:
-        return 0
+        return False
     with _lock:
         receipt = _receipts.get((service, session_id))
-    return len(receipt[1]) if receipt else 0
+    if receipt is None or media_id not in receipt[1]:
+        return False
+    candidates = receipt[1]
+    if len(candidates) == 1:
+        return True
+    if next(iter(candidates)) != media_id:
+        return False
+
+    def norm(item: dict[str, Any]) -> str:
+        return " ".join(str(item.get("title", "")).lower().split())
+
+    chosen = norm(candidates[media_id])
+    return bool(chosen) and sum(norm(item) == chosen for item in candidates.values()) == 1
 
 
 def consume(service: str, session_id: str | None) -> None:

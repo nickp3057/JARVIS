@@ -16,6 +16,7 @@ ENTITIES = {"entities": [
     {"entity_id": "light.desk_lights_2", "friendly_name": "Desk Lights", "domain": "light", "state": "off"},
     {"entity_id": "light.bedroom_lights", "friendly_name": "Bedroom Lights", "domain": "light", "state": "off"},
     {"entity_id": "fan.nicks_fan", "friendly_name": "Nick’s Fan", "domain": "fan", "state": "off"},
+    {"entity_id": "light.nicks_fan", "friendly_name": "Fan Light", "domain": "light", "state": "off"},
     {"entity_id": "switch.lamp", "friendly_name": "Lamp", "domain": "switch", "state": "off"},
 ], "error": ""}
 
@@ -29,6 +30,7 @@ class QuickCommandTests(unittest.TestCase):
         self.scene = patch.object(status_hub, "activate_scene", return_value={"error": ""}).start()
         self.control = patch.object(status_hub, "home_control", return_value={"error": ""}).start()
         self.light = patch.object(status_hub, "set_light", return_value={"error": ""}).start()
+        self.fan = patch.object(status_hub, "set_fan", return_value={"error": ""}).start()
         self.addCleanup(patch.stopall)
 
     def test_scenes_by_name(self) -> None:
@@ -48,6 +50,14 @@ class QuickCommandTests(unittest.TestCase):
         self.control.assert_called_with("fan.nicks_fan", "on", settle=False)
         quick_commands.run("set the bedroom light to 40 percent")
         self.light.assert_called_with("light.bedroom_lights", brightness_pct=40)
+
+    def test_fan_speed_never_touches_the_fan_light(self) -> None:
+        for said in ("Set fan to 30", "Set fan to 30%.", "fan at 30 percent"):
+            self.fan.reset_mock()
+            result = quick_commands.run(said)
+            self.assertTrue(result and result.ok, said)
+            self.fan.assert_called_once_with("fan.nicks_fan", 30)
+        self.light.assert_not_called()
 
     def test_anything_else_goes_to_the_conversation(self) -> None:
         for said in ("what's the weather tomorrow", "turn it off", "turn off the lights",

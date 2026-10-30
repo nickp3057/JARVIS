@@ -67,7 +67,7 @@ Pearson-Stark-Jarvis/
 │   ├── notifications.py     Phone alert router: companion push (APNs, stubbed) then HA notify fallback
 │   ├── event_bus.py         Single alert bus: publish once; phone (APNs→HA) and SSE client streams subscribe
 │   ├── arr_stack.py         Arr alert hysteresis/per-indexer tracking, restart confirmation gate, async recovery follow-up
-│   ├── confirm_gate.py      Generic session-bound "yes"/"approve <code>" gate for side-effecting fixes (media doctor)
+│   ├── confirm_gate.py      Generic session-bound "yes"/"approve <code>" gate for side-effecting fixes (media doctor); several proposals at once, "yes" approves all staged that turn, one message can carry several codes
 │   ├── arr_incidents.py     Arr push policy: watchdog-recovery hold + summary, minimum downtime, grouped incidents, daily indexer digest
 │   ├── stack_fixes.py       Tier-2 allowlist of NAS-stack fixes (HA restart, indexer re-test, indexer mirror switch, Plex rescan, arr recovery, download retry), each with a post-fix check
 │   ├── self_repair.py       Governed self-repair: diagnose a subsystem, stage a bounded fix, apply on approval
@@ -382,6 +382,10 @@ RMS envelope from ElevenLabs audio drives the orb in real time using a monotonic
   — Sonarr `/series` POST with `addOptions.searchForMissingEpisodes: true`.
   `monitor` defaults to `future` (new episodes only); accepts `all`,
   `firstSeason`, `pilot`, `latestSeason`, `none`, or natural phrasing.
+- "Add <title>" is the confirmation: when the pick is the only result, or the
+  top result with no other result of the same title, the add runs in the same
+  turn (`media_selections.is_clear_pick`). Otherwise (two "Gold"s, or the
+  model picked a lower result) it goes through `confirm_gate` for Nick's yes.
 - `list_quality_profiles(service?)` — the profile names defined in Radarr /
   Sonarr, for when a quality phrase doesn't match.
 - `media_queue(service?)` — live Radarr/Sonarr activity with movie/show/episode,
@@ -609,7 +613,7 @@ INTERRUPT_RMS_THRESHOLD=1500
 WHISPER_MODEL=small.en
 STT_PROVIDER=local          # elevenlabs (Scribe, uses ELEVENLABS_API_KEY) or openai: the command after the wake word goes to the cloud
 STT_MODEL=                  # cloud model override (scribe_v1 / gpt-4o-mini-transcribe)
-STT_TIMEOUT_S=6             # slower than this (or any error) falls back to local Whisper
+STT_TIMEOUT_S=6             # slower than this (or any error, or an empty transcript of a 1.5 s+ utterance) falls back to local Whisper
 # Default is one deterministic decode (fast, stable latency on CPU); true
 # restores faster-whisper's re-decode-on-low-confidence temperature schedule.
 WHISPER_TEMPERATURE_FALLBACK=false
@@ -664,13 +668,13 @@ ROOM_VOICE=0                # 1 = "Hey JARVIS" on the Optiplex mic/speakers insi
 AUDIO_OUTPUT_DEVICE=        # ALSA device for aplay; Optiplex: plughw:1,0 (card 0 is the USB mic, no output)
 MIC_DEVICE=CMTECK           # sounddevice input name/index. Set it: left empty, Core's room voice opened the onboard jack (hw:1,0). Rates it refuses are converted (48 kHz -> 16 kHz)
 VOICE_LIVE_MODEL=tiny.en    # Whisper model for live captions on the iPad; "off" to skip
-VOICE_SILENCE_END_MS=750    # silence that ends what you said
+VOICE_SILENCE_END_MS=1000   # silence that ends what you said (750 cut Nick off mid-sentence)
 VOICE_MIN_UTTERANCE_MS=1000 # never end a command sooner than this (a pause after "turn" isn't the end)
 VOICE_MIN_RMS=90            # speech is at least this loud...
 VOICE_NOISE_RATIO=2.5       # ...and this many times the room's learned background (capped by MIC_RMS_THRESHOLD)
 WHISPER_PROMPT=             # words Whisper should expect; empty = the room's scene/device names; off = none
 VOICE_START_TIMEOUT_S=4     # wait after the wake word before giving up
-VOICE_FOLLOWUP_S=5          # no-wake-word follow-up window after a spoken answer
+VOICE_FOLLOWUP_S=8          # no-wake-word follow-up window after a spoken answer
 VOICE_PREROLL_S=2           # audio kept from before the wake word ("game time, Jarvis")
 VOICE_SHORTCUT_AFTER=2      # same phrase + same simple action this many times -> instant shortcut
 VOICE_BARGE_IN=1            # "Hey JARVIS" while he's talking stops him and listens
@@ -861,7 +865,7 @@ CALENDAR_ALERT_LEAD_MIN=10  # warn this many minutes before a meeting
   `hey_jarvis` → soft "listen" sound → record to ~0.55 s of silence while a
   tiny Whisper (`VOICE_LIVE_MODEL`) captions live → final transcript
   (`WHISPER_MODEL`, base.en recommended on the i5-6500T) →
-  `speech/quick_commands.py` runs plain scenes / on-off / "X to 40%" straight
+  `speech/quick_commands.py` runs plain scenes / on-off / "X to 40%" / "fan to 30" (fan speed, `status_hub.set_fan`; a bare "fan" never means the fan light) straight
   through `status_hub` with a jingle (`speech/room_sounds.py`, no words);
   anything else is `runtime.respond(text, spoken=True)`, which adds a
   "spoken reply: one short sentence, 'Done.' after a home action" hint to the

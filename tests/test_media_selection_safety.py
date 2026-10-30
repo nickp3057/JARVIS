@@ -64,6 +64,23 @@ class MediaSelectionSafetyTests(unittest.TestCase):
         self.assertIn("Added Gold (2016)", confirm_gate.conversation_action("yes", "phone"))
         call.assert_called_once()
 
+    @patch("integrations.radarr.servarr.call")
+    @patch("integrations.radarr.servarr.resolve_root_folder", return_value=(1, "/movies"))
+    @patch("integrations.radarr.servarr.resolve_quality", return_value=(2, "HD-720p"))
+    @patch("integrations.radarr.servarr.is_configured", return_value=True)
+    @patch("integrations.radarr._lookup")
+    def test_plain_top_match_adds_without_a_second_yes(
+        self, lookup, _configured, _quality, _root, call
+    ) -> None:
+        phillips = {"title": "Captain Phillips", "year": 2013, "tmdbId": 109424}
+        other = {"title": "Captain Phillips: Making Of", "year": 2014, "tmdbId": 2}
+        lookup.side_effect = [(True, [phillips, other]), (True, [phillips])]
+        call.return_value = servarr.Result(True, {"id": 1}, "ok")
+        radarr.find_movie("Captain Phillips", session_id="phone")
+        result = radarr.add_movie(109424, confirmed=True, session_id="phone")
+        self.assertIn("Added Captain Phillips (2013)", result)
+        call.assert_called_once()
+
     @patch("integrations.radarr.servarr.is_configured", return_value=True)
     def test_confirmation_is_still_required(self, _configured) -> None:
         result = radarr.add_movie(286217, confirmed=False, session_id="phone")

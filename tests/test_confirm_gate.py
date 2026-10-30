@@ -55,5 +55,42 @@ class ConfirmGateTests(unittest.TestCase):
         self.assertIsNone(gate.conversation_action("approve 1234", "s"))
 
 
+    def _code(self, reply: str) -> str:
+        return reply.split('"approve ')[1][:4]
+
+    def test_two_proposals_keep_both_codes(self) -> None:
+        first, second = Mock(return_value="one"), Mock(return_value="two")
+        code1 = self._code(gate.propose("s", "fix Deadpool 2", first))
+        code2 = self._code(gate.propose("s", "fix Ministry", second))
+        reply = gate.conversation_action(f"Approve {code1}. Approve {code2}.", "s")
+        self.assertEqual(reply, "one two")
+        first.assert_called_once()
+        second.assert_called_once()
+
+    def test_bare_yes_approves_everything_staged_that_turn(self) -> None:
+        first, second = Mock(return_value="one"), Mock(return_value="two")
+        gate.propose("s", "fix A", first)
+        gate.propose("s", "fix B", second)
+        self.assertEqual(gate.conversation_action("yes", "s"), "one two")
+
+    def test_later_code_still_works_after_other_approved(self) -> None:
+        first, second = Mock(return_value="one"), Mock(return_value="two")
+        code1 = self._code(gate.propose("s", "fix A", first))
+        code2 = self._code(gate.propose("s", "fix B", second))
+        self.assertEqual(gate.conversation_action(f"approve {code2}", "s"), "two")
+        self.assertEqual(gate.conversation_action(f"approve {code1}", "s"), "one")
+
+    def test_restaging_same_fix_replaces_its_code(self) -> None:
+        old = self._code(gate.propose("s", "fix A", self.run))
+        new = self._code(gate.propose("s", "fix A", self.run))
+        if old != new:
+            self.assertIn("does not match", gate.conversation_action(f"approve {old}", "s"))
+        self.assertEqual(gate.conversation_action(f"approve {new}", "s"), "done")
+
+    def test_wake_phrase_before_yes(self) -> None:
+        gate.propose("s", "add Captain Phillips", self.run)
+        self.assertEqual(gate.conversation_action("Hey, Jarvis. Yes", "s"), "done")
+
+
 if __name__ == "__main__":
     unittest.main()

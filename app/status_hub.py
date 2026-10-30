@@ -813,6 +813,20 @@ def set_light(entity_id: str, brightness_pct: int | None = None,
     return {"error": "", "entity_id": entity_id}
 
 
+def set_fan(entity_id: str, percentage: int) -> dict[str, Any]:
+    """Speed for one allowlisted fan (0 turns it off). ValueError (a 400) for
+    anything off the allowlist or not a fan."""
+    entity_id = (entity_id or "").strip().lower()
+    if not entity_id.startswith("fan.") or entity_id not in _dashboard_allowlist():
+        raise ValueError("entity_id is not an allowlisted fan")
+    data = {"percentage": max(0, min(100, int(percentage)))}
+    message = call_discovered_service("fan", "set_percentage", entity_id=entity_id, service_data=data)
+    invalidate("entities")
+    if _HA_SUCCESS_MARKER not in message.lower():
+        return {"error": message, "entity_id": entity_id}
+    return {"error": "", "entity_id": entity_id}
+
+
 def home_scenes() -> dict[str, Any]:
     """Every saved Home Assistant scene, for the app's scene picker.
 

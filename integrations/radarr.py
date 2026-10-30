@@ -73,7 +73,7 @@ def find_movie(title: str, session_id: str | None = None) -> str:
             return f"{_describe(movie)}. It's already in your library, sir — nothing to do."
         return (
             f"One match on Radarr: {_describe(movie)}. "
-            f"Say the word and I'll add it — mention a quality profile if you want a specific one."
+            f"If Nick asked to add it, add it now; no need to ask again."
         )
 
     lines = [f"{i}. {_describe(m)}" for i, m in enumerate(results[:_MAX_CANDIDATES], 1)]
@@ -167,9 +167,10 @@ def add_movie(
             f"on the {profile_detail} profile. Search is underway, sir."
         )
 
-    if media_selections.candidate_count(_SERVICE, session_id) > 1:
-        # The lookup offered several titles, so the model may have guessed
-        # which one Nick meant. Make him say yes to this exact title.
+    if not media_selections.is_clear_pick(_SERVICE, session_id, tmdb_id):
+        # The lookup offered several titles and this pick isn't the obvious
+        # top one, so the model may have guessed which one Nick meant. Make
+        # him say yes to this exact title.
         from brain import confirm_gate
 
         year = movie.get("year", "")
