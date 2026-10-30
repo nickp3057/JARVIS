@@ -630,3 +630,5 @@ for its quick home commands, and reports its state through
 - Room voice selects its own runtime session atomically for every spoken turn. Phone/TV session switches cannot move room transcripts or consume another session’s pending confirmation.
 - NAS host monitoring waits out startup grace before advancing persisted alert state, so disk/RAID faults present at boot are delivered after grace instead of swallowed.
 - Profile memory serializes complete read–modify–write operations with a reentrant lock across parallel tools and background extraction; atomic replacement alone is not the concurrency boundary.
+
+- Updater correction (2026-10-29): failed pulls, image inspections or recreations abort with a nonzero exit and a `FAILED` phase. `APPLIED` follows successful recreation only; final `SUCCESS` requires all stages. Gluetun dependents are explicitly removed and recreated with `--no-deps`; old images are retained for manual rollback.

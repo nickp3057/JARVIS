@@ -289,3 +289,5 @@ For the 2026-09-20 deployment, source and `.env` are backed up in
 that archive to roll back the Optiplex patch, then restart Jarvis only after
 confirmation. New unused Python modules may remain on disk after restoration.
 `PROGRESS.md` distinguishes installed source from activated/live-tested behavior.
+
+- Updater correction (2026-10-29): failed pulls, image inspections or recreations abort with a nonzero exit and a `FAILED` phase. `APPLIED` follows successful recreation only; final `SUCCESS` requires all stages. Gluetun dependents are explicitly removed and recreated with `--no-deps`; old images are retained for manual rollback.
