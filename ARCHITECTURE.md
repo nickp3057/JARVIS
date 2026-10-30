@@ -629,3 +629,4 @@ for its quick home commands, and reports its state through
 - Repair command definitions are administrative `.env` configuration only, never editable through `update_setting`. Command repairs require Nick’s session-bound chat confirmation or app approval, and are bound to the exact command digest at diagnosis; changed/legacy commands require a fresh proposal.
 - Room voice selects its own runtime session atomically for every spoken turn. Phone/TV session switches cannot move room transcripts or consume another session’s pending confirmation.
 - NAS host monitoring waits out startup grace before advancing persisted alert state, so disk/RAID faults present at boot are delivered after grace instead of swallowed.
+- Profile memory serializes complete read–modify–write operations with a reentrant lock across parallel tools and background extraction; atomic replacement alone is not the concurrency boundary.

@@ -13,8 +13,8 @@ Design notes:
   invent useful ones (people, interests, preferences, projects, ...).
 - ``update_fact`` replaces a contradicted fact in place while retaining a
   bounded revision trail; ``forget_fact`` removes by id.
-- Reads/writes are atomic enough for single-process use; we don't need
-  concurrency control here.
+- A reentrant lock serializes whole profile mutations across parallel tools
+  and the background extractor, including cache reads and mirror updates.
 """
 
 from __future__ import annotations
@@ -24,6 +24,8 @@ import json
 import os
 import re
 import uuid
+from functools import wraps
+from threading import RLock
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -42,6 +44,17 @@ _CONTRADICTION_STOP_WORDS = {
 }
 
 
+_lock = RLock()
+
+
+def _serialized(function):
+    @wraps(function)
+    def call(*args, **kwargs):
+        with _lock:
+            return function(*args, **kwargs)
+    return call
+
+
 # --- Storage primitives -----------------------------------------------------
 
 def _empty_memory() -> dict[str, Any]:
@@ -55,6 +68,7 @@ def _empty_memory() -> dict[str, Any]:
 _cache: tuple[tuple[str, int, int], dict[str, Any]] | None = None
 
 
+@_serialized
 def _load() -> dict[str, Any]:
     global _cache
     try:
@@ -81,6 +95,7 @@ def _load() -> dict[str, Any]:
     return copy.deepcopy(data)
 
 
+@_serialized
 def _save(data: dict[str, Any]) -> bool:
     try:
         _MEMORY_FILE.parent.mkdir(parents=True, exist_ok=True)
@@ -119,6 +134,7 @@ def _normalize_source(value: str | None, default: str = "conversation") -> str:
     return (" ".join((value or default).split()) or default)[:120]
 
 
+@_serialized
 def remember_fact(
     category: str,
     content: str,
@@ -213,6 +229,7 @@ def remember_profile_record(
     )
 
 
+@_serialized
 def forget_fact(fact_id: str) -> str:
     """Remove a fact by id. Returns a confirmation or an error."""
     fact_id = (fact_id or "").strip()
@@ -232,6 +249,7 @@ def forget_fact(fact_id: str) -> str:
     return "Failed to write to memory."
 
 
+@_serialized
 def update_fact(
     fact_id: str,
     content: str,
@@ -306,6 +324,7 @@ def update_fact(
     return "Failed to write to memory."
 
 
+@_serialized
 def adjust_fact_confidence(fact_id: str, signal: str, amount: float | None = None) -> str:
     """Explicitly reinforce or decay one fact's confidence with an audit timestamp."""
     fact_id = (fact_id or "").strip()

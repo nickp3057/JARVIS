@@ -2,6 +2,8 @@
 import json
 import os
 import tempfile
+import threading
+from concurrent.futures import ThreadPoolExecutor
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -41,6 +43,45 @@ class MemoryCacheTests(unittest.TestCase):
         with patch("brain.knowledge_vault.sync_profile_note"):
             self.assertTrue(memory._save(data))
         self.assertEqual([f["id"] for f in memory._load()["facts"]], ["a", "c"])
+
+    def test_concurrent_remember_preserves_both_facts(self) -> None:
+        first_loaded = threading.Event()
+        second_loaded = threading.Event()
+        second_started = threading.Event()
+        release = threading.Event()
+        original = memory._load
+        first_thread = []
+
+        def load():
+            data = original()
+            if not first_thread:
+                first_thread.append(threading.get_ident())
+                first_loaded.set()
+                if not release.wait(3):
+                    raise AssertionError("first writer never released")
+            elif threading.get_ident() != first_thread[0]:
+                second_loaded.set()
+            return data
+
+        def second():
+            second_started.set()
+            return memory.remember_fact("test", "second concurrent fact")
+
+        with patch.object(memory, "_load", side_effect=load), \
+                patch("brain.knowledge_vault.sync_profile_note"), \
+                ThreadPoolExecutor(max_workers=2) as pool:
+            first = pool.submit(memory.remember_fact, "test", "first concurrent fact")
+            try:
+                self.assertTrue(first_loaded.wait(2))
+                other = pool.submit(second)
+                self.assertTrue(second_started.wait(2))
+                self.assertFalse(second_loaded.wait(0.1), "second writer read an uncommitted snapshot")
+            finally:
+                release.set()
+            self.assertIn("Remembered", first.result())
+            self.assertIn("Remembered", other.result())
+        contents = {f["content"] for f in memory.list_facts()}
+        self.assertTrue({"first concurrent fact", "second concurrent fact"} <= contents)
 
     def test_missing_file_is_empty(self) -> None:
         self.path.unlink()
