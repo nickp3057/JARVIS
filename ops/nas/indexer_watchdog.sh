@@ -45,6 +45,8 @@ if [ "$N" -ge "$STRIKES" ]; then
   else
     ACTION="rotate"
     log "rotating: $EHOST bad x$N (last ${SECS}s)"
+    # Failed attempts must also cool down; otherwise every cron run restarts the stack.
+    echo "$NOW" > "$COOLDOWN"
     if ! "$WD/recover_stack.sh" indexer; then
       log "ERROR: shared recovery failed; strikes and cooldown retained"
       exit 1
@@ -52,7 +54,6 @@ if [ "$N" -ge "$STRIKES" ]; then
     NEW=$(docker exec gluetun wget -qO- --timeout=10 https://am.i.mullvad.net/json 2>/dev/null \
       | python3 -c "import sys,json;print(json.load(sys.stdin).get('mullvad_exit_ip_hostname','?'))" 2>/dev/null)
     log "rotated $EHOST -> $NEW"
-    echo "$NOW" > "$COOLDOWN"
     echo 0 > "$STATE"
   fi
 fi

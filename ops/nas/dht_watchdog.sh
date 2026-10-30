@@ -61,10 +61,10 @@ trap 'rm -f "$COOKIE_JAR"' EXIT
 # Newer qBittorrent returns HTTP 200/204 with an empty body on success (auth cookie
 # is what actually matters), rather than the older "Ok." text body — so we check the
 # HTTP status code and cookie presence instead of body content.
-LOGIN_HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" -c "$COOKIE_JAR" \
+LOGIN_HTTP_CODE=$(curl -s --connect-timeout 3 --max-time 10 -o /dev/null -w "%{http_code}" -c "$COOKIE_JAR" \
     -H "Referer: ${QBIT_URL}" \
     -H "Origin: ${QBIT_URL}" \
-    --data "username=${QBIT_USER}&password=${QBIT_PASS}" \
+    --data-urlencode "username=${QBIT_USER}" --data-urlencode "password=${QBIT_PASS}" \
     "${QBIT_URL}/api/v2/auth/login")
 
 if [[ "$LOGIN_HTTP_CODE" != "200" && "$LOGIN_HTTP_CODE" != "204" ]] || ! grep -q "QBT_SID" "$COOKIE_JAR" 2>/dev/null; then
@@ -75,7 +75,7 @@ fi
 # --- Get DHT node count from transfer info ---
 # qBittorrent doesn't expose DHT nodes directly via a clean single field pre-v5 API,
 # so we pull it from sync/maindata's server_state.dht_nodes
-MAINDATA=$(curl -s -b "$COOKIE_JAR" \
+MAINDATA=$(curl -s --connect-timeout 3 --max-time 10 -b "$COOKIE_JAR" \
     -H "Referer: ${QBIT_URL}" \
     -H "Origin: ${QBIT_URL}" \
     "${QBIT_URL}/api/v2/sync/maindata")
@@ -135,7 +135,7 @@ log "Capturing diagnostics before remediation..."
 
 {
     echo "--- gluetun mullvad status ---"
-    sudo docker exec gluetun wget -qO- https://am.i.mullvad.net/json 2>&1
+    sudo docker exec gluetun wget -qO- --timeout=10 https://am.i.mullvad.net/json 2>&1
     echo ""
     echo "--- gluetun recent logs (last 100 lines) ---"
     sudo docker logs gluetun --tail 100 2>&1

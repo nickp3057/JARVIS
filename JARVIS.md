@@ -1977,3 +1977,5 @@ to prevent duplicate monitors, and server shutdown stops them.
 
 - Updater correction (2026-10-29): failed pulls, image inspections or recreations abort with a nonzero exit and a `FAILED` phase. `APPLIED` follows successful recreation only; final `SUCCESS` requires all stages. Gluetun dependents are explicitly removed and recreated with `--no-deps`; old images are retained for manual rollback.
 - Wake scheduling excludes already-fired occurrences before choosing a due candidate, so a nine-minute snooze rings on time alongside the weekly schedule.
+
+- Watchdog correction (2026-10-29): indexer recovery attempts start cooldown before execution, including failures. DHT login/state requests have 3-second connect and 10-second total limits while holding `stack.lock`; credentials are form-encoded.

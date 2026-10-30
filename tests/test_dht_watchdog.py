@@ -78,6 +78,16 @@ class DhtWatchdogCooldownTests(unittest.TestCase):
         self.run_once(0)
         self.assertEqual(self.calls(), 3)
 
+    def test_http_calls_have_connect_and_total_timeouts(self):
+        curl = self.bin / "curl"
+        curl.write_text(FAKE_CURL.replace('jar=""; login=0; prev=""', r'''for flag in --connect-timeout --max-time; do
+  case " $* " in *" $flag "*) ;; *) exit 90;; esac
+done
+jar=""; login=0; prev=""'''))
+        result = self.run_once(0)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.calls(), 1)
+
     def test_success_first_time_has_no_retry_allowance(self):
         self.run_once(0)
         (self.wd / '.zero_count').write_text('2')
