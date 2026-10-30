@@ -12,6 +12,7 @@ from __future__ import annotations
 from contextvars import ContextVar
 from threading import Lock
 import sqlite3
+from contextlib import closing
 import os
 import re
 import uuid
@@ -79,6 +80,7 @@ def _initialize_schema(conn: sqlite3.Connection) -> None:
         )
     if "request_id" not in cols:
         conn.execute("ALTER TABLE conversation ADD COLUMN request_id TEXT")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_conversation_session_id ON conversation(session_id, id)")
     conn.execute("""CREATE TABLE IF NOT EXISTS companion_requests (
         request_id TEXT PRIMARY KEY, session_id TEXT NOT NULL,
         message TEXT NOT NULL, reply TEXT
@@ -179,7 +181,7 @@ def start_new_session() -> str:
     """Register a new session and return its ID."""
     session_id = uuid.uuid4().hex[:12]
     try:
-        with _connect() as conn:
+        with closing(_connect()) as conn, conn:
             _ensure_schema(conn)
             conn.execute(
                 "INSERT INTO sessions (session_id) VALUES (?)", (session_id,)
@@ -196,7 +198,7 @@ def list_sessions(limit: int = 30) -> list[dict[str, Any]]:
     Each dict has session metadata plus a preview of the first user message.
     """
     try:
-        with _connect() as conn:
+        with closing(_connect()) as conn, conn:
             _ensure_schema(conn)
             rows = conn.execute(
                 """
@@ -234,7 +236,7 @@ def load_session_messages(
 ) -> list[dict[str, Any]]:
     """Return all messages for a session in chronological order."""
     try:
-        with _connect() as conn:
+        with closing(_connect()) as conn, conn:
             _ensure_schema(conn)
             rows = conn.execute(
                 """
@@ -263,7 +265,7 @@ def load_session_messages(
 def load_history(max_turns: int = 20, session_id: str | None = None) -> list[dict[str, Any]]:
     """Return the last ``max_turns`` pairs for a session (or globally)."""
     try:
-        with _connect() as conn:
+        with closing(_connect()) as conn, conn:
             _ensure_schema(conn)
             if session_id:
                 rows = conn.execute(
@@ -291,7 +293,7 @@ def load_history(max_turns: int = 20, session_id: str | None = None) -> list[dic
 def append_turn(user_text: str, assistant_text: str, session_id: str = "default") -> None:
     """Persist one complete turn."""
     try:
-        with _connect() as conn:
+        with closing(_connect()) as conn, conn:
             _ensure_schema(conn)
             conn.executemany(
                 "INSERT INTO conversation (session_id, role, content, request_id) VALUES (?, ?, ?, ?)",
@@ -315,7 +317,7 @@ def append_turn(user_text: str, assistant_text: str, session_id: str = "default"
 def session_exists(session_id: str) -> bool:
     """Return whether a session is registered."""
     try:
-        with _connect() as conn:
+        with closing(_connect()) as conn, conn:
             _ensure_schema(conn)
             return conn.execute(
                 "SELECT 1 FROM sessions WHERE session_id = ?", (session_id,)
@@ -331,7 +333,7 @@ def rename_session(session_id: str, title: str) -> bool:
     if not clean:
         return False
     try:
-        with _connect() as conn:
+        with closing(_connect()) as conn, conn:
             _ensure_schema(conn)
             cursor = conn.execute(
                 "UPDATE sessions SET title = ?, updated_at = datetime('now') WHERE session_id = ?",
@@ -347,7 +349,7 @@ def rename_session(session_id: str, title: str) -> bool:
 def delete_session(session_id: str) -> bool:
     """Delete one session and its messages."""
     try:
-        with _connect() as conn:
+        with closing(_connect()) as conn, conn:
             _ensure_schema(conn)
             conn.execute("DELETE FROM companion_requests WHERE session_id = ?", (session_id,))
             conn.execute("DELETE FROM conversation WHERE session_id = ?", (session_id,))
@@ -362,7 +364,7 @@ def delete_session(session_id: str) -> bool:
 def clear_history() -> str:
     """Delete all stored conversation history."""
     try:
-        with _connect() as conn:
+        with closing(_connect()) as conn, conn:
             _ensure_schema(conn)
             conn.execute("DELETE FROM companion_requests")
             conn.execute("DELETE FROM conversation")
@@ -378,7 +380,7 @@ def clear_history() -> str:
 def history_stats() -> str:
     """Return a spoken summary of stored history size."""
     try:
-        with _connect() as conn:
+        with closing(_connect()) as conn, conn:
             _ensure_schema(conn)
             turns = conn.execute("SELECT COUNT(*) FROM conversation").fetchone()[0] // 2
             sessions = conn.execute("SELECT COUNT(*) FROM sessions").fetchone()[0]
@@ -396,7 +398,7 @@ def search_session_summaries(query: str = "", limit: int = 5) -> list[dict[str, 
     query_tokens = {token.lower() for token in _SUMMARY_WORD_RE.findall(query or "")}
     limit = max(1, min(20, int(limit or 5)))
     try:
-        with _connect() as conn:
+        with closing(_connect()) as conn, conn:
             _ensure_schema(conn)
             rows = conn.execute(
                 """
@@ -439,7 +441,7 @@ def describe_session_summaries(query: str = "", limit: int = 5) -> str:
 
 def begin_companion_request(request_id: str, session_id: str, message: str) -> str | None:
     """Claim once under the runtime lock; never replay an uncertain tool turn."""
-    with _connect() as conn:
+    with closing(_connect()) as conn, conn:
         _ensure_schema(conn)
         row = conn.execute("SELECT * FROM companion_requests WHERE request_id = ?", (request_id,)).fetchone()
         if row:
