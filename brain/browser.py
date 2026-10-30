@@ -9,7 +9,8 @@ says what to install.
 Guardrails, whatever the engine:
 
 - public http(s) pages only (the same check as price watching: no LAN,
-  localhost or credentials in the URL), re-checked after every navigation;
+  localhost or credentials in the URL); Chromium routes all HTTP(S) traffic
+  through a proxy that validates and pins the destination IP before connecting;
 - never types into password, card, CVV, bank or SSN fields (no logins:
   Nick agreed the browser is not for banks or brokerages);
 - anything that submits a form that posts data needs ``confirmed`` (Nick
@@ -263,10 +264,19 @@ class _ChromiumEngine:
     def __init__(self) -> None:
         from playwright.sync_api import sync_playwright  # noqa: PLC0415 - optional dependency
         self._playwright = sync_playwright().start()
-        self._browser = self._playwright.chromium.launch(
-            headless=True, args=["--disable-dev-shm-usage", "--no-first-run"])
+        from brain.browser_proxy import PublicProxy
+        self._proxy = PublicProxy()
+        try:
+            self._browser = self._playwright.chromium.launch(
+                headless=True, proxy={"server": self._proxy.url},
+                args=["--disable-dev-shm-usage", "--no-first-run", "--proxy-bypass-list=<-loopback>",
+                      "--force-webrtc-ip-handling-policy=disable_non_proxied_udp"])
+        except Exception:
+            self._proxy.close()
+            self._playwright.stop()
+            raise
         self._context = self._browser.new_context(user_agent=_UA, viewport={"width": 1280, "height": 900},
-                                                  java_script_enabled=True, accept_downloads=False)
+                                                  java_script_enabled=True, accept_downloads=False, service_workers="block")
         # Pictures, fonts and video cost RAM and bandwidth and Claude can't see them here.
         self._context.route("**/*", lambda route: route.abort()
                             if route.request.resource_type in ("image", "media", "font") else route.continue_())
@@ -327,7 +337,7 @@ class _ChromiumEngine:
         return self._snapshot()
 
     def close(self) -> None:
-        for step in (self._context.close, self._browser.close, self._playwright.stop):
+        for step in (self._context.close, self._browser.close, self._playwright.stop, self._proxy.close):
             try:
                 step()
             except Exception:  # noqa: BLE001
