@@ -632,3 +632,4 @@ for its quick home commands, and reports its state through
 - Profile memory serializes complete read–modify–write operations with a reentrant lock across parallel tools and background extraction; atomic replacement alone is not the concurrency boundary.
 
 - Updater correction (2026-10-29): failed pulls, image inspections or recreations abort with a nonzero exit and a `FAILED` phase. `APPLIED` follows successful recreation only; final `SUCCESS` requires all stages. Gluetun dependents are explicitly removed and recreated with `--no-deps`; old images are retained for manual rollback.
+- Wake scheduling excludes already-fired occurrences before choosing a due candidate, so a nine-minute snooze rings on time alongside the weekly schedule.

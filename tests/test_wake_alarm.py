@@ -44,6 +44,16 @@ class WakeAlarmTests(unittest.TestCase):
         self.assertEqual(wake_alarm.next_time(wake_alarm.load(), datetime(2026, 10, 30, 8, 0)),
                          datetime(2026, 11, 2, 7, 0))
 
+    def test_snooze_rings_at_nine_minutes_beside_fired_weekly_alarm(self) -> None:
+        now = datetime(2026, 10, 27, 8, 0)
+        wake_alarm.set_alarm("8:00", "weekdays")
+        self.assertIsNotNone(wake_alarm.due(now))
+        wake_alarm.snooze(now=now)
+        self.assertIsNone(wake_alarm.due(datetime(2026, 10, 27, 8, 8)))
+        self.assertEqual(wake_alarm.due(datetime(2026, 10, 27, 8, 9))["time"], "08:09")
+        self.assertIsNone(wake_alarm.due(datetime(2026, 10, 27, 8, 9, 30)))
+        self.assertIsNone(wake_alarm.due(datetime(2026, 10, 27, 8, 10)))
+
     def test_each_day_keeps_its_own_time(self) -> None:
         wake_alarm.set_alarm("6:30am", "weekdays", music="Back in Black")
         wake_alarm.set_alarm("8", "tue,thu")

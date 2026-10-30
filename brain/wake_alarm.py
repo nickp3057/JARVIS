@@ -295,7 +295,7 @@ def _at(day: datetime, hhmm: str) -> datetime:
     return day.replace(hour=hour, minute=minute, second=0, microsecond=0)
 
 
-def _upcoming(data: dict[str, Any], now: datetime) -> tuple[datetime, dict[str, Any]] | None:
+def _upcoming(data: dict[str, Any], now: datetime, *, exclude_fired: bool = False) -> tuple[datetime, dict[str, Any]] | None:
     """(when, what plays) for the next alarm after ``now``."""
     found: list[tuple[datetime, dict[str, Any]]] = []
     once = data.get("once")
@@ -314,6 +314,8 @@ def _upcoming(data: dict[str, Any], now: datetime) -> tuple[datetime, dict[str, 
         if hhmm and _at(day, hhmm) > now:
             found.append((_at(day, hhmm), {"music": data["music"], "label": data["label"], "once": False}))
             break
+    if exclude_fired:
+        found = [pair for pair in found if pair[0].isoformat(timespec="minutes") > (data.get("last_fired") or "")]
     return min(found, key=lambda pair: pair[0]) if found else None
 
 
@@ -332,7 +334,7 @@ def due(now: datetime | None = None) -> dict[str, Any] | None:
     now = now or datetime.now()
     if not data:
         return None
-    upcoming = _upcoming(data, now - timedelta(minutes=10))
+    upcoming = _upcoming(data, now - timedelta(minutes=10), exclude_fired=True)
     if not upcoming or upcoming[0] > now:
         return None
     at, what = upcoming
