@@ -152,7 +152,7 @@ class JarvisRuntime:
         self._nas_host_started = False
         # The phone is one subscriber of the alert bus (companion push, HA
         # fallback); client event streams subscribe in app/server.py.
-        event_bus.subscribe("phone", self._deliver_alert_to_phone)
+        event_bus.subscribe("phone", self._deliver_alert_to_phone, background=True)
         self._arr_monitor_thread = None
         self._arr_last_cycle = 0.0
         self._deadman_started = False

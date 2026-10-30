@@ -12,14 +12,15 @@ decide delivery:
 
 Alerts are deduplicated by ``dedupe_key`` within ``cooldown_s`` so a monitor
 that re-detects the same condition every poll doesn't spam every channel.
-Subscribers run synchronously in the publisher's thread and must not raise;
-slow ones (APNs) are already bounded by their own timeouts.
+Fast subscribers run synchronously. Network subscribers use a bounded FIFO
+worker so phone timeouts cannot delay client streams or monitor loops.
 """
 from __future__ import annotations
 
 from collections import deque
 from dataclasses import asdict, dataclass, field
 import threading
+import queue
 import time
 from typing import Any, Callable
 
@@ -61,15 +62,57 @@ _last_sent: dict[str, float] = {}
 _subscribers: dict[str, Subscriber] = {}
 
 
-def subscribe(name: str, callback: Subscriber) -> None:
-    """Register (or replace) a named subscriber."""
+class _BufferedSubscriber:
+    def __init__(self, name: str, callback: Subscriber, capacity: int = _HISTORY) -> None:
+        self.name, self.callback = name, callback
+        self.queue: queue.Queue[Alert] = queue.Queue(maxsize=capacity)
+        self.stopped = threading.Event()
+        self.thread = threading.Thread(target=self._run, daemon=True, name=f"alert-{name}")
+        self.thread.start()
+
+    def __call__(self, alert: Alert) -> None:
+        if self.stopped.is_set():
+            return
+        try:
+            self.queue.put_nowait(alert)
+        except queue.Full:
+            # Preserve bounded memory and publisher latency. The bus history
+            # still exposes the alert to clients; surface the missed push.
+            log.error("Alert subscriber %s queue full; push %s not queued (retained in bus history)", self.name, alert.id)
+
+    def _run(self) -> None:
+        while not self.stopped.is_set():
+            try:
+                alert = self.queue.get(timeout=0.25)
+            except queue.Empty:
+                continue
+            try:
+                if not self.stopped.is_set():
+                    self.callback(alert)
+            except Exception:
+                log.exception("Alert subscriber %s failed", self.name)
+            finally:
+                self.queue.task_done()
+
+    def close(self) -> None:
+        self.stopped.set()
+
+
+def subscribe(name: str, callback: Subscriber, *, background: bool = False) -> None:
+    """Register a fast callback or a bounded worker for network delivery."""
+    subscriber = _BufferedSubscriber(name, callback) if background else callback
     with _lock:
-        _subscribers[name] = callback
+        previous = _subscribers.get(name)
+        _subscribers[name] = subscriber
+    if isinstance(previous, _BufferedSubscriber):
+        previous.close()
 
 
 def unsubscribe(name: str) -> None:
     with _lock:
-        _subscribers.pop(name, None)
+        previous = _subscribers.pop(name, None)
+    if isinstance(previous, _BufferedSubscriber):
+        previous.close()
 
 
 def publish(kind: str, title: str, message: str, *, source: str, severity: str = "warning",
@@ -110,4 +153,8 @@ def reset_for_tests() -> None:
         _next_id = 1
         _history.clear()
         _last_sent.clear()
+        subscribers = list(_subscribers.values())
         _subscribers.clear()
+    for subscriber in subscribers:
+        if isinstance(subscriber, _BufferedSubscriber):
+            subscriber.close()

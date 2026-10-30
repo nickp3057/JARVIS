@@ -28,6 +28,30 @@ class BusTests(unittest.TestCase):
         alert = event_bus.publish("download_stalled", "Download stalled", "Dune", source="downloads")
         good.assert_called_once_with(alert)
 
+    def test_slow_phone_does_not_block_streams_and_preserves_fifo(self) -> None:
+        entered, release, finished = threading.Event(), threading.Event(), threading.Event()
+        delivered = []
+        def phone(alert):
+            entered.set()
+            release.wait(3)
+            delivered.append(alert.title)
+            if len(delivered) == 2:
+                finished.set()
+        event_bus.subscribe("phone", phone, background=True)
+        self.addCleanup(event_bus.reset_for_tests)
+        stream = Mock()
+        event_bus.subscribe("stream", stream)
+        try:
+            first = event_bus.publish("x", "first", "", source="test")
+            self.assertTrue(entered.wait(1))
+            second = event_bus.publish("x", "second", "", source="test")
+            self.assertEqual([c.args[0] for c in stream.call_args_list], [first, second])
+            self.assertEqual(delivered, [])
+        finally:
+            release.set()
+        self.assertTrue(finished.wait(1))
+        self.assertEqual(delivered, ["first", "second"])
+
     def test_dedupe_within_cooldown(self) -> None:
         first = event_bus.publish("x", "t", "m", source="s", dedupe_key="k", cooldown_s=60)
         second = event_bus.publish("x", "t", "m", source="s", dedupe_key="k", cooldown_s=60)

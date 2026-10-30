@@ -31,7 +31,7 @@ class StopAfter:
 def make_runtime() -> JarvisRuntime:
     agent = Mock(brain_label="Test brain", last_used_tools=False, spoken_turn=False)
     agent.is_available.return_value = True
-    with patch.object(JarvisRuntime, "start_monitors"):
+    with patch.object(JarvisRuntime, "start_monitors"), patch.object(JarvisRuntime, "_deliver_alert_to_phone"):
         rt = JarvisRuntime(agent=agent)
     return rt
 
