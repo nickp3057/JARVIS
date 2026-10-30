@@ -461,7 +461,7 @@ class RoomVoice:
         # A question or a chat keeps listening briefly; a finished task doesn't,
         # unless it asked something ("which one?") or waits on Nick's yes.
         from brain import confirm_gate
-        asked = "?" in reply or confirm_gate.awaiting_yes(getattr(self.runtime.agent, "session_id", None))
+        asked = "?" in reply or confirm_gate.awaiting_yes(self.runtime.room_session_id)
         return (asked or not self.runtime.last_used_tools) and not self._barged
 
     def _learn(self, text: str) -> None:

@@ -1971,3 +1971,4 @@ to prevent duplicate monitors, and server shutdown stops them.
 ### Review corrections (2026-10-29)
 
 - Repair command definitions are administrative `.env` configuration only, never editable through `update_setting`. Command repairs require Nick’s session-bound chat confirmation or app approval, and are bound to the exact command digest at diagnosis; changed/legacy commands require a fresh proposal.
+- Room voice selects its own runtime session atomically for every spoken turn. Phone/TV session switches cannot move room transcripts or consume another session’s pending confirmation.

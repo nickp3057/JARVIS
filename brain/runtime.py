@@ -19,7 +19,7 @@ from typing import Any, Iterator
 
 from brain import event_bus, memory_extractor, tool_health
 from brain.agent import JarvisAgent
-from brain.history import load_session_messages, session_exists, request_context, begin_companion_request, delete_session
+from brain.history import load_session_messages, session_exists, request_context, begin_companion_request, delete_session, start_new_session
 from brain.memory import list_facts
 from brain.timers import Timer, active_timers, pop_expired
 from brain.reminders import active_reminders, pop_due_reminders as _pop_due_reminders
@@ -174,6 +174,7 @@ class JarvisRuntime:
             error="Waiting for weather monitor",
         )
         self.agent = agent or JarvisAgent()
+        self.room_session_id = self.agent.session_id
         memory_extractor.add_listener(self._on_memory_change)
         from brain import arr_stack
         arr_stack.set_recovery_notifier(self._report_arr_recovery)
@@ -472,6 +473,10 @@ class JarvisRuntime:
         ``spoken``: the reply goes to a speaker (the room voice), so short."""
         task_id = self.start_task("Reasoning", user_input.strip())
         with self._turn_lock:
+            if spoken:
+                if not session_exists(self.room_session_id):
+                    self.room_session_id = start_new_session()
+                self.agent.switch_session(self.room_session_id)
             self.agent.spoken_turn = spoken
             try:
                 reply = self.agent.respond(user_input)

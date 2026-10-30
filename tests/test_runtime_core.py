@@ -49,6 +49,8 @@ class RuntimeCoreTests(unittest.TestCase):
         self.assertEqual(self.rt.recent_events()[0].title, "Runtime online")
 
     def test_a_spoken_turn_is_flagged_only_for_that_turn(self) -> None:
+        patch.object(runtime_module, "session_exists", return_value=True).start()
+        self.addCleanup(patch.stopall)
         seen = []
         self.rt.agent.respond.side_effect = lambda text: seen.append(self.rt.agent.spoken_turn) or "Done."
         self.assertEqual(self.rt.respond("game time", spoken=True), "Done.")

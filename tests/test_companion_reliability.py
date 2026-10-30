@@ -101,6 +101,27 @@ class CompanionReliabilityTests(unittest.TestCase):
         self.assertEqual(self.core.respond_in_session(self.session, "hello", "stream-one"), "First second")
         self.assertEqual(self.calls, [])
 
+    def test_room_yes_cannot_approve_phone_action(self):
+        from brain import agent, confirm_gate, memory_extractor, event_bus
+        with patch.object(JarvisRuntime, "start_monitors"), \
+                patch.object(agent, "_get_client", return_value=None):
+            core = JarvisRuntime()
+        self.addCleanup(memory_extractor.remove_listener, core._on_memory_change)
+        self.addCleanup(event_bus.reset_for_tests)
+        actions = []
+        with patch.object(agent, "routed_offline_reply", return_value="Room answer"), \
+                patch.object(core.agent, "_after_turn"):
+            core.respond_in_session(self.session, "phone question")
+            confirm_gate.propose(self.session, "phone action", lambda: actions.append("phone") or "done")
+            self.assertEqual(core.respond("yes", spoken=True), "Room answer")
+            self.assertEqual(actions, [])
+            self.assertEqual(history.load_session_messages(core.room_session_id)[0]["content"], "yes")
+            self.assertEqual(core.respond_in_session(self.session, "yes"), "done")
+            self.assertEqual(actions, ["phone"])
+            confirm_gate.propose(core.room_session_id, "room action", lambda: actions.append("room") or "room done")
+            self.assertEqual(core.respond("yes", spoken=True), "room done")
+            self.assertEqual(actions, ["phone", "room"])
+
     def test_paused_and_stopped_torrents_remain_available_to_resume(self):
         records = [{"hash": str(i), "name": state, "state": state, "dlspeed": 0, "upspeed": 0}
                    for i, state in enumerate(["pausedDL", "pausedUP", "stoppedDL", "stoppedUP"])]
