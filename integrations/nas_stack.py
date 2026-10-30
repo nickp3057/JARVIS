@@ -55,6 +55,13 @@ _INDEXER_STATUS_SOURCES = frozenset({'IndexerStatusCheck', 'IndexerLongTermStatu
 _indexer_names: dict[str, Any] = {'at': 0.0, 'base': '', 'names': {}}
 
 
+def _is_update_notice(item: dict) -> bool:
+    """Servarr's "New update is available" check: not a fault. The NAS's
+    weekly updater (or "update the arr stack") installs it once the image is out."""
+    return (str(item.get('source', '')) == 'UpdateCheck'
+            or 'update is available' in str(item.get('message', '')).lower())
+
+
 def _is_indexer_status_health(item: dict) -> bool:
     source = str(item.get('source', ''))
     if source:
@@ -206,7 +213,8 @@ def poll_health() -> dict[str, Any]:
         if not healthy or not isinstance(payload, list) or any(not isinstance(x, dict) for x in payload):
             issues[service + '-api'] = f'{service.title()} API unreachable, authentication failed, or invalid health response'
             continue
-        warnings = [str(x.get('message') or x.get('type') or 'health error')[:220] for x in payload if str(x.get('type', 'error')).lower() != 'ok']
+        warnings = [str(x.get('message') or x.get('type') or 'health error')[:220] for x in payload
+                    if str(x.get('type', 'error')).lower() != 'ok' and not _is_update_notice(x)]
         if warnings:
             issues[service + '-health'] = f'{service.title()} health: ' + '; '.join(warnings[:3])
     # Prowlarr v1 health when a key exists; public /ping otherwise. Byparr's
@@ -237,6 +245,7 @@ def poll_health() -> dict[str, Any]:
                     # each indexer alerts and recovers on its own.
                     issues.update(down)
                     payload = [x for x in payload if not _is_indexer_status_health(x)]
+                payload = [x for x in payload if not _is_update_notice(x)]
                 if payload:
                     issues['prowlarr-health'] = 'Prowlarr health: ' + '; '.join(str(x.get('message', 'health error'))[:220] for x in payload[:3])
             elif not isinstance(payload, dict) or str(payload.get('status', '')).lower() != 'ok':
@@ -320,6 +329,14 @@ def start_recovery(request_id: str) -> tuple[bool, Any]:
     if not re.fullmatch(r'[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}', request_id):
         return False, 'Invalid recovery request ID'
     return _ssh('recovery', 'recover ' + request_id)
+
+
+def start_update(request_id: str) -> tuple[bool, Any]:
+    """Run the NAS's compose updater now (the weekly root-cron job), through
+    the same restricted recovery key: pulls images, recreates changed ones."""
+    if not re.fullmatch(r'[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}', request_id):
+        return False, 'Invalid update request ID'
+    return _ssh('recovery', 'update ' + request_id)
 
 
 def watchdog_note(status: tuple[bool, Any] | None = None) -> str:

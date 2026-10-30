@@ -857,6 +857,11 @@ _CUSTOM_TOOLS: list[dict[str, Any]] = [
         "input_schema": {"type": "object", "properties": {}, "additionalProperties": False},
     },
     {
+        "name": "update_arr_stack",
+        "description": "Update the NAS arr stack (qBittorrent, Radarr, Sonarr, Prowlarr, gluetun, Byparr, Tailscale, Plex) the safe way: the NAS's own compose updater pulls new images and recreates only changed containers, never the UGOS GUI. Use when Nick asks to update the arr stack / Radarr / Sonarr / Prowlarr, or to clear an \"update available\" warning. Stages it; Nick's yes runs it. Never claim it ran from this tool.",
+        "input_schema": {"type": "object", "properties": {}, "additionalProperties": False},
+    },
+    {
         "name": "arr_stack_status",
         "description": "Read live qBit DHT/connection, Radarr/Sonarr/Prowlarr/Byparr API health, and NAS watchdog activity. Never restarts anything.",
         "input_schema": {"type": "object", "properties": {}, "additionalProperties": False},
@@ -2302,6 +2307,7 @@ _CUSTOM_TOOLS: list[dict[str, Any]] = [
 # (like web_search) are intentionally absent - Anthropic runs those.
 _DISPATCH: dict[str, Callable[[dict[str, Any]], str]] = {
     "restart_arr_stack": lambda args: arr_stack.prepare_restart(args.get("_jarvis_session_id")),
+    "update_arr_stack": lambda args: arr_stack.prepare_update(args.get("_jarvis_session_id")),
     "arr_stack_status": lambda args: arr_stack.describe_status(),
     "get_time": _tool_get_time,
     "control_device": _tool_control_device,

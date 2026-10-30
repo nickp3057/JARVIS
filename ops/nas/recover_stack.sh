@@ -16,7 +16,10 @@ if [[ $EUID -ne 0 ]]; then
     if [[ ${SSH_ORIGINAL_COMMAND:-} =~ ^recover\ ([a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12})$ ]]; then
         exec /usr/bin/sudo -n /usr/local/libexec/jarvis-nas-launch "${BASH_REMATCH[1]}"
     fi
-    echo 'DENIED: only probe or recover UUID is allowed.' >&2
+    if [[ ${SSH_ORIGINAL_COMMAND:-} =~ ^update\ ([a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12})$ ]]; then
+        exec /usr/bin/sudo -n /usr/local/libexec/jarvis-nas-launch update "${BASH_REMATCH[1]}"
+    fi
+    echo 'DENIED: only probe, recover UUID or update UUID is allowed.' >&2
     exit 64
 fi
 SOURCE=${1:-manual}

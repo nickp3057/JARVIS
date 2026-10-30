@@ -155,8 +155,19 @@ of each group.
   for a real 1.5 s+ utterance now retries on local Whisper.
 - **"Fan to 30"** is a quick command now (`status_hub.set_fan`). Also fixed:
   "turn the fan on" had been ambiguous with the Fan Light and went to the model.
-- **Not looked at:** "errors on my phone" (which errors? ask Nick for a
-  screenshot).
+- **Follow-up window after a question:** it only opened when no tools ran,
+  so "Add Captain Phillips" (tools, then a question) closed the mic and
+  Nick's instant "yes" was lost. Now a reply with a "?" or an armed
+  confirm_gate yes keeps listening.
+- **Phone "critical" arr alerts were "Prowlarr: New update is available"**
+  every ~6 h for 54 h. Servarr `UpdateCheck` messages are no longer alerts.
+- **"Update the arr stack"** (`update_arr_stack`): runs the NAS's weekly
+  compose updater now, via the recovery key's new `update <uuid>`. Needs Nick
+  to re-run `ops/nas/install-restricted-ssh.sh --apply` on the NAS (sudo).
+  That also re-locks `stack_updater.sh`, which was world-writable while root
+  cron runs it. Hand test: `ssh -i ~/.ssh/jarvis_nas_recovery Jarvis@nas
+  "update <uuidgen>"` from the Optiplex → `{"state":"accepted","mode":"update"}`
+  and a new `=== updater start` in updater.log.
 
 ### Next session starts here (left 2026-10-28, from school)
 

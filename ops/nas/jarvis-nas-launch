@@ -3,7 +3,13 @@
 set -euo pipefail
 PATH=/usr/sbin:/usr/bin:/sbin:/bin
 export PATH
-[[ $EUID == 0 && $# == 1 && $1 =~ ^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$ ]] || exit 64
+UUID='^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$'
+MODE=recover
+if [[ $# == 2 && $1 == update ]]; then
+    MODE=update
+    shift
+fi
+[[ $EUID == 0 && $# == 1 && $1 =~ $UUID ]] || exit 64
 REQUEST=$1
 WD=/volume1/docker/watchdog
 STATE=/var/lib/jarvis-nas
@@ -11,6 +17,17 @@ umask 077
 # Durable receipt: retries after an SSH disconnect must never repeat a restart.
 if [[ -d "$STATE/requests/$REQUEST" ]]; then
     printf '{"request_id":"%s","state":"already_started"}\n' "$REQUEST"
+    exit 0
+fi
+if [[ $MODE == update ]]; then
+    # The weekly root-cron updater, on demand: pulls images and recreates only
+    # changed containers through compose (never the UGOS GUI). It takes
+    # stack.lock itself (waiting up to 15 min behind a recovery), so the
+    # launcher must not hold it.
+    mkdir "$STATE/requests/$REQUEST"
+    nohup setsid "$WD/stack_updater.sh" </dev/null >>"$WD/updater.log" 2>&1 &
+    disown
+    printf '{"request_id":"%s","state":"accepted","mode":"update"}\n' "$REQUEST"
     exit 0
 fi
 exec 9>"$WD/stack.lock"

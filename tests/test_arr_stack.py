@@ -214,6 +214,30 @@ class ArrMonitorTests(unittest.TestCase):
         self.assertNotIn('byparr-api', result['issues'])
         self.assertIn('Byparr', result['issues']['prowlarr-health'])
 
+    def test_update_available_is_not_an_alert(self):
+        response = Mock(status_code=200)
+        response.json.return_value = [{'source': 'UpdateCheck', 'type': 'warning', 'message': 'New update is available: v2.7.0.5723'}]
+        with patch.object(nas_stack, 'network_status', return_value=(True, {'dht_nodes': 5, 'connection_status': 'connected'})), \
+             patch.object(nas_stack.servarr_common, 'get_health', return_value=(True, [{'source': 'UpdateCheck', 'type': 'warning', 'message': 'New update is available'}])), \
+             patch.object(nas_stack, 'indexer_outages', return_value=None), \
+             patch.object(nas_stack.requests, 'get', return_value=response), \
+             patch.dict(os.environ, {'PROWLARR_URL': 'http://nas:9696', 'PROWLARR_API_KEY': 'key'}):
+            result = nas_stack.poll_health()
+        self.assertEqual(result['issues'], {})
+
+    def test_update_is_staged_then_held_after_yes(self):
+        from brain import confirm_gate
+        confirm_gate.clear_for_tests()
+        with patch.object(arr_stack.qbittorrent, 'active_downloads', return_value=(True, [])), \
+             patch.object(nas_stack, 'start_update', return_value=(True, {'state': 'accepted'})) as start:
+            prompt = arr_stack.prepare_update('s')
+            start.assert_not_called()
+            self.assertIn('update the arr stack', prompt)
+            self.assertIn('Update started', confirm_gate.conversation_action('yes', 's'))
+        start.assert_called_once()
+        self.assertTrue(arr_stack.recovery_in_progress())
+        arr_stack._update_hold_until = 0.0
+
     def test_watchdog_note_recent_and_unknown(self):
         note = nas_stack.watchdog_note((True, {'observed_at': 5000, 'watchdog_actions': {'.last_action': 4800, '.rotate_cooldown': 0}, 'recovery': {'source': 'dht', 'state': 'success', 'updated_at': 4900}}))
         self.assertIn('DHT', note)

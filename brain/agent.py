@@ -338,6 +338,10 @@ class JarvisAgent:
         return self._client is not None or local_model_configured()
 
     @property
+    def session_id(self) -> str:
+        return self._session_id
+
+    @property
     def brain_label(self) -> str:
         if self._client is not None:
             return "Claude (online)"

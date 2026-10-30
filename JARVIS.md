@@ -1918,6 +1918,12 @@ hand-test commands. Installation hardens previously writable path/SSH ACLs.
   SSH. `restart_arr_stack` (the model's tool) never restarts by itself: it
   only opens the same request. The direct request also works in offline
   text/voice.
+- `update_arr_stack` stages "update the arr stack" for Nick's yes: the NAS's
+  compose updater (`ops/nas/stack_updater.sh`, the weekly root-cron job) runs
+  at once through the recovery key (`update <uuid>`), pulling images and
+  recreating only changed containers, never through the UGOS GUI. Arr alerts
+  are held for `ARR_STACK_UPDATE_HOLD_S` (900) meanwhile. Servarr's "New
+  update is available" health message is no longer an alert at all.
 - Recovery returns promptly on SSH and continues detached on the NAS. The
   turn replies at once; a background follow-up polls the NAS result (if the
   status key works) and live service probes for up to 12 minutes, then pushes

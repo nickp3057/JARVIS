@@ -40,7 +40,7 @@ if [[ "$CURRENT_SHELL" == "$DESIRED_SHELL" ]]; then
 else
     echo "Shell: $RESTRICTED_USER is $CURRENT_SHELL; would change to $DESIRED_SHELL (forced commands are invoked via the account's shell, and nologin/false ignore them entirely; every key on this account is command=-restricted, so a working shell does not grant interactive access)."
 fi
-for file in recover_stack.sh stack_status.sh jarvis-nas-launch; do
+for file in recover_stack.sh stack_status.sh stack_updater.sh jarvis-nas-launch; do
     DEST="$WD/$file"
     [[ $file != jarvis-nas-launch ]] || DEST=/usr/local/libexec/jarvis-nas-launch
     bash -n "$HERE/$file"
@@ -140,7 +140,7 @@ for path in "$WD"/*.sh "$WD"/stack.lock "$WD"/*.log "$WD"/.*count "$WD"/.last_ac
 done
 chmod 755 "$WD"/*.sh
 chmod 600 "$WD/stack.lock"
-for file in recover_stack.sh stack_status.sh jarvis-nas-launch; do
+for file in recover_stack.sh stack_status.sh stack_updater.sh jarvis-nas-launch; do
     DEST="$WD/$file"
     [[ $file != jarvis-nas-launch ]] || DEST=/usr/local/libexec/jarvis-nas-launch
     sed -n '1,$p' "$HERE/$file" > "$DEST.new"

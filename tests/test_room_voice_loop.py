@@ -176,6 +176,12 @@ class HandleTests(unittest.TestCase):
         self.assertTrue(follow_up)
         self.assertEqual(voice_presence.current()["reply"], "Fifty-four and sunny, sir.")
 
+    def test_a_question_after_tools_keeps_listening(self) -> None:
+        runtime = Mock(last_used_tools=True)
+        runtime.respond.return_value = "Two Golds, sir: 2016 or 2014?"
+        with patch.object(quick_commands, "run", return_value=None):
+            self.assertTrue(make_voice("add gold", runtime)._handle(self.audio))
+
     def test_nothing_heard_goes_back_to_idle(self) -> None:
         runtime = Mock()
         self.assertFalse(make_voice("Hey Jarvis.", runtime)._handle(self.audio))

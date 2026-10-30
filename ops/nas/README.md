@@ -90,11 +90,30 @@ of `Nick`'s `authorized_keys` once they're installed for `Jarvis`, leaving
 Nick's own login key untouched.
 
 Sudo permits `Jarvis` to invoke one fixed root launcher with a validated UUID.
-The launcher accepts exactly one UUID argument; its wildcard sudo rule cannot
+The launcher accepts exactly one UUID argument, or `update` plus one UUID
+(2026-10-29); anything else exits 64, so its wildcard sudo rule cannot
 supply shell commands or extra arguments. A durable request directory prevents
 replays. The recovery key's forced command is exactly
 `/volume1/docker/watchdog/recover_stack.sh`, with pty, port/agent/X11 forwarding,
 and user rc disabled. Ordinary commands are rejected, not silently restarted.
+
+### On-demand updates (2026-10-29)
+
+`update <uuid>` on the recovery key runs `stack_updater.sh` (the same script
+root cron runs weekly) right away: `docker compose pull` per service, then
+`up -d` only for containers whose image changed, with the gluetun chain
+recreated in order. It is the terminal path that doesn't break the stack the
+way UGOS's GUI updater does. The updater takes `stack.lock` itself (waiting up
+to 15 min behind a recovery), so the launcher does not hold it. JARVIS's
+`update_arr_stack` tool stages it for Nick's yes and holds arr alerts for
+`ARR_STACK_UPDATE_HOLD_S` (900) while containers restart.
+
+Because root now runs `stack_updater.sh` on Jarvis's request as well as from
+cron, it must be root-owned 755 with no ACLs. On 2026-10-29 it (and the
+watchdog folder) showed `rwxrwxrwx+`, meaning any account that can write
+there could get root through cron. `install-restricted-ssh.sh --apply` resets
+it with the other watchdog scripts; check `ls -la /volume1/docker/watchdog`
+afterwards, and again after UGOS updates or shared-folder permission edits.
 
 A separate status key runs `stack_status.sh` without sudo. It returns fixed
 status/cooldown files and the last 20 lines (at most 8 KiB) of each watchdog log.

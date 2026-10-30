@@ -458,8 +458,11 @@ class RoomVoice:
         voice_presence.update("speaking", reply=reply)
         self._barged = self._speak(reply, cache="auto")  # a reply said before replays without synthesis
         voice_presence.update("idle")
-        # A question or a chat keeps listening briefly; a finished task doesn't.
-        return not self.runtime.last_used_tools and not self._barged
+        # A question or a chat keeps listening briefly; a finished task doesn't,
+        # unless it asked something ("which one?") or waits on Nick's yes.
+        from brain import confirm_gate
+        asked = "?" in reply or confirm_gate.awaiting_yes(getattr(self.runtime.agent, "session_id", None))
+        return (asked or not self.runtime.last_used_tools) and not self._barged
 
     def _learn(self, text: str) -> None:
         """A simple action Claude did for this phrase: maybe now a shortcut."""

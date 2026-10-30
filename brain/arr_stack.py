@@ -220,9 +220,42 @@ class AlertTracker:
         return notices
 
 
+_update_hold_until = 0.0
+
+
 def recovery_in_progress() -> bool:
-    """True while a Jarvis-initiated recovery is launching or being followed."""
-    return _restart_lock.locked()
+    """True while a Jarvis-initiated recovery or update is running."""
+    return _restart_lock.locked() or time.time() < _update_hold_until
+
+
+def prepare_update(session_id: str | None) -> str:
+    """Stage "update the arr stack" for Nick's yes (containers restart, so
+    downloads pause for a few minutes)."""
+    from brain import confirm_gate
+
+    checked, downloading = qbittorrent.active_downloads()
+    if not checked:
+        why = f"I couldn't check qBittorrent ({downloading}), so downloads may be interrupted"
+    elif downloading:
+        why = f"{len(downloading)} torrent(s) downloading will pause while containers restart"
+    else:
+        why = "nothing is downloading"
+    return confirm_gate.propose(
+        session_id,
+        f"update the arr stack on the NAS (pull new images, restart only what changed, about 5 minutes; {why})",
+        start_update,
+    )
+
+
+def start_update() -> str:
+    """Kick off the NAS updater now; holds alerts while containers restart."""
+    global _update_hold_until
+    ok, result = nas_stack.start_update(str(uuid.uuid4()))
+    if not ok:
+        return f"The NAS refused the update, sir: {result}"
+    _update_hold_until = time.time() + nas_stack.seconds('ARR_STACK_UPDATE_HOLD_S', 900, 60)
+    return ("Update started on the NAS, sir. It pulls new images and restarts only the containers "
+            "that changed, about five minutes. Alerts are held until it settles.")
 
 
 _PENDING_TTL_S = 600
