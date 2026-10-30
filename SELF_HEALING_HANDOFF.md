@@ -80,3 +80,5 @@ cd ~/jarvis && git pull
 
 1. Source-level self-modification on the same proposal pattern: patch,
    test, approve, activate, rollback.
+
+Current correction (2026-10-29): `SELF_REPAIR_COMMANDS` is no longer model-editable. Command execution requires chat/app approval bound to the diagnosed command; the editable-setting entry above records the original implementation.

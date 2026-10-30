@@ -623,3 +623,7 @@ apps: it runs inside Core on the shared runtime (`ROOM_VOICE=1`), uses
 `runtime.respond(..., spoken=True)` for conversation and `app.status_hub`
 for its quick home commands, and reports its state through
 `brain/voice_presence.py` (`/api/voice/stream`) so screens can show it.
+
+### Review corrections (2026-10-29)
+
+- Repair command definitions are administrative `.env` configuration only, never editable through `update_setting`. Command repairs require Nick’s session-bound chat confirmation or app approval, and are bound to the exact command digest at diagnosis; changed/legacy commands require a fresh proposal.

@@ -26,6 +26,7 @@ State lives in ``memory/repair_proposals.json``.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import shlex
@@ -248,7 +249,7 @@ def _new_proposal(subsystem: str, tool: str, action: dict[str, Any], rationale: 
     }
 
 
-def diagnose(tool: str) -> str:
+def diagnose(tool: str, session_id: str | None = None) -> str:
     """Diagnose a tool's subsystem, stage one repair proposal, and describe both."""
     subsystem = subsystem_for(tool)
     if subsystem is None:
@@ -277,7 +278,8 @@ def diagnose(tool: str) -> str:
     elif result["reachable"] is False:
         name = next((c for c in book["commands"] if c in commands), None)
         if name:
-            action = {"kind": "run_command", "name": name}
+            action = {"kind": "run_command", "name": name,
+                      "command_digest": hashlib.sha256(commands[name].encode()).hexdigest()}
             rationale = f"{book['label']} at {result['target']} is not answering; the approved '{name}' command should bring it back."
         else:
             action = {"kind": "clear_flag", "tool": tool}
@@ -306,7 +308,17 @@ def diagnose(tool: str) -> str:
     lines.extend(f"- {f}" for f in result["findings"])
     lines.append(f"- note: {book['hint']}")
     lines.append(f"Proposed repair [{proposal['id']}]: {_describe_action(action)}. {rationale}")
-    lines.append(f"Say the word and I'll apply repair {proposal['id']}, sir.")
+    if action["kind"] == "run_command":
+        if session_id:
+            from brain import confirm_gate
+            lines.append(confirm_gate.propose(
+                session_id, f"{_describe_action(action)} [repair {proposal['id']}]",
+                lambda: apply(proposal["id"], confirmed=True, approved_by="chat"),
+            ))
+        else:
+            lines.append("Approve this repair in the companion app, sir.")
+    else:
+        lines.append(f"Say the word and I'll apply repair {proposal['id']}, sir.")
     return "\n".join(lines)
 
 
@@ -412,7 +424,7 @@ def apply(proposal_id: str, *, confirmed: bool = False, value: Any = None, appro
     """Execute a staged repair.  Requires the exact id and confirmed=True.
 
     ``approved_by`` ("chat" from the confirm gate, "app" from the Approve tap)
-    is required for stack fixes: they only ever follow a message or tap from
+    is required for stack fixes and commands: they only ever follow a message or tap from
     Nick himself, so the model's apply_repair call alone is refused."""
     if not confirmed:
         return "I need Nick's explicit go-ahead before I apply a repair, sir."
@@ -423,8 +435,8 @@ def apply(proposal_id: str, *, confirmed: bool = False, value: Any = None, appro
             return f"No repair proposal with id '{proposal_id}', sir."
         if proposal.get("status") != "pending":
             return f"Repair {proposal_id} was already {proposal.get('status')}."
-        if proposal["action"].get("kind") == "stack_fix" and approved_by not in {"chat", "app"}:
-            return (f"Repair {proposal_id} restarts or changes part of the NAS stack, so it needs Nick's own "
+        if proposal["action"].get("kind") in {"stack_fix", "run_command"} and approved_by not in {"chat", "app"}:
+            return (f"Repair {proposal_id} runs a command or changes a service, so it needs Nick's own "
                     "approval: his \"yes\" or code in chat, or the Approve button in the app, sir.")
         action = proposal["action"]
         if action.get("kind") == "set_setting" and value is None and action.get("value") is None:
@@ -465,6 +477,8 @@ def apply(proposal_id: str, *, confirmed: bool = False, value: Any = None, appro
             command = approved_commands().get(action["name"])
             if not command:
                 raise RuntimeError(f"'{action['name']}' is no longer in SELF_REPAIR_COMMANDS.")
+            if action.get("command_digest") != hashlib.sha256(command.encode()).hexdigest():
+                raise RuntimeError("The approved command changed or this proposal predates command binding. Diagnose and approve again.")
             completed = subprocess.run(
                 shlex.split(command) if not any(ch in command for ch in "|&;><") else ["/bin/sh", "-c", command],
                 capture_output=True, text=True, timeout=_COMMAND_TIMEOUT_S, check=False,

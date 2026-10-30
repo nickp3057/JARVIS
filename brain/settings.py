@@ -171,13 +171,6 @@ SETTINGS_SCHEMA: dict[str, dict[str, Any]] = {
         "type": "string",
         "description": "Claude model id for conversation turns (read live). Empty or 'auto' follows the newest Haiku; 'auto:sonnet' follows the newest Sonnet; a full id pins it.",
     },
-    "SELF_REPAIR_COMMANDS": {
-        "type": "string",
-        "description": (
-            "Pre-approved repair commands JARVIS may run by name after Nick confirms, "
-            "as name=command;name2=command2 (e.g. restart_home_assistant=ssh nas 'docker restart homeassistant')."
-        ),
-    },
     "WEB_SEARCH_ENABLED": {
         "type": "bool",
         "description": "Whether Claude can use the web search tool.",

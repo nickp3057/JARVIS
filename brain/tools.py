@@ -447,7 +447,7 @@ def _tool_clear_tool_health(args: dict[str, Any]) -> str:
 
 
 def _tool_diagnose_tool(args: dict[str, Any]) -> str:
-    return self_repair.diagnose(str(args.get("tool") or ""))
+    return self_repair.diagnose(str(args.get("tool") or ""), session_id=args.get("_jarvis_session_id"))
 
 
 def _tool_list_repair_proposals(args: dict[str, Any]) -> str:

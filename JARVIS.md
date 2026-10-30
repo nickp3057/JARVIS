@@ -483,7 +483,7 @@ RMS envelope from ElevenLabs audio drives the orb in real time using a monotonic
   actions: `set_setting` (one schema-validated `.env` key, old value kept and
   rolled back automatically if the endpoint is still unreachable afterwards),
   `run_command` (a command Nick pre-approved by name in `SELF_REPAIR_COMMANDS`;
-  JARVIS can never compose a command), or `clear_flag` (transient fault).
+  JARVIS cannot edit these definitions; command repairs require the chat gate or app approval), or `clear_flag` (transient fault).
 - `propose_stack_fix(fix, reason)` — stages one allowlisted NAS-stack fix
   (`brain/stack_fixes.py`): `restart_home_assistant` (then waits until HA
   answers), `retest_indexers` (Prowlarr test-all, then checks none is backed
@@ -1353,7 +1353,7 @@ CALENDAR_ALERT_LEAD_MIN=10  # warn this many minutes before a meeting
   (validated `.env` write with automatic rollback, a pre-approved
   `SELF_REPAIR_COMMANDS` entry by name, or a flag clear), and apply it only
   when Nick approves the proposal id. `ANTHROPIC_MODEL` and
-  `SELF_REPAIR_COMMANDS` are now editable settings. The memory extractor also
+  `SELF_REPAIR_COMMANDS` were initially editable settings; command definitions are now admin-only (see Review corrections). The memory extractor also
   turns clear behavioural corrections into standing orders on its own.
 - **Model auto-update (1.64 / build 66)** — `brain/model_select.py`:
   `ANTHROPIC_MODEL` empty or `auto` follows the newest model in
@@ -1967,3 +1967,7 @@ recovery verification.
 The companion server starts configured arr monitoring/heartbeats during server
 startup, without waiting for a phone connection. Runtime creation is serialized
 to prevent duplicate monitors, and server shutdown stops them.
+
+### Review corrections (2026-10-29)
+
+- Repair command definitions are administrative `.env` configuration only, never editable through `update_setting`. Command repairs require Nick’s session-bound chat confirmation or app approval, and are bound to the exact command digest at diagnosis; changed/legacy commands require a fresh proposal.

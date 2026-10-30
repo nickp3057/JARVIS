@@ -64,6 +64,13 @@ class SettingsTests(unittest.TestCase):
         self.assertEqual(settings.get_setting("humor_percent"), "HUMOR_PERCENT is currently 30.")
         self.assertIn("HUMOR_PERCENT = 30 [int]", settings.list_settings())
 
+    def test_repair_command_registry_is_admin_only(self) -> None:
+        with patch.dict(os.environ, {"SELF_REPAIR_COMMANDS": "restart_home_assistant=echo original"}):
+            reply = settings.update_setting("SELF_REPAIR_COMMANDS", "restart_home_assistant=echo injected")
+            self.assertIn("isn't an editable setting", reply)
+            self.assertEqual(os.environ["SELF_REPAIR_COMMANDS"], "restart_home_assistant=echo original")
+            self.assertEqual(self.env.read_text(), ENV)
+
     def test_bools(self) -> None:
         bool_keys = [k for k, s in settings.SETTINGS_SCHEMA.items() if s["type"] == "bool"]
         if not bool_keys:

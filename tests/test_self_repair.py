@@ -7,7 +7,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from brain import self_repair, tool_health
+from brain import self_repair, tool_health, confirm_gate
 
 CMDS = "restart_home_assistant=docker restart homeassistant; restart_radarr = ssh nas 'docker restart radarr' ;bad"
 
@@ -53,7 +53,9 @@ class SelfRepairTests(unittest.TestCase):
     def test_diagnosis_choices(self) -> None:
         self.stage(reachable=False)
         (proposal,) = self.pending()
-        self.assertEqual(proposal["action"], {"kind": "run_command", "name": "restart_home_assistant"})
+        self.assertEqual(proposal["action"]["kind"], "run_command")
+        self.assertEqual(proposal["action"]["name"], "restart_home_assistant")
+        self.assertTrue(proposal["action"]["command_digest"])
         self.stage(reachable=True)  # a new diagnosis replaces the old pending one for that tool
         (proposal,) = self.pending()
         self.assertEqual(proposal["action"]["kind"], "clear_flag")
@@ -78,7 +80,7 @@ class SelfRepairTests(unittest.TestCase):
         with patch.object(self_repair.subprocess, "run", return_value=done) as run, \
                 patch.object(self_repair.time, "sleep"), \
                 patch.object(self_repair, "_probe_host", return_value=(True, "ok")):
-            reply = self_repair.apply(pid, confirmed=True)
+            reply = self_repair.apply(pid, confirmed=True, approved_by="app")
         self.assertEqual(run.call_args.args[0], ["docker", "restart", "homeassistant"])
         self.assertIn("Repair applied", reply)
         self.assertIn("Endpoint is back.", reply)
@@ -89,11 +91,39 @@ class SelfRepairTests(unittest.TestCase):
         with patch.object(self_repair.subprocess, "run",
                           return_value=subprocess.CompletedProcess([], 1, stdout="", stderr="no such container")), \
                 self.assertLogs("jarvis.brain.self_repair", level="WARNING"):
-            reply = self_repair.apply(pid, confirmed=True)
+            reply = self_repair.apply(pid, confirmed=True, approved_by="app")
         self.assertIn("Repair failed", reply)
         self.assertIn("no such container", reply)
         self.cleared.assert_not_called()
         self.assertEqual(self_repair._load()[-1]["status"], "failed")
+
+    def test_model_cannot_approve_a_command(self) -> None:
+        pid = self.stage(reachable=False)
+        with patch.object(self_repair.subprocess, "run") as run:
+            self.assertIn("needs Nick's own approval", self_repair.apply(pid, confirmed=True))
+        run.assert_not_called()
+        self.assertEqual(self.pending()[0]["id"], pid)
+
+    def test_changed_or_legacy_command_requires_fresh_approval(self) -> None:
+        for legacy in (False, True):
+            pid = self.stage(reachable=False)
+            if legacy:
+                items = self_repair._load()
+                items[-1]["action"].pop("command_digest")
+                self_repair._save(items)
+            with patch.dict(os.environ, {"SELF_REPAIR_COMMANDS": "restart_home_assistant=echo changed"}), \
+                    patch.object(self_repair.subprocess, "run") as run:
+                reply = self_repair.apply(pid, confirmed=True, approved_by="app")
+            self.assertIn("Diagnose and approve again", reply)
+            run.assert_not_called()
+
+    def test_chat_confirmation_is_bound_to_its_session(self) -> None:
+        with patch.object(self_repair, "_probe_host", return_value=(False, "down")):
+            self_repair.diagnose("control_device", session_id="command-review")
+        with patch.object(self_repair, "apply", return_value="approved") as apply:
+            self.assertIsNone(confirm_gate.conversation_action("yes", "other-review"))
+            self.assertEqual(confirm_gate.conversation_action("yes", "command-review"), "approved")
+        self.assertEqual(apply.call_args.kwargs, {"confirmed": True, "approved_by": "chat"})
 
     def test_set_setting_and_honest_rollback(self) -> None:
         proposal = self_repair._new_proposal("home_assistant", "control_device",
