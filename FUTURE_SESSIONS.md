@@ -129,32 +129,22 @@ Nick's running to-do list for the project. When one ships, move it to
 `JARVIS.md` "Recently Shipped" and delete it here. Newest asks at the bottom
 of each group.
 
-### Room camera + Barn Door polish (Nick, 2026-10-31, not started)
+### Room camera + Barn Door polish (built 2026-10-31 from work, untested on hardware)
 
-The camera and Barn Door both work; these are refinements. Camera design is
-in `brain/camera.py` and `ios/.../Views/RoomCamera.swift` /
-`RoomCameraView.swift`; Barn Door in `brain/protocols.py` and the toggle in
-`RoomCameraView.swift`.
+All three asks are in iOS 5.40 (type-checked, not run on a device). At home,
+install on the phone and iPad, then check:
 
-- [ ] **Slide-to-activate Barn Door.** Replace the plain toggle (in the phone
-  camera view, and consider it for the reactor triple-tap too) with a
-  slide-a-block-across gesture, so it can't fire by accident. Stand-down can
-  stay a normal tap, or slide back.
-- [ ] **Green orb replaces the blue reactor on the iPad, not an overlay.**
-  Today `CameraWatchOrb` floats over everything at the top of the iPad screen
-  (`RootView` overlay). Instead, while the camera is capturing, make the
-  iPad's actual reactor (`JarvisCoreMark` on the Room tab) render green —
-  i.e. teach `JarvisCoreMark` a "watching" state that draws the green
-  `CameraWatchOrb` shape in place of the blue orb — and drop the floating
-  overlay. Phone is unaffected.
-- [ ] **Barn Door must NOT kill the phone's video feed.** Engaging Barn Door
-  currently interrupts the feed. Likely cause: `RootView` has `.id(palette)`,
-  so the theme flip to `barnDoor` re-identifies the whole `TabView`, which
-  tears down and recreates the `@StateObject RoomCameraController` and its
-  capture session. Fix so a theme change doesn't restart the camera (e.g.
-  hoist the controller above the `.id(palette)` boundary, or stop keying the
-  whole tree on palette). Verify: open the phone view, toggle Barn Door, the
-  feed should keep running.
+- [ ] **Slide-to-activate Barn Door** (`SlideToEngage` in
+  `RoomCameraView.swift`): drag the red block fully across to engage; let go
+  early and it springs back. Stand-down is a plain tap. The reactor
+  triple-tap (`barnDoorTaps`) is unchanged; decide if it needs a slide too.
+- [ ] **Green orb replaces the iPad reactor**: `RootView` passes
+  `camera.watching` down as `\.cameraWatching`, and every `JarvisCoreMark`
+  draws `CameraWatchOrb` instead of the blue reactor. Floating overlay gone.
+- [ ] **Barn Door keeps the phone feed alive**: the camera cover moved from
+  `HubView` (inside `.id(palette)`) to `RootView`, opened via
+  `RoomCameraPresenter.shared`. Open the viewer, slide Barn Door, the feed
+  should keep running.
 
 ### Loose ends (Nick)
 

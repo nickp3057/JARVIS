@@ -35,7 +35,6 @@ struct HubView: View {
     /// Long-pressed light: its brightness/colour/rainbow sheet.
     @State private var lightSheet: LightSheetID?
     @State private var showingRemote = false
-    @State private var showingCamera = false
     private let focus: HubFocus
 
     /// Home is JARVIS himself: the reactor, a quick look, the next
@@ -121,7 +120,6 @@ struct HubView: View {
             }
             .sheet(isPresented: $showingSettings) { SettingsView() }
             .sheet(isPresented: $showingRemote) { TVRemoteView() }
-            .fullScreenCover(isPresented: $showingCamera) { RoomCameraView() }
             .sheet(item: $lightSheet) { LightSheet(model: model, entityID: $0.id) }
             .sheet(isPresented: $schwabLoggingIn) {
                 SchwabLoginView { Task { await model.refreshPortfolio() } }
@@ -287,7 +285,7 @@ struct HubView: View {
     /// The room camera: the iPad becomes a sentry view on the phone. Opening
     /// it is the only way the lens turns on; closing it turns the lens off.
     private var roomCameraButton: some View {
-        Button { showingCamera = true } label: {
+        Button { RoomCameraPresenter.shared.showing = true } label: {
             HStack(spacing: 12) {
                 Image(systemName: "video.fill").font(.title3).foregroundStyle(JarvisTheme.cyan)
                 Text("Room camera").font(.headline)

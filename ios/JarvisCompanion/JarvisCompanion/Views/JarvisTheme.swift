@@ -245,6 +245,7 @@ struct JarvisCoreMark: View {
     var animated = true
     var active = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.cameraWatching) private var cameraWatching
     @State private var visible = false
 
     private var moving: Bool {
@@ -253,7 +254,10 @@ struct JarvisCoreMark: View {
 
     var body: some View {
         Group {
-            if JarvisPalette.current == .barnDoor {
+            if cameraWatching {
+                // iPad lens on: the reactor itself turns into the green orb.
+                CameraWatchOrb(size: size, moving: moving && visible)
+            } else if JarvisPalette.current == .barnDoor {
                 // Barn Door: the same hostile reactor as the TV's red-alert screen.
                 RedAlertMark(size: size, moving: moving && visible)
             } else {

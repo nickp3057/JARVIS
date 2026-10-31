@@ -7,7 +7,8 @@ import UIKit
 /// lockout) it runs the front camera and uploads a downscaled JPEG a few
 /// times a second; otherwise the session is off and nothing is captured.
 /// Frames never touch disk. While capturing, `watching` is true and the app
-/// shows the green JARVIS orb (`CameraWatchOrb`) so the room can see it's on.
+/// draws its reactor as the green JARVIS orb (`CameraWatchOrb`) so the room
+/// can see it's on.
 /// iOS's own green dot is on too. Camera needs the foreground, which the
 /// wall-panel iPad always is.
 @MainActor
@@ -124,24 +125,36 @@ extension RoomCameraController: AVCaptureVideoDataOutputSampleBufferDelegate {
     }
 }
 
+/// Opens the phone's camera viewer from `RootView`, outside the
+/// palette-keyed tab tree, so the cover survives a theme change.
+@MainActor
+final class RoomCameraPresenter: ObservableObject {
+    static let shared = RoomCameraPresenter()
+    @Published var showing = false
+}
+
+private struct CameraWatchingKey: EnvironmentKey { static let defaultValue = false }
+
+extension EnvironmentValues {
+    /// True on the iPad while its lens is capturing: `JarvisCoreMark` then
+    /// draws `CameraWatchOrb` in place of the blue reactor.
+    var cameraWatching: Bool {
+        get { self[CameraWatchingKey.self] }
+        set { self[CameraWatchingKey.self] = newValue }
+    }
+}
+
 /// The green "Nick is watching" orb: the TV's red-alert reactor shape in
-/// green, less intimidating. Shown over the whole app on the iPad whenever
-/// the room camera is capturing, so anyone in the room knows.
+/// green, less intimidating. `JarvisCoreMark` draws it in place of the blue
+/// reactor on the iPad whenever the room camera is capturing.
 struct CameraWatchOrb: View {
     var size: CGFloat = 132
+    var moving = true
 
     var body: some View {
-        VStack(spacing: 10) {
-            RedAlertMark(size: size, moving: true,
-                         base: Color(red: 0.20, green: 0.85, blue: 0.45),
-                         hot: Color(red: 0.55, green: 1.0, blue: 0.70))
-            Text("JARVIS is watching")
-                .font(.headline)
-                .foregroundStyle(Color(red: 0.55, green: 1.0, blue: 0.70))
-        }
-        .padding(28)
-        .background(.black.opacity(0.75), in: .rect(cornerRadius: 28))
-        .shadow(color: .black.opacity(0.5), radius: 24)
-        .accessibilityLabel("JARVIS is watching the room on camera")
+        RedAlertMark(size: size, moving: moving,
+                     base: Color(red: 0.20, green: 0.85, blue: 0.45),
+                     hot: Color(red: 0.55, green: 1.0, blue: 0.70))
+            .accessibilityLabel("JARVIS is watching the room on camera")
     }
 }

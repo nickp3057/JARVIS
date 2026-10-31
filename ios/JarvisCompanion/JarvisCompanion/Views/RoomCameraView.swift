@@ -4,8 +4,8 @@ import SwiftUI
 /// ~1.5 s (so the iPad keeps the lens on) and pulls the newest frame about 8
 /// times a second. Closing it stops the heartbeat, and the lens goes off
 /// within a few seconds. A Kill button (and "Jarvis, kill the camera")
-/// locks the lens off for five minutes. A Barn Door toggle engages or stands
-/// down the protocol without leaving the view.
+/// locks the lens off for five minutes. Barn Door engages with a slide (so it
+/// can't fire by accident) and stands down with a tap, without leaving the view.
 struct RoomCameraView: View {
     @EnvironmentObject private var settings: AppSettings
     @Environment(\.dismiss) private var dismiss
@@ -66,14 +66,20 @@ struct RoomCameraView: View {
 
     private var controls: some View {
         VStack(spacing: 14) {
-            Toggle(isOn: $barnDoorOn) {
-                Label("Barn Door Protocol", systemImage: "exclamationmark.octagon.fill")
-                    .font(.headline).foregroundStyle(.white)
+            if barnDoorOn {
+                Button { barnDoorOn = false; Task { await setBarnDoor(false) } } label: {
+                    Label("Stand down Barn Door", systemImage: "checkmark.shield")
+                        .font(.headline)
+                        .frame(maxWidth: .infinity, minHeight: 52)
+                        .background(.ultraThinMaterial, in: .rect(cornerRadius: 16))
+                        .foregroundStyle(.white)
+                }
+            } else {
+                SlideToEngage(title: "Slide for Barn Door") {
+                    barnDoorOn = true
+                    Task { await setBarnDoor(true) }
+                }
             }
-            .tint(Color(red: 1.0, green: 0.18, blue: 0.16))
-            .padding(.horizontal, 18).padding(.vertical, 12)
-            .background(.ultraThinMaterial, in: .rect(cornerRadius: 16))
-            .onChange(of: barnDoorOn) { _, on in Task { await setBarnDoor(on) } }
 
             Button(role: .destructive) { Task { await kill() } } label: {
                 Label("Kill camera (5 min)", systemImage: "video.slash.fill")
@@ -116,5 +122,45 @@ struct RoomCameraView: View {
     private func setBarnDoor(_ on: Bool) async {
         _ = try? await client?.barnDoor(on ? "engage" : "stand_down")
         await ThemeSync.pull(settings)
+    }
+}
+
+/// Drag the block all the way across to fire; let go early and it springs
+/// back. VoiceOver gets a plain activate action.
+struct SlideToEngage: View {
+    let title: String
+    let action: () -> Void
+    @State private var offset: CGFloat = 0
+    private let knob: CGFloat = 52
+    private let red = Color(red: 1.0, green: 0.18, blue: 0.16)
+
+    var body: some View {
+        GeometryReader { geo in
+            let travel = max(1, geo.size.width - knob - 8)
+            ZStack(alignment: .leading) {
+                RoundedRectangle(cornerRadius: 16).fill(.ultraThinMaterial)
+                RoundedRectangle(cornerRadius: 16).fill(red.opacity(0.35 * offset / travel))
+                Text(title)
+                    .font(.headline).foregroundStyle(.white.opacity(1 - offset / travel))
+                    .frame(maxWidth: .infinity)
+                RoundedRectangle(cornerRadius: 12)
+                    .fill(red)
+                    .frame(width: knob, height: knob - 8)
+                    .overlay(Image(systemName: "exclamationmark.octagon.fill").foregroundStyle(.white))
+                    .offset(x: 4 + offset)
+                    .gesture(DragGesture()
+                        .onChanged { offset = min(max(0, $0.translation.width), travel) }
+                        .onEnded { _ in
+                            if offset >= travel * 0.95 { action() }
+                            withAnimation(.spring(duration: 0.3)) { offset = 0 }
+                        })
+            }
+        }
+        .frame(height: knob)
+        .sensoryFeedback(.impact(weight: .heavy), trigger: offset == 0)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(title)
+        .accessibilityAddTraits(.isButton)
+        .accessibilityAction { action() }
     }
 }

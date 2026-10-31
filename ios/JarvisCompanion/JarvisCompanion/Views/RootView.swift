@@ -19,6 +19,9 @@ struct RootView: View {
     @ObservedObject private var wakeRinging = WakeRinging.shared
     /// The iPad as the room camera: runs the lens while Nick's phone watches.
     @StateObject private var camera = RoomCameraController()
+    /// The phone's camera viewer is presented here, above `.id(palette)`, so a
+    /// theme flip (Barn Door engaging) doesn't tear down the live feed.
+    @ObservedObject private var cameraViewer = RoomCameraPresenter.shared
     /// iPad: slide back to Room after a few idle minutes on another tab.
     @AppStorage(RoomView.autoReturnKey) private var autoReturn = true
     /// Bumped by any touch, so the trip back to Room waits for a quiet spell.
@@ -108,13 +111,9 @@ struct RootView: View {
         .focusedSceneValue(\.rootTab, $selection)
         .onAppear(perform: sizeMacWindow)
         .fullScreenCover(isPresented: $wakeRinging.showing) { WakeRingingView().environmentObject(settings) }
-        .overlay(alignment: .top) {
-            // The visible "Nick is watching" signal while the iPad's lens is on.
-            if camera.watching {
-                CameraWatchOrb().padding(.top, 60).transition(.opacity)
-            }
-        }
-        .animation(.easeInOut(duration: 0.3), value: camera.watching)
+        // While the iPad's lens is on, its reactors draw the green orb.
+        .environment(\.cameraWatching, camera.watching)
+        .fullScreenCover(isPresented: $cameraViewer.showing) { RoomCameraView().environmentObject(settings) }
         .task { camera.activate(settings: settings) }
         .onChange(of: scenePhase) { _, phase in
             if phase == .active { camera.activate(settings: settings) } else { camera.deactivate() }
