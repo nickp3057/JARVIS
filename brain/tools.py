@@ -707,6 +707,12 @@ def _tool_tv_power(args: dict[str, Any]) -> str:
     return tv_remote.power(str(args.get("state", "on")).lower() != "off")[1]
 
 
+def _tool_kill_camera(_: dict[str, Any]) -> str:
+    from brain import camera
+    camera.kill()
+    return f"Room camera locked off for {round(camera.KILL_SECONDS / 60)} minutes, sir."
+
+
 def _tool_portfolio_summary(_: dict[str, Any]) -> str:
     from integrations import schwab
     return schwab.describe()
@@ -1910,6 +1916,15 @@ _CUSTOM_TOOLS: list[dict[str, Any]] = [
             "required": ["state"],
         },
     },
+    {
+        "name": "kill_camera",
+        "description": (
+            "Lock the room camera (the iPad lens Nick watches from his phone) off for five "
+            "minutes, no matter who is asking. Use for 'kill the camera', 'camera off', "
+            "'disable the camera'. There is no tool to turn it on: only Nick's phone does that."
+        ),
+        "input_schema": {"type": "object", "properties": {}},
+    },
     # --- Charles Schwab, read-only ---------------------------------------
     {
         "name": "portfolio_summary",
@@ -2393,6 +2408,7 @@ _DISPATCH: dict[str, Callable[[dict[str, Any]], str]] = {
     "skip_wake_up": _tool_skip_wake_up,
     "portfolio_summary": _tool_portfolio_summary,
     "tv_power": _tool_tv_power,
+    "kill_camera": _tool_kill_camera,
     "barn_door_protocol": _tool_barn_door_protocol,
     "cancel_wake_up": _tool_cancel_wake_up,
     "watch_price": _tool_watch_price,

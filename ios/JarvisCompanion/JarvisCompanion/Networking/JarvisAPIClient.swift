@@ -71,6 +71,7 @@ enum JarvisAPIError: LocalizedError {
 }
 
 struct ServerSession: Decodable {
+    let lastMessageID: Int?
     let sessionID: String
     let createdAt: String?
     let updatedAt: String?
@@ -79,6 +80,7 @@ struct ServerSession: Decodable {
 
     enum CodingKeys: String, CodingKey {
         case sessionID = "session_id"
+        case lastMessageID = "last_message_id"
         case createdAt = "created_at"
         case updatedAt = "updated_at"
         case title, preview
@@ -626,6 +628,60 @@ struct JarvisAPIClient {
     }
 
     // MARK: - TV remote
+
+    // MARK: - Room camera
+
+    /// The phone, while the live view is open: keep the lens on and read
+    /// whether it's actually viewing (false during a kill lockout).
+    @discardableResult
+    func cameraHeartbeat() async throws -> CameraStatus {
+        try await postEmpty(CameraStatus.self, path: "api/camera/view")
+    }
+
+    func cameraStatus() async throws -> CameraStatus {
+        try await getJSON(CameraStatus.self, path: "api/camera/status")
+    }
+
+    /// Lock the lens off for five minutes, from the phone's Kill button.
+    @discardableResult
+    func cameraKill() async throws -> CameraStatus {
+        try await postEmpty(CameraStatus.self, path: "api/camera/kill")
+    }
+
+    /// The iPad uploads one JPEG frame (raw body). Throws on a kill (409).
+    func putCameraFrame(_ jpeg: Data) async throws {
+        var r = request(path: "api/camera/frame", method: "POST")
+        r.setValue("image/jpeg", forHTTPHeaderField: "Content-Type")
+        r.httpBody = jpeg
+        let (data, response) = try await session.upload(for: r, from: jpeg)
+        _ = try validate(response, data: data)
+    }
+
+    /// The phone pulls the newest frame; nil when the lens isn't sending (404).
+    func cameraFrame() async throws -> Data? {
+        let r = request(path: "api/camera/frame")
+        let (data, response) = try await session.data(for: r)
+        guard let http = response as? HTTPURLResponse else { throw JarvisAPIError.malformedResponse(nil) }
+        if http.statusCode == 404 { return nil }
+        _ = try validate(response, data: data)
+        return data
+    }
+
+    private func postEmpty<T: Decodable>(_ type: T.Type, path: String) async throws -> T {
+        let r = request(path: path, method: "POST")
+        let data: Data
+        let response: URLResponse
+        do {
+            (data, response) = try await session.data(for: r)
+        } catch let error as URLError {
+            throw JarvisAPIError.transport(error)
+        }
+        _ = try validate(response, data: data)
+        guard let decoded = try? JSONDecoder().decode(type, from: data) else {
+            throw JarvisAPIError.malformedResponse(String(data: data, encoding: .utf8))
+        }
+        return decoded
+    }
 
     /// Whether the room TV is on (false when it's off or unreachable).
     func tvPowerState() async throws -> Bool {

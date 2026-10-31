@@ -286,6 +286,8 @@ RMS envelope from ElevenLabs audio drives the orb in real time using a monotonic
   restored with `select.select_option`, and the pick showing at engage wins.
 
 ### Nick's room TV *(new)*
+- `kill_camera()` — lock the room camera (the iPad lens Nick watches from
+  his phone) off for five minutes, from anywhere; no tool turns it on.
 - `tv_power(state)` — on/off through Home Assistant's Android TV Remote
   entity (`TV_REMOTE_ENTITY`, default `remote.nick_s_room_tv`), which can
   wake the TV from standby (`integrations/tv_remote.py`).
@@ -785,6 +787,20 @@ CALENDAR_ALERT_LEAD_MIN=10  # warn this many minutes before a meeting
 ---
 
 ## Recently Shipped
+
+- **Room camera (2026-10-31, iOS 5.38 / build 181)** — the iPad is the lens
+  (front camera), Nick's phone the only viewer. A "Room camera" button on
+  the phone's Hub tab opens a live sentry view; while it's open the phone
+  heartbeats `POST /api/camera/view` and pulls `GET /api/camera/frame`
+  (~8 fps), and the iPad, polling `GET /api/camera/status`, runs the camera
+  and uploads downscaled JPEGs. Close the view and the lens goes off within
+  ~6 s. Deliberately visible: the iPad shows a green JARVIS orb
+  (`CameraWatchOrb`, the red-alert shape in green) whenever it's capturing,
+  and iOS's green dot is on. The phone view has a Barn Door toggle and a
+  Kill button; "Jarvis, kill the camera" (quick command) and the
+  `kill_camera` tool lock the lens off for 5 minutes no matter who or where
+  (`POST /api/camera/kill`). Frames live in memory, never on disk. No audio.
+  (`brain/camera.py`, `Views/RoomCamera*.swift`.)
 
 - **Fewer false wake-ups (2026-10-31)** — the room voice fired the instant
   one audio frame crossed the wake score, so TV chatter or a passing phrase

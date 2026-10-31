@@ -565,6 +565,60 @@ class TvRemoteRequest(BaseModel):
     key: str = Field(min_length=1, max_length=20)
 
 
+# --- Room camera (brain/camera.py) --------------------------------------------
+# The iPad is the lens, Nick's phone the only viewer. The lens runs only while
+# the phone heartbeats /view and there's no kill lockout. Frames live in
+# memory, never on disk. "Jarvis, kill the camera" and /kill lock it off.
+
+
+@app.post("/api/camera/view")
+def camera_view(_: None = Depends(authorize)) -> dict[str, object]:
+    """The phone, while the live view is open, every couple of seconds: keep
+    the lens on. Refused silently during a kill (``wanted`` stays false)."""
+    from brain import camera
+    camera.view_heartbeat()
+    return camera.status()
+
+
+@app.get("/api/camera/status")
+def camera_status(_: None = Depends(authorize)) -> dict[str, object]:
+    """The iPad polls this to decide whether to capture (and show the green
+    orb); the phone reads the kill countdown from it."""
+    from brain import camera
+    return camera.status()
+
+
+@app.post("/api/camera/kill")
+def camera_kill(_: None = Depends(authorize)) -> dict[str, object]:
+    """Lock the lens off for five minutes, from anywhere."""
+    from brain import camera
+    camera.kill()
+    return camera.status()
+
+
+@app.post("/api/camera/frame")
+async def camera_put_frame(request: Request, _: None = Depends(authorize)) -> dict[str, object]:
+    """The iPad's latest JPEG (raw body). Refused (409) during a kill."""
+    from brain import camera
+    data = await request.body()
+    if not data:
+        raise HTTPException(status_code=400, detail="empty frame")
+    if not camera.put_frame(data):
+        raise HTTPException(status_code=409, detail="camera is off")
+    return {"ok": True}
+
+
+@app.get("/api/camera/frame")
+def camera_get_frame(_: None = Depends(authorize)) -> Response:
+    """The phone pulls the newest frame; 404 when the lens isn't sending."""
+    from brain import camera
+    data = camera.get_frame()
+    if data is None:
+        raise HTTPException(status_code=404, detail="no frame")
+    return Response(content=data, media_type="image/jpeg",
+                    headers={"Cache-Control": "no-store"})
+
+
 @app.get("/api/tv/power")
 def tv_power_state(_: None = Depends(authorize)) -> dict[str, object]:
     """Whether the room TV is on (the iPad's power square). Reads only the

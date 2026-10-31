@@ -385,6 +385,26 @@ struct FanDetails: Decodable, Equatable {
     }
 }
 
+/// The room camera's state (Core's `brain/camera.py`).
+struct CameraStatus: Decodable, Equatable {
+    /// The lens should be capturing (a live viewer, no kill lockout).
+    let wanted: Bool
+    /// Nick's phone is watching right now.
+    let viewing: Bool
+    /// Locked off (a kill is in effect).
+    let killed: Bool
+    /// Seconds of lockout left.
+    let killSecondsLeft: Int
+    /// A fresh frame is available to pull.
+    let hasFrame: Bool
+
+    enum CodingKeys: String, CodingKey {
+        case wanted, viewing, killed
+        case killSecondsLeft = "kill_seconds_left"
+        case hasFrame = "has_frame"
+    }
+}
+
 /// The room speaker's level (Core's `speech/room_volume.py`, 0-10).
 struct RoomVolume: Decodable, Equatable {
     let level: Int?

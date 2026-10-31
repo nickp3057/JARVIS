@@ -319,6 +319,7 @@ runtime knows, the more JARVIS feels like one mind instead of several scripts.
   before Schwab's 7-day login lapses.
 - Barn Door Protocol (`brain/protocols.py`): engage records whether the TV was on (`memory/barn_door_tv.json`); stand-down turns it back off only if Barn Door turned it on.
 - Home monitor flap guard (TVs only: `media_player.*`, `remote.*`; lights, switches and fans are always recorded): an entity that changes state more than 4 times in 10 minutes stops being recorded for 30 minutes (`_should_record_home_change`), so a TV dropping on and off Wi-Fi can't flood the inbox.
+- Room camera (`brain/camera.py`, in-memory only): the iPad is the lens, Nick's phone the only viewer. The lens captures only while the phone heartbeats `/api/camera/view` and there's no kill lockout; the iPad shows a green orb while it does. `kill_camera` / "kill the camera" lock it off for `KILL_SECONDS` (300). Frames are never written to disk.
 - Wake-up monitor: always on; idle unless the wake-up schedule or a one-off
   is set (`brain/wake_alarm.py`). Publishes `wake_up` (`push=False`) for the TV,
   powers the TV on through HA, and starts the room-speaker backup ring if the

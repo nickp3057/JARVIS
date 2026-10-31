@@ -9,9 +9,9 @@ import SwiftUI
 struct RedAlertMark: View {
     var size: CGFloat
     var moving = true
-
-    private static let red = Color(red: 1.0, green: 0.18, blue: 0.16)   // TV theme.reactor
-    private static let hot = Color(red: 1.0, green: 72 / 255, blue: 56 / 255)
+    /// The two reds the TV uses; the camera's green-watch orb passes greens.
+    var base = Color(red: 1.0, green: 0.18, blue: 0.16)   // TV theme.reactor
+    var hot = Color(red: 1.0, green: 72 / 255, blue: 56 / 255)
 
     var body: some View {
         TimelineView(.animation(minimumInterval: 1.0 / 30, paused: !moving)) { context in
@@ -26,7 +26,7 @@ struct RedAlertMark: View {
     private func draw(_ ctx: inout GraphicsContext, _ canvas: CGSize, t: Double) {
         let c = CGPoint(x: canvas.width / 2, y: canvas.height / 2)
         let r = min(canvas.width, canvas.height) * 0.42
-        let red = Self.red, hot = Self.hot
+        let red = base
 
         // A steady red glow behind it.
         ctx.fill(Path(ellipseIn: CGRect(x: 0, y: 0, width: canvas.width, height: canvas.height)),

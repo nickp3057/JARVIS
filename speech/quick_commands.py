@@ -25,6 +25,8 @@ _ON_OFF = (re.compile(rf"^{_VERB}(?P<action>on|off)\s+(?P<target>.+)$"),
 _LEVEL = re.compile(r"^(?:set|dim|turn|put|make)?\s*(.+?)\s+(?:to|at)\s+(\d{1,3})\s*(?:%|percent)?$")
 # Nick's room TV (its own remote protocol, integrations/tv_remote.py), not an allowlisted entity.
 _TV = re.compile(r"^(?:tv|telly|television)$")
+# Any of these means "lock the room camera off now" (said to the room voice).
+_KILL_CAMERA = re.compile(r"\b(?:kill|stop|disable|shut (?:off|down)|turn off)\b.*\bcamera\b|\bcamera\b.*\boff\b")
 _SCENE_VERBS = re.compile(r"^(?:run|start|activate|set|turn on|do|it's|its|time for)\s+")
 
 
@@ -95,6 +97,12 @@ def run(text: str) -> QuickResult | None:
             return QuickResult(not result.get("error"), f"{entity['entity_id']} {level.group(2)}%",
                                result.get("error", ""))
         return None
+
+    # "kill the camera" / "camera off" / "kill camera": a hard lockout, always.
+    if _KILL_CAMERA.search(text):
+        from brain import camera
+        camera.kill()
+        return QuickResult(True, "camera killed")
 
     on_off = _ON_OFF[0].match(text) or _ON_OFF[1].match(text)
     if on_off and _TV.match(on_off["target"].strip()):
