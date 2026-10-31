@@ -317,6 +317,7 @@ runtime knows, the more JARVIS feels like one mind instead of several scripts.
   are set (`integrations/schwab.py`). Holdings every `SCHWAB_POLL_SECONDS`
   (30) in market hours, prices streamed live; raises `schwab_login` a day
   before Schwab's 7-day login lapses.
+- Barn Door Protocol (`brain/protocols.py`): engage records whether the TV was on (`memory/barn_door_tv.json`); stand-down turns it back off only if Barn Door turned it on.
 - Wake-up monitor: always on; idle unless the wake-up schedule or a one-off
   is set (`brain/wake_alarm.py`). Publishes `wake_up` (`push=False`) for the TV,
   powers the TV on through HA, and starts the room-speaker backup ring if the

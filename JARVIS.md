@@ -785,6 +785,18 @@ CALENDAR_ALERT_LEAD_MIN=10  # warn this many minutes before a meeting
 
 ## Recently Shipped
 
+- **iPad big level panel for everything; Barn Door orb and TV (2026-10-31,
+  iOS 5.32 / build 175)** — on the Room tab a plain up/down drag on a light
+  or the fan (landscape; portrait still holds first, the panel scrolls)
+  opens the big level panel and sets brightness/speed; hold and let go
+  opens the same panel to use (`LevelPanel`: drag its bar, power, Rainbow,
+  whites, colours, any colour; the fan's Fresh/Nature), replacing the
+  light sheet and `FanSheet` there (the phone keeps `LightSheet`). During
+  Barn Door the orb everywhere in the app is `RedAlertMark`, a SwiftUI port
+  of the TV's `RedAlertView`. Barn Door now turns the TV back off at
+  stand-down if it was off when engaged (`brain/protocols.py`,
+  `memory/barn_door_tv.json`); a TV that was on stays on.
+
 - **iPad Room: big level bar, no stray tab swipes (2026-10-31, iOS 5.31 /
   build 174)** — holding a light or fan tile now opens a tall level bar over
   the panel (`LevelOverlay`, 4 pt per percent) while the same finger drags.

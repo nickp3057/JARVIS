@@ -252,8 +252,15 @@ struct JarvisCoreMark: View {
     }
 
     var body: some View {
-        TimelineView(.animation(minimumInterval: 1.0 / 30, paused: !(moving && visible))) { context in
-            mark(seconds: moving ? context.date.timeIntervalSinceReferenceDate : 0)
+        Group {
+            if JarvisPalette.current == .barnDoor {
+                // Barn Door: the same hostile reactor as the TV's red-alert screen.
+                RedAlertMark(size: size, moving: moving && visible)
+            } else {
+                TimelineView(.animation(minimumInterval: 1.0 / 30, paused: !(moving && visible))) { context in
+                    mark(seconds: moving ? context.date.timeIntervalSinceReferenceDate : 0)
+                }
+            }
         }
         .frame(width: size, height: size)
         .onAppear { visible = true }

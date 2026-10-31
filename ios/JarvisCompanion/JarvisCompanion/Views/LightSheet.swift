@@ -12,8 +12,8 @@ struct LightSheet: View {
     @State private var custom = Color.white
     @State private var loaded = false
 
-    private static let whites: [(String, Int)] = [("Candle", 2200), ("Warm", 2700), ("Neutral", 4000), ("Daylight", 6500)]
-    private static let colours: [(String, [Int])] = [
+    static let whites: [(String, Int)] = [("Candle", 2200), ("Warm", 2700), ("Neutral", 4000), ("Daylight", 6500)]
+    static let colours: [(String, [Int])] = [
         ("Red", [255, 0, 0]), ("Orange", [255, 110, 0]), ("Yellow", [255, 210, 0]),
         ("Green", [0, 220, 70]), ("Cyan", [0, 220, 255]), ("Blue", [20, 60, 255]),
         ("Purple", [140, 40, 255]), ("Pink", [255, 60, 180]),
@@ -142,7 +142,7 @@ struct LightSheet: View {
         .accessibilityLabel(name)
     }
 
-    private static func kelvinColor(_ kelvin: Int) -> Color {
+    static func kelvinColor(_ kelvin: Int) -> Color {
         switch kelvin {
         case ..<2500: return Color(red: 1, green: 0.62, blue: 0.3)
         case ..<3500: return Color(red: 1, green: 0.78, blue: 0.5)
@@ -151,7 +151,7 @@ struct LightSheet: View {
         }
     }
 
-    private static func rgb(_ colour: Color) -> [Int] {
+    static func rgb(_ colour: Color) -> [Int] {
         let ui = UIColor(colour)
         var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
         ui.getRed(&r, green: &g, blue: &b, alpha: &a)

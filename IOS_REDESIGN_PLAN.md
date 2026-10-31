@@ -34,6 +34,8 @@ Check these on the phone first. Some of the "weird" may already be gone.
   volume slider (room speaker) in the clock panel. The phone's Home tab
   still uses plain long-press for the light sheet.
   5.31: the hold expands into a big level bar; full screen locks the iPad to Room.
+  5.32: drag without holding (landscape); hold-and-release opens the same big
+  panel to use (`LevelPanel`, colours too); Barn Door orb = the TV's red-alert reactor.
 - Next: an iOS Home Screen / Control Center widget for scenes (needs a
   widget extension target and an App Group for the server address/token).
 

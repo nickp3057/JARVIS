@@ -8,11 +8,11 @@ import UIKit
 /// sits above the clock (top left). Right: the light/switch tiles with a
 /// Peace square in the top corner, and Nick's favourite scenes (Game Time,
 /// Movie, Study) in one row; the rest are voice-only. Portrait (iPad mini)
-/// stacks and scrolls. Hold a light or the fan and drag up or down without
-/// lifting to set brightness or speed (`LevelDragger`); hold and let go for
-/// the light's brightness and colour (`LightSheet`) or the fan's speed and
-/// modes (`FanSheet`). The hold doesn't also toggle it, and while held a big
-/// level bar (`LevelOverlay`) covers the panel for finer control. The clock panel has
+/// stacks and scrolls. Drag a light or the fan up or down (in portrait, hold
+/// first, since the panel scrolls) and the big level panel (`LevelPanel`)
+/// opens while brightness or speed follows the finger (`LevelDragger`); hold
+/// and let go and the same panel stays open to use, with colours, Rainbow
+/// and the fan's modes. Neither toggles the tile. The clock panel has
 /// JARVIS's own volume (the room speaker, `RoomVolumeControl`). Core pushes every Home
 /// Assistant change (`/api/home/stream`), so a switch flipped on the phone or
 /// the wall shows here within about half a second.
@@ -57,6 +57,13 @@ struct RoomView: View {
     @StateObject private var dragger = LevelDragger()
     /// The tile a hold is in progress on; resets when the finger lifts or the hold is cancelled.
     @GestureState private var holding: String?
+    /// This touch dragged a level (so lifting after a hold doesn't leave the panel open).
+    @State private var touchDragged = false
+    @State private var holdSeen = false
+    /// The first movement of this touch was sideways: not a level drag.
+    @State private var touchSideways = false
+    /// Landscape: no scrolling, so a plain drag on a tile sets its level.
+    @State private var wideLayout = true
     @State private var showingSettings = false
     @AppStorage(RoomView.favoritesKey) private var favoriteScenes = RoomView.defaultFavorites
     /// "Back to the panel" during a movie; cleared when the scene changes.
@@ -96,6 +103,7 @@ struct RoomView: View {
                 }
             }
         }
+        .onGeometryChange(for: Bool.self) { $0.size.width > $0.size.height } action: { wideLayout = $0 }
         .background { JarvisBackdrop().ignoresSafeArea() }
         .toolbar(fullScreen && !RootView.isMac ? .hidden : .automatic, for: .tabBar)
         .statusBarHidden(fullScreen && !RootView.isMac)
@@ -109,26 +117,23 @@ struct RoomView: View {
             NavigationStack { WakeScheduleView() }
         }
         .sheet(item: $lightSheet) { item in
-            if item.id.hasPrefix("fan.") {
-                FanSheet(model: model, entityID: item.id)
-            } else {
-                LightSheet(model: model, entityID: item.id)
-            }
+            LightSheet(model: model, entityID: item.id)
         }
         .onChange(of: holding) { was, now in
-            // The finger lifted: a drag sends its level; a plain hold opens the sheet.
-            guard let was, now == nil,
-                  let entity = model.entities.value?.first(where: { $0.entityID == was }) else { return }
-            if !dragger.end(entity, model: model) { lightSheet = LightSheetID(id: was) }
+            // The finger lifted after a hold: no drag means the panel stays open to use.
+            guard let was, now == nil else { return }
+            if holdSeen, !touchDragged { dragger.openPanel(was) }
+            holdSeen = false
         }
         .overlay {
-            if let id = dragger.activeID, let level = dragger.live[id],
+            if let id = dragger.panelID ?? dragger.activeID,
                let entity = model.entities.value?.first(where: { $0.entityID == id }) {
-                LevelOverlay(name: entity.friendlyName, symbol: Self.symbol(for: entity), level: level)
-                    .transition(.opacity)
+                LevelPanel(model: model, dragger: dragger, entity: entity, symbol: Self.symbol(for: entity),
+                           interactive: dragger.panelID == id)
+                    .transition(.opacity.combined(with: .scale(scale: 0.96)))
             }
         }
-        .animation(.easeOut(duration: 0.15), value: dragger.activeID)
+        .animation(.easeOut(duration: 0.18), value: dragger.panelID ?? dragger.activeID)
         .fullScreenCover(isPresented: $asleep) {
             // Black; a tap is the only thing on it.
             Color.black.ignoresSafeArea()
@@ -480,7 +485,8 @@ struct RoomView: View {
         }
         .buttonStyle(CockpitButtonStyle())
         .disabled(!entity.isToggleable || pending != nil)
-        .simultaneousGesture(holdAndDrag(entity, on: on))
+        .simultaneousGesture(levelDrag(entity, on: on))
+        .simultaneousGesture(holdToOpen(entity))
         .sensoryFeedback(.impact(weight: .light), trigger: on)
         .sensoryFeedback(.selection, trigger: live.map { $0 / 10 })
         .accessibilityLabel(entity.friendlyName)
@@ -494,22 +500,45 @@ struct RoomView: View {
         return "On"
     }
 
-    /// Hold (0.35 s), then drag without lifting: the level follows the finger.
-    /// Lifting is handled in `onChange(of: holding)`, which also sees a hold
-    /// that never moved (that one opens the sheet).
-    private func holdAndDrag(_ entity: HomeEntity, on: Bool) -> some Gesture {
+    /// Up or down on a light or fan tile: the level follows the finger and
+    /// the big panel shows it. Landscape takes it straight away; portrait
+    /// (the panel scrolls) only after a hold. Sideways is left to the page.
+    private func levelDrag(_ entity: HomeEntity, on: Bool) -> some Gesture {
+        DragGesture(minimumDistance: 10, coordinateSpace: .global)
+            .onChanged { drag in
+                guard LevelDragger.adjustable(entity), !touchSideways else { return }
+                let id = entity.entityID
+                if dragger.activeID != id {
+                    let dx = drag.translation.width, dy = drag.translation.height
+                    guard abs(dy) > abs(dx) else { touchSideways = true; return }
+                    guard wideLayout || holding == id else { return }
+                    holds.hold(id)  // the release mustn't toggle it
+                    touchDragged = true
+                    dragger.begin(entity, on: on, baseline: dy)
+                }
+                dragger.update(entity, translation: drag.translation.height, model: model)
+            }
+            .onEnded { _ in
+                touchSideways = false
+                dragger.end(entity, model: model)
+            }
+    }
+
+    /// Hold (0.35 s): lifting without a drag leaves the big panel open
+    /// (`onChange(of: holding)`).
+    private func holdToOpen(_ entity: HomeEntity) -> some Gesture {
         LongPressGesture(minimumDuration: 0.35)
             .sequenced(before: DragGesture(minimumDistance: 0, coordinateSpace: .global))
             .updating($holding) { value, state, _ in
                 if case .second(true, _) = value, LevelDragger.adjustable(entity) { state = entity.entityID }
             }
             .onChanged { value in
-                guard case .second(true, let drag) = value, LevelDragger.adjustable(entity) else { return }
-                if dragger.activeID != entity.entityID {
-                    holds.hold(entity.entityID)  // the release mustn't toggle it
-                    dragger.begin(entity, on: on)
+                guard case .second(true, _) = value, LevelDragger.adjustable(entity) else { return }
+                if !holdSeen {  // a new hold: nothing dragged yet
+                    holdSeen = true
+                    touchDragged = false
                 }
-                if let drag { dragger.update(entity, translation: drag.translation.height, model: model) }
+                holds.hold(entity.entityID)  // the release mustn't toggle it
             }
     }
 

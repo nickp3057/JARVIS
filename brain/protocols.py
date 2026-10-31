@@ -6,8 +6,9 @@ colour light in ``BARN_DOOR_LIGHTS`` goes full red, everything in
 goes dark, the TV turns on (``BARN_DOOR_TV``, on by default), the shared
 theme switches to the red ``barnDoor`` palette (phone and TV follow;
 brain/theme.py remembers the old one) and the TV hands its whole screen to
-the red-alert view. Stand down: the snapshot and the old theme come back
-(the TV stays on).
+the red-alert view. Stand down: the snapshot and the old theme come back,
+and the TV goes back off if Barn Door is what turned it on (it was off at
+engage, ``memory/barn_door_tv.json``); a TV that was already on stays on.
 
 Speed: the theme flips and the TV wake goes out first (the TV hears the
 theme over ``/api/home/stream`` at once), then the lights change in
@@ -45,6 +46,7 @@ _SCENE = "barn_door_before"
 _COLOUR = "light.nick_strip_lights,light.strip_lights,light.desk_lights,light.desk_lights_2"
 _OFF = "light.bedroom_lights,light.nicks_fan,switch.avengers_tower_socket_1"  # not red: dark
 _EFFECTS_FILE = Path(__file__).resolve().parents[1] / "memory" / "barn_door_effects.json"
+_TV_FILE = Path(__file__).resolve().parents[1] / "memory" / "barn_door_tv.json"
 
 
 def _ids(key: str, default: str) -> list[str]:
@@ -60,9 +62,8 @@ def engage() -> str:
     # No alert: the red room and the TV taking over say it (Nick's call).
     theme.choose("barnDoor", remember=True)
     if os.getenv("BARN_DOOR_TV", "1").strip().lower() not in ("0", "off", "false", "no"):
-        from integrations import tv_remote
         # The red-alert screen needs the TV awake; it takes seconds, so not inline.
-        threading.Thread(target=tv_remote.power, args=(True,), daemon=True, name="barn-door-tv").start()
+        threading.Thread(target=_tv_on, args=(first,), daemon=True, name="barn-door-tv").start()
     if first:
         _save_effects(colour)
 
@@ -80,6 +81,40 @@ def engage() -> str:
             job.result()
     note = f" {len(failed)} light(s) didn't answer." if failed else ""
     return f"Barn Door Protocol engaged, sir. Everything's red.{note}"
+
+
+def _tv_is_on() -> bool:
+    from integrations import tv_remote
+    ok, state = home_assistant._request("GET", f"/api/states/{tv_remote.entity()}")
+    return bool(ok and isinstance(state, dict) and state.get("state") == "on")
+
+
+def _tv_on(first: bool) -> None:
+    """Wake the TV, remembering (on the first engage) whether it was off, so
+    stand-down can put it back."""
+    from integrations import tv_remote
+    if first:
+        try:
+            was_on = _tv_is_on()
+        except Exception:  # noqa: BLE001 - unknown: leave it on afterwards
+            was_on = True
+        _TV_FILE.parent.mkdir(parents=True, exist_ok=True)
+        _TV_FILE.write_text(json.dumps({"was_on": was_on}))
+    tv_remote.power(True)
+
+
+def _tv_back() -> bool:
+    """Stand-down: TV off again if it was off before Barn Door. True if it was turned off."""
+    try:
+        was_on = json.loads(_TV_FILE.read_text()).get("was_on", True)
+    except (OSError, ValueError):
+        return False
+    _TV_FILE.unlink(missing_ok=True)
+    if was_on:
+        return False
+    from integrations import tv_remote
+    tv_remote.power(False)
+    return True
 
 
 def _save_effects(entities: list[str]) -> None:
@@ -120,6 +155,7 @@ def _effects_to_restore() -> dict[str, str]:
 
 def stand_down() -> str:
     restored = theme.restore()  # first, so the TV lets go at once
+    threading.Thread(target=_tv_back, daemon=True, name="barn-door-tv-back").start()
     home_assistant.call_service("scene", "turn_on", f"scene.{_SCENE}")
     for entity, effect in _effects_to_restore().items():
         if entity.startswith("select."):  # a Govee DIY scene dropdown
