@@ -20,14 +20,14 @@ from speech.audio import MicStream
 
 log = get_logger(__name__)
 
-WAKE_THRESHOLD = float(os.getenv("WAKE_THRESHOLD", "0.5"))  # at import; wake_threshold() is live
+WAKE_THRESHOLD = float(os.getenv("WAKE_THRESHOLD", "0.6"))  # at import; wake_threshold() is live
 
 
 def wake_threshold() -> float:
     """WAKE_THRESHOLD read now (lower = easier to wake), so a change by voice
     or chat applies to the very next "Hey JARVIS"."""
     try:
-        return float(os.getenv("WAKE_THRESHOLD", "0.5"))
+        return float(os.getenv("WAKE_THRESHOLD", "0.6"))
     except ValueError:
         return WAKE_THRESHOLD
 WAKE_MODEL_NAME = os.getenv("WAKE_MODEL", "hey_jarvis")
@@ -83,7 +83,8 @@ class WakeDetector:
                 log.exception("openWakeWord predict() raised; skipping frame")
                 continue
 
+            threshold = wake_threshold()
             for name, score in scores.items():
-                if score >= WAKE_THRESHOLD:
+                if score >= threshold:
                     log.info("Wake word fired: %s (score=%.2f)", name, score)
                     return name

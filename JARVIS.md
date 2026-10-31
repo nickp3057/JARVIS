@@ -614,7 +614,8 @@ PRICE_WATCH_DROP_PERCENT=5       # alert after this percentage decrease
 PRICE_WATCH_TIMEOUT_S=15
 
 # Voice tuning
-WAKE_THRESHOLD=0.5
+WAKE_THRESHOLD=0.6         # wake score 0-1 (higher = harder to wake; was 0.5, raised to cut false triggers)
+WAKE_CONSECUTIVE=2         # frames in a row over the threshold before it wakes (debounce against stray noise)
 PREROLL_SECONDS=4.0
 FOLLOWUP_TIMEOUT_S=10.0
 FOLLOWUP_TASK_S=2.5
@@ -784,6 +785,13 @@ CALENDAR_ALERT_LEAD_MIN=10  # warn this many minutes before a meeting
 ---
 
 ## Recently Shipped
+
+- **Fewer false wake-ups (2026-10-31)** — the room voice fired the instant
+  one audio frame crossed the wake score, so TV chatter or a passing phrase
+  could wake JARVIS with nobody saying "Jarvis". It now needs the score over
+  the threshold on `WAKE_CONSECUTIVE` frames in a row (default 2) and logs
+  the firing score; the default `WAKE_THRESHOLD` is raised 0.5 -> 0.6. Both
+  are live-tunable in `.env`. (`speech/room_voice.py`, `speech/wake.py`.)
 
 - **TV power: iPad square and instant voice (2026-10-31, iOS 5.36 / build
   179)** — a square power button beside "TV remote" on the iPad's Room tab

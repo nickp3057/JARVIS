@@ -112,6 +112,7 @@ class RoomVoice:
         self._next_duties = 0.0
         self._spoke = False
         self._noise = 0.0  # the room's background level (RMS), learned between commands
+        self._wake_hits = 0  # consecutive frames over the threshold (debounce)
 
     # --- lifecycle -----------------------------------------------------------
 
@@ -172,15 +173,34 @@ class RoomVoice:
             barged, self._barged = self._barged, False
 
     def _heard_wake(self, frame: np.ndarray) -> bool:
+        """True only after the wake word scores over the threshold on
+        ``WAKE_CONSECUTIVE`` frames in a row (default 2). One stray frame of
+        noise or TV chatter crossing the line no longer wakes him; a real
+        "Hey JARVIS" clears several frames easily. Resetting the detector
+        (after a fire, barge-in or dismissal) also resets the streak."""
         from speech.wake import wake_threshold
         try:
             scores = self.detector._model.predict(frame)  # noqa: SLF001
         except Exception:  # noqa: BLE001
             log.exception("openWakeWord predict() failed; skipping frame")
             return False
-        return any(score >= wake_threshold() for score in scores.values())
+        top = max(scores.values(), default=0.0)
+        if top < wake_threshold():
+            self._wake_hits = 0
+            return False
+        self._wake_hits += 1
+        try:
+            needed = max(1, int(os.getenv("WAKE_CONSECUTIVE", "2")))
+        except ValueError:
+            needed = 2
+        if self._wake_hits < needed:
+            return False
+        log.info("Wake word fired (score=%.2f, %d frames)", top, self._wake_hits)
+        self._wake_hits = 0
+        return True
 
     def _wait_for_wake(self, stream: MicStream) -> bool:
+        self._wake_hits = 0
         self.detector.reset()
         while not self.stop.is_set():
             self._duties(stream)
