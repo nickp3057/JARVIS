@@ -158,6 +158,8 @@ class JarvisRuntime:
         self._deadman_started = False
         self._price_monitor_started = False
         self._wake_monitor_started = False
+        self._home_flaps: dict[str, list[float]] = {}
+        self._home_flap_muted: dict[str, float] = {}
         self._schwab_monitor_started = False
         self._price_monitor_failed = False
         self._home_snapshot = HomeSnapshot(
@@ -998,6 +1000,20 @@ class JarvisRuntime:
         cooldown_s = float(os.getenv("HOME_EVENT_COOLDOWN_S", "5.0"))
         key = f"{entity_id}:{old_state}->{state}"
         now = time.time()
+        # A flapping device (the TV dropping on and off Wi-Fi in standby,
+        # 2026-10-31: 276 events in 90 min) would push every real event out
+        # of the inbox: more than 4 changes in 10 minutes mutes it for 30.
+        flaps = self.__dict__.setdefault("_home_flaps", {})
+        muted = self.__dict__.setdefault("_home_flap_muted", {})
+        if now < muted.get(entity_id, 0.0):
+            return False
+        recent = [t for t in flaps.get(entity_id, []) if now - t < 600] + [now]
+        flaps[entity_id] = recent
+        if len(recent) > 4:
+            muted[entity_id] = now + 1800
+            flaps[entity_id] = []
+            log.info("Home events from %s muted for 30 min (flapping)", entity_id)
+            return False
         last_seen = self._home_event_last_seen.get(key, 0)
         if now - last_seen < cooldown_s:
             return False

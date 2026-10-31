@@ -284,11 +284,8 @@ def _answer() -> None:
 def tv_is_on() -> bool:
     """The room TV's remote entity reads "on" in Home Assistant."""
     from integrations import home_assistant, tv_remote
-    ok, states = home_assistant.get_states()
-    if not ok or not isinstance(states, list):
-        return False
-    entity = tv_remote.entity()
-    return any(s.get("entity_id") == entity and s.get("state") == "on" for s in states)
+    ok, state = home_assistant._request("GET", f"/api/states/{tv_remote.entity()}")  # just the one
+    return bool(ok and isinstance(state, dict) and state.get("state") == "on")
 
 
 def wake_tv_with_backup(stop: threading.Event) -> str:

@@ -66,10 +66,28 @@ class RuntimeMonitorTests(unittest.TestCase):
     def test_home_change_filter_ignores_noise_and_deduplicates(self) -> None:
         runtime = object.__new__(JarvisRuntime)
         runtime._home_event_last_seen = {}
+        runtime._home_flaps, runtime._home_flap_muted = {}, {}
         self.assertFalse(runtime._should_record_home_change("light.office", "unknown", "on"))
         with patch.dict(os.environ, {"HOME_EVENT_COOLDOWN_S": "60"}, clear=False):
             self.assertTrue(runtime._should_record_home_change("light.office", "off", "on"))
             self.assertFalse(runtime._should_record_home_change("light.office", "off", "on"))
+
+    def test_flapping_entity_is_muted_for_half_an_hour(self) -> None:
+        runtime = object.__new__(JarvisRuntime)
+        runtime._home_event_last_seen = {}
+        runtime._home_flaps, runtime._home_flap_muted = {}, {}
+        clock = [1000.0]
+        with patch("brain.runtime.time.time", side_effect=lambda: clock[0]), \
+                patch.dict(os.environ, {"HOME_EVENT_COOLDOWN_S": "0"}, clear=False):
+            recorded = []
+            for i in range(8):  # on/off once a minute, like the TV in standby
+                clock[0] += 60
+                old, new = ("off", "on") if i % 2 == 0 else ("on", "off")
+                recorded.append(runtime._should_record_home_change("media_player.tv", old, new))
+            self.assertEqual(recorded, [True, True, True, True, False, False, False, False])
+            self.assertTrue(runtime._should_record_home_change("light.desk", "off", "on"))  # others unaffected
+            clock[0] += 1801
+            self.assertTrue(runtime._should_record_home_change("media_player.tv", "off", "on"))
 
     def test_download_monitor_announces_only_new_completion_transition(self) -> None:
         runtime = object.__new__(JarvisRuntime)

@@ -72,6 +72,7 @@ public class RemoteBridgeService extends Service {
                 .build());
         // TCL's boot manager may block the BOOT_COMPLETED start, so clean up on
         // whichever start comes first after boot (usually from HomeActivity).
+        StayReachable.hold(this);  // stay on Wi-Fi in standby (JARVIS's alarm needs it)
         if (!cleanupStarted) {
             cleanupStarted = true;
             new Thread(() -> BootCleanup.run(this), "cleanup").start();

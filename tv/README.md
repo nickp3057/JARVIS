@@ -152,6 +152,18 @@ TV=10.0.0.46:5555 tv/provision.sh         # Nick runs it: new token + Core URL
 - TCL turns every app's wakeup alarm into a non-wakeup one
   (`ro.feature.alarm_wakeup_control`); app alarms can't wake the TV. Network
   traffic can (network standby), which is why wake-up comes from Core.
+- Network standby isn't forever. 2026-10-31: switched off at 04:54, the
+  TV's Wi-Fi dropped about once a minute, and at 06:26 the firmware took it
+  from standby (STR, `ro.feature.power_str`) to a full power-off
+  (`ro.feature.power_auto_standby_optimize`; the next boot reported
+  `ro.boot.bootreason=cold,powerkey`), so the 09:00 alarm couldn't reach it.
+  No setting for it shows up in `settings` or `getprop`. Since 8.4,
+  `StayReachable` (from `RemoteBridgeService`) holds a partial wake lock and
+  a low-latency Wi-Fi lock for as long as the TV has power, and `deploy.sh`
+  whitelists the launcher from doze. Check after a night with
+  `adb shell uptime` (a short uptime after an off night means it cold-booted
+  again) and Core's journal for the TV's `/api/clients/events` reconnects.
+  Core's wake-up alarm rings the room speaker if the TV still doesn't come on.
 - The log buffer is 64 KiB: logs from a few minutes ago are gone.
 - The launcher's own adb key is approved on the TV (self-adb). If the "Allow
   debugging?" prompt appears behind the launcher: `am task lock <id>`, then

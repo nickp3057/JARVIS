@@ -171,7 +171,7 @@ struct RoomView: View {
         .task {
             if !holdsPolling {
                 holdsPolling = true
-                model.retainPolling(start: scenePhase == .active)
+                model.retainPolling(start: scenePhase == .active, details: false)
             }
             await refresh()
         }
@@ -180,7 +180,7 @@ struct RoomView: View {
             // poll is only the fallback for a dropped stream.
             while scenePhase == .active, !Task.isCancelled {
                 try? await Task.sleep(for: .seconds(5))
-                await model.refreshEntities()
+                if !model.homeStreamLive { await model.refreshEntities() }
             }
         }
         .task(id: scenePhase) {
@@ -193,7 +193,7 @@ struct RoomView: View {
         .onDisappear {
             if holdsPolling {
                 holdsPolling = false
-                model.releasePolling()
+                model.releasePolling(details: false)
             }
             UIApplication.shared.isIdleTimerDisabled = false
             asleep = false

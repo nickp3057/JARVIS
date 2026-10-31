@@ -254,12 +254,12 @@ class WakeBackupRingTests(unittest.TestCase):
         self.assertTrue(wake_alarm.ringing(now=1059.0))
         self.assertFalse(wake_alarm.ringing(now=1061.0))
 
-    def test_tv_is_on_reads_the_remote_entity(self) -> None:
-        states = [{"entity_id": "remote.nick_s_room_tv", "state": "on"}]
-        with patch("integrations.home_assistant.get_states", return_value=(True, states)), \
+    def test_tv_is_on_reads_just_the_remote_entity(self) -> None:
+        with patch("integrations.home_assistant._request", return_value=(True, {"state": "on"})) as req, \
                 patch.dict("os.environ", {"TV_REMOTE_ENTITY": "remote.nick_s_room_tv"}):
             self.assertTrue(wake_alarm.tv_is_on())
-        with patch("integrations.home_assistant.get_states", return_value=(True, [])):
+        req.assert_called_once_with("GET", "/api/states/remote.nick_s_room_tv")
+        with patch("integrations.home_assistant._request", return_value=(False, "unavailable")):
             self.assertFalse(wake_alarm.tv_is_on())
 
 

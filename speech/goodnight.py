@@ -136,10 +136,10 @@ def run(say: Callable[[str], None], listen: Callable[[], str | None],
                 kind = "silent"
 
     if kind == "change" and hhmm:
-        wake_alarm.set_alarm(hhmm, day)  # this morning only; the week stays as it was
+        wake_alarm.set_alarm(hhmm, day, now=now)  # this morning only; the week stays as it was
         closing, outcome = f"{_say_time(datetime.strptime(hhmm, '%H:%M'))}, then. Sleep well, {sir}.", f"moved to {hhmm}"
     elif kind == "skip" and at is not None:
-        wake_alarm.skip(day)
+        wake_alarm.skip(day, now=now)
         closing, outcome = f"No alarm, then. Sleep well, {sir}.", "skipped"
     else:  # yes, silence, or something unclear: keep it as it is
         closing, outcome = f"Sleep well, {sir}.", "kept" if at is not None else "none"

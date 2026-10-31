@@ -110,9 +110,12 @@ struct RootView: View {
             // Follow the shared theme while the app is open (a pick on the TV,
             // Barn Door engaging or standing down), not just on launch.
             guard scenePhase == .active else { return }
+            // While the home stream is up it brings theme changes at once
+            // (HubViewModel), so this only runs when it's down.
+            await ThemeSync.pull(settings)
             while !Task.isCancelled {
-                await ThemeSync.pull(settings)
                 try? await Task.sleep(for: .seconds(10))
+                if !hub.homeStreamLive { await ThemeSync.pull(settings) }
             }
         }
         .onChange(of: settings.studyAlertsEnabled) { Task { await hub.updateNotificationPreferences() } }

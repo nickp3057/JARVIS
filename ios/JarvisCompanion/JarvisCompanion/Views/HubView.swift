@@ -174,7 +174,7 @@ struct HubView: View {
             guard focus == .hub || focus == .desk else { return }
             while scenePhase == .active, isVisible, !Task.isCancelled {
                 try? await Task.sleep(for: .seconds(2))
-                await model.refreshEntities()
+                if !model.homeStreamLive { await model.refreshEntities() }
             }
         }
         .onChange(of: settings.isConfigured) { _, configured in

@@ -83,6 +83,12 @@ final class HubViewModel: ObservableObject {
     /// Matches the server's TTL cache — polling faster just returns the same
     /// cached payload.
     private let pollInterval: Duration = .seconds(5)
+    /// Core's home stream is connected: lights, switches, scenes and the
+    /// theme arrive as they change, so nothing needs to poll for them.
+    @Published private(set) var homeStreamLive = false
+    /// Visible views that show more than the room (Hub, Media, Home, Desk):
+    /// torrents, services, repairs, alerts, portfolio. Room alone needs none.
+    private var detailViews = 0
 
     init(
         settings: AppSettings,
@@ -513,9 +519,24 @@ final class HubViewModel: ObservableObject {
 
     // MARK: - Foreground polling
 
+    /// US market hours (with a few minutes either side), New York time:
+    /// Core streams quotes then, so the portfolio is worth a 5 s refresh.
+    static func marketHours(_ date: Date = .now) -> Bool {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "America/New_York") ?? .current
+        let parts = calendar.dateComponents([.weekday, .hour, .minute], from: date)
+        guard let weekday = parts.weekday, (2...6).contains(weekday),
+              let hour = parts.hour, let minute = parts.minute else { return false }
+        let minutes = hour * 60 + minute
+        return minutes >= 9 * 60 + 25 && minutes <= 16 * 60 + 5
+    }
+
     /// Auto-refresh the fast-moving sections (torrents, services) while the
     /// Hub is visible and the app is foregrounded. Never faster than the
-    /// server's 5s TTL; stops entirely when the view goes away.
+    /// server's 5s TTL; stops entirely when the view goes away. Lights and
+    /// scenes come from the home stream while it's up (a 60 s safety
+    /// refetch), the Hub-only sections only while a Hub view is showing, and
+    /// the portfolio every 5 s in market hours, else once a minute.
     func startPolling() {
         guard pollTask == nil, settings.isConfigured else { return }
         startHomeStream()
@@ -525,21 +546,25 @@ final class HubViewModel: ObservableObject {
             while !Task.isCancelled {
                 try? await Task.sleep(for: self?.pollInterval ?? .seconds(5))
                 guard !Task.isCancelled, let self else { return }
-                async let torrents: Void = self.refreshTorrents()
-                async let services: Void = self.refreshServices()
-                async let entities: Void = self.refreshEntities()
-                async let now: Void = self.refreshNow()
-                async let alerts: Void = self.refreshAlerts()
-                async let repairs: Void = self.refreshRepairs()
-                async let portfolio: Void = self.refreshPortfolio()
-                _ = await (torrents, services, entities, now, alerts, repairs, portfolio)
                 tick += 1
+                let details = self.detailViews > 0
+                let homeDue = !self.homeStreamLive || tick.isMultiple(of: 12)
+                let portfolioDue = details && (Self.marketHours() || tick.isMultiple(of: 12))
+                async let now: Void = self.refreshNow()
+                async let entities: Void = homeDue ? self.refreshEntities() : ()
+                async let torrents: Void = details ? self.refreshTorrents() : ()
+                async let services: Void = details ? self.refreshServices() : ()
+                async let alerts: Void = details ? self.refreshAlerts() : ()
+                async let repairs: Void = details ? self.refreshRepairs() : ()
+                async let portfolio: Void = portfolioDue ? self.refreshPortfolio() : ()
+                _ = await (torrents, services, entities, now, alerts, repairs, portfolio)
                 if tick.isMultiple(of: 3) {
-                    async let media: Void = self.refreshMedia()
-                    async let scenes: Void = self.refreshScenes() // new scenes made in HA show up
+                    async let media: Void = details ? self.refreshMedia() : ()
+                    // New scenes made in HA show up (the stream covers runs).
+                    async let scenes: Void = homeDue || tick.isMultiple(of: 6) ? self.refreshScenes() : ()
                     _ = await (media, scenes)
                 }
-                if tick.isMultiple(of: 6) {
+                if details, tick.isMultiple(of: 6) {
                     async let storage: Void = self.refreshStorage()
                     async let maintenance: Void = self.refreshMaintenance()
                     async let glance: Void = self.refreshGlance()
@@ -560,7 +585,8 @@ final class HubViewModel: ObservableObject {
             while !Task.isCancelled {
                 guard let client = try? self?.client() else { return }
                 self?.lastHomeSeq = nil  // a reconnect's first event may hide a missed change
-                try? await client.streamHome { [weak self] seq in self?.homeChanged(seq) }
+                try? await client.streamHome { [weak self] seq, theme in self?.homeChanged(seq, theme: theme) }
+                self?.homeStreamLive = false
                 guard !Task.isCancelled else { return }
                 await self?.refreshEntities()
                 try? await Task.sleep(for: .seconds(3))
@@ -571,7 +597,15 @@ final class HubViewModel: ObservableObject {
     private var lastHomeSeq: Int?
     private var homeRefetch: Task<Void, Never>?
 
-    private func homeChanged(_ seq: Int) {
+    private var lastTheme: String?
+
+    private func homeChanged(_ seq: Int, theme: String?) {
+        homeStreamLive = true
+        if let theme, theme != JarvisPalette.current.rawValue, theme != lastTheme {
+            // Barn Door (or a pick on the TV): follow it now, not at a poll.
+            Task { [settings] in await ThemeSync.pull(settings) }
+        }
+        lastTheme = theme
         defer { lastHomeSeq = seq }
         guard let last = lastHomeSeq, last != seq else { return }  // the first event is just "connected"
         homeRefetch?.cancel()
@@ -589,13 +623,16 @@ final class HubViewModel: ObservableObject {
     /// rather than each view's appear/disappear.
     private var visibleViews = 0
 
-    func retainPolling(start: Bool) {
+    /// `details`: the view shows Hub sections (torrents, portfolio...); Room doesn't.
+    func retainPolling(start: Bool, details: Bool = true) {
         visibleViews += 1
+        if details { detailViews += 1 }
         if start { startPolling() }
     }
 
-    func releasePolling() {
+    func releasePolling(details: Bool = true) {
         visibleViews = max(0, visibleViews - 1)
+        if details { detailViews = max(0, detailViews - 1) }
         if visibleViews == 0 { stopPolling() }
     }
 
@@ -604,6 +641,7 @@ final class HubViewModel: ObservableObject {
         pollTask = nil
         homeStreamTask?.cancel()
         homeStreamTask = nil
+        homeStreamLive = false
         nowSnapshotIsStale = now.value != nil
     }
 

@@ -12,6 +12,8 @@ adb -s "$TV" shell appops set com.tvhome APP_AUTO_START allow
 adb -s "$TV" shell appops set com.tvhome SYSTEM_ALERT_WINDOW allow
 adb -s "$TV" shell pm grant com.tvhome android.permission.READ_LOGS
 adb -s "$TV" shell pm grant com.tvhome android.permission.RECORD_AUDIO
+# Never doze the launcher: its alert stream must survive standby (StayReachable).
+adb -s "$TV" shell dumpsys deviceidle whitelist +com.tvhome >/dev/null
 # Lets the home screen read and control what Spotify is playing.
 adb -s "$TV" shell cmd notification allow_listener com.tvhome/com.tvhome.MediaListener
 # The service isn't exported; BootReceiver starts it for any explicit broadcast.

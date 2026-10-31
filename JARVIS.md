@@ -785,6 +785,21 @@ CALENDAR_ALERT_LEAD_MIN=10  # warn this many minutes before a meeting
 
 ## Recently Shipped
 
+- **Less polling, TV stays reachable (2026-10-31, iOS 5.33 / build 176, TV
+  8.4)** — measured 1,300 app requests to Core in 10 minutes (portfolio,
+  entities and theme each about every 3 s across the devices). Now the
+  apps skip entity and theme polls while `/api/home/stream` is connected
+  (each pulse carries the theme; changes land in about 0.3 s instead of the
+  next 2-10 s poll), the iPad's Room tab no longer drives the Hub-only
+  sections (torrents, services, repairs, alerts, portfolio, media), and the
+  portfolio refreshes every 5 s only in US market hours (once a minute
+  otherwise). Core: a flapping HA entity is muted from the inbox for 30
+  minutes after 5 changes in 10 minutes; the wake-up alarm reads only the
+  TV's entity. The goodnight routine passes its own `now` to the alarm
+  calls (the tests had started failing once their date passed). TV 8.4:
+  `StayReachable` holds a wake lock and a Wi-Fi lock so the TV stays on the
+  network in standby (see `tv/README.md`, TCL quirks).
+
 - **iPad big level panel for everything; Barn Door orb and TV (2026-10-31,
   iOS 5.32 / build 175)** — on the Room tab a plain up/down drag on a light
   or the fan (landscape; portrait still holds first, the panel scrolls)

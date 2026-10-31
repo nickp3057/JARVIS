@@ -14,6 +14,12 @@ from speech import goodnight, room_voice
 NIGHT = datetime(2026, 10, 28, 22, 30)  # a Wednesday night; Thursday's alarm is 7:00
 
 
+class _FrozenNight(datetime):
+    @classmethod
+    def now(cls, tz=None):  # noqa: ANN001, ANN206
+        return NIGHT
+
+
 class Script:
     """Plays Nick's side: each listen() returns the next answer."""
 
@@ -36,6 +42,8 @@ class GoodnightTests(unittest.TestCase):
         self.addCleanup(tmp.cleanup)
         patch.object(wake_alarm, "_FILE", Path(tmp.name) / "wake.json").start()
         patch.dict(os.environ, {"ADDRESS": "sir"}).start()
+        # The alarm file drops days before "today": keep today on the test's night.
+        patch.object(wake_alarm, "datetime", _FrozenNight).start()
         self.addCleanup(patch.stopall)
         wake_alarm.set_schedule(["08:00", "07:00", "08:00", "07:00", "08:00", "09:00", "07:00"])
 
