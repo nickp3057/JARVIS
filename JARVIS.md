@@ -793,8 +793,8 @@ CALENDAR_ALERT_LEAD_MIN=10  # warn this many minutes before a meeting
   next 2-10 s poll), the iPad's Room tab no longer drives the Hub-only
   sections (torrents, services, repairs, alerts, portfolio, media), and the
   portfolio refreshes every 5 s only in US market hours (once a minute
-  otherwise). Core: a flapping HA entity is muted from the inbox for 30
-  minutes after 5 changes in 10 minutes; the wake-up alarm reads only the
+  otherwise). Core: a flapping TV entity (`media_player`/`remote`; never
+  lights, switches or fans) is muted from the inbox for 30 minutes after 5 changes in 10 minutes; the wake-up alarm reads only the
   TV's entity. The goodnight routine passes its own `now` to the alarm
   calls (the tests had started failing once their date passed). TV 8.4:
   `StayReachable` holds a wake lock and a Wi-Fi lock so the TV stays on the
