@@ -593,20 +593,8 @@ def wake_awake(_: None = Depends(require_scope("wake:write"))) -> dict[str, obje
     """I'm up (phone or TV): the TV's wake screen closes, music plays on, and
     the good-morning lights come on (``wake_alarm.good_morning``)."""
     from brain import wake_alarm
-    wake_alarm.awake()
-    threading.Thread(target=_good_morning, daemon=True).start()
-    event_bus.publish("wake_dismiss", "Up and at 'em", "", source="wake-up", severity="info", push=False)
+    wake_alarm.im_up()
     return {"ok": True}
-
-
-def _good_morning() -> None:
-    from brain import wake_alarm
-    try:
-        ok, detail = wake_alarm.good_morning()
-    except Exception as exc:  # noqa: BLE001
-        ok, detail = False, str(exc)
-    if not ok:
-        log.warning("Good-morning lights failed: %s", detail)
 
 
 # --- Shared colour theme (phone and TV follow one pick; brain/theme.py) -----
@@ -921,6 +909,47 @@ def home_light(request: LightRequest, _: None = Depends(authorize)) -> dict[str,
                                     request.rainbow)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+class FanRequest(BaseModel):
+    entity_id: str = Field(min_length=5, max_length=200)
+    percentage: int | None = Field(default=None, ge=0, le=100)
+    preset_mode: str | None = Field(default=None, max_length=40, pattern=r"^[A-Za-z0-9 _-]+$")
+
+
+@app.post("/api/home/fan")
+def home_fan(request: FanRequest, _: None = Depends(authorize)) -> dict[str, object]:
+    """Speed (0 = off) and/or mode for an allowlisted fan (the iPad's fan tile and sheet)."""
+    try:
+        return status_hub.set_fan(request.entity_id, request.percentage, request.preset_mode)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+class RoomVolumeRequest(BaseModel):
+    level: int = Field(ge=0, le=10)
+
+
+def _room_volume_state() -> dict[str, object]:
+    from speech import room_volume
+    return {"level": room_volume.level(), "night": room_volume.quiet_now()}
+
+
+@app.get("/api/room/volume")
+def room_volume_get(_: None = Depends(authorize)) -> dict[str, object]:
+    """The room speaker's level (0-10, ``speech/room_volume.py``); ``night``
+    is true inside ROOM_QUIET_HOURS, where the slider sets the night level."""
+    return _room_volume_state()
+
+
+@app.post("/api/room/volume")
+def room_volume_set(request: RoomVolumeRequest, _: None = Depends(authorize)) -> dict[str, object]:
+    """The iPad's volume slider: this time of day's level, applied now, with
+    a soft chime so Nick hears how loud it is."""
+    from speech import room_sounds, room_volume
+    room_volume.set_level(request.level)
+    room_sounds.play("chime")
+    return _room_volume_state()
 
 
 @app.get("/api/home/scenes")

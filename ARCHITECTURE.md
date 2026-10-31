@@ -318,7 +318,10 @@ runtime knows, the more JARVIS feels like one mind instead of several scripts.
   (30) in market hours, prices streamed live; raises `schwab_login` a day
   before Schwab's 7-day login lapses.
 - Wake-up monitor: always on; idle unless the wake-up schedule or a one-off
-  is set (`brain/wake_alarm.py`). Publishes `wake_up` (`push=False`) for the TV.
+  is set (`brain/wake_alarm.py`). Publishes `wake_up` (`push=False`) for the TV,
+  powers the TV on through HA, and starts the room-speaker backup ring if the
+  TV isn't on `WAKE_BACKUP_DELAY_S` (90) later and nobody answered
+  (`WAKE_BACKUP_RING_S`, 600, caps it).
 
 - `HOME_MONITOR_ENABLED`: true/false, defaults to true.
 - `HOME_MONITOR_INTERVAL_S`: polling interval in seconds, defaults to 20.

@@ -810,6 +810,33 @@ struct JarvisAPIClient {
                                             rainbow: rainbow)).error
     }
 
+    /// Speed (0 = off) and/or preset mode for an allowlisted fan.
+    func setFan(_ entityID: String, percentage: Int?, presetMode: String? = nil) async throws -> String {
+        struct Body: Encodable {
+            let entityID: String
+            let percentage: Int?
+            let presetMode: String?
+            enum CodingKeys: String, CodingKey {
+                case percentage
+                case entityID = "entity_id"
+                case presetMode = "preset_mode"
+            }
+        }
+        struct Result: Decodable { let error: String }
+        return try await postJSON(Result.self, path: "api/home/fan",
+                                  body: Body(entityID: entityID, percentage: percentage, presetMode: presetMode)).error
+    }
+
+    /// The room speaker's volume (JARVIS's voice and sounds on the Optiplex).
+    func roomVolume() async throws -> RoomVolume {
+        try await getJSON(RoomVolume.self, path: "api/room/volume")
+    }
+
+    func setRoomVolume(_ level: Int) async throws -> RoomVolume {
+        struct Body: Encodable { let level: Int }
+        return try await postJSON(RoomVolume.self, path: "api/room/volume", body: Body(level: level))
+    }
+
     func homeScenes() async throws -> HomeScenes {
         try await getJSON(HomeScenes.self, path: "api/home/scenes")
     }

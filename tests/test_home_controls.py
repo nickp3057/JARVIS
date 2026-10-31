@@ -98,6 +98,57 @@ class SceneAndLightTests(unittest.TestCase):
         self.assertEqual((result["error"], result["state"]), ("", None))
 
 
+class FanAndVolumeTests(unittest.TestCase):
+    """The iPad's fan tile/sheet and room-speaker volume slider."""
+
+    def setUp(self) -> None:
+        status_hub.invalidate("entities")
+        env = patch.dict(os.environ, {"JARVIS_API_TOKEN": "t", "HOME_DASHBOARD_ENTITIES": "fan.nicks_fan,light.desk"})
+        env.start()
+        self.addCleanup(env.stop)
+        self.call = patch.object(status_hub, "call_discovered_service",
+                                 return_value="Set Percentage command sent.").start()
+        self.addCleanup(patch.stopall)
+        self.client = TestClient(server.app)
+        self.headers = {"Authorization": "Bearer t"}
+
+    def test_entities_carry_fan_speed_and_modes(self) -> None:
+        states = [{"entity_id": "fan.nicks_fan", "state": "on",
+                   "attributes": {"friendly_name": "Nick's Fan", "percentage": 50, "percentage_step": 1.0,
+                                  "preset_modes": ["fresh", "nature"], "preset_mode": "fresh"}}]
+        with patch.object(status_hub, "get_states", return_value=(True, states)):
+            fan = status_hub.home_entities()["entities"][0]["fan"]
+        self.assertEqual(fan, {"percentage": 50, "step": 1.0, "preset_modes": ["fresh", "nature"],
+                               "preset_mode": "fresh"})
+
+    def test_fan_endpoint_sets_mode_then_speed(self) -> None:
+        ok = self.client.post("/api/home/fan", headers=self.headers,
+                              json={"entity_id": "fan.nicks_fan", "percentage": 35, "preset_mode": "nature"})
+        self.assertEqual((ok.status_code, ok.json()["error"]), (200, ""))
+        self.assertEqual([c.args[1] for c in self.call.call_args_list], ["set_preset_mode", "set_percentage"])
+        self.assertEqual(self.call.call_args.kwargs["service_data"], {"percentage": 35})
+        self.assertEqual(self.client.post("/api/home/fan", headers=self.headers,
+                                          json={"entity_id": "light.desk", "percentage": 35}).status_code, 400)
+        self.assertEqual(self.client.post("/api/home/fan", headers=self.headers,
+                                          json={"entity_id": "fan.nicks_fan"}).status_code, 400)
+        self.assertEqual(self.client.post("/api/home/fan", headers=self.headers,
+                                          json={"entity_id": "fan.nicks_fan", "percentage": 101}).status_code, 422)
+
+    def test_room_volume_slider(self) -> None:
+        from speech import room_sounds, room_volume
+        with patch.object(room_volume, "set_level") as set_level, patch.object(room_sounds, "play") as play, \
+                patch.object(room_volume, "level", return_value=6), patch.object(room_volume, "quiet_now",
+                                                                                return_value=False):
+            got = self.client.get("/api/room/volume", headers=self.headers)
+            put = self.client.post("/api/room/volume", headers=self.headers, json={"level": 6})
+            bad = self.client.post("/api/room/volume", headers=self.headers, json={"level": 11})
+        self.assertEqual(got.json(), {"level": 6, "night": False})
+        self.assertEqual(put.json(), {"level": 6, "night": False})
+        set_level.assert_called_once_with(6)
+        play.assert_called_once_with("chime")
+        self.assertEqual(bad.status_code, 422)
+
+
 class EndpointTests(unittest.TestCase):
     def setUp(self) -> None:
         env = patch.dict(os.environ, {"JARVIS_API_TOKEN": "t", "HOME_DASHBOARD_ENTITIES": "light.desk"})
@@ -127,24 +178,30 @@ class EndpointTests(unittest.TestCase):
         self.assertEqual(missing.status_code, 400)
 
     def test_im_up_runs_the_good_morning_lights(self) -> None:
+        from brain import wake_alarm
+        with patch.object(wake_alarm, "im_up") as im_up:
+            response = self.client.post("/api/wake/awake", headers=self.headers)
+        self.assertEqual(response.json(), {"ok": True})
+        im_up.assert_called_once()
+
         class InlineThread:  # runs the target right away, so nothing races the asserts
-            def __init__(self, target, daemon=None):  # noqa: ANN001
+            def __init__(self, target, daemon=None, **_):  # noqa: ANN001
                 self.target = target
 
             def start(self) -> None:
                 self.target()
 
-        with patch.object(server, "_good_morning") as lights, patch("brain.wake_alarm.awake") as awake, \
-                patch.object(server.threading, "Thread", InlineThread):
-            response = self.client.post("/api/wake/awake", headers=self.headers)
-        self.assertEqual(response.json(), {"ok": True})
+        with patch.object(wake_alarm, "_good_morning_logged") as lights, patch.object(wake_alarm, "awake") as awake, \
+                patch.object(wake_alarm.threading, "Thread", InlineThread):
+            wake_alarm.im_up()
         awake.assert_called_once()
         lights.assert_called_once()
 
     def test_good_morning_failure_is_logged_not_raised(self) -> None:
+        from brain import wake_alarm
         with patch("brain.wake_alarm.good_morning", side_effect=RuntimeError("HA down")), \
-                self.assertLogs("jarvis.app.server", level="WARNING"):
-            server._good_morning()
+                self.assertLogs("jarvis.brain.wake_alarm", level="WARNING"):
+            wake_alarm._good_morning_logged()
 
 
 class ClientTokenCliTests(unittest.TestCase):

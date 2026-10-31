@@ -29,7 +29,10 @@ Check these on the phone first. Some of the "weird" may already be gone.
   (Nick, 2026-10-28). 4.8 adds long-press brightness/colour (`LightSheet`)
   and the night screen (black + brightness 0 after dark with the lights off).
   Later: the same light sheet on the phone's Home tab, a music card, effects
-  (the Govee scenes HA lists in `effect_list`).
+  (the Govee scenes HA lists in `effect_list`). 5.30 adds hold-and-drag
+  dimming / fan speed on the tiles (`LevelDragger`), `FanSheet`, and a JARVIS
+  volume slider (room speaker) in the clock panel. The phone's Home tab
+  still uses plain long-press for the light sheet.
 - Next: an iOS Home Screen / Control Center widget for scenes (needs a
   widget extension target and an App Group for the server address/token).
 

@@ -11,6 +11,12 @@ turns itself on and plays the music. Music is a Spotify link or URI
 AC/DC", stored as ``search:...``), or empty to resume whatever Spotify last
 played. A time like "in 3 minutes" makes the one-off unless days are given.
 Music starts at the alarm's volume (no fade-in); the TV offers I'm up / Snooze.
+
+The event alone can't wake a TV that dropped off Wi-Fi in standby, so Core
+also powers it on through Home Assistant (``tv_remote.power``). If the TV
+still isn't on ``WAKE_BACKUP_DELAY_S`` (90) later and Nick hasn't answered,
+the backup ring starts: the room voice beeps the Optiplex speaker until I'm
+up, Snooze, "stop" by voice, or ``WAKE_BACKUP_RING_S`` (600) runs out.
 """
 from __future__ import annotations
 
@@ -20,7 +26,12 @@ import os
 from pathlib import Path
 import re
 import threading
+import time
 from typing import Any
+
+from jarvis_logger import get_logger
+
+log = get_logger(__name__)
 
 _FILE = Path(__file__).resolve().parents[1] / "memory" / "wake_alarm.json"
 _lock = threading.Lock()
@@ -222,9 +233,118 @@ def skip(day_text: str = "tomorrow", restore: bool = False, now: datetime | None
 SNOOZE_MINUTES = 9
 
 
+# Backup ring state (process-wide): set when the alarm fires, cleared by an answer.
+_answered = threading.Event()
+_ring_until = 0.0
+_ring_lock = threading.Lock()
+
+
+def alarm_fired() -> None:
+    """A new alarm went off: nobody has answered it yet."""
+    _answered.clear()
+
+
+def answered() -> bool:
+    return _answered.is_set()
+
+
+def start_backup_ring(now: float | None = None) -> bool:
+    """Ring the room speaker (the room voice beeps while ``ringing()``),
+    unless Nick already answered. False if it didn't start."""
+    global _ring_until
+    if _answered.is_set():
+        return False
+    try:
+        seconds = max(30.0, float(os.getenv("WAKE_BACKUP_RING_S", "600")))
+    except ValueError:
+        seconds = 600.0
+    with _ring_lock:
+        _ring_until = (now or time.monotonic()) + seconds
+    return True
+
+
+def ringing(now: float | None = None) -> bool:
+    return (now or time.monotonic()) < _ring_until
+
+
+def stop_ring() -> bool:
+    """Silence the backup ring; True if it was ringing."""
+    global _ring_until
+    with _ring_lock:
+        was = ringing()
+        _ring_until = 0.0
+    return was
+
+
+def _answer() -> None:
+    _answered.set()
+    stop_ring()
+
+
+def tv_is_on() -> bool:
+    """The room TV's remote entity reads "on" in Home Assistant."""
+    from integrations import home_assistant, tv_remote
+    ok, states = home_assistant.get_states()
+    if not ok or not isinstance(states, list):
+        return False
+    entity = tv_remote.entity()
+    return any(s.get("entity_id") == entity and s.get("state") == "on" for s in states)
+
+
+def wake_tv_with_backup(stop: threading.Event) -> str:
+    """Run off the monitor thread when an alarm fires: power the TV on, give
+    it ``WAKE_BACKUP_DELAY_S`` to come up, then ring the speaker if it
+    didn't and nobody answered. Returns what happened (for logs and tests)."""
+    from integrations import tv_remote
+    try:
+        ok, detail = tv_remote.power(True)
+    except Exception as exc:  # noqa: BLE001
+        ok, detail = False, str(exc)
+    if not ok:
+        log.warning("Wake-up: couldn't power the TV on: %s", detail)
+    try:
+        delay = max(10.0, float(os.getenv("WAKE_BACKUP_DELAY_S", "90")))
+    except ValueError:
+        delay = 90.0
+    if stop.wait(delay):
+        return "stopped"
+    if _answered.is_set():
+        return "answered"
+    try:
+        on = tv_is_on()
+    except Exception:  # noqa: BLE001
+        on = False
+    if on:
+        return "tv"
+    if not start_backup_ring():
+        return "answered"
+    log.warning("Wake-up: the TV didn't come on; ringing the room speaker")
+    return "ringing"
+
+
+def im_up() -> None:
+    """I'm up (phone, TV, or "stop" to the room voice while the backup rings):
+    clears a snooze, silences the backup ring, closes the TV's wake screen
+    and turns on the good-morning lights in the background."""
+    from brain import event_bus
+    awake()
+    threading.Thread(target=_good_morning_logged, daemon=True).start()
+    event_bus.publish("wake_dismiss", "Up and at 'em", "", source="wake-up", severity="info", push=False)
+
+
+def _good_morning_logged() -> None:
+    try:
+        ok, detail = good_morning()
+    except Exception as exc:  # noqa: BLE001
+        ok, detail = False, str(exc)
+    if not ok:
+        log.warning("Good-morning lights failed: %s", detail)
+
+
 def snooze(now: datetime | None = None) -> datetime:
     """Snoozed from the phone: ring again (resuming the music) in 9 minutes.
     Core rings it, so the phone gets its I'm up / Snooze buttons again."""
+    _answer()
     now = now or datetime.now()
     data = load() or _blank()
     at = (now + timedelta(minutes=SNOOZE_MINUTES)).replace(second=0, microsecond=0)
@@ -234,7 +354,8 @@ def snooze(now: datetime | None = None) -> datetime:
 
 
 def awake() -> None:
-    """I'm up: a pending snooze doesn't ring."""
+    """I'm up: a pending snooze doesn't ring, and the backup ring stops."""
+    _answer()
     data = load()
     if data and (data.get("once") or {}).get("snooze"):
         data["once"] = None

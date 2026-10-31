@@ -349,6 +349,15 @@ RMS envelope from ElevenLabs audio drives the orb in real time using a monotonic
   one-day `overrides` are shown, not edited.
 - Runtime wake monitor (every 20 s, fires each alarm once within 10 minutes of
   its time) publishes a `wake_up` bus event with `push=False`; the TV acts on it.
+- The event can't reach a TV that dropped off Wi-Fi in deep standby (2026-10-31:
+  the stream went quiet at 06:26 and every TV entity in HA read `unavailable`
+  until noon), so Core also powers the TV on through HA (`tv_remote.power`).
+  If `remote.nick_s_room_tv` still isn't `on` `WAKE_BACKUP_DELAY_S` (90) later
+  and nobody pressed I'm up / Snooze, the **backup ring** starts: the room voice
+  beeps the Optiplex speaker (at the day volume) until I'm up, Snooze, "stop" /
+  "I'm up" / "Hey JARVIS" by voice, or `WAKE_BACKUP_RING_S` (600) runs out.
+  Voice dismissal counts as I'm up (lights, TV wake screen closes:
+  `wake_alarm.im_up`). The TV coming on, it plays the music and the room stays quiet.
 
 ### Price Watching
 - `watch_price(url, label?, target_price?)` — monitor structured price metadata
@@ -679,6 +688,8 @@ VOICE_PREROLL_S=2           # audio kept from before the wake word ("game time, 
 VOICE_SHORTCUT_AFTER=2      # same phrase + same simple action this many times -> instant shortcut
 VOICE_BARGE_IN=1            # "Hey JARVIS" while he's talking stops him and listens
 ROOM_ALARM_RING_S=120       # longest a finished timer rings on the room speaker
+WAKE_BACKUP_DELAY_S=90      # wake-up: how long the TV gets to come on before the room speaker rings instead
+WAKE_BACKUP_RING_S=600      # wake-up: longest the backup ring goes on
 ROOM_ANNOUNCEMENTS=1        # speak runtime announcements (never in quiet hours)
 ROOM_QUIET_HOURS=22-7       # night mode hours; empty turns night mode off
 ROOM_NIGHT_VOLUME=3         # 0-10 speaker level in quiet hours (voice changes at night override)
@@ -773,6 +784,20 @@ CALENDAR_ALERT_LEAD_MIN=10  # warn this many minutes before a meeting
 ---
 
 ## Recently Shipped
+
+- **Wake-up backup ring; iPad volume slider, hold-and-drag dimming, fan speed
+  (2026-10-31, iOS 5.30 / build 173)** — the alarm fired at 09:00 but the TV
+  was off the network (see "Wake-up music"): Core now wakes the TV through
+  HA and rings the room speaker if it stays off. iPad Room tab: a **JARVIS
+  volume** slider in the clock panel (room speaker 0-10, `GET`/`POST
+  /api/room/volume`, a chime on release, sets the night level in quiet
+  hours); **hold a light or the fan tile and drag up/down without lifting**
+  to set brightness/speed (the tile fills to the level, a tick every 10%,
+  steps sent 4×/s, 0 = off; `Views/LevelDrag.swift`); hold and let go still
+  opens the light sheet, and the fan now has its own `FanSheet` (power,
+  speed, Fresh/Nature). Core: `/api/home/entities` gives fans a `fan` block
+  (percentage, step, preset_modes, preset_mode) and `POST /api/home/fan
+  {entity_id, percentage?, preset_mode?}` (`status_hub.set_fan`).
 
 - **Profile memory cached (2026-10-29, iOS 5.16 / build 159)** —
   `brain/memory.py:_load()` reuses the parsed `profile.json` until its

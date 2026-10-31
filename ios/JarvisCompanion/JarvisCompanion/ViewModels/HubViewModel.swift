@@ -315,9 +315,10 @@ final class HubViewModel: ObservableObject {
 
     // MARK: - Light brightness and colour
 
-    /// Brightness and/or colour for one light; re-reads the room after.
+    /// Brightness and/or colour for one light; re-reads the room after
+    /// (`refresh: false` for the in-between steps of a hold-and-drag).
     func setLight(_ entity: HomeEntity, brightness: Int? = nil, rgb: [Int]? = nil, kelvin: Int? = nil,
-                  rainbow: Bool = false) {
+                  rainbow: Bool = false, refresh: Bool = true) {
         Task {
             do {
                 let error = try await client().setLight(entity.entityID, brightness: brightness, rgb: rgb,
@@ -326,7 +327,31 @@ final class HubViewModel: ObservableObject {
             } catch {
                 actionError = error.localizedDescription
             }
-            await refreshEntities()
+            if refresh { await refreshEntities() }
+        }
+    }
+
+    /// Speed (0 = off) and/or mode for a fan; re-reads the room after.
+    func setFan(_ entity: HomeEntity, percentage: Int? = nil, presetMode: String? = nil, refresh: Bool = true) {
+        Task {
+            do {
+                let error = try await client().setFan(entity.entityID, percentage: percentage, presetMode: presetMode)
+                if !error.isEmpty { actionError = error }
+            } catch {
+                actionError = error.localizedDescription
+            }
+            if refresh { await refreshEntities() }
+        }
+    }
+
+    /// One step of a hold-and-drag on a light or fan tile: 0 turns it off.
+    func setLevel(_ entity: HomeEntity, _ level: Int, final: Bool) {
+        if entity.domain == "fan" {
+            setFan(entity, percentage: level, refresh: final)
+        } else if level <= 0 {
+            if final, entity.isOn { toggle(entity, to: false) }
+        } else {
+            setLight(entity, brightness: level, refresh: final)
         }
     }
 

@@ -142,9 +142,6 @@ class WakeAlarmTests(unittest.TestCase):
         self.assertIn("cancelled", tools.execute_tool("cancel_wake_up", {}))
         self.assertIsNone(wake_alarm.public())
 
-if __name__ == "__main__":
-    unittest.main()
-
 
 class GoodMorningTests(unittest.TestCase):
     STATES = [
@@ -198,3 +195,73 @@ class GrantScopeTests(unittest.TestCase):
             self.assertFalse(client_tokens.grant("nobody", ["wake:write"]))
             with self.assertRaises(ValueError):
                 client_tokens.grant("tv", ["root"])
+
+
+class WakeBackupRingTests(unittest.TestCase):
+    """The TV can't hear the alarm in deep standby: wake it, else ring the room."""
+
+    def setUp(self) -> None:
+        wake_alarm.stop_ring()
+        wake_alarm.alarm_fired()
+        self.addCleanup(wake_alarm.stop_ring)
+        self.stop = __import__("threading").Event()
+        env = patch.dict("os.environ", {"WAKE_BACKUP_DELAY_S": "10"})
+        env.start()
+        self.addCleanup(env.stop)
+        # Don't actually wait out the delay.
+        wait = patch.object(self.stop, "wait", return_value=False)
+        wait.start()
+        self.addCleanup(wait.stop)
+
+    def test_rings_when_tv_stays_off(self) -> None:
+        with patch("integrations.tv_remote.power", return_value=(False, "unavailable")) as power, \
+                patch.object(wake_alarm, "tv_is_on", return_value=False):
+            self.assertEqual(wake_alarm.wake_tv_with_backup(self.stop), "ringing")
+        power.assert_called_once_with(True)
+        self.assertTrue(wake_alarm.ringing())
+
+    def test_quiet_when_tv_comes_on(self) -> None:
+        with patch("integrations.tv_remote.power", return_value=(True, "ok")), \
+                patch.object(wake_alarm, "tv_is_on", return_value=True):
+            self.assertEqual(wake_alarm.wake_tv_with_backup(self.stop), "tv")
+        self.assertFalse(wake_alarm.ringing())
+
+    def test_quiet_when_already_answered_on_phone(self) -> None:
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        with patch.object(wake_alarm, "_FILE", Path(tmp.name) / "w.json"):
+            wake_alarm.awake()
+        with patch("integrations.tv_remote.power", return_value=(True, "ok")), \
+                patch.object(wake_alarm, "tv_is_on", return_value=False):
+            self.assertEqual(wake_alarm.wake_tv_with_backup(self.stop), "answered")
+        self.assertFalse(wake_alarm.ringing())
+
+    def test_snooze_or_im_up_silences_the_ring(self) -> None:
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.assertTrue(wake_alarm.start_backup_ring())
+        self.assertTrue(wake_alarm.ringing())
+        with patch.object(wake_alarm, "_FILE", Path(tmp.name) / "w.json"):
+            wake_alarm.snooze(now=datetime(2026, 10, 31, 9, 0))
+        self.assertFalse(wake_alarm.ringing())
+        # The snooze rings again later: a fresh alarm can ring the room again.
+        wake_alarm.alarm_fired()
+        self.assertTrue(wake_alarm.start_backup_ring())
+
+    def test_ring_gives_up_after_its_limit(self) -> None:
+        with patch.dict("os.environ", {"WAKE_BACKUP_RING_S": "60"}):
+            wake_alarm.start_backup_ring(now=1000.0)
+        self.assertTrue(wake_alarm.ringing(now=1059.0))
+        self.assertFalse(wake_alarm.ringing(now=1061.0))
+
+    def test_tv_is_on_reads_the_remote_entity(self) -> None:
+        states = [{"entity_id": "remote.nick_s_room_tv", "state": "on"}]
+        with patch("integrations.home_assistant.get_states", return_value=(True, states)), \
+                patch.dict("os.environ", {"TV_REMOTE_ENTITY": "remote.nick_s_room_tv"}):
+            self.assertTrue(wake_alarm.tv_is_on())
+        with patch("integrations.home_assistant.get_states", return_value=(True, [])):
+            self.assertFalse(wake_alarm.tv_is_on())
+
+
+if __name__ == "__main__":
+    unittest.main()

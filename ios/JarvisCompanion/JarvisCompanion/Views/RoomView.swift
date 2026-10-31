@@ -8,8 +8,11 @@ import UIKit
 /// sits above the clock (top left). Right: the light/switch tiles with a
 /// Peace square in the top corner, and Nick's favourite scenes (Game Time,
 /// Movie, Study) in one row; the rest are voice-only. Portrait (iPad mini)
-/// stacks and scrolls. Long-press a light for brightness and colour
-/// (`LightSheet`); the hold doesn't also toggle it. Core pushes every Home
+/// stacks and scrolls. Hold a light or the fan and drag up or down without
+/// lifting to set brightness or speed (`LevelDragger`); hold and let go for
+/// the light's brightness and colour (`LightSheet`) or the fan's speed and
+/// modes (`FanSheet`). The hold doesn't also toggle it. The clock panel has
+/// JARVIS's own volume (the room speaker, `RoomVolumeControl`). Core pushes every Home
 /// Assistant change (`/api/home/stream`), so a switch flipped on the phone or
 /// the wall shows here within about half a second.
 ///
@@ -50,6 +53,9 @@ struct RoomView: View {
     @State private var savedBrightness: CGFloat?
     @ObservedObject private var voice = VoicePresence.shared
     @StateObject private var holds = HoldSuppressor()
+    @StateObject private var dragger = LevelDragger()
+    /// The tile a hold is in progress on; resets when the finger lifts or the hold is cancelled.
+    @GestureState private var holding: String?
     @State private var showingSettings = false
     @AppStorage(RoomView.favoritesKey) private var favoriteScenes = RoomView.defaultFavorites
     /// "Back to the panel" during a movie; cleared when the scene changes.
@@ -102,7 +108,17 @@ struct RoomView: View {
             NavigationStack { WakeScheduleView() }
         }
         .sheet(item: $lightSheet) { item in
-            LightSheet(model: model, entityID: item.id)
+            if item.id.hasPrefix("fan.") {
+                FanSheet(model: model, entityID: item.id)
+            } else {
+                LightSheet(model: model, entityID: item.id)
+            }
+        }
+        .onChange(of: holding) { was, now in
+            // The finger lifted: a drag sends its level; a plain hold opens the sheet.
+            guard let was, now == nil,
+                  let entity = model.entities.value?.first(where: { $0.entityID == was }) else { return }
+            if !dragger.end(entity, model: model) { lightSheet = LightSheetID(id: was) }
         }
         .fullScreenCover(isPresented: $asleep) {
             // Black; a tap is the only thing on it.
@@ -276,6 +292,7 @@ struct RoomView: View {
             }
             ForEach(timers.prefix(2)) { timerRow($0) }
             if fill { Spacer(minLength: 0) }
+            RoomVolumeControl()
             Button { showingRemote = true } label: {
                 Label("TV remote", systemImage: "appletvremote.gen4")
                     .font(.headline)
@@ -409,7 +426,8 @@ struct RoomView: View {
 
     private func deviceTile(_ entity: HomeEntity) -> some View {
         let pending = model.pendingEntityStates[entity.entityID]
-        let on = pending ?? entity.isOn
+        let live = dragger.live[entity.entityID]
+        let on = live.map { $0 > 0 } ?? pending ?? entity.isOn
         return Button {
             guard !holds.swallows(entity.entityID) else { return }
             model.toggle(entity, to: !on)
@@ -427,13 +445,25 @@ struct RoomView: View {
                         .font(.headline)
                         .lineLimit(2, reservesSpace: true)
                         .multilineTextAlignment(.leading)
-                    Text(statusText(entity, on: on))
+                    Text(live.map { $0 > 0 ? "On · \($0)%" : "Off" } ?? statusText(entity, on: on))
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
+                        .monospacedDigit()
                 }
             }
             .padding(16)
             .frame(maxWidth: .infinity, minHeight: 108, alignment: .topLeading)
+            // While dragged, the tile fills from the bottom to the new level.
+            .background(alignment: .bottom) {
+                if let live {
+                    GeometryReader { geo in
+                        JarvisTheme.amber.opacity(0.28)
+                            .frame(height: geo.size.height * CGFloat(live) / 100)
+                            .frame(maxHeight: .infinity, alignment: .bottom)
+                    }
+                    .clipShape(.rect(cornerRadius: 18))
+                }
+            }
             .background(on ? JarvisTheme.amber.opacity(0.16) : JarvisTheme.cyan.opacity(0.05),
                         in: .rect(cornerRadius: 18))
             .overlay(RoundedRectangle(cornerRadius: 18)
@@ -441,12 +471,9 @@ struct RoomView: View {
         }
         .buttonStyle(CockpitButtonStyle())
         .disabled(!entity.isToggleable || pending != nil)
-        .simultaneousGesture(LongPressGesture(minimumDuration: 0.45).onEnded { _ in
-            guard entity.light?.dimmable == true else { return }
-            holds.hold(entity.entityID)  // the release mustn't toggle it
-            lightSheet = LightSheetID(id: entity.entityID)
-        })
+        .simultaneousGesture(holdAndDrag(entity, on: on))
         .sensoryFeedback(.impact(weight: .light), trigger: on)
+        .sensoryFeedback(.selection, trigger: live.map { $0 / 10 })
         .accessibilityLabel(entity.friendlyName)
         .accessibilityValue(on ? "On" : "Off")
     }
@@ -454,8 +481,27 @@ struct RoomView: View {
     private func statusText(_ entity: HomeEntity, on: Bool) -> String {
         guard entity.isToggleable else { return entity.state.capitalized }
         guard on else { return "Off" }
-        if let pct = entity.light?.brightnessPct { return "On · \(pct)%" }
+        if let pct = entity.light?.brightnessPct ?? entity.fan?.percentage { return "On · \(pct)%" }
         return "On"
+    }
+
+    /// Hold (0.35 s), then drag without lifting: the level follows the finger.
+    /// Lifting is handled in `onChange(of: holding)`, which also sees a hold
+    /// that never moved (that one opens the sheet).
+    private func holdAndDrag(_ entity: HomeEntity, on: Bool) -> some Gesture {
+        LongPressGesture(minimumDuration: 0.35)
+            .sequenced(before: DragGesture(minimumDistance: 0, coordinateSpace: .global))
+            .updating($holding) { value, state, _ in
+                if case .second(true, _) = value, LevelDragger.adjustable(entity) { state = entity.entityID }
+            }
+            .onChanged { value in
+                guard case .second(true, let drag) = value, LevelDragger.adjustable(entity) else { return }
+                if dragger.activeID != entity.entityID {
+                    holds.hold(entity.entityID)  // the release mustn't toggle it
+                    dragger.begin(entity, on: on)
+                }
+                if let drag { dragger.update(entity, translation: drag.translation.height, model: model) }
+            }
     }
 
     private static func symbol(for entity: HomeEntity) -> String {

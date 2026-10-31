@@ -680,6 +680,8 @@ def _home_entities_uncached() -> dict[str, Any]:
         }
         if entity_id.startswith("light."):
             item["light"] = _light_details(attributes, entity_id)
+        elif entity_id.startswith("fan."):
+            item["fan"] = _fan_details(attributes)
         entities.append(item)
     # The iPad's night screen dims only after dark (sun.sun), lights all off.
     sun = by_id.get("sun.sun")
@@ -732,6 +734,18 @@ def _light_details(attributes: dict[str, Any], entity_id: str = "") -> dict[str,
         "min_kelvin": attributes.get("min_color_temp_kelvin"),
         "max_kelvin": attributes.get("max_color_temp_kelvin"),
         "rainbow": entity_id in rainbows(),
+    }
+
+
+def _fan_details(attributes: dict[str, Any]) -> dict[str, Any]:
+    """Speed and modes for the iPad's fan tile (hold and drag) and fan sheet."""
+    percentage = attributes.get("percentage")
+    step = attributes.get("percentage_step")
+    return {
+        "percentage": int(percentage) if isinstance(percentage, (int, float)) else None,
+        "step": float(step) if isinstance(step, (int, float)) and step > 0 else 1.0,
+        "preset_modes": [str(m) for m in attributes.get("preset_modes") or []],
+        "preset_mode": attributes.get("preset_mode"),
     }
 
 
@@ -813,14 +827,21 @@ def set_light(entity_id: str, brightness_pct: int | None = None,
     return {"error": "", "entity_id": entity_id}
 
 
-def set_fan(entity_id: str, percentage: int) -> dict[str, Any]:
-    """Speed for one allowlisted fan (0 turns it off). ValueError (a 400) for
-    anything off the allowlist or not a fan."""
+def set_fan(entity_id: str, percentage: int | None = None, preset_mode: str | None = None) -> dict[str, Any]:
+    """Speed (0 turns it off) and/or preset mode for one allowlisted fan.
+    ValueError (a 400) for anything off the allowlist or not a fan."""
     entity_id = (entity_id or "").strip().lower()
     if not entity_id.startswith("fan.") or entity_id not in _dashboard_allowlist():
         raise ValueError("entity_id is not an allowlisted fan")
-    data = {"percentage": max(0, min(100, int(percentage)))}
-    message = call_discovered_service("fan", "set_percentage", entity_id=entity_id, service_data=data)
+    if percentage is None and not preset_mode:
+        raise ValueError("give a percentage or a preset_mode")
+    message = "command sent"
+    if preset_mode:
+        message = call_discovered_service("fan", "set_preset_mode", entity_id=entity_id,
+                                          service_data={"preset_mode": preset_mode})
+    if percentage is not None and _HA_SUCCESS_MARKER in message.lower():
+        data = {"percentage": max(0, min(100, int(percentage)))}
+        message = call_discovered_service("fan", "set_percentage", entity_id=entity_id, service_data=data)
     invalidate("entities")
     if _HA_SUCCESS_MARKER not in message.lower():
         return {"error": message, "entity_id": entity_id}

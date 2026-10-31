@@ -346,13 +346,17 @@ struct HomeEntity: Decodable, Identifiable {
     var state: String
     /// Lights only: what it can do and where it is (brightness/colour sheet).
     var light: LightDetails? = nil
+    /// Fans only: speed and modes (hold-and-drag on the tile, `FanSheet`).
+    var fan: FanDetails? = nil
 
-    init(entityID: String, friendlyName: String, domain: String, state: String, light: LightDetails? = nil) {
+    init(entityID: String, friendlyName: String, domain: String, state: String, light: LightDetails? = nil,
+         fan: FanDetails? = nil) {
         self.entityID = entityID
         self.friendlyName = friendlyName
         self.domain = domain
         self.state = state
         self.light = light
+        self.fan = fan
     }
 
     var id: String { entityID }
@@ -361,10 +365,31 @@ struct HomeEntity: Decodable, Identifiable {
     var isToggleable: Bool { state == "on" || state == "off" }
 
     enum CodingKeys: String, CodingKey {
-        case domain, state, light
+        case domain, state, light, fan
         case entityID = "entity_id"
         case friendlyName = "friendly_name"
     }
+}
+
+struct FanDetails: Decodable, Equatable {
+    /// 0-100; nil while the fan is off on some integrations.
+    let percentage: Int?
+    let step: Double?
+    let presetModes: [String]
+    let presetMode: String?
+
+    enum CodingKeys: String, CodingKey {
+        case percentage, step
+        case presetModes = "preset_modes"
+        case presetMode = "preset_mode"
+    }
+}
+
+/// The room speaker's level (Core's `speech/room_volume.py`, 0-10).
+struct RoomVolume: Decodable, Equatable {
+    let level: Int?
+    /// Inside Core's quiet hours: the slider sets the night level.
+    let night: Bool
 }
 
 struct LightDetails: Decodable, Equatable {

@@ -41,6 +41,7 @@ from before the wake word is kept and used when nothing follows it.
 from __future__ import annotations
 
 from collections import deque
+from datetime import datetime
 import os
 import re
 import threading
@@ -188,7 +189,7 @@ class RoomVoice:
                 continue
             self._learn_noise(frame)
             if self._heard_wake(frame):
-                if self._ringing_since is not None:  # "Hey JARVIS" while a timer rings: that's stop
+                if self._ringing_since is not None or self._wake_ringing():  # "Hey JARVIS" while ringing: that's stop
                     self._dismiss_alarms()
                     self.detector.reset()
                     continue
@@ -211,6 +212,12 @@ class RoomVoice:
                 self._deliver(item)
             while self._broadcasts:
                 self._chime_and_say(self._broadcasts.popleft())
+        if self._ringing_since is None and self._wake_ringing():
+            # Wake-up backup (brain/wake_alarm.py): the TV didn't come on.
+            if now >= self._next_ring:
+                self._next_ring = now + 3.5
+                room_volume.prepare(datetime.now().replace(hour=12))  # day volume: it's an alarm
+                room_sounds.play("alarm")
         if self._ringing_since is not None:
             if not self._alarming() or now - self._ringing_since > _seconds("ROOM_ALARM_RING_S", 120):
                 self._ringing_since = None
@@ -252,6 +259,11 @@ class RoomVoice:
         self._say(text)
         voice_presence.update("idle")
 
+    @staticmethod
+    def _wake_ringing() -> bool:
+        from brain import wake_alarm
+        return wake_alarm.ringing()
+
     def _alarming(self) -> list:
         from brain import timers
         try:
@@ -260,7 +272,13 @@ class RoomVoice:
             return []
 
     def _dismiss_alarms(self) -> bool:
-        from brain import timers
+        from brain import timers, wake_alarm
+        if self._wake_ringing():
+            wake_alarm.im_up()  # stops the ring, lights on, TV wake screen closes
+            log.info("Dismissed the wake-up backup ring")
+            room_sounds.play("done")
+            voice_presence.update("idle")
+            return True
         ringing = self._alarming()
         for t in ringing:
             timers.dismiss_timer(t.id)
@@ -388,7 +406,7 @@ class RoomVoice:
             voice_presence.update("idle")
             return False
 
-        if self._alarming() and _DISMISS.search(text.lower()):
+        if (self._alarming() or self._wake_ringing()) and _DISMISS.search(text.lower()):
             self._dismiss_alarms()
             voice_presence.update("idle")
             return False
