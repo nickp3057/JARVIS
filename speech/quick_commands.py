@@ -1,7 +1,7 @@
 """Home commands the room voice runs itself, without asking Claude.
 
 The point is speed: "game time", "peace", "desk lights off", "turn on the
-lamp", "bedroom light to 40", "fan to 30" go straight to Home Assistant (through the same
+lamp", "bedroom light to 40", "fan to 30", "TV off" go straight to Home Assistant (through the same
 guarded ``app.status_hub`` calls the apps use) and answer with a jingle,
 like a smart speaker. Anything that doesn't clearly match returns None and
 goes to the normal conversation.
@@ -23,6 +23,8 @@ _VERB = r"(?:turn|switch|shut|put)\s+"
 _ON_OFF = (re.compile(rf"^{_VERB}(?P<action>on|off)\s+(?P<target>.+)$"),
            re.compile(rf"^(?:{_VERB})?(?P<target>.+?)\s+(?P<action>on|off)$"))
 _LEVEL = re.compile(r"^(?:set|dim|turn|put|make)?\s*(.+?)\s+(?:to|at)\s+(\d{1,3})\s*(?:%|percent)?$")
+# Nick's room TV (its own remote protocol, integrations/tv_remote.py), not an allowlisted entity.
+_TV = re.compile(r"^(?:tv|telly|television)$")
 _SCENE_VERBS = re.compile(r"^(?:run|start|activate|set|turn on|do|it's|its|time for)\s+")
 
 
@@ -95,6 +97,10 @@ def run(text: str) -> QuickResult | None:
         return None
 
     on_off = _ON_OFF[0].match(text) or _ON_OFF[1].match(text)
+    if on_off and _TV.match(on_off["target"].strip()):
+        from integrations import tv_remote
+        ok, detail = tv_remote.power(on_off["action"] == "on")
+        return QuickResult(ok, f"tv {on_off['action']}", "" if ok else detail)
     if on_off:
         action = on_off["action"]
         entity = _match_entity(on_off["target"], entities)

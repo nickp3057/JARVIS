@@ -41,6 +41,15 @@ class QuickCommandTests(unittest.TestCase):
             self.assertTrue(result and result.ok, said)
             self.scene.assert_called_once_with(scene)
 
+    def test_tv_power_by_voice(self) -> None:
+        with patch("integrations.tv_remote.power", return_value=(True, "TV off, sir.")) as power:
+            for said, on in (("Turn off the TV.", False), ("TV on", True), ("turn the television off", False)):
+                power.reset_mock()
+                result = quick_commands.run(said)
+                self.assertTrue(result and result.ok, said)
+                power.assert_called_once_with(on)
+        self.control.assert_not_called()
+
     def test_on_off_and_brightness(self) -> None:
         quick_commands.run("Turn off the desk lights.")
         self.control.assert_called_with("light.desk_lights_2", "off", settle=False)  # no 2 s wait

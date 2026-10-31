@@ -627,6 +627,12 @@ struct JarvisAPIClient {
 
     // MARK: - TV remote
 
+    /// Whether the room TV is on (false when it's off or unreachable).
+    func tvPowerState() async throws -> Bool {
+        struct State: Decodable { let on: Bool }
+        return try await getJSON(State.self, path: "api/tv/power").on
+    }
+
     func pressTVRemote(_ key: String) async throws {
         struct Body: Encodable { let key: String }
         struct Done: Decodable { let ok: Bool }

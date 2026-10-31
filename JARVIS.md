@@ -785,6 +785,14 @@ CALENDAR_ALERT_LEAD_MIN=10  # warn this many minutes before a meeting
 
 ## Recently Shipped
 
+- **TV power: iPad square and instant voice (2026-10-31, iOS 5.36 / build
+  179)** — a square power button beside "TV remote" on the iPad's Room tab
+  (`TVPowerButton`, amber while the TV is on; state from the new `GET
+  /api/tv/power`, every 15 s and 4 s after a press). "TV off" / "turn on
+  the TV" / "turn the television off" to the room voice now go straight to
+  `tv_remote.power` as a quick command (jingle, no model turn); typed or
+  phone requests still use the `tv_power` tool.
+
 - **Less polling, TV stays reachable (2026-10-31, iOS 5.33 / build 176, TV
   8.4)** — measured 1,300 app requests to Core in 10 minutes (portfolio,
   entities and theme each about every 3 s across the devices). Now the

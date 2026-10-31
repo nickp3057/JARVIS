@@ -134,6 +134,13 @@ class FanAndVolumeTests(unittest.TestCase):
         self.assertEqual(self.client.post("/api/home/fan", headers=self.headers,
                                           json={"entity_id": "fan.nicks_fan", "percentage": 101}).status_code, 422)
 
+    def test_tv_power_state(self) -> None:
+        from brain import wake_alarm
+        with patch.object(wake_alarm, "tv_is_on", return_value=True):
+            self.assertEqual(self.client.get("/api/tv/power", headers=self.headers).json(), {"on": True})
+        with patch.object(wake_alarm, "tv_is_on", side_effect=RuntimeError("HA down")):
+            self.assertEqual(self.client.get("/api/tv/power", headers=self.headers).json(), {"on": False})
+
     def test_room_volume_slider(self) -> None:
         from speech import room_sounds, room_volume
         with patch.object(room_volume, "set_level") as set_level, patch.object(room_sounds, "play") as play, \

@@ -565,6 +565,18 @@ class TvRemoteRequest(BaseModel):
     key: str = Field(min_length=1, max_length=20)
 
 
+@app.get("/api/tv/power")
+def tv_power_state(_: None = Depends(authorize)) -> dict[str, object]:
+    """Whether the room TV is on (the iPad's power square). Reads only the
+    TV's remote entity in Home Assistant; ``on`` is false when it's off or
+    unreachable."""
+    from brain import wake_alarm
+    try:
+        return {"on": wake_alarm.tv_is_on()}
+    except Exception:  # noqa: BLE001 - HA down: show it as off
+        return {"on": False}
+
+
 @app.post("/api/tv/remote")
 def tv_remote_press(request: TvRemoteRequest, _: None = Depends(authorize)) -> dict[str, object]:
     """One button on the companion's TV remote."""

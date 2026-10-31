@@ -307,14 +307,17 @@ struct RoomView: View {
             ForEach(timers.prefix(2)) { timerRow($0) }
             if fill { Spacer(minLength: 0) }
             RoomVolumeControl()
-            Button { showingRemote = true } label: {
-                Label("TV remote", systemImage: "appletvremote.gen4")
-                    .font(.headline)
-                    .frame(maxWidth: .infinity, minHeight: 52)
-                    .background(JarvisTheme.cyan.opacity(0.14), in: .rect(cornerRadius: 14))
-                    .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(JarvisTheme.cyan.opacity(0.4)))
+            HStack(spacing: 10) {
+                Button { showingRemote = true } label: {
+                    Label("TV remote", systemImage: "appletvremote.gen4")
+                        .font(.headline)
+                        .frame(maxWidth: .infinity, minHeight: 52)
+                        .background(JarvisTheme.cyan.opacity(0.14), in: .rect(cornerRadius: 14))
+                        .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(JarvisTheme.cyan.opacity(0.4)))
+                }
+                .buttonStyle(CockpitButtonStyle())
+                TVPowerButton()  // the TV on or off in one tap
             }
-            .buttonStyle(CockpitButtonStyle())
             Button { showingSettings = true } label: {
                 Label("Room settings", systemImage: "gearshape")
                     .font(.subheadline.weight(.semibold))
