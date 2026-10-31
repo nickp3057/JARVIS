@@ -11,7 +11,8 @@ import UIKit
 /// stacks and scrolls. Hold a light or the fan and drag up or down without
 /// lifting to set brightness or speed (`LevelDragger`); hold and let go for
 /// the light's brightness and colour (`LightSheet`) or the fan's speed and
-/// modes (`FanSheet`). The hold doesn't also toggle it. The clock panel has
+/// modes (`FanSheet`). The hold doesn't also toggle it, and while held a big
+/// level bar (`LevelOverlay`) covers the panel for finer control. The clock panel has
 /// JARVIS's own volume (the room speaker, `RoomVolumeControl`). Core pushes every Home
 /// Assistant change (`/api/home/stream`), so a switch flipped on the phone or
 /// the wall shows here within about half a second.
@@ -120,6 +121,14 @@ struct RoomView: View {
                   let entity = model.entities.value?.first(where: { $0.entityID == was }) else { return }
             if !dragger.end(entity, model: model) { lightSheet = LightSheetID(id: was) }
         }
+        .overlay {
+            if let id = dragger.activeID, let level = dragger.live[id],
+               let entity = model.entities.value?.first(where: { $0.entityID == id }) {
+                LevelOverlay(name: entity.friendlyName, symbol: Self.symbol(for: entity), level: level)
+                    .transition(.opacity)
+            }
+        }
+        .animation(.easeOut(duration: 0.15), value: dragger.activeID)
         .fullScreenCover(isPresented: $asleep) {
             // Black; a tap is the only thing on it.
             Color.black.ignoresSafeArea()

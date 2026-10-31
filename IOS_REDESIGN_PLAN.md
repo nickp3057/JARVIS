@@ -33,6 +33,7 @@ Check these on the phone first. Some of the "weird" may already be gone.
   dimming / fan speed on the tiles (`LevelDragger`), `FanSheet`, and a JARVIS
   volume slider (room speaker) in the clock panel. The phone's Home tab
   still uses plain long-press for the light sheet.
+  5.31: the hold expands into a big level bar; full screen locks the iPad to Room.
 - Next: an iOS Home Screen / Control Center widget for scenes (needs a
   widget extension target and an App Group for the server address/token).
 

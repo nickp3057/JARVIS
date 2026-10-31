@@ -1,8 +1,28 @@
 import SwiftUI
 
+/// Held while a control on the page owns the finger (the volume slider, a
+/// tile being dragged), so `RootView`'s swipe-between-tabs ignores it. Stays
+/// held a moment after release: the slider lets go before the swipe's own
+/// end fires.
+@MainActor
+enum SwipeLock {
+    private static var held = 0
+    private static var releasedAt = Date.distantPast
+
+    static var active: Bool { held > 0 || Date.now.timeIntervalSince(releasedAt) < 0.4 }
+
+    static func hold() { held += 1 }
+
+    static func release() {
+        held = max(0, held - 1)
+        releasedAt = .now
+    }
+}
+
 /// Hold a light or fan tile on the iPad's Room tab, then drag up or down
-/// without lifting: brightness (or fan speed) follows the finger, about 2.5
-/// points per percent, so a drag the height of two tiles covers the range.
+/// without lifting: brightness (or fan speed) follows the finger. The hold
+/// opens a big level bar over the panel (`LevelOverlay`) at 4 points per
+/// percent, so 1% steps are easy to hit.
 /// Steps go to Core at most four times a second; the last one on release.
 /// Down to 0 turns the light (or fan) off. A hold released without dragging
 /// still opens the light's (or fan's) sheet; `RoomView` does that.
@@ -10,14 +30,15 @@ import SwiftUI
 final class LevelDragger: ObservableObject {
     /// The level each tile shows while (and just after) it's dragged.
     @Published private(set) var live: [String: Int] = [:]
-    private(set) var activeID: String?
+    /// The tile being held: `RoomView` shows the big level bar for it.
+    @Published private(set) var activeID: String?
     private var start = 0
     private var moved = false
     private var lastSent = Date.distantPast
     private var lastLevel: Int?
     private var clearTasks: [String: Task<Void, Never>] = [:]
 
-    static let pointsPerPercent: CGFloat = 2.5
+    static let pointsPerPercent: CGFloat = 4
     /// Movement under this many points is a wobble, not a drag.
     static let deadZone: CGFloat = 8
 
@@ -35,6 +56,7 @@ final class LevelDragger: ObservableObject {
     func begin(_ entity: HomeEntity, on: Bool) {
         let id = entity.entityID
         clearTasks[id]?.cancel()
+        if activeID == nil { SwipeLock.hold() }
         activeID = id
         start = live[id] ?? Self.level(of: entity, on: on)
         live[id] = start
@@ -63,6 +85,7 @@ final class LevelDragger: ObservableObject {
         let id = entity.entityID
         guard activeID == id else { return false }
         activeID = nil
+        SwipeLock.release()
         guard moved, let level = live[id] else {
             live[id] = nil
             return false
@@ -110,6 +133,7 @@ struct RoomVolumeControl: View {
                             .monospacedDigit()
                     }
                     Slider(value: $level, in: 0...10, step: 1) { isEditing in
+                        if isEditing != editing { isEditing ? SwipeLock.hold() : SwipeLock.release() }
                         editing = isEditing
                         if !isEditing { send(Int(level)) }
                     }
@@ -154,6 +178,45 @@ struct RoomVolumeControl: View {
         if let value = volume.level, !editing { level = Double(value) }
         night = volume.night
         loaded = true
+    }
+}
+
+/// The expanded control while a tile is held: a tall bar (like Control
+/// Center's) filled to the level, the big number and the device's name over
+/// a dimmed panel. It only shows; the finger stays on the tile's gesture.
+struct LevelOverlay: View {
+    let name: String
+    let symbol: String
+    let level: Int
+
+    var body: some View {
+        ZStack {
+            Color.black.opacity(0.55).ignoresSafeArea()
+            VStack(spacing: 20) {
+                Label(name, systemImage: symbol)
+                    .font(.title2.weight(.semibold))
+                    .foregroundStyle(.white.opacity(0.85))
+                Text(level == 0 ? "Off" : "\(level)%")
+                    .font(.system(size: 64, weight: .thin, design: .rounded))
+                    .monospacedDigit()
+                    .foregroundStyle(.white)
+                    .contentTransition(.numericText())
+                ZStack(alignment: .bottom) {
+                    RoundedRectangle(cornerRadius: 36).fill(Color.white.opacity(0.12))
+                    RoundedRectangle(cornerRadius: 36)
+                        .fill(JarvisTheme.amber.opacity(0.9))
+                        .frame(height: 400 * CGFloat(level) / 100)
+                }
+                .frame(width: 130, height: 400)
+                .clipShape(.rect(cornerRadius: 36))
+                .overlay(RoundedRectangle(cornerRadius: 36).strokeBorder(.white.opacity(0.2)))
+                Text("Drag up or down · let go to set")
+                    .font(.subheadline)
+                    .foregroundStyle(.white.opacity(0.6))
+            }
+        }
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
     }
 }
 

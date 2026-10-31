@@ -21,6 +21,14 @@ struct RootView: View {
     @AppStorage(RoomView.autoReturnKey) private var autoReturn = true
     /// Bumped by any touch, so the trip back to Room waits for a quiet spell.
     @State private var touches = 0
+    /// Room's full screen: the iPad stays on Room, no swiping to other tabs.
+    @AppStorage("room.fullScreen") private var roomFullScreen = false
+
+    /// No swipe to another tab: in Room's full screen, or while a control
+    /// (the volume slider, a tile drag) has the finger (`SwipeLock`).
+    private var swipeBlocked: Bool {
+        (Self.isPad && !Self.isMac && selection == .room && roomFullScreen) || SwipeLock.active
+    }
 
     /// Tab-bar (and swipe) order: Home sits in the middle. The iPad adds Room
     /// first (its default): the tablet is mainly a panel for the room. The
@@ -132,7 +140,10 @@ struct RootView: View {
     /// while the drag is clearly horizontal, so vertical scrolling is untouched.
     private func track(_ drag: DragGesture.Value) {
         touches &+= 1
-        guard !reduceMotion, drag.startLocation.x > 24 else { return }
+        guard !reduceMotion, drag.startLocation.x > 24, !swipeBlocked else {
+            if swipeOffset != 0 { withAnimation(.spring(duration: 0.25)) { swipeOffset = 0 } }
+            return
+        }
         let dx = drag.translation.width, dy = drag.translation.height
         guard abs(dx) > 2.5 * abs(dy) else {
             if swipeOffset != 0 { withAnimation(.spring(duration: 0.25)) { swipeOffset = 0 } }
@@ -147,7 +158,8 @@ struct RootView: View {
     /// pushed screens).
     private func swipe(_ drag: DragGesture.Value) {
         let dx = drag.translation.width, dy = drag.translation.height
-        guard drag.startLocation.x > 24, abs(dx) > 60, abs(dx) > 2.5 * abs(dy), let next = neighbour(towards: dx) else {
+        guard !swipeBlocked, drag.startLocation.x > 24, abs(dx) > 60, abs(dx) > 2.5 * abs(dy),
+              let next = neighbour(towards: dx) else {
             withAnimation(.spring(duration: 0.3)) { swipeOffset = 0 }
             return
         }

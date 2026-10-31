@@ -785,6 +785,13 @@ CALENDAR_ALERT_LEAD_MIN=10  # warn this many minutes before a meeting
 
 ## Recently Shipped
 
+- **iPad Room: big level bar, no stray tab swipes (2026-10-31, iOS 5.31 /
+  build 174)** — holding a light or fan tile now opens a tall level bar over
+  the panel (`LevelOverlay`, 4 pt per percent) while the same finger drags.
+  The volume slider and tile drags hold `SwipeLock`, so they no longer
+  swipe to the next tab; with Room's **Full screen** on, the iPad stays on
+  Room (no swiping to other tabs; turn Full screen off in Room settings to leave).
+
 - **Wake-up backup ring; iPad volume slider, hold-and-drag dimming, fan speed
   (2026-10-31, iOS 5.30 / build 173)** — the alarm fired at 09:00 but the TV
   was off the network (see "Wake-up music"): Core now wakes the TV through
