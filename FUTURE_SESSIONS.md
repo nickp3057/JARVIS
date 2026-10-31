@@ -146,6 +146,12 @@ install on the phone and iPad, then check:
   `RoomCameraPresenter.shared`. Open the viewer, slide Barn Door, the feed
   should keep running.
 
+- [ ] **iPad movie mode + battery (5.41)**: movie mode now keeps the screen
+  awake for the whole film (even with Keep screen on off) and caps the
+  backlight at 15%, restoring it after. The battery badge updates the moment
+  iOS reports a change (iOS only gives apps 5% steps). Check the dim level is
+  readable in a dark room.
+
 ### Loose ends (Nick)
 
 - [ ] Reserve the Optiplex's IP on the home router (it drifted 10.0.0.80 →

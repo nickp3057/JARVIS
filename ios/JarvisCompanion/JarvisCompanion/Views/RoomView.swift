@@ -52,6 +52,8 @@ struct RoomView: View {
     @AppStorage(RoomView.autoReturnKey) private var autoReturn = true
     /// The screen's brightness before the night screen, to put back.
     @State private var savedBrightness: CGFloat?
+    /// The screen's brightness before movie mode dimmed it.
+    @State private var movieBrightness: CGFloat?
     @ObservedObject private var voice = VoicePresence.shared
     @StateObject private var holds = HoldSuppressor()
     @StateObject private var dragger = LevelDragger()
@@ -198,12 +200,20 @@ struct RoomView: View {
             UIApplication.shared.isIdleTimerDisabled = false
             asleep = false
             setDimmed(false)
+            setMovieDim(false)
         }
         .onChange(of: scenePhase) { _, phase in
             if phase != .active { asleep = false; setDimmed(false) }
         }
-        .onAppear { if !RootView.isMac { UIApplication.shared.isIdleTimerDisabled = keepAwake } }
-        .onChange(of: keepAwake) { _, on in if !RootView.isMac { UIApplication.shared.isIdleTimerDisabled = on } }
+        .onAppear { if !RootView.isMac { UIApplication.shared.isIdleTimerDisabled = keepAwake || movieMode } }
+        .onChange(of: keepAwake) { _, on in if !RootView.isMac { UIApplication.shared.isIdleTimerDisabled = on || movieMode } }
+        // Movie mode stays awake for the whole film (even with Keep screen on
+        // off) and drops the backlight, the iPad's biggest power draw.
+        .onChange(of: movieMode) { _, on in
+            UIApplication.shared.isIdleTimerDisabled = keepAwake || on
+            setMovieDim(on)
+        }
+        .onChange(of: scenePhase) { _, phase in setMovieDim(phase == .active && movieMode) }
     }
 
     private static let lightsOutScenes: Set<String> = ["scene.peace", "scene.goodnight"]
@@ -244,6 +254,18 @@ struct RoomView: View {
         guard !RootView.isMac, nightScreen, scenePhase == .active, !voice.active, !timers.contains(where: { $0.state == "alarming" }),
               lightsOut || (keepAwake && model.sun == "below_horizon") else { return false }
         return lightsAllOff == true
+    }
+
+    /// Movie mode's low backlight; the old level goes back when it ends.
+    private func setMovieDim(_ dim: Bool) {
+        guard !RootView.isMac, let screen = (UIApplication.shared.connectedScenes.first as? UIWindowScene)?.screen else { return }
+        if dim {
+            if movieBrightness == nil { movieBrightness = screen.brightness }
+            screen.brightness = min(screen.brightness, 0.15)
+        } else if let saved = movieBrightness {
+            screen.brightness = saved
+            movieBrightness = nil
+        }
     }
 
     /// The app may set the screen's brightness while it's in front; put it
@@ -732,11 +754,11 @@ private struct MovieModeView: View {
 
 /// The iPad's battery, since full screen hides the status bar.
 private struct BatteryBadge: View {
+    @State private var level: Float = -1  // -1 when unknown
+    @State private var charging = false
+
     var body: some View {
-        TimelineView(.periodic(from: .now, by: 60)) { _ in
-            let device = UIDevice.current
-            let level = device.batteryLevel  // -1 when unknown
-            let charging = device.batteryState == .charging || device.batteryState == .full
+        Group {
             if level >= 0 {
                 HStack(spacing: 4) {
                     Image(systemName: charging ? "battery.100.bolt" : Self.symbol(level))
@@ -748,7 +770,17 @@ private struct BatteryBadge: View {
                 .accessibilityLabel("Battery \(Int((level * 100).rounded())) percent\(charging ? ", charging" : "")")
             }
         }
-        .onAppear { UIDevice.current.isBatteryMonitoringEnabled = true }
+        // iOS posts these the moment the level (in its 5% steps) or the
+        // charger changes, so no polling and no lag.
+        .onAppear { UIDevice.current.isBatteryMonitoringEnabled = true; read() }
+        .onReceive(NotificationCenter.default.publisher(for: UIDevice.batteryLevelDidChangeNotification)) { _ in read() }
+        .onReceive(NotificationCenter.default.publisher(for: UIDevice.batteryStateDidChangeNotification)) { _ in read() }
+    }
+
+    private func read() {
+        let device = UIDevice.current
+        level = device.batteryLevel
+        charging = device.batteryState == .charging || device.batteryState == .full
     }
 
     private static func symbol(_ level: Float) -> String {
