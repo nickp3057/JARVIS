@@ -146,11 +146,14 @@ install on the phone and iPad, then check:
   `RoomCameraPresenter.shared`. Open the viewer, slide Barn Door, the feed
   should keep running.
 
-- [ ] **iPad movie mode + battery (5.41)**: movie mode now keeps the screen
-  awake for the whole film (even with Keep screen on off) and caps the
-  backlight at 15%, restoring it after. The battery badge updates the moment
-  iOS reports a change (iOS only gives apps 5% steps). Check the dim level is
-  readable in a dark room.
+- [ ] **iPad movie mode + battery (5.42)**: movie mode keeps the screen
+  awake for the whole film (even with Keep screen on off). It drops to 15%
+  after 20 s idle; a tap lights it to 100%, then it re-dims. The old
+  brightness comes back when the movie ends. The battery badge updates the
+  moment iOS reports a change (iOS only gives apps 5% steps).
+- [ ] **Night screen shows "JARVIS is watching"** in light grey while the
+  iPad's lens is on, so Nick can see it from bed. Check it's readable at
+  brightness 0 and not too bright to sleep with.
 
 ### Loose ends (Nick)
 

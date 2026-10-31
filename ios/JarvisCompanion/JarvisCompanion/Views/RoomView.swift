@@ -54,6 +54,9 @@ struct RoomView: View {
     @State private var savedBrightness: CGFloat?
     /// The screen's brightness before movie mode dimmed it.
     @State private var movieBrightness: CGFloat?
+    /// Bumped by each tap in movie mode: full brightness, then back to dim.
+    @State private var movieTouches = 0
+    @Environment(\.cameraWatching) private var cameraWatching
     @ObservedObject private var voice = VoicePresence.shared
     @StateObject private var holds = HoldSuppressor()
     @StateObject private var dragger = LevelDragger()
@@ -82,6 +85,7 @@ struct RoomView: View {
             if movieMode {
                 MovieModeView(model: model, showRemote: { showingRemote = true },
                               backToPanel: { withAnimation(.easeInOut(duration: 0.4)) { movieDismissed = true } })
+                    .simultaneousGesture(TapGesture().onEnded { movieTouches &+= 1 })
                     .transition(.opacity)
             } else if wide {
                 HStack(alignment: .top, spacing: 18) {
@@ -138,10 +142,19 @@ struct RoomView: View {
         .animation(.easeOut(duration: 0.18), value: dragger.panelID ?? dragger.activeID)
         .fullScreenCover(isPresented: $asleep) {
             // Black; a tap is the only thing on it.
-            Color.black.ignoresSafeArea()
-                .contentShape(Rectangle())
-                .onTapGesture { wakeFromNight() }
-                .accessibilityLabel("Night screen. Tap to wake.")
+            ZStack {
+                Color.black.ignoresSafeArea()
+                // Lens on while the room sleeps: a faint grey line, readable
+                // from bed, so a watcher can't go unnoticed.
+                if cameraWatching {
+                    Label("JARVIS is watching", systemImage: "eye")
+                        .font(.title2.weight(.medium))
+                        .foregroundStyle(Color(white: 0.6))
+                }
+            }
+            .contentShape(Rectangle())
+            .onTapGesture { wakeFromNight() }
+            .accessibilityLabel(cameraWatching ? "Night screen. JARVIS is watching. Tap to wake." : "Night screen. Tap to wake.")
         }
         .transaction { $0.disablesAnimations = asleep }
         .task(id: "\(roomIsDark)-\(asleep)-\(lightsOut)") {
@@ -200,7 +213,7 @@ struct RoomView: View {
             UIApplication.shared.isIdleTimerDisabled = false
             asleep = false
             setDimmed(false)
-            setMovieDim(false)
+            setMovieDim(nil)
         }
         .onChange(of: scenePhase) { _, phase in
             if phase != .active { asleep = false; setDimmed(false) }
@@ -211,9 +224,16 @@ struct RoomView: View {
         // off) and drops the backlight, the iPad's biggest power draw.
         .onChange(of: movieMode) { _, on in
             UIApplication.shared.isIdleTimerDisabled = keepAwake || on
-            setMovieDim(on)
+            if !on { setMovieDim(nil) }
         }
-        .onChange(of: scenePhase) { _, phase in setMovieDim(phase == .active && movieMode) }
+        .onChange(of: scenePhase) { _, phase in if phase != .active { setMovieDim(nil) } }
+        // Movie mode: a tap lights the screen fully, 20 s idle drops it to 15%.
+        .task(id: "\(movieMode)-\(movieTouches)-\(scenePhase == .active)") {
+            guard movieMode, scenePhase == .active else { return }
+            if movieTouches > 0 { setMovieDim(1.0) }
+            try? await Task.sleep(for: .seconds(20))
+            if !Task.isCancelled, movieMode { setMovieDim(0.15) }
+        }
     }
 
     private static let lightsOutScenes: Set<String> = ["scene.peace", "scene.goodnight"]
@@ -256,12 +276,13 @@ struct RoomView: View {
         return lightsAllOff == true
     }
 
-    /// Movie mode's low backlight; the old level goes back when it ends.
-    private func setMovieDim(_ dim: Bool) {
+    /// Movie mode's backlight (nil = movie over); the old level goes back
+    /// when it ends.
+    private func setMovieDim(_ level: CGFloat?) {
         guard !RootView.isMac, let screen = (UIApplication.shared.connectedScenes.first as? UIWindowScene)?.screen else { return }
-        if dim {
+        if let level {
             if movieBrightness == nil { movieBrightness = screen.brightness }
-            screen.brightness = min(screen.brightness, 0.15)
+            screen.brightness = level
         } else if let saved = movieBrightness {
             screen.brightness = saved
             movieBrightness = nil
