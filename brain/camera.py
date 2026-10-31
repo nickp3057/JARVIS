@@ -36,6 +36,15 @@ def view_heartbeat(now: float | None = None) -> None:
         _viewer_last_seen = now or time.time()
 
 
+def leave() -> None:
+    """The phone closed the live view: the lens should stop now, not after
+    ``VIEWER_TTL``. The iPad's next frame upload is refused and it stops."""
+    global _viewer_last_seen, _frame
+    with _lock:
+        _viewer_last_seen = 0.0
+        _frame = None
+
+
 def kill(now: float | None = None) -> float:
     """Lock the lens off for KILL_SECONDS. Returns when it lifts. Also drops
     any viewer and the last frame at once."""
@@ -65,12 +74,12 @@ def wanted(now: float | None = None) -> bool:
 
 
 def put_frame(data: bytes, now: float | None = None) -> bool:
-    """The iPad's latest frame. Refused (False) during a lockout, so a kill
-    stops frames even if the lens is mid-shutdown."""
+    """The iPad's latest frame. Refused (False) during a lockout or once no
+    viewer is left, so a kill or the phone closing stops the lens at once."""
     global _frame, _frame_at
     now = now or time.time()
     with _lock:
-        if now < _kill_until:
+        if now < _kill_until or now - _viewer_last_seen >= VIEWER_TTL:
             return False
         _frame, _frame_at = data, now
         return True

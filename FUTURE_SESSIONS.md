@@ -155,6 +155,17 @@ install on the phone and iPad, then check:
   iPad's lens is on, so Nick can see it from bed. Check it's readable at
   brightness 0 and not too bright to sleep with.
 
+- [ ] **Green orb goes out instantly (5.43 + Core)**: closing the phone's
+  camera view posts `POST /api/camera/leave`; Core then refuses the iPad's
+  next frame (409) and it stops within ~0.2 s. Frames are now refused
+  whenever no viewer is live. Needs `git pull` + restart on the Optiplex.
+- [ ] **iPad low battery alert (5.43 + Core)**: the iPad posts
+  `POST /api/device/battery` when its level/charging changes; below 20% and
+  not charging, Core raises a `device_battery` alert (once per 4 h).
+- [ ] **Camera on mid-movie** lights the iPad to full, then re-dims after 20 s.
+- [ ] Add `/api/camera/leave` and `/api/device/battery` to JARVIS.md (left
+  out because JARVIS.md had another session's uncommitted edits).
+
 ### Loose ends (Nick)
 
 - [ ] Reserve the Optiplex's IP on the home router (it drifted 10.0.0.80 →

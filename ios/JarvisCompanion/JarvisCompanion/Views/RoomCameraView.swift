@@ -55,6 +55,9 @@ struct RoomCameraView: View {
             .tint(.white)
         }
         .task { await drive() }
+        // Closing the view tells Core at once, so the iPad's orb goes out
+        // within a frame instead of after the heartbeat lapses.
+        .onDisappear { let c = client; Task { _ = try? await c?.cameraLeave() } }
     }
 
     private var waitingText: String {

@@ -24,6 +24,8 @@ final class RoomCameraController: NSObject, ObservableObject {
     private var uploading = false
     private var lastUpload = Date.distantPast
     private var authorized = false
+    /// Last battery reading sent to Core (it only changes in 5% steps).
+    private var reportedBattery: (Float, Bool)?
 
     /// Start following Core's camera status (iPad only; the phone never
     /// captures). Safe to call repeatedly.
@@ -46,8 +48,22 @@ final class RoomCameraController: NSObject, ObservableObject {
 
     private func tick() async {
         guard let settings else { return }
-        let wanted = (try? await JarvisAPIClient.make(from: settings).cameraStatus().wanted) ?? false
+        let client = try? JarvisAPIClient.make(from: settings)
+        let wanted = (try? await client?.cameraStatus().wanted) ?? false
         if wanted { await start() } else { stop() }
+        await reportBatteryIfChanged(client)
+    }
+
+    /// Send the battery to Core when it changes; Core warns the phone below 20%.
+    private func reportBatteryIfChanged(_ client: JarvisAPIClient?) async {
+        let device = UIDevice.current
+        device.isBatteryMonitoringEnabled = true
+        let level = device.batteryLevel
+        let charging = device.batteryState == .charging || device.batteryState == .full
+        guard level >= 0, let client, reportedBattery.map({ $0 != (level, charging) }) ?? true else { return }
+        if (try? await client.reportBattery(level: level, charging: charging)) != nil {
+            reportedBattery = (level, charging)
+        }
     }
 
     private func start() async {

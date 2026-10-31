@@ -588,6 +588,38 @@ def camera_status(_: None = Depends(authorize)) -> dict[str, object]:
     return camera.status()
 
 
+@app.post("/api/camera/leave")
+def camera_leave(_: None = Depends(authorize)) -> dict[str, object]:
+    """The phone closed the live view: stop the lens (and the iPad's green
+    orb) now instead of waiting for the heartbeat to lapse."""
+    from brain import camera
+    camera.leave()
+    return camera.status()
+
+
+class DeviceBatteryRequest(BaseModel):
+    device: str = Field(default="iPad", min_length=1, max_length=40)
+    level: float = Field(ge=0, le=1)
+    charging: bool = False
+
+
+IPAD_LOW_BATTERY = 0.20
+
+
+@app.post("/api/device/battery")
+def device_battery(payload: DeviceBatteryRequest, _: None = Depends(authorize)) -> dict[str, object]:
+    """The wall iPad reports its battery when it changes. Below 20% and not
+    on the charger, JARVIS warns the phone (at most every few hours)."""
+    low = payload.level < IPAD_LOW_BATTERY and not payload.charging
+    if low:
+        pct = round(payload.level * 100)
+        runtime().raise_alert("device_battery", f"{payload.device} battery low",
+                              f"The {payload.device} is at {pct}% and not charging.",
+                              source="device-battery", dedupe_key=f"battery:{payload.device}",
+                              cooldown_s=4 * 3600)
+    return {"ok": True, "low": low}
+
+
 @app.post("/api/camera/kill")
 def camera_kill(_: None = Depends(authorize)) -> dict[str, object]:
     """Lock the lens off for five minutes, from anywhere."""

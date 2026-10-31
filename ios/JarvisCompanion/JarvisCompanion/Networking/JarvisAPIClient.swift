@@ -642,6 +642,19 @@ struct JarvisAPIClient {
         try await getJSON(CameraStatus.self, path: "api/camera/status")
     }
 
+    /// The phone closed the live view: the lens stops now, not after the TTL.
+    @discardableResult
+    func cameraLeave() async throws -> CameraStatus {
+        try await postEmpty(CameraStatus.self, path: "api/camera/leave")
+    }
+
+    /// The wall iPad's battery, so Core can warn the phone when it runs low.
+    func reportBattery(level: Float, charging: Bool) async throws {
+        struct Body: Encodable { let device = "iPad"; let level: Float; let charging: Bool }
+        struct Reply: Decodable { let ok: Bool }
+        _ = try await postJSON(Reply.self, path: "api/device/battery", body: Body(level: level, charging: charging))
+    }
+
     /// Lock the lens off for five minutes, from the phone's Kill button.
     @discardableResult
     func cameraKill() async throws -> CameraStatus {

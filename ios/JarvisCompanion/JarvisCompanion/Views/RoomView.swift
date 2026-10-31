@@ -35,8 +35,8 @@ import UIKit
 struct RoomView: View {
     @EnvironmentObject private var settings: AppSettings
     @ObservedObject var model: HubViewModel
-    @Environment(\.scenePhase) private var scenePhase
-    @AppStorage("room.keepAwake") private var keepAwake = false
+    @Environment(\.scenePhase) fileprivate var scenePhase
+    @AppStorage("room.keepAwake") fileprivate var keepAwake = false
     @State private var wake: WakeSchedule?
     @State private var showingRemote = false
     @State private var showingWake = false
@@ -55,8 +55,8 @@ struct RoomView: View {
     /// The screen's brightness before movie mode dimmed it.
     @State private var movieBrightness: CGFloat?
     /// Bumped by each tap in movie mode: full brightness, then back to dim.
-    @State private var movieTouches = 0
-    @Environment(\.cameraWatching) private var cameraWatching
+    @State fileprivate var movieTouches = 0
+    @Environment(\.cameraWatching) fileprivate var cameraWatching
     @ObservedObject private var voice = VoicePresence.shared
     @StateObject private var holds = HoldSuppressor()
     @StateObject private var dragger = LevelDragger()
@@ -75,7 +75,7 @@ struct RoomView: View {
     @State private var movieDismissed = false
 
     /// Movie is on: the panel becomes a dark, quiet movie remote.
-    private var movieMode: Bool {
+    fileprivate var movieMode: Bool {
         !RootView.isMac && !movieDismissed && model.scenes.value?.current == "scene.movie"
     }
 
@@ -220,21 +220,12 @@ struct RoomView: View {
         }
         .onAppear { if !RootView.isMac { UIApplication.shared.isIdleTimerDisabled = keepAwake || movieMode } }
         .onChange(of: keepAwake) { _, on in if !RootView.isMac { UIApplication.shared.isIdleTimerDisabled = on || movieMode } }
-        // Movie mode stays awake for the whole film (even with Keep screen on
-        // off) and drops the backlight, the iPad's biggest power draw.
-        .onChange(of: movieMode) { _, on in
-            UIApplication.shared.isIdleTimerDisabled = keepAwake || on
-            if !on { setMovieDim(nil) }
-        }
-        .onChange(of: scenePhase) { _, phase in if phase != .active { setMovieDim(nil) } }
-        // Movie mode: a tap lights the screen fully, 20 s idle drops it to 15%.
-        .task(id: "\(movieMode)-\(movieTouches)-\(scenePhase == .active)") {
-            guard movieMode, scenePhase == .active else { return }
-            if movieTouches > 0 { setMovieDim(1.0) }
-            try? await Task.sleep(for: .seconds(20))
-            if !Task.isCancelled, movieMode { setMovieDim(0.15) }
-        }
+        .modifier(movieModeEffects)
     }
+
+    /// Movie mode stays awake for the whole film (even with Keep screen on
+    /// off) and drops the backlight, the iPad's biggest power draw.
+    private var movieModeEffects: MovieModeEffects { MovieModeEffects(room: self) }
 
     private static let lightsOutScenes: Set<String> = ["scene.peace", "scene.goodnight"]
     static let favoritesKey = "room.favoriteScenes"
@@ -278,7 +269,7 @@ struct RoomView: View {
 
     /// Movie mode's backlight (nil = movie over); the old level goes back
     /// when it ends.
-    private func setMovieDim(_ level: CGFloat?) {
+    fileprivate func setMovieDim(_ level: CGFloat?) {
         guard !RootView.isMac, let screen = (UIApplication.shared.connectedScenes.first as? UIWindowScene)?.screen else { return }
         if let level {
             if movieBrightness == nil { movieBrightness = screen.brightness }
@@ -883,5 +874,29 @@ private struct RoomSettingsView: View {
             list[list.count - 1] = id
         }
         favoriteScenes = list.joined(separator: ",")
+    }
+}
+
+/// RoomView's movie-mode wake/brightness rules, split out so the main view's
+/// modifier chain stays type-checkable.
+private struct MovieModeEffects: ViewModifier {
+    let room: RoomView
+
+    func body(content: Content) -> some View {
+        content
+            .onChange(of: room.movieMode) { _, on in
+                UIApplication.shared.isIdleTimerDisabled = room.keepAwake || on
+                if !on { room.setMovieDim(nil) }
+            }
+            .onChange(of: room.scenePhase) { _, phase in if phase != .active { room.setMovieDim(nil) } }
+            // The lens coming on mid-movie lights the screen like a tap would.
+            .onChange(of: room.cameraWatching) { _, on in if on && room.movieMode { room.movieTouches &+= 1 } }
+            // Movie mode: a tap lights the screen fully, 20 s idle drops it to 15%.
+            .task(id: "\(room.movieMode)-\(room.movieTouches)-\(room.scenePhase == .active)") {
+                guard room.movieMode, room.scenePhase == .active else { return }
+                if room.movieTouches > 0 { room.setMovieDim(1.0) }
+                try? await Task.sleep(for: .seconds(20))
+                if !Task.isCancelled, room.movieMode { room.setMovieDim(0.15) }
+            }
     }
 }
