@@ -1000,23 +1000,25 @@ class JarvisRuntime:
         cooldown_s = float(os.getenv("HOME_EVENT_COOLDOWN_S", "5.0"))
         key = f"{entity_id}:{old_state}->{state}"
         now = time.time()
-        # A flapping device (the TV dropping on and off Wi-Fi in standby,
-        # 2026-10-31: 276 events in 90 min) would push every real event out
-        # of the inbox: more than 4 changes in 10 minutes mutes it for 30.
-        flaps = self.__dict__.setdefault("_home_flaps", {})
-        muted = self.__dict__.setdefault("_home_flap_muted", {})
-        if now < muted.get(entity_id, 0.0):
+        if now - self._home_event_last_seen.get(key, 0) < cooldown_s:
             return False
-        recent = [t for t in flaps.get(entity_id, []) if now - t < 600] + [now]
-        flaps[entity_id] = recent
-        if len(recent) > 4:
-            muted[entity_id] = now + 1800
-            flaps[entity_id] = []
-            log.info("Home events from %s muted for 30 min (flapping)", entity_id)
-            return False
-        last_seen = self._home_event_last_seen.get(key, 0)
-        if now - last_seen < cooldown_s:
-            return False
+        # A flapping TV (dropping on and off Wi-Fi in standby, 2026-10-31:
+        # 276 events in 90 min) would push every real event out of the
+        # inbox: more than 4 changes in 10 minutes mutes it for 30. Only
+        # TV-like entities (media players, remotes); lights, switches and
+        # fans are always recorded however often Nick flips them.
+        if entity_id.split(".", 1)[0] in ("media_player", "remote"):
+            flaps = self.__dict__.setdefault("_home_flaps", {})
+            muted = self.__dict__.setdefault("_home_flap_muted", {})
+            if now < muted.get(entity_id, 0.0):
+                return False
+            recent = [t for t in flaps.get(entity_id, []) if now - t < 600] + [now]
+            flaps[entity_id] = recent
+            if len(recent) > 4:
+                muted[entity_id] = now + 1800
+                flaps[entity_id] = []
+                log.info("Home events from %s muted for 30 min (flapping)", entity_id)
+                return False
         self._home_event_last_seen[key] = now
         return True
 

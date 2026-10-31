@@ -85,7 +85,10 @@ class RuntimeMonitorTests(unittest.TestCase):
                 old, new = ("off", "on") if i % 2 == 0 else ("on", "off")
                 recorded.append(runtime._should_record_home_change("media_player.tv", old, new))
             self.assertEqual(recorded, [True, True, True, True, False, False, False, False])
-            self.assertTrue(runtime._should_record_home_change("light.desk", "off", "on"))  # others unaffected
+            for i in range(8):  # lights are never muted, however often they're flipped
+                clock[0] += 60
+                old, new = ("off", "on") if i % 2 == 0 else ("on", "off")
+                self.assertTrue(runtime._should_record_home_change("light.desk", old, new))
             clock[0] += 1801
             self.assertTrue(runtime._should_record_home_change("media_player.tv", "off", "on"))
 
