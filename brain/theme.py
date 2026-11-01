@@ -11,7 +11,8 @@ from pathlib import Path
 import time
 
 # Same names as JarvisPalette (iOS) and Theme.java (TV).
-THEMES = ("arc", "hotRod", "malibu", "crimson", "mark85", "spiderMan", "mcqueen", "barnDoor")
+THEMES = ("arc", "hotRod", "malibu", "crimson", "mark85", "spiderMan", "mcqueen", "experimenting", "barnDoor")
+# experimenting is the iOS visual lab (Views/Experiments.swift); the TV shows it as Spider-Man.
 # barnDoor is Barn Door Protocol's red alert (brain/protocols.py), not a pick.
 # Retired picks land on their closest survivor.
 _RETIRED = {"markIII": "hotRod", "graphite": "arc", "stealth": "arc"}

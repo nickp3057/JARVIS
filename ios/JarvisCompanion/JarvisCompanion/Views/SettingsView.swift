@@ -237,6 +237,9 @@ struct ThemePicker: View {
                 .buttonStyle(.plain)
                 .accessibilityAddTraits(palette == option.rawValue ? .isSelected : [])
             }
+            if palette == JarvisPalette.experimenting.rawValue {
+                ExperimentToggles()
+            }
         }
         .sensoryFeedback(.selection, trigger: palette)
     }

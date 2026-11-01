@@ -285,6 +285,12 @@ RMS envelope from ElevenLabs audio drives the orb in real time using a monotonic
   `govee` integration: a `BARN_DOOR_EFFECTS` entry keyed by that select is
   restored with `select.select_option`, and the pick showing at engage wins.
 
+### Voice ID *(new)*
+- `voice_id(action)` — Nick's voiceprint for the room mic (`brain/speaker_id.py`):
+  `status`, `enroll` (the next `VOICE_ID_SAMPLES` room sentences become
+  samples, counted aloud, no wake word between them), `cancel`, `reset`.
+  Locked itself, so only Nick (or the phone app) can re-enrol.
+
 ### Nick's room TV *(new)*
 - `kill_camera()` — lock the room camera (the iPad lens Nick watches from
   his phone) off for five minutes, from anywhere; no tool turns it on.
@@ -690,6 +696,12 @@ VOICE_FOLLOWUP_S=8          # no-wake-word follow-up window after a spoken answe
 VOICE_PREROLL_S=2           # audio kept from before the wake word ("game time, Jarvis")
 VOICE_SHORTCUT_AFTER=2      # same phrase + same simple action this many times -> instant shortcut
 VOICE_BARGE_IN=1            # "Hey JARVIS" while he's talking stops him and listens
+VOICE_ID=0                  # 1 = check the room voice against Nick's voiceprint; guests can't use locked tools (brain/voice_trust.py)
+VOICE_ID_MODEL=             # speaker model; default models/speaker/nemo_en_titanet_small.onnx (download below)
+VOICE_ID_THRESHOLD=0.55     # cosine score that counts as Nick; every verdict is logged with its score to tune this
+VOICE_ID_SAMPLES=5          # sentences "learn my voice" asks for
+VOICE_LOCKED_TOOLS=         # extra comma-separated tool names only Nick's voice may use
+VOICE_TRUSTED_CLIENTS=      # client-token names whose /chat counts as Nick (default: every client token is a guest)
 ROOM_ALARM_RING_S=120       # longest a finished timer rings on the room speaker
 WAKE_BACKUP_DELAY_S=90      # wake-up: how long the TV gets to come on before the room speaker rings instead
 WAKE_BACKUP_RING_S=600      # wake-up: longest the backup ring goes on
@@ -719,7 +731,7 @@ BARN_DOOR_EFFECTS=light.nick_strip_lights=Rainbow-A,light.desk_lights_2=Rainbow 
 TV_REMOTE_ENTITY=remote.nick_s_room_tv   # HA Android TV Remote entity for Nick's room TV
 TV_MEDIA_PLAYERS=media_player.nicks_room_tv,media_player.nicks_room_tv_2,media_player.nick_s_room_tv,media_player.nicks_room_group,media_player.nick_s_room_display   # on/off for these goes to the remote
 SCHWAB_POLL_SECONDS=30      # holdings/cash refresh in market hours (prices stream live regardless)
-JARVIS_THEME=arc            # arc | hotRod | malibu | crimson | mark85 | spiderMan | mcqueen (markIII/graphite/stealth retired): default look until someone picks one on the phone or TV (then memory/theme.json via /api/theme)
+JARVIS_THEME=arc            # arc | hotRod | malibu | crimson | mark85 | spiderMan | mcqueen | experimenting (markIII/graphite/stealth retired): default look until someone picks one on the phone or TV (then memory/theme.json via /api/theme)
 CALENDAR_CATEGORIES=        # calendar name=category pairs, ';'-separated (e.g. Oil/Boil Outs=work);
                             # unlisted names with school/family/work in them use that, else personal
 GLANCE_HIDDEN_CATEGORIES=work # categories left off the TV's Coming up list
@@ -787,6 +799,44 @@ CALENDAR_ALERT_LEAD_MIN=10  # warn this many minutes before a meeting
 ---
 
 ## Recently Shipped
+
+- **Experimenting theme (2026-11-01, iOS 5.45 / build 188, TV 8.5)** — a
+  pickable "visual lab" palette (Spider-Man's colours underneath) whose
+  experiments each have a switch under the theme list in Settings
+  (`Views/Experiments.swift`, `jarvis.experiment.<name>`, default on):
+  **Frosted plasma** (`PlasmaBackdrop`: five red/blue/ice radial-gradient
+  blobs on 40–90 s Lissajous paths in one `Canvas` at 20 fps, under a thin
+  material; replaces `JarvisBackdrop` everywhere) and **3D orb**
+  (`OrbitOrb`: a lit glass sphere with three `rotation3DEffect` rings on
+  tilted, slowly precessing orbits; replaces the reactor in
+  `JarvisCoreMark`). Drift only, no pulsing; Reduce Motion / Low Power get
+  the still frame. Core accepts `experimenting` as a shared theme; the TV
+  shows it as Spider-Man. New experiments go in the `Experiment` enum.
+
+- **Voice ID backbone (2026-11-01, untested on the Optiplex)** — who's
+  talking decides what a voice may do. `brain/voice_trust.py` holds the
+  turn's speaker (a `contextvars` value, copied into the agent's parallel
+  tool workers); outside a voice turn it's Nick, so the phone and desktop
+  are unchanged. The room voice (`speech/room_voice.py`) asks
+  `brain/speaker_id.py` (sherpa-onnx + NeMo TitaNet-small, ~20 ms per
+  command) whether the clip matches Nick's enrolled voiceprint
+  (`memory/voiceprint.json`, vectors only, never audio); client-token chats
+  (the TV remote's mic) are guests unless in `VOICE_TRUSTED_CLIENTS`. A
+  guest keeps lights, scenes (Peace etc.), timers, music and questions, but
+  `execute_tool` refuses `voice_trust.LOCKED_TOOLS` (memory and profile
+  writes, standing orders, `update_setting`, voice shortcuts, Barn Door,
+  self-repair and automation applies, `voice_id`), the memory extractor
+  skips the turn, staged fixes can't be approved, and the turn context tells
+  the model not to take persona/address instructions from them. Off by
+  default (`VOICE_ID=0`); with nothing enrolled everyone is Nick; once
+  enrolled, a missing model or a clip under 0.8 s fails closed. Setup on
+  the Optiplex: `.venv/bin/pip install sherpa-onnx`, then
+  `mkdir -p models/speaker && curl -L -o models/speaker/nemo_en_titanet_small.onnx
+  https://github.com/k2-fsa/sherpa-onnx/releases/download/speaker-recongition-models/nemo_en_titanet_small.onnx`
+  (the tag really is spelled "recongition"), set `VOICE_ID=1`, restart, then type
+  "learn my voice" in the phone app and say five sentences to the room mic.
+  On Mac test clips, TitaNet scored the same voice 0.90+ and a different one
+  under 0.25; CAM++ and ResNet34 separated far worse.
 
 - **Room camera (2026-10-31, iOS 5.38 / build 181)** — the iPad is the lens
   (front camera), Nick's phone the only viewer. A "Room camera" button on

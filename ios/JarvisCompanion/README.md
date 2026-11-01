@@ -332,3 +332,5 @@ and test sources against the device SDK; this does not replace visual or
 on-device validation.
 
 - Companion history sync uses the server’s `last_message_id` revision to skip unchanged transcripts while still updating titles. Revisions are cached in the local archive; older servers without revisions still fetch normally. Live turns are skipped before fetching, message matching is indexed, and date formatters are reused.
+
+- Experimenting theme (5.45): a lab palette for trying visuals on real devices. `Views/Experiments.swift` holds each experiment (`Experiment` enum + its view) and its Settings switch; `JarvisBackdrop` and `JarvisCoreMark` swap in the experiment views only while the palette is `experimenting`. Current experiments: Frosted plasma background, 3D orb.

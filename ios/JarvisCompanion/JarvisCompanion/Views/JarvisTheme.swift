@@ -7,7 +7,7 @@ typealias RGB = (Double, Double, Double)
 /// the reactor (`reactor`: the mark and the control tint), the secondary (`blue`: Nick's bubbles), the three status colours
 /// (warning, critical, nominal), and the four surfaces, dark and light.
 enum JarvisPalette: String, CaseIterable, Identifiable {
-    case arc, hotRod, malibu, crimson, mark85, spiderMan, mcqueen, barnDoor
+    case arc, hotRod, malibu, crimson, mark85, spiderMan, mcqueen, experimenting, barnDoor
 
     /// What Settings offers; barnDoor is Barn Door Protocol's red alert,
     /// switched on by JARVIS (brain/protocols.py), never picked.
@@ -25,6 +25,7 @@ enum JarvisPalette: String, CaseIterable, Identifiable {
         case .mark85: return "Mark 85"
         case .spiderMan: return "Spider-Man"
         case .mcqueen: return "Lightning McQueen"
+        case .experimenting: return "Experimenting"
         case .barnDoor: return "Barn Door Protocol"
         }
     }
@@ -38,6 +39,7 @@ enum JarvisPalette: String, CaseIterable, Identifiable {
         case .mark85: return "Endgame's suit: gold and crimson on deep navy, no red glare."
         case .spiderMan: return "Suit red and web blue, after dark in Queens."
         case .mcqueen: return "Ka-chow. Lightning yellow and candy red on race-day asphalt."
+        case .experimenting: return "The visual lab: Spider-Man colours plus whatever's being tried out (switches below)."
         case .barnDoor: return "Red alert. Say \"stand down\" to JARVIS to undo."
         }
     }
@@ -112,7 +114,7 @@ enum JarvisPalette: String, CaseIterable, Identifiable {
                          deep: ((0.012, 0.016, 0.035), (0.91, 0.915, 0.935)),
                          panel: ((0.07, 0.085, 0.14), (1, 1, 1)),
                          raised: ((0.10, 0.12, 0.19), (0.98, 0.98, 0.995)))
-        case .spiderMan:
+        case .spiderMan, .experimenting:
             return Roles(accent: ((0.93, 0.18, 0.22), (0.75, 0.05, 0.10)),
                          reactor: ((0.55, 0.75, 1.0), (0.10, 0.30, 0.70)),
                          secondary: ((0.15, 0.38, 0.90), (0.08, 0.28, 0.75)),
@@ -205,7 +207,19 @@ enum JarvisTheme {
 /// A quiet gradient field shared by every screen. It keeps the app related to
 /// the desktop cockpit without competing with the text.
 struct JarvisBackdrop: View {
+    // Observed so flipping the theme or the experiment switch redraws at once.
+    @AppStorage(JarvisPalette.storageKey) private var palette = JarvisPalette.arc.rawValue
+    @AppStorage(Experiment.plasma.storageKey) private var plasmaOn = true
+
     var body: some View {
+        if palette == JarvisPalette.experimenting.rawValue && plasmaOn {
+            PlasmaBackdrop()
+        } else {
+            classic
+        }
+    }
+
+    private var classic: some View {
         ZStack {
             LinearGradient(
                 colors: [JarvisTheme.background, JarvisTheme.backgroundDeep],
@@ -246,6 +260,8 @@ struct JarvisCoreMark: View {
     var active = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.cameraWatching) private var cameraWatching
+    @AppStorage(JarvisPalette.storageKey) private var palette = JarvisPalette.arc.rawValue
+    @AppStorage(Experiment.orb3D.storageKey) private var orb3DOn = true
     @State private var visible = false
 
     private var moving: Bool {
@@ -260,6 +276,8 @@ struct JarvisCoreMark: View {
             } else if JarvisPalette.current == .barnDoor {
                 // Barn Door: the same hostile reactor as the TV's red-alert screen.
                 RedAlertMark(size: size, moving: moving && visible)
+            } else if palette == JarvisPalette.experimenting.rawValue && orb3DOn {
+                OrbitOrb(size: size, moving: moving && visible, active: active)
             } else {
                 TimelineView(.animation(minimumInterval: 1.0 / 30, paused: !(moving && visible))) { context in
                     mark(seconds: moving ? context.date.timeIntervalSinceReferenceDate : 0)

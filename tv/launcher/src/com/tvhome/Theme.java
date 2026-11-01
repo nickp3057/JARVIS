@@ -88,7 +88,7 @@ final class Theme {
         if ("malibu".equals(name)) return MALIBU;
         if ("crimson".equals(name)) return CRIMSON;
         if ("mark85".equals(name)) return MARK_85;
-        if ("spiderMan".equals(name)) return SPIDER_MAN;
+        if ("spiderMan".equals(name) || "experimenting".equals(name)) return SPIDER_MAN; // the iOS lab theme
         if ("mcqueen".equals(name)) return MCQUEEN;
         if ("barnDoor".equals(name)) return BARN_DOOR; // Barn Door Protocol, never a pick
         return ARC;
