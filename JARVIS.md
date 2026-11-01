@@ -1217,7 +1217,8 @@ CALENDAR_ALERT_LEAD_MIN=10  # warn this many minutes before a meeting
   `brain/voice_presence.py` (not the event bus: captions would flood its
   history) and out on `GET /api/voice/stream` (SSE) / `GET /api/voice/state`
   (`status:read`). On the iPad's Room tab (5.62) the conversation shows in
-  place: the side reactor grows (1.12×) with a steady glow and the lights &
+  place (the reactor always sits on a still, soft-edged dark circle drawn on
+  the clock card, 5.64): the side reactor grows (1.12×) with a steady glow and the lights &
   scenes column becomes `RoomDialogue` — what Nick said, smaller, then the
   reply in big type; it lingers 2.5–8 s after (longer replies longer), tap
   to put away. Anywhere else (another tab, a sheet, movie mode) `VoicePresence`
