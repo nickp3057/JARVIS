@@ -800,18 +800,36 @@ CALENDAR_ALERT_LEAD_MIN=10  # warn this many minutes before a meeting
 
 ## Recently Shipped
 
-- **Experimenting theme (2026-11-01, iOS 5.45 / build 188, TV 8.5)** — a
+- **Experimenting theme (2026-11-01, iOS 5.45–5.46 / build 188–189, TV 8.5)** — a
   pickable "visual lab" palette (Spider-Man's colours underneath) whose
   experiments each have a switch under the theme list in Settings
-  (`Views/Experiments.swift`, `jarvis.experiment.<name>`, default on):
-  **Frosted plasma** (`PlasmaBackdrop`: five red/blue/ice radial-gradient
-  blobs on 40–90 s Lissajous paths in one `Canvas` at 20 fps, under a thin
-  material; replaces `JarvisBackdrop` everywhere) and **3D orb**
-  (`OrbitOrb`: a lit glass sphere with three `rotation3DEffect` rings on
-  tilted, slowly precessing orbits; replaces the reactor in
-  `JarvisCoreMark`). Drift only, no pulsing; Reduce Motion / Low Power get
-  the still frame. Core accepts `experimenting` as a shared theme; the TV
-  shows it as Spider-Man. New experiments go in the `Experiment` enum.
+  (`Views/Experiments.swift`, `jarvis.experiment.<name>`). Everything is
+  drawn live in Swift (`Canvas` in a `TimelineView`), no video or web views.
+  - **Flowing plasma** (default on; `PlasmaBackdrop`): seven red/blue/ice
+    radial-gradient blobs on wandering paths, stretched along their travel,
+    under a thin material; replaces `JarvisBackdrop` everywhere. Each axis
+    is driven by a `Gust`: speed = 1 + three cosines with unrelated 6–31 s
+    periods (amplitudes sum to 0.88), integrated analytically, so blobs
+    speed up and ease off at random-looking times but never jump or reverse.
+  - **Neural core** (default on; `NeuralCore` + `NeuralNetwork`): the reactor
+    becomes a 3D brain, 96 box-shaped data nodes in two hemispheres (longer
+    front-to-back, a fissure, a few bridges across), each wired to its 3
+    nearest; it turns slowly with a nod. Gold impulses travel the wires;
+    an arriving impulse lights the node and passes on to 0/1/2 neighbours
+    (30/56/14%), so firing spreads in chains. Spontaneous firing ~2.4/s,
+    ~7/s while `active` (JARVIS thinking; the iPad's room view passes the
+    room voice's state). Look after Animal Logic's Age of Ultron JARVIS
+    (orange, angular, "made out of code or data"), structure in the
+    palette's reactor colour. Marks under 60 pt keep the classic reactor.
+  - **Orbit orb** (default off; `OrbitOrb`): lit glass sphere with three
+    `rotation3DEffect` rings; Neural core wins when both are on.
+  Reduce Motion / Low Power get the still frame. Core accepts
+  `experimenting` as a shared theme (the TV shows it as Spider-Man), and the
+  switches are shared too: `PUT /api/theme {"experiments": {"neural": true}}`,
+  returned in `GET /api/theme` and applied by `ThemeSync.pull`. Theme names
+  are validated only against `brain/theme.THEMES` (the API used to keep its
+  own regex, which refused "experimenting": that was the sync bug). New
+  experiments go in the `Experiment` enum; Core needs no change.
 
 - **Voice ID backbone (2026-11-01, untested on the Optiplex)** — who's
   talking decides what a voice may do. `brain/voice_trust.py` holds the

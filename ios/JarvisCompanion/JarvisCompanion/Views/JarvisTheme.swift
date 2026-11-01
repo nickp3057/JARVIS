@@ -209,7 +209,7 @@ enum JarvisTheme {
 struct JarvisBackdrop: View {
     // Observed so flipping the theme or the experiment switch redraws at once.
     @AppStorage(JarvisPalette.storageKey) private var palette = JarvisPalette.arc.rawValue
-    @AppStorage(Experiment.plasma.storageKey) private var plasmaOn = true
+    @AppStorage(Experiment.plasma.storageKey) private var plasmaOn = Experiment.plasma.defaultOn
 
     var body: some View {
         if palette == JarvisPalette.experimenting.rawValue && plasmaOn {
@@ -261,7 +261,8 @@ struct JarvisCoreMark: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.cameraWatching) private var cameraWatching
     @AppStorage(JarvisPalette.storageKey) private var palette = JarvisPalette.arc.rawValue
-    @AppStorage(Experiment.orb3D.storageKey) private var orb3DOn = true
+    @AppStorage(Experiment.neural.storageKey) private var neuralOn = Experiment.neural.defaultOn
+    @AppStorage(Experiment.orb3D.storageKey) private var orb3DOn = Experiment.orb3D.defaultOn
     @State private var visible = false
 
     private var moving: Bool {
@@ -276,6 +277,9 @@ struct JarvisCoreMark: View {
             } else if JarvisPalette.current == .barnDoor {
                 // Barn Door: the same hostile reactor as the TV's red-alert screen.
                 RedAlertMark(size: size, moving: moving && visible)
+            } else if palette == JarvisPalette.experimenting.rawValue && neuralOn && size >= 60 {
+                // (Below 60 pt the brain is a smudge; the chat's thinking dot keeps the classic mark.)
+                NeuralCore(size: size, moving: moving && visible, active: active)
             } else if palette == JarvisPalette.experimenting.rawValue && orb3DOn {
                 OrbitOrb(size: size, moving: moving && visible, active: active)
             } else {

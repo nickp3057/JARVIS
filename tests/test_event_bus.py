@@ -171,6 +171,24 @@ class ClientTokenTests(unittest.TestCase):
         admin = {"Authorization": "Bearer admin"}
         self.assertEqual(self.client.put("/api/theme", headers=admin, json={"theme": "arc"}).json()["theme"], "arc")
 
+    def test_every_theme_in_brain_theme_is_accepted(self) -> None:
+        # Regression: the API once kept its own regex and refused "experimenting".
+        from brain import theme
+        admin = {"Authorization": "Bearer admin"}
+        for name in theme.THEMES:
+            self.assertEqual(self.client.put("/api/theme", headers=admin, json={"theme": name}).json()["theme"], name)
+
+    def test_experiment_switches_are_shared_and_survive_theme_changes(self) -> None:
+        admin = {"Authorization": "Bearer admin"}
+        put = lambda body: self.client.put("/api/theme", headers=admin, json=body)  # noqa: E731
+        self.assertEqual(put({"theme": "experimenting"}).json()["experiments"], {})
+        self.assertEqual(put({"experiments": {"plasma": False}}).json()["experiments"], {"plasma": False})
+        body = put({"experiments": {"neural": True}}).json()
+        self.assertEqual((body["theme"], body["experiments"]), ("experimenting", {"plasma": False, "neural": True}))
+        self.assertEqual(put({"theme": "spiderMan"}).json()["experiments"], {"plasma": False, "neural": True})
+        self.assertEqual(put({"experiments": {"bad name!": True}}).status_code, 422)
+        self.assertEqual(put({}).status_code, 422)
+
     def test_wake_schedule_editor_is_admin_only(self) -> None:
         tv = {"Authorization": "Bearer " + client_tokens.create("tv", ["status:read", "settings:write"])}
         admin = {"Authorization": "Bearer admin"}

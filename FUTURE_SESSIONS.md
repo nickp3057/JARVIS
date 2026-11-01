@@ -166,6 +166,24 @@ install on the phone and iPad, then check:
 - [ ] Add `/api/camera/leave` and `/api/device/battery` to JARVIS.md (left
   out because JARVIS.md had another session's uncommitted edits).
 
+### Overnight 2026-11-01: check when you wake (iOS 5.46)
+
+- [ ] **Deploy Core** (`git pull` + restart): the theme-sync fix lives in
+  `app/server.py`. Until then Core refuses "experimenting" (422), so the
+  phone and iPad don't follow each other on that theme.
+- [ ] **Theme sync**: pick Experimenting on the phone; the iPad should follow
+  within ~10 s. Flip an experiment switch on one; the other follows too.
+- [ ] **Flowing plasma**: does the speeding up / easing off read as
+  "flowing", not twitchy? Knobs in `PlasmaBackdrop`: `Gust` amplitudes
+  (0.42/0.28/0.18), base loop times (`34 + seed * 4` s, `27 + seed * 5` s),
+  blob opacities.
+- [ ] **Neural core**: brain shape, size (`* 1.3` in `project`), firing
+  rate (2.4/s idle, 7/s thinking), gold colour. Watch it on the iPad while
+  saying "Hey JARVIS": it should get busier while he thinks. Check the
+  iPad doesn't get warm or drop frames (it's ~200 lines + glows at 30 fps).
+- [ ] Decide what graduates: a real theme, a switch on every theme, or
+  binned. Orbit orb is still there (off by default).
+
 ### Voice ID, presence, motion (asked 2026-11-01)
 
 - [ ] **Deploy and enrol voice ID** (backbone built 2026-11-01, JARVIS.md

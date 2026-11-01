@@ -754,6 +754,8 @@ struct JarvisAPIClient {
     struct SharedTheme: Codable {
         let theme: String
         var chosen: Bool? = nil
+        /// Experimenting theme switches (`Experiment` raw values); absent on older Cores.
+        var experiments: [String: Bool]? = nil
     }
 
     /// The colour theme Core shares with the TV; `chosen` is false until
@@ -764,6 +766,12 @@ struct JarvisAPIClient {
 
     func saveSharedTheme(_ theme: String) async throws {
         _ = try await sendJSON(SharedTheme.self, path: "api/theme", method: "PUT", body: SharedTheme(theme: theme))
+    }
+
+    /// Share Experimenting switches with Nick's other devices.
+    func saveExperiments(_ experiments: [String: Bool]) async throws {
+        struct Body: Encodable { let experiments: [String: Bool] }
+        _ = try await sendJSON(SharedTheme.self, path: "api/theme", method: "PUT", body: Body(experiments: experiments))
     }
 
     // MARK: - Maintenance

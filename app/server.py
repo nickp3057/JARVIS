@@ -708,7 +708,9 @@ def wake_awake(_: None = Depends(require_scope("wake:write"))) -> dict[str, obje
 
 
 class ThemeRequest(BaseModel):
-    theme: str = Field(pattern="^(arc|hotRod|malibu|crimson|mark85|spiderMan|mcqueen|barnDoor)$")
+    # Checked against brain/theme.THEMES (one list, not a second copy here).
+    theme: str | None = Field(default=None, max_length=40)
+    experiments: dict[str, bool] | None = None
 
 
 @app.get("/api/theme")
@@ -719,8 +721,17 @@ def theme_get(_: None = _status_read) -> dict[str, object]:
 
 @app.put("/api/theme")
 def theme_put(request: ThemeRequest, _: None = Depends(require_scope("settings:write"))) -> dict[str, object]:
+    """Pick the shared theme and/or flip Experimenting switches."""
     from brain import theme
-    return theme.choose(request.theme)
+    if request.theme is None and not request.experiments:
+        raise HTTPException(status_code=422, detail="Send a theme or experiments.")
+    try:
+        result = theme.choose(request.theme) if request.theme is not None else theme.current()
+        if request.experiments:
+            result = theme.set_experiments(request.experiments)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return result
 
 
 # --- Maintenance (recurring chores with a countdown and a log) -------------
