@@ -139,6 +139,16 @@ final class PushAppDelegate: NSObject, UIApplicationDelegate, UNUserNotification
 
     func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification,
                                 withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void) {
-        completionHandler([.banner, .list, .sound])
+        let content = notification.request.content
+        guard content.categoryIdentifier == "WAKE_UP" else {
+            completionHandler([.banner, .list, .sound])
+            return
+        }
+        // The alarm went off with the app open: straight to I'm up / Snooze.
+        Task { @MainActor in
+            WakeRinging.shared.detail = content.body
+            WakeRinging.shared.showing = true
+            completionHandler([.list, .sound])
+        }
     }
 }

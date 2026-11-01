@@ -19,9 +19,9 @@ import java.util.Locale;
 
 /**
  * The wake-up's own screen (Wake.run starts it once the music is playing):
- * the time, "Good morning, sir." and two buttons. I'm up closes it and the
- * music plays on; Snooze pauses it and Wake runs again in 9 minutes. Back is
- * I'm up; play/pause on the remote still works.
+ * the time, "Good morning, sir." and two buttons. I'm up stops the music and
+ * closes it; Snooze pauses it and Wake runs again in 9 minutes. Back is I'm
+ * up; play/pause on the remote still works.
  */
 public class WakeActivity extends Activity {
     /** The one on screen, so I'm up on the phone can close it (main thread only). */
@@ -127,8 +127,8 @@ public class WakeActivity extends Activity {
     }
 
     private void awake() {
-        Wake.cancelSnooze();
         Context app = getApplicationContext();
+        Wake.dismiss(app);
         new Thread(() -> Jarvis.awake(app)).start(); // good-morning lights
         finish();
     }

@@ -199,6 +199,15 @@ class ApnsSenderTests(unittest.TestCase):
         self.assertNotIn("apns-collapse-id", self.requests[-1].headers)
         self.assertNotIn("thread-id", __import__("json").loads(self.requests[-1].content)["aps"])
 
+    def test_wake_up_push_is_time_sensitive(self):
+        notifications.register_device(TOKEN, "sandbox")
+        notifications.send("Good morning, sir", "Music's on", category="WAKE_UP")
+        aps = __import__("json").loads(self.requests[-1].content)["aps"]
+        self.assertEqual((aps["interruption-level"], aps["relevance-score"], aps["category"]),
+                         ("time-sensitive", 1.0, "WAKE_UP"))
+        notifications.send("T", "m")
+        self.assertNotIn("interruption-level", __import__("json").loads(self.requests[-1].content)["aps"])
+
     def test_ha_fallback_carries_group_and_tag(self):
         with patch.dict(os.environ, {"ARR_STACK_NOTIFY_SERVICE": "notify.mobile_app_phone"}), \
              patch("integrations.home_assistant.call_service", return_value=(True, "ok")) as call:

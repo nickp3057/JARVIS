@@ -170,8 +170,10 @@ class MonitorLoopTests(unittest.TestCase):
     def test_wake_monitor_rings_the_phone_and_tv(self) -> None:
         self.rt._stop_monitors = StopAfter(1)
         alarm = {"music": "spotify:track:1", "volume": 30, "label": "Back in Black"}
+        self.addCleanup(wake_alarm._fired.clear)
         with patch.object(wake_alarm, "due", return_value=alarm):
             self.rt._wake_monitor_loop()
+        self.assertEqual(wake_alarm.ringing_state()["detail"], "Back in Black is on the TV.")
         (alert,) = event_bus.since(0)
         self.assertEqual((alert.kind, alert.message), ("wake_up", "Back in Black is on the TV."))
         self.assertEqual(alert.context["music"], "spotify:track:1")

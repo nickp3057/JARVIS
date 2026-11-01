@@ -100,7 +100,7 @@ final class AlertStream {
             JSONObject ctx = alert.optJSONObject("context");
             long until = ctx != null ? (long) (ctx.optDouble("until") * 1000) : 0;
             if ("wake_snooze".equals(kind)) Wake.snoozedByCore(c, until);
-            else Wake.dismiss();
+            else Wake.dismiss(c);
             return;
         }
         if (wake) {

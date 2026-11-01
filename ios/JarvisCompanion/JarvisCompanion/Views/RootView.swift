@@ -42,7 +42,7 @@ struct RootView: View {
     /// Tab-bar (and swipe) order: Home sits in the middle. The iPad adds Room
     /// first (its default): the tablet is mainly a panel for the room. The
     /// Mac swaps Room and Home for Desk, everything on one screen.
-    enum RootTab: Hashable, CaseIterable { case room, desk, media, hub, home, chat, settings }
+    enum RootTab: Hashable, CaseIterable { case room, desk, media, hub, home, chat, knowledge, settings }
 
     /// True on the Mac too (Mac Catalyst runs the iPad layout, Room tab included).
     static let isPad = UIDevice.current.userInterfaceIdiom == .pad
@@ -54,6 +54,7 @@ struct RootView: View {
         case .room: return isPad && !isMac
         case .desk: return isMac
         case .home: return !isMac
+        case .knowledge: return isPad // the phone opens it from Settings
         default: return true
         }
     }
@@ -101,6 +102,13 @@ struct RootView: View {
                 .swipePage(swipeOffset)
                 .tabItem { Label("Chat", systemImage: "bubble.left.and.bubble.right") }
                 .tag(RootTab.chat)
+
+            if Self.isPad {
+                KnowledgeView()
+                    .swipePage(swipeOffset)
+                    .tabItem { Label("Memory", systemImage: "brain") }
+                    .tag(RootTab.knowledge)
+            }
 
             SettingsView(embedded: true, studyBrief: hub.studyBrief.value)
                 .swipePage(swipeOffset)
@@ -150,6 +158,15 @@ struct RootView: View {
             while !Task.isCancelled {
                 try? await Task.sleep(for: .seconds(10))
                 if !hub.homeStreamLive { await ThemeSync.pull(settings) }
+            }
+        }
+        .task(id: scenePhase) {
+            // An alarm going off (or snoozed) opens the alarm screen whenever the
+            // app is open, push or no push; answered anywhere, it closes.
+            guard scenePhase == .active, let client = try? JarvisAPIClient.make(from: settings) else { return }
+            while !Task.isCancelled {
+                if let wake = try? await client.wakeSchedule() { wakeRinging.follow(wake.ringing) }
+                try? await Task.sleep(for: .seconds(wakeRinging.showing ? 5 : 15))
             }
         }
         .onChange(of: settings.studyAlertsEnabled) { Task { await hub.updateNotificationPreferences() } }
@@ -255,6 +272,7 @@ extension RootView.RootTab {
         case .hub: return "Hub"
         case .home: return "Home"
         case .chat: return "Chat"
+        case .knowledge: return "Memory"
         case .settings: return "Settings"
         }
     }

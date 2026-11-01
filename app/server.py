@@ -83,6 +83,7 @@ _COMPANION_CAPABILITIES: dict[str, object] = {
         "portfolio": True,
         "tv_remote": True,
         "shared_theme": True,
+        "knowledge": True,
     },
     "actions": {
         "home_on_off": True,
@@ -697,11 +698,30 @@ def wake_snooze(_: None = Depends(authorize)) -> dict[str, object]:
 
 @app.post("/api/wake/awake")
 def wake_awake(_: None = Depends(require_scope("wake:write"))) -> dict[str, object]:
-    """I'm up (phone or TV): the TV's wake screen closes, music plays on, and
+    """I'm up (phone or TV): the TV's wake screen closes, its music stops, and
     the good-morning lights come on (``wake_alarm.good_morning``)."""
     from brain import wake_alarm
     wake_alarm.im_up()
     return {"ok": True}
+
+
+# --- What JARVIS knows: the Obsidian vault, read-only (brain/knowledge_vault.py)
+
+
+@app.get("/api/knowledge")
+def knowledge_list(_: None = Depends(authorize)) -> dict[str, object]:
+    """The notes JARVIS may read (profile memory, journal, captured notes)."""
+    from brain import knowledge_vault
+    return {"notes": knowledge_vault.list_notes()}
+
+
+@app.get("/api/knowledge/note")
+def knowledge_note(path: str, _: None = Depends(authorize)) -> dict[str, object]:
+    from brain import knowledge_vault
+    note = knowledge_vault.read_note(path)
+    if note is None:
+        raise HTTPException(status_code=404, detail="No such note.")
+    return note
 
 
 # --- Shared colour theme (phone and TV follow one pick; brain/theme.py) -----

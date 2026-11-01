@@ -182,6 +182,10 @@ def _apns_post(environment: str, device: str, payload: bytes, headers: dict[str,
     return response.status_code, reason or response.text[:80]
 
 
+# Pushes that must be seen now (the wake-up alarm): time-sensitive, top of the list.
+URGENT_CATEGORIES = frozenset({"WAKE_UP"})
+
+
 def _send_apns(title: str, message: str, *, thread_id: str = "", collapse_id: str = "",
                passive: bool = False, category: str = "") -> tuple[bool, str]:
     """Push to every registered device; success if at least one accepted it.
@@ -196,6 +200,10 @@ def _send_apns(title: str, message: str, *, thread_id: str = "", collapse_id: st
         aps["interruption-level"] = "passive"
     else:
         aps["sound"] = "default"
+    if category in URGENT_CATEGORIES:
+        # Breaks through Focus/Sleep and sits at the top of Notification Center.
+        aps["interruption-level"] = "time-sensitive"
+        aps["relevance-score"] = 1.0
     if thread_id:
         aps["thread-id"] = thread_id[:64]
     if category:
@@ -278,6 +286,8 @@ def _send_home_assistant(title: str, message: str, *, thread_id: str = "", colla
         data["tag"] = collapse_id[:64]
     if passive:
         data["push"] = {"interruption-level": "passive"}
+    if category in URGENT_CATEGORIES:
+        data["push"] = {"interruption-level": "time-sensitive"}
     if data:
         service_data["data"] = data
     ok, detail = home_assistant.call_service("notify", service, service_data=service_data)

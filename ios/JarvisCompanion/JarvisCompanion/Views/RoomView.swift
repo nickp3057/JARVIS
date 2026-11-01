@@ -837,6 +837,13 @@ private struct RoomSettingsView: View {
                     }
                     Toggle("Back to Room after 3 min on another tab", isOn: $autoReturn)
                 }
+                Section {
+                    ThemePicker()
+                } header: {
+                    Text("Theme")
+                } footer: {
+                    Text("Shared with your phone and the TV, the same as Settings › Theme, without leaving full screen.")
+                }
                 if let scenes = model.scenes.value?.scenes, !scenes.isEmpty {
                     Section {
                         ForEach(scenes.filter { $0.entityID != "scene.peace" }) { scene in

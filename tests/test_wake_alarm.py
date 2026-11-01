@@ -16,6 +16,7 @@ class WakeAlarmTests(unittest.TestCase):
         p = patch.object(wake_alarm, "_FILE", Path(tmp.name) / "wake_alarm.json")
         p.start()
         self.addCleanup(p.stop)
+        wake_alarm._fired.clear()  # an alarm another test fired isn't ringing here
 
     def test_parsing(self) -> None:
         self.assertEqual(wake_alarm.parse_time("7"), "07:00")
@@ -204,6 +205,7 @@ class WakeBackupRingTests(unittest.TestCase):
         wake_alarm.stop_ring()
         wake_alarm.alarm_fired()
         self.addCleanup(wake_alarm.stop_ring)
+        self.addCleanup(wake_alarm._fired.clear)
         self.stop = __import__("threading").Event()
         env = patch.dict("os.environ", {"WAKE_BACKUP_DELAY_S": "10"})
         env.start()
@@ -253,6 +255,40 @@ class WakeBackupRingTests(unittest.TestCase):
             wake_alarm.start_backup_ring(now=1000.0)
         self.assertTrue(wake_alarm.ringing(now=1059.0))
         self.assertFalse(wake_alarm.ringing(now=1061.0))
+
+    def test_ringing_state_until_answered_snoozed_or_stale(self) -> None:
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.addCleanup(wake_alarm._fired.clear)
+        with patch.object(wake_alarm, "_FILE", Path(tmp.name) / "w.json"):
+            wake_alarm.alarm_fired("Back in Black is on the TV.", now=1000.0)
+            state = wake_alarm.ringing_state(now=1010.0)
+            self.assertEqual((state["state"], state["since"], state["detail"]),
+                             ("ringing", 1000.0, "Back in Black is on the TV."))
+            self.assertIsNone(wake_alarm.ringing_state(now=1000.0 + wake_alarm.RINGING_WINDOW_S + 1))
+            at = wake_alarm.snooze(now=datetime.fromtimestamp(1010.0))
+            snoozed = wake_alarm.ringing_state(now=1020.0)
+            self.assertEqual((snoozed["state"], snoozed["until"]), ("snoozed", at.timestamp()))
+            with patch.object(wake_alarm, "_good_morning_logged"), patch.object(wake_alarm, "_pause_tv") as pause, \
+                    patch("brain.event_bus.publish"):
+                wake_alarm.im_up()
+            self.assertIsNone(wake_alarm.ringing_state(now=1030.0))
+
+    def test_im_up_pauses_the_tv_only_after_an_alarm(self) -> None:
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.addCleanup(wake_alarm._fired.clear)
+        calls = []
+        with patch.object(wake_alarm, "_FILE", Path(tmp.name) / "w.json"), \
+                patch.object(wake_alarm, "_good_morning_logged"), patch("brain.event_bus.publish"), \
+                patch("integrations.home_assistant.call_service", side_effect=lambda *a, **k: calls.append(a) or (True, "")):
+            wake_alarm._fired.clear()
+            wake_alarm.im_up()
+            wake_alarm.alarm_fired("x")
+            wake_alarm.im_up()
+            __import__("time").sleep(0.2)
+        self.assertEqual(calls, [("remote", "send_command", __import__("integrations.tv_remote").tv_remote.entity(),
+                                  {"command": "MEDIA_PAUSE"})])
 
     def test_tv_is_on_reads_just_the_remote_entity(self) -> None:
         with patch("integrations.home_assistant._request", return_value=(True, {"state": "on"})) as req, \

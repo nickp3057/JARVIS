@@ -15,6 +15,7 @@ struct SettingsView: View {
     @State private var connectionSucceeded = false
     @State private var notificationStatus = "Checking permission…"
     @State private var permissionUndetermined = false
+    @State private var showingKnowledge = false
     @ObservedObject private var push = PushRegistrar.shared
 
     var body: some View {
@@ -62,6 +63,21 @@ struct SettingsView: View {
                         if let connectionResult {
                             Label(connectionResult, systemImage: connectionSucceeded ? "checkmark.circle.fill" : "wifi.exclamationmark")
                                 .font(.footnote).foregroundStyle(connectionSucceeded ? JarvisTheme.success : JarvisTheme.amber)
+                        }
+                    }
+                    if !RootView.isPad {
+                        CockpitPanel("Memory", symbol: "brain") {
+                            Button { showingKnowledge = true } label: {
+                                HStack {
+                                    Text("What JARVIS knows about you").foregroundStyle(.primary)
+                                    Spacer()
+                                    Image(systemName: "chevron.right").foregroundStyle(.secondary)
+                                }
+                                .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                            Text("His profile memory, journal and notes from the Obsidian vault, read-only.")
+                                .font(.footnote).foregroundStyle(.secondary)
                         }
                     }
                     CockpitPanel("Theme", symbol: "paintpalette") {
@@ -139,6 +155,7 @@ struct SettingsView: View {
                 .frame(maxWidth: 680).padding(20).frame(maxWidth: .infinity)
             }
             .scrollDismissesKeyboard(.interactively)
+            .sheet(isPresented: $showingKnowledge) { KnowledgeView() }
             .background { JarvisBackdrop() }
             .navigationTitle("Settings").navigationBarTitleDisplayMode(.inline)
             .toolbar {

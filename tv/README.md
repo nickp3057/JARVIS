@@ -51,7 +51,7 @@ every deploy, so edit the repo copy, not the TV's.
   the play presses (a stale session sitting paused on last night's track), it
   opens the link in Spotify itself (`am start VIEW`) and presses play. Volume goes straight to the
   alarm's level (no fade: Nick didn't like it creeping up), then
-  `WakeActivity` shows the time with **I'm up** (closes; music plays on;
+  `WakeActivity` shows the time with **I'm up** (stops the music and closes, 9.0;
   tells Core `POST /api/wake/awake`, which turns on the good-morning lights;
   Back does the same) and **Snooze 9 min** (pauses, then `Wake.run` again,
   resuming the song). The snooze is a main-looper Handler, so it's lost if
@@ -83,8 +83,10 @@ every deploy, so edit the repo copy, not the TV's.
   auto-entry is gone (2026-10-27); `PlexWatch` only presses Watch/Resume for
   "play ..." voice requests.
 - **Phone snooze**: `wake_snooze` / `wake_dismiss` bus events (from the
-  phone's notification buttons) pause and count down, or close
-  `WakeActivity`. Core rings a phone snooze again itself.
+  phone's notification buttons) pause and count down, or stop the music
+  and close `WakeActivity` (9.0: I'm up used to leave it playing). Core
+  rings a phone snooze again itself, and also sends `MEDIA_PAUSE` through
+  HA on I'm up in case this stream is down.
 - **Neural core (8.6)**: when Core's glance/`/api/theme` says `core:
   "neural"` (Experimenting picked on the phone, or underneath Barn Door, with
   its Neural core switch on), the header draws `NeuralView` instead of

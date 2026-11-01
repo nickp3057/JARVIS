@@ -68,6 +68,11 @@ links; Media shows the Request button, storage, transfers, queues (with
 preserving any draft already there. Settings has its own tab (Chat's menu keeps
 a shortcut for first-run setup) and includes a connection test, secure token entry, study
 notification controls, and the current iOS notification permission status.
+On the iPad a **Memory** tab (`KnowledgeView`, 5.52) shows what JARVIS knows
+about Nick from the Obsidian vault (`GET /api/knowledge`), read-only; the
+phone opens it from Settings › Memory. The full-screen wake-up alarm
+(`WakeRingingView`) opens whenever the app is open while Core says an alarm
+is ringing (`GET /api/wake` → `ringing`), not just from the push.
 
 ## Architecture
 

@@ -33,7 +33,7 @@ enum Experiment: String, CaseIterable, Identifiable {
         case .plasma: return "Red and blue light flowing behind frosted glass, speeding up and easing off on its own."
         case .neural: return "The reactor becomes a layered mind of data nodes with thoughts cascading out from its core. It opens into a green eye while the camera watches and bristles red for Barn Door."
         case .orb3D: return "A lit sphere with tilted orbiting rings (Neural core wins if both are on)."
-        case .glass: return "Every card turns to Liquid Glass (as clear or tinted as your Liquid Glass setting), and the background's frost thins so the colour comes through."
+        case .glass: return "Every card turns to Liquid Glass (as clear or tinted as your Liquid Glass setting), and the background loses its frost so the colour comes through clear."
         }
     }
 
@@ -149,9 +149,12 @@ struct PlasmaBackdrop: View {
                 }
             }
             // The frost: a thin material evens the colour out like glass, then a
-            // whisper of the background keeps text contrast where it was.
-            Rectangle().fill(.ultraThinMaterial).opacity(glassOn ? 0.15 : 0.35)
-            JarvisTheme.backgroundDeep.opacity((dark ? 0.18 : 0.08) * (glassOn ? 0.6 : 1))
+            // whisper of the background keeps text contrast where it was. With
+            // Liquid glass the cards are the glass: the backdrop is left clear.
+            if !glassOn {
+                Rectangle().fill(.ultraThinMaterial).opacity(0.35)
+            }
+            JarvisTheme.backgroundDeep.opacity((dark ? 0.18 : 0.08) * (glassOn ? 0.3 : 1))
         }
         .ignoresSafeArea()
         .accessibilityHidden(true)

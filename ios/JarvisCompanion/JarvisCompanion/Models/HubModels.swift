@@ -662,17 +662,28 @@ struct WakeSchedule: Decodable, Equatable {
     /// One-day changes made by asking JARVIS ("skip tomorrow", "8:30 tomorrow");
     /// `time` nil means skipped. They drop off once the day has passed.
     var overrides: [Override]?
+    /// Set while an alarm is going off unanswered or snoozed (Core 2026-11-01+).
+    var ringing: Ringing?
 
     struct Override: Decodable, Equatable, Hashable {
         let date: String
         let time: String?
     }
 
+    /// `state` is "ringing" or "snoozed"; `since` (when it went off) tells one
+    /// alarm from the next, `until` is when a snooze rings again.
+    struct Ringing: Decodable, Equatable {
+        let state: String
+        let since: Double?
+        let detail: String
+        let until: Double?
+    }
+
     enum CodingKeys: String, CodingKey {
         case times, music, label, volume, enabled, summary
         case onceAt = "once_at"
         case nextAt = "next_at"
-        case overrides
+        case overrides, ringing
     }
 }
 

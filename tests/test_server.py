@@ -54,6 +54,27 @@ class ServerTests(unittest.TestCase):
         debug_reports._REPORTS_FILE = self.old_reports_path
         self.tempdir.cleanup()
 
+    def test_knowledge_lists_and_reads_authorized_notes_only(self) -> None:
+        vault = Path(self.tempdir.name) / "vault"
+        (vault / "Jarvis Memory" / "Journal").mkdir(parents=True)
+        (vault / "Private").mkdir()
+        (vault / "Jarvis Memory" / "Profile.md").write_text(
+            "---\njarvis_managed: true\n---\n\n# JARVIS Profile Memory\n\n## music\n\n"
+            "- Likes AC/DC <!-- jarvis:abc -->\n  - Metadata: key=music, confidence=1.0\n")
+        (vault / "Jarvis Memory" / "Journal" / "2026-10-31.md").write_text("# Oct 31\n- Went out\n")
+        (vault / "Private" / "Secret.md").write_text("nope")
+        with patch.dict(os.environ, {"OBSIDIAN_VAULT_PATH": str(vault), "OBSIDIAN_INDEX_FOLDERS": "Jarvis Memory"}):
+            self.assertEqual(self.client.get("/api/knowledge").status_code, 401)
+            notes = self.client.get("/api/knowledge", headers=self.headers).json()["notes"]
+            self.assertEqual([n["path"] for n in notes],
+                             ["Jarvis Memory/Profile.md", "Jarvis Memory/Journal/2026-10-31.md"])
+            note = self.client.get("/api/knowledge/note", params={"path": "Jarvis Memory/Profile.md"},
+                                   headers=self.headers).json()
+            self.assertEqual(note["text"], "# JARVIS Profile Memory\n\n## music\n\n- Likes AC/DC\n")
+            for bad in ("Private/Secret.md", "../vault/Private/Secret.md"):
+                self.assertEqual(self.client.get("/api/knowledge/note", params={"path": bad},
+                                                 headers=self.headers).status_code, 404)
+
     def test_auth_sessions_chat_history_rename_and_delete(self) -> None:
         self.assertEqual(self.client.get("/health").status_code, 401)
         health = self.client.get("/health", headers=self.headers)

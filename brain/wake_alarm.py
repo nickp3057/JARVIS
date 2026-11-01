@@ -11,6 +11,9 @@ turns itself on and plays the music. Music is a Spotify link or URI
 AC/DC", stored as ``search:...``), or empty to resume whatever Spotify last
 played. A time like "in 3 minutes" makes the one-off unless days are given.
 Music starts at the alarm's volume (no fade-in); the TV offers I'm up / Snooze.
+The phone gets a time-sensitive push with the same buttons, and while the
+alarm is unanswered (``ringing_state``) the app opens on its alarm screen.
+I'm up stops the music.
 
 The event alone can't wake a TV that dropped off Wi-Fi in standby, so Core
 also powers it on through Home Assistant (``tv_remote.power``). If the TV
@@ -237,11 +240,40 @@ SNOOZE_MINUTES = 9
 _answered = threading.Event()
 _ring_until = 0.0
 _ring_lock = threading.Lock()
+# The alarm that's going off (wall-clock time it fired, what the push said), so
+# the phone can open on I'm up / Snooze whenever the app is opened meanwhile.
+_fired: dict[str, Any] = {}
+RINGING_WINDOW_S = 3600  # unanswered for an hour: it stops counting as ringing
 
 
-def alarm_fired() -> None:
+def alarm_fired(detail: str = "", now: float | None = None) -> None:
     """A new alarm went off: nobody has answered it yet."""
     _answered.clear()
+    with _ring_lock:
+        _fired.update(at=now or time.time(), detail=detail)
+
+
+def _recent(now: float) -> bool:
+    return bool(_fired) and now - _fired["at"] < RINGING_WINDOW_S
+
+
+def ringing_state(now: float | None = None) -> dict[str, Any] | None:
+    """For the phone and iPad: ``{"state": "ringing" | "snoozed", "since",
+    "detail", "until"}`` while an alarm is going off unanswered or snoozed,
+    else None. ``since`` identifies the alarm (a snooze ringing again is a
+    new one), so closing the screen on one doesn't hide the next."""
+    now = now or time.time()
+    with _ring_lock:
+        fired = dict(_fired)
+    data = load()
+    once = (data or {}).get("once") or {}
+    if once.get("snooze"):
+        until = datetime.fromisoformat(once["at"]).timestamp()
+        if until > now:
+            return {"state": "snoozed", "since": fired.get("at"), "detail": fired.get("detail", ""), "until": until}
+    if fired and not _answered.is_set() and now - fired["at"] < RINGING_WINDOW_S:
+        return {"state": "ringing", "since": fired["at"], "detail": fired.get("detail", ""), "until": None}
+    return None
 
 
 def answered() -> bool:
@@ -321,12 +353,28 @@ def wake_tv_with_backup(stop: threading.Event) -> str:
 
 def im_up() -> None:
     """I'm up (phone, TV, or "stop" to the room voice while the backup rings):
-    clears a snooze, silences the backup ring, closes the TV's wake screen
-    and turns on the good-morning lights in the background."""
+    clears a snooze, silences the backup ring, stops the TV's music and closes
+    its wake screen, and turns on the good-morning lights in the background."""
     from brain import event_bus
+    alarm_on = _recent(time.time())
     awake()
     threading.Thread(target=_good_morning_logged, daemon=True).start()
+    if alarm_on:
+        # The TV pauses when the event reaches it; this covers a TV whose event
+        # stream is down. MEDIA_PAUSE (not play/pause) can't start it again.
+        threading.Thread(target=_pause_tv, daemon=True).start()
     event_bus.publish("wake_dismiss", "Up and at 'em", "", source="wake-up", severity="info", push=False)
+
+
+def _pause_tv() -> None:
+    try:
+        from integrations import home_assistant, tv_remote
+        ok, detail = home_assistant.call_service("remote", "send_command", tv_remote.entity(),
+                                                 {"command": "MEDIA_PAUSE"})
+    except Exception as exc:  # noqa: BLE001
+        ok, detail = False, str(exc)
+    if not ok:
+        log.warning("I'm up: couldn't pause the TV: %s", detail)
 
 
 def _good_morning_logged() -> None:
@@ -520,13 +568,15 @@ def public(now: datetime | None = None) -> dict[str, Any] | None:
     now = now or datetime.now()
     upcoming = _upcoming(data, now) if data else None
     if not upcoming:
-        return None
+        ringing = ringing_state()
+        return {"time": "", "days": "", "label": "", "next_at": None, "ringing": ringing} if ringing else None
     at, what = upcoming
     return {
         "time": at.strftime("%H:%M"),
         "days": _when(at, now),
         "label": what["label"],
         "next_at": at.timestamp(),
+        "ringing": ringing_state(),
     }
 
 
@@ -544,4 +594,5 @@ def editor(now: datetime | None = None) -> dict[str, Any]:
         "overrides": [{"date": d, "time": t or None} for d, t in sorted(data.get("overrides", {}).items())],
         "next_at": at.timestamp() if at else None,
         "summary": describe(data) if load() else "No wake-up set.",
+        "ringing": ringing_state(),
     }

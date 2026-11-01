@@ -184,6 +184,22 @@ install on the phone and iPad, then check:
 - [ ] Decide what graduates: a real theme, a switch on every theme, or
   binned. Orbit orb is still there (off by default).
 
+### Wake-up fixes, Memory view (iOS 5.52, TV 9.0, 2026-11-01): check
+
+- [ ] **Deploy Core** (`git pull` + restart): I'm up pausing the TV, the
+  ringing state the app reads, the time-sensitive push and `/api/knowledge`
+  all live there.
+- [ ] **Time-sensitive entitlement:** Nick accepts the updated Program License
+  Agreement at developer.apple.com (Xcode refused new profiles until then),
+  then add `com.apple.developer.usernotifications.time-sensitive` = true to
+  `ios/JarvisCompanion/JarvisCompanion.entitlements` and rebuild. Until then
+  the push still arrives with its buttons, but Focus/Sleep can hold it.
+- [ ] Next alarm: I'm up on the phone stops the TV's music; opening the app
+  while it rings shows I'm up / Snooze; after Snooze it shows "Back at …".
+- [ ] iPad Memory tab: profile note and journal render readably.
+- [ ] Room settings › Theme on the iPad (picking one closes the sheet as the
+  app re-themes; fine?). Liquid glass background clear enough now?
+
 ### Neural core v2 (iOS 5.47): check
 
 - [ ] **Deploy Core** (`git pull` + restart) so switch flips reach the other
@@ -556,7 +572,8 @@ or a much newer CPU), bigger Whisper models, or running cameras/vision
   - [x] (6.8 / iOS 3.0) I'm up / Snooze from the phone: the wake-up push
     (category WAKE_UP) has both buttons; `/api/wake/snooze` and `/awake`.
   - [ ] Wake-up options Nick may want once he's lived with it ("idk what i
-    want yet"): snooze length, stop music on I'm up, a gentler start.
+    want yet"): snooze length, a gentler start. (Stop music on I'm up: done,
+    TV 9.0.)
 
   **Foundation**
   - [x] Boots straight into JARVIS; the remote's Home button always returns

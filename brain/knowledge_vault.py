@@ -233,6 +233,44 @@ def describe_search(query: str) -> str:
     )
 
 
+# --- Reading: the companion's vault browser (GET /api/knowledge) -------------
+
+_FRONTMATTER_RE = re.compile(r"\A---\n.*?\n---\n+", re.DOTALL)
+_COMMENT_RE = re.compile(r"\s*<!--.*?-->", re.DOTALL)
+_METADATA_LINE_RE = re.compile(r"^\s+- Metadata: .*$\n?", re.MULTILINE)
+
+
+def list_notes() -> list[dict[str, Any]]:
+    """Every note JARVIS may read (the authorized folders): the profile note
+    first, then newest first. ``path`` is vault-relative, for ``read_note``."""
+    notes = []
+    for path, relative in _markdown_files():
+        try:
+            modified = path.stat().st_mtime
+        except OSError:
+            continue
+        notes.append({"path": relative.as_posix(), "title": path.stem,
+                      "folder": relative.parent.as_posix(), "modified": modified})
+    profile = _PROFILE_NOTE.as_posix()
+    notes.sort(key=lambda n: (n["path"] != profile, -n["modified"]))
+    return notes
+
+
+def read_note(relative: str) -> dict[str, Any] | None:
+    """One authorized note, cleaned for reading: no frontmatter, no JARVIS's
+    hidden fact IDs or metadata lines. None if it isn't an authorized note."""
+    for path, rel in _markdown_files():
+        if rel.as_posix() != relative:
+            continue
+        try:
+            text = path.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            return None
+        text = _METADATA_LINE_RE.sub("", _COMMENT_RE.sub("", _FRONTMATTER_RE.sub("", text)))
+        return {"path": relative, "title": path.stem, "text": text.strip() + "\n"}
+    return None
+
+
 # --- Writing: quick capture and the daily journal ---------------------------
 
 _NOTE_NAME_RE = re.compile(r"[^A-Za-z0-9 _\-]+")

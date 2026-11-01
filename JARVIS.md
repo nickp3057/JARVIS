@@ -366,6 +366,21 @@ RMS envelope from ElevenLabs audio drives the orb in real time using a monotonic
   "I'm up" / "Hey JARVIS" by voice, or `WAKE_BACKUP_RING_S` (600) runs out.
   Voice dismissal counts as I'm up (lights, TV wake screen closes:
   `wake_alarm.im_up`). The TV coming on, it plays the music and the room stays quiet.
+- **The phone (2026-11-01, iOS 5.52):** the wake-up push is time-sensitive with
+  `relevance-score` 1 (`notifications.URGENT_CATEGORIES`; breaks through Focus,
+  top of Notification Center; the app's entitlement is pending, see
+  FUTURE_SESSIONS.md) and keeps its I'm up / Snooze buttons. While an alarm is
+  unanswered or snoozed (`wake_alarm.ringing_state()`, in `GET /api/wake` and
+  glance `wake.ringing`: `state` ringing/snoozed, `since`, `detail`, `until`)
+  the phone and iPad open the full-screen alarm whenever the app is open
+  (RootView polls every 15 s, and the push landing in the foreground opens it
+  at once); answered anywhere, it closes. Close hides it for that alarm only.
+  Ringing state is in memory and lapses after an hour (`RINGING_WINDOW_S`).
+- **I'm up stops the music (Core, TV 9.0):** the TV pauses Spotify on
+  `wake_dismiss` and on its own I'm up (only within an hour of an alarm or
+  while snoozed), and Core also sends `MEDIA_PAUSE` through the HA remote in
+  case the TV's event stream is down (2026-11-01: the phone's I'm up closed the
+  TV's wake screen but the music played on).
 
 ### Price Watching
 - `watch_price(url, label?, target_price?)` — monitor structured price metadata
@@ -799,6 +814,20 @@ CALENDAR_ALERT_LEAD_MIN=10  # warn this many minutes before a meeting
 ---
 
 ## Recently Shipped
+
+- **Wake-up fixes, Memory view, theme in Room settings (2026-11-01, iOS 5.52 /
+  build 195, TV 9.0)** — I'm up (phone, TV, voice) now stops the TV's music;
+  the wake-up push is time-sensitive and the alarm screen opens whenever the
+  app is open while an alarm rings (see "Wake-up music"). New read-only
+  `GET /api/knowledge` (list) and `GET /api/knowledge/note?path=` (one note,
+  frontmatter and JARVIS's hidden fact IDs/metadata stripped), admin token,
+  only the `OBSIDIAN_INDEX_FOLDERS` notes (`knowledge_vault.list_notes` /
+  `read_note`). iPad gets a **Memory** tab (`Views/KnowledgeView.swift`:
+  profile memory as "What I know about you", journal, notes; split view with
+  light Markdown); the phone opens it from Settings › Memory. Room settings
+  has the theme picker (with the Experimenting switches) so the iPad needn't
+  leave full screen. Liquid glass: the plasma backdrop drops its material
+  frost entirely (cards stay glass), TV wash 60 → 22.
 
 - **Experimenting theme (2026-11-01, iOS 5.45–5.48 / build 188–191, TV 8.5–8.6)** — a
   pickable "visual lab" palette (Spider-Man's colours underneath) whose

@@ -17,7 +17,7 @@ import android.view.View;
  * wandering paths, stretched along their travel, each axis driven by a
  * {@link Gust} so they speed up and ease off at random-looking times without
  * ever jumping or reversing. A thin wash of the deep background on top is the
- * frost (thinner while Liquid glass puts the frost on the cards).
+ * frost (nearly clear while Liquid glass puts the frost on the cards).
  *
  * Drawn into a bitmap an eighth of the screen's size and stretched up with
  * filtering: it's all soft gradients, so it looks the same, and the TV's GPU
@@ -129,7 +129,7 @@ final class PlasmaView extends View {
         }
         paint.setShader(null);
         // The frost: a wash of the deep background evens the colour out.
-        paint.setColor(Theme.alpha(deep, glass ? 60 : 110));
+        paint.setColor(Theme.alpha(deep, glass ? 22 : 110));
         canvas.drawRect(0, 0, w, h, paint);
 
         src.set(0, 0, sw, sh);

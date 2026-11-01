@@ -13,7 +13,8 @@ import android.util.Log;
  * packet on the event stream is what wakes the TV from network standby (TCL
  * blocks app wakeup alarms). Turns the screen on, starts the music at the
  * alarm's volume (Nick didn't like a fade that kept getting louder) and puts
- * up WakeActivity: I'm up, or Snooze (pause, then the same again in 9 min).
+ * up WakeActivity: I'm up (the music stops), or Snooze (pause, then the same
+ * again in 9 min).
  *
  * Test from the Mac (DUMP-guarded):
  *   adb shell am broadcast -n com.tvhome/.WakeTestReceiver [--es music spotify:playlist:...] [--ei volume 30]
@@ -25,12 +26,15 @@ final class Wake {
     private static Runnable snoozed;
     /** When the snooze ends (wall-clock ms), 0 if not snoozing; WakeActivity shows it. */
     static volatile long snoozeUntil;
+    /** When the last alarm went off (wall-clock ms), so I'm up only stops wake-up music. */
+    private static volatile long rangAt;
 
     private Wake() {}
 
     /** Blocking; call off the main thread. {@code music}: spotify: URI, "search:words", or "" to resume. */
     static void run(Context c, String music, int volumePercent, String label) {
         Log.i(TAG, "waking: music=" + music + " volume=" + volumePercent);
+        rangAt = System.currentTimeMillis();
         cancelSnooze(); // a snooze ending (ours or Core's) lands here
         AudioManager audio = c.getSystemService(AudioManager.class);
         int max = audio.getStreamMaxVolume(AudioManager.STREAM_MUSIC);
@@ -99,9 +103,14 @@ final class Wake {
         snoozeUntil = untilMs > 0 ? untilMs : System.currentTimeMillis() + SNOOZE_MS;
     }
 
-    /** I'm up, from the phone: close the wake screen; the music plays on. */
-    static void dismiss() {
+    /** I'm up (here or on the phone): stop the music and close the wake screen. */
+    static void dismiss(Context c) {
+        boolean alarm = snoozeUntil > 0 || System.currentTimeMillis() - rangAt < 60 * 60_000;
         cancelSnooze();
+        if (alarm) {
+            Music.pause(c);
+            rangAt = 0;
+        }
         MAIN.post(WakeActivity::closeShowing);
     }
 

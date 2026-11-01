@@ -837,6 +837,15 @@ struct JarvisAPIClient {
         try await getJSON(NowStatus.self, path: "api/now")
     }
 
+    func knowledgeNotes() async throws -> [KnowledgeNote] {
+        struct Notes: Decodable { let notes: [KnowledgeNote] }
+        return try await getJSON(Notes.self, path: "api/knowledge").notes
+    }
+
+    func knowledgeNote(_ path: String) async throws -> KnowledgeNoteText {
+        try await getJSON(KnowledgeNoteText.self, path: "api/knowledge/note", query: [URLQueryItem(name: "path", value: path)])
+    }
+
     func glance() async throws -> Glance {
         try await getJSON(Glance.self, path: "api/glance")
     }

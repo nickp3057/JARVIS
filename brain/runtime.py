@@ -1090,12 +1090,12 @@ class JarvisRuntime:
                 log.exception("Wake-up monitor failed")
                 alarm = None
             if alarm:
-                wake_alarm.alarm_fired()
+                music = alarm["label"] or ("your music" if alarm["music"] else "whatever Spotify last played")
+                wake_alarm.alarm_fired(f"{music} is on the TV.")
                 # The bus event can't reach a TV that dropped off Wi-Fi in standby:
                 # power it on through HA, and ring the room speaker if it stays off.
                 threading.Thread(target=wake_alarm.wake_tv_with_backup, args=(self._stop_monitors,),
                                  daemon=True, name="wake-tv").start()
-                music = alarm["label"] or ("your music" if alarm["music"] else "whatever Spotify last played")
                 # Info for the TV (no banner); the phone gets it with I'm up / Snooze buttons.
                 self.raise_alert("wake_up", "Good morning, sir", f"{music} is on the TV.",
                                  source="wake-up", severity="info", push=True, category="WAKE_UP",
