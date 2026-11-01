@@ -868,7 +868,8 @@ CALENDAR_ALERT_LEAD_MIN=10  # warn this many minutes before a meeting
   stretches so the right column ends flush at the bottom.
   New `brain/traffic.py`: a 400-entry in-memory log of every signal between
   `core`, `nas`, `tv`, `iphone`, `ipad`, `mac` and `internet`. Fed by an ASGI
-  tap in `app/server.py` (each authorized request = client -> core; the
+  tap in `app/server.py` (each authorized request = client -> core, and
+  since 5.59 its successful reply = core -> client once the body is sent; the
   companion sends `X-Jarvis-Device`, client tokens are named by their token
   name), the voice/home/alert streams as they push (core -> client),
   `status_hub.home_changed` (HA websocket = nas -> core), and a wrapper on

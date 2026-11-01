@@ -116,7 +116,8 @@ class ServerTests(unittest.TestCase):
         self.client.get("/health", headers=self.headers)
         self.client.get("/health")  # no token: not a signal from anyone
         logged = [(t["from"], t["to"], t["label"]) for t in traffic.since(start)]
-        self.assertEqual(logged, [("ipad", "core", "health"), ("iphone", "core", "health")])
+        self.assertEqual(logged, [("ipad", "core", "health"), ("core", "ipad", "health"),
+                                  ("iphone", "core", "health"), ("core", "iphone", "health")])
 
     def test_auth_sessions_chat_history_rename_and_delete(self) -> None:
         self.assertEqual(self.client.get("/health").status_code, 401)

@@ -76,24 +76,42 @@ def _pushed(request: Request, label: str) -> None:
 
 
 class _TrafficTap:
-    """Every request is a signal from its client to Core (the link map and the
-    iPad's neural core light up with it). The traffic stream itself isn't.
-    Plain ASGI, not ``@app.middleware``, so the SSE streams pass untouched."""
+    """Every request is a signal from its client to Core, and its answer a
+    signal back once the reply has gone out (a camera frame, a status
+    snapshot): the link map and the iPad's neural core light up with both.
+    Streams only count when they open; their pushes log themselves
+    (``_pushed``). The traffic stream itself isn't logged. Plain ASGI, not
+    ``@app.middleware``, so the SSE streams pass untouched."""
 
     def __init__(self, inner):
         self.inner = inner
 
     async def __call__(self, scope, receive, send):
-        if scope.get("type") == "http":
-            path = scope.get("path", "")
-            headers = {k.decode("latin-1").lower(): v.decode("latin-1") for k, v in scope.get("headers", [])}
-            if path != "/api/traffic/stream" and headers.get("authorization"):
-                try:
-                    traffic.record(_caller(headers["authorization"], headers.get("x-jarvis-device")), "core",
-                                   path.removeprefix("/api/").removeprefix("/"))
-                except Exception:  # noqa: BLE001 - the map must never break a request
-                    pass
-        await self.inner(scope, receive, send)
+        if scope.get("type") != "http":
+            await self.inner(scope, receive, send)
+            return
+        path = scope.get("path", "")
+        headers = {k.decode("latin-1").lower(): v.decode("latin-1") for k, v in scope.get("headers", [])}
+        if path == "/api/traffic/stream" or not headers.get("authorization"):
+            await self.inner(scope, receive, send)
+            return
+        label = path.removeprefix("/api/").removeprefix("/")
+        try:
+            caller = _caller(headers["authorization"], headers.get("x-jarvis-device"))
+            traffic.record(caller, "core", label)
+        except Exception:  # noqa: BLE001 - the map must never break a request
+            caller = None
+        answered = {"ok": False}
+
+        async def reply(message):
+            if message.get("type") == "http.response.start":
+                answered["ok"] = int(message.get("status", 500)) < 400
+            await send(message)
+            if (caller and answered["ok"] and message.get("type") == "http.response.body"
+                    and not message.get("more_body", False)):
+                traffic.record("core", caller, label)
+
+        await self.inner(scope, receive, reply)
 
 
 app.add_middleware(_TrafficTap)
