@@ -74,3 +74,24 @@ class LightControlTests(unittest.TestCase):
         for bad in ("switch.lamp", "light.kitchen"):
             with self.assertRaises(ValueError):
                 status_hub.set_light(bad, 50)
+
+
+class SceneForceOffTests(unittest.TestCase):
+    """HA's scene skips a light it already thinks is off; Govee's cloud
+    integration can think so while the light is lit (bedtime 2026-11-01)."""
+
+    CONFIG = {"entities": {"light.desk_lights_2": {"state": "off"}, "light.bedroom_lights": "off",
+                           "light.nick_strip_lights": {"state": "on"}, "fan.nicks_fan": {"state": "off"}}}
+
+    def test_off_lights_include_each_twin(self) -> None:
+        self.assertEqual(status_hub.scene_off_lights(self.CONFIG),
+                         ["light.bedroom_lights", "light.desk_lights", "light.desk_lights_2"])
+        self.assertEqual(status_hub.scene_off_lights(None), [])
+
+    def test_force_offs_sends_one_plain_turn_off(self) -> None:
+        with patch("integrations.home_assistant._request", return_value=(True, self.CONFIG)) as req, \
+                patch("integrations.home_assistant.call_service", return_value=(True, "")) as call:
+            status_hub._force_scene_offs("scene.goodnight", delay=0)
+        req.assert_called_once_with("GET", "/api/config/scene/config/goodnight")
+        call.assert_called_once_with("light", "turn_off", service_data={
+            "entity_id": ["light.bedroom_lights", "light.desk_lights", "light.desk_lights_2"]})

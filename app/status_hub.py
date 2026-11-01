@@ -1031,7 +1031,55 @@ def activate_scene(entity_id: str, toggle: bool = False) -> dict[str, Any]:
     invalidate("entities")
     if _HA_SUCCESS_MARKER not in message.lower():
         return {"error": message, "entity_id": entity_id, "left": left}
+    if not left:
+        import threading
+        threading.Thread(target=_force_scene_offs, args=(entity_id,), daemon=True, name="scene-offs").start()
     return {"error": "", "entity_id": entity_id, "left": left}
+
+
+# The same Govee light under two integrations: the cloud one the scenes use,
+# and the LAN one ("<cloud>=<local>,...").
+_DEFAULT_LIGHT_TWINS = "light.desk_lights_2=light.desk_lights,light.nick_strip_lights=light.strip_lights"
+
+
+def _light_twins() -> dict[str, str]:
+    pairs = {}
+    for item in os.getenv("LIGHT_TWINS", _DEFAULT_LIGHT_TWINS).split(","):
+        cloud, _, local = item.partition("=")
+        if cloud.strip() and local.strip():
+            pairs[cloud.strip().lower()] = local.strip().lower()
+            pairs[local.strip().lower()] = cloud.strip().lower()
+    return pairs
+
+
+def scene_off_lights(config: dict[str, Any] | None) -> list[str]:
+    """The lights a scene turns off, plus each one's twin."""
+    twins = _light_twins()
+    off: set[str] = set()
+    for target, spec in ((config or {}).get("entities") or {}).items():
+        state = str(spec.get("state") if isinstance(spec, dict) else spec)
+        if target.startswith("light.") and state == "off":
+            off.add(target)
+            if target in twins:
+                off.add(twins[target])
+    return sorted(off)
+
+
+def _force_scene_offs(entity_id: str, delay: float = 1.5) -> None:
+    """Send a plain turn_off to every light the scene turns off. HA's scene
+    skips a light it already thinks is off, and the Govee cloud integration
+    can think so while the light is lit (2026-11-01: Goodnight left the desk
+    lights on), so a stale state can't keep a light on at bedtime."""
+    from integrations.home_assistant import _request, call_service
+    time.sleep(delay)  # after the scene's own commands
+    try:
+        ok, config = _request("GET", f"/api/config/scene/config/{entity_id.split('.', 1)[1]}")
+        lights = scene_off_lights(config if ok and isinstance(config, dict) else None)
+        if lights:
+            call_service("light", "turn_off", service_data={"entity_id": lights})
+    except Exception:  # noqa: BLE001
+        log.exception("Scene %s: forcing its lights off failed", entity_id)
+    invalidate("entities")
 
 
 # Home Assistant acknowledges a service call before the device reports back,

@@ -718,6 +718,7 @@ VOICE_ID_SAMPLES=5          # sentences "learn my voice" asks for
 VOICE_LOCKED_TOOLS=         # extra comma-separated tool names only Nick's voice may use
 VOICE_TRUSTED_CLIENTS=      # client-token names whose /chat counts as Nick (default: every client token is a guest)
 ROOM_ALARM_RING_S=120       # longest a finished timer rings on the room speaker
+LIGHT_TWINS=light.desk_lights_2=light.desk_lights,light.nick_strip_lights=light.strip_lights  # cloud=LAN entity of one light; scenes' "off" goes to both
 WAKE_BACKUP_DELAY_S=90      # wake-up: how long the TV gets to come on before the room speaker rings instead
 WAKE_BACKUP_RING_S=600      # wake-up: longest the backup ring goes on
 ROOM_ANNOUNCEMENTS=1        # speak runtime announcements (never in quiet hours)
@@ -814,6 +815,16 @@ CALENDAR_ALERT_LEAD_MIN=10  # warn this many minutes before a meeting
 ---
 
 ## Recently Shipped
+
+- **Scenes force their lights off (2026-11-01, Core)** — Goodnight left the
+  desk lights on: HA's `scene.turn_on` skips a light whose state already
+  matches, and the Govee cloud entity (`light.desk_lights_2`, which the scenes
+  use) can read "off" while the light is lit. After any scene runs,
+  `status_hub._force_scene_offs` (1.5 s later, in the background) reads the
+  scene config and sends one plain `light.turn_off` to every light it sets
+  off plus its twin under the other integration (`LIGHT_TWINS`, default
+  `light.desk_lights_2=light.desk_lights,light.nick_strip_lights=light.strip_lights`:
+  Govee cloud = Govee LAN).
 
 - **Vivid glass backdrop, still TV plasma, Barn Door fly-in (2026-11-01, iOS
   5.53 / build 196, TV 9.1)** — with Liquid glass on, `PlasmaBackdrop` drops

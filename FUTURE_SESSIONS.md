@@ -186,6 +186,12 @@ install on the phone and iPad, then check:
 
 ### Wake-up fixes, Memory view (iOS 5.52, TV 9.0, 2026-11-01): check
 
+- [ ] Goodnight / Peace actually turn the desk lights off (Core forces every
+  "off" light through both Govee entities after a scene). If the desk still
+  disagrees with the app, consider pointing the HA scenes at the LAN entity
+  `light.desk_lights` (real state, no cloud rate limit) and keeping only the
+  DIY-scene selects on the cloud one.
+
 - [ ] **Deploy Core** (`git pull` + restart): I'm up pausing the TV, the
   ringing state the app reads, the time-sensitive push and `/api/knowledge`
   all live there.
