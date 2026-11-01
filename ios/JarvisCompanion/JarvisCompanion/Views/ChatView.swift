@@ -453,7 +453,7 @@ struct ChatView: View {
                 .sensoryFeedback(.impact(flexibility: .soft), trigger: model.isAwaitingReply)
             }
             .padding(4)
-            .background(JarvisTheme.panelGradient, in: .rect(cornerRadius: 26))
+            .jarvisSurface(in: .rect(cornerRadius: 26))
             .overlay(RoundedRectangle(cornerRadius: 26).strokeBorder(
                 voiceInput.isListening ? JarvisTheme.amber.opacity(0.55) : JarvisTheme.border
             ))

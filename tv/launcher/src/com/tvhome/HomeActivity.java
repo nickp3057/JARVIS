@@ -78,7 +78,7 @@ public class HomeActivity extends Activity {
         @Override
         public void onReceive(Context context, Intent intent) {
             // A new shared theme (ThemeStream: Barn Door) rebuilds the screen.
-            if (Jarvis.theme(home) != home.theme || Jarvis.neural(home) != home.neural) home.recreate();
+            if (Jarvis.theme(home) != home.theme || !Jarvis.look(home).equals(home.look)) home.recreate();
             else home.render();
         }
     }
@@ -103,6 +103,10 @@ public class HomeActivity extends Activity {
     private Beat.Dancer reactor;
     /** Drawing the neural core (Core's {@code core: "neural"}) rather than the classic reactor. */
     private boolean neural;
+    /** {@link Jarvis#look}: core and Experimenting switches this screen was built with. */
+    private String look;
+    /** Liquid glass (Experimenting): cards drawn as frosted glass. */
+    private boolean glass;
     /** The theme the last home screen was built with, so a change fades in. */
     private static Theme shownTheme;
 
@@ -111,6 +115,8 @@ public class HomeActivity extends Activity {
         super.onCreate(savedInstanceState);
         theme = Jarvis.theme(this);
         neural = Jarvis.neural(this);
+        look = Jarvis.look(this);
+        glass = Jarvis.lab(this, "glass");
         build();
         RemoteBridgeService.start(this);
     }
@@ -118,7 +124,7 @@ public class HomeActivity extends Activity {
     @Override
     protected void onResume() {
         super.onResume();
-        if (Jarvis.theme(this) != theme || Jarvis.neural(this) != neural) {
+        if (Jarvis.theme(this) != theme || !Jarvis.look(this).equals(look)) {
             recreate();
             return;
         }
@@ -250,8 +256,14 @@ public class HomeActivity extends Activity {
 
     private void build() {
         stage = new FrameLayout(this);
-        stage.setBackground(new GradientDrawable(GradientDrawable.Orientation.TL_BR,
-                new int[] {theme.background, theme.deep}));
+        if (Jarvis.lab(this, "plasma") && theme != Theme.BARN_DOOR) {
+            // Experimenting: red and blue flowing behind everything, like the phone.
+            stage.addView(new PlasmaView(this, theme, glass), new FrameLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+        } else {
+            stage.setBackground(new GradientDrawable(GradientDrawable.Orientation.TL_BR,
+                    new int[] {theme.background, theme.deep}));
+        }
         screen = new LinearLayout(this);
         screen.setOrientation(LinearLayout.VERTICAL);
         screen.setPadding(dp(48), dp(22), dp(48), dp(26));
@@ -329,14 +341,20 @@ public class HomeActivity extends Activity {
         addContinueTile(apps);
         addSettingsTile(apps);
 
-        if (theme == Theme.BARN_DOOR) addBarnDoor();
-        setContentView(stage);
-        // A theme change (Barn Door engaging or standing down) fades the new
-        // screen in instead of cutting; the neural core morphs underneath.
-        if (shownTheme != null && shownTheme != theme) {
-            stage.setAlpha(0f);
-            stage.animate().alpha(1f).setDuration(1400).start();
+        // Barn Door fades in over the home screen and, on stand-down, back out
+        // of it (no dip to black); the neural core morphs inside it meanwhile.
+        boolean wasAlert = shownTheme == Theme.BARN_DOOR;
+        if (theme == Theme.BARN_DOOR) {
+            View alert = addBarnDoor(false);
+            if (shownTheme != null && !wasAlert) {
+                alert.setAlpha(0f);
+                alert.animate().alpha(1f).setDuration(1400).start();
+            }
+        } else if (wasAlert) {
+            View leaving = addBarnDoor(true);
+            leaving.animate().alpha(0f).setDuration(1400).withEndAction(() -> stage.removeView(leaving)).start();
         }
+        setContentView(stage);
         shownTheme = theme;
     }
 
@@ -348,16 +366,17 @@ public class HomeActivity extends Activity {
      * normal home sits underneath (its timers keep running) and comes back
      * when JARVIS stands down and the theme changes.
      */
-    private void addBarnDoor() {
+    private View addBarnDoor(boolean leaving) {
+        Theme theme = Theme.BARN_DOOR; // also while it fades out over the restored theme
         FrameLayout alert = new FrameLayout(this);
         alert.setBackgroundColor(theme.deep);
-        alert.setClickable(true);
+        alert.setClickable(!leaving);
         if (neural) {
             // Experimenting underneath: the neural core bristles into red spikes.
             FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT);
             lp.setMargins(0, dp(48), 0, dp(80));
-            alert.addView(new NeuralView(this, theme.reactor, NeuralNet.ALERT), lp);
+            alert.addView(new NeuralView(this, theme.reactor, mood()), lp);
         } else {
             alert.addView(new RedAlertView(this, theme.reactor, Color.rgb(255, 72, 56)), new FrameLayout.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
@@ -382,7 +401,16 @@ public class HomeActivity extends Activity {
 
         stage.addView(alert, new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
-        screen.setDescendantFocusability(ViewGroup.FOCUS_BLOCK_DESCENDANTS);
+        if (!leaving) screen.setDescendantFocusability(ViewGroup.FOCUS_BLOCK_DESCENDANTS);
+        return alert;
+    }
+
+    /**
+     * Every neural core on screen asks for the same mood: they share one mind,
+     * and two asking different moods would tug it back and forth.
+     */
+    private int mood() {
+        return theme == Theme.BARN_DOOR ? NeuralNet.ALERT : NeuralNet.THINKING;
     }
 
     /** Greeting on the left, the reactor dead centre, the clock on the right. */
@@ -404,7 +432,7 @@ public class HomeActivity extends Activity {
         h.addView(words, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.START | Gravity.CENTER_VERTICAL));
 
-        View mark = neural ? new NeuralView(this, theme.reactor, NeuralNet.THINKING)
+        View mark = neural ? new NeuralView(this, theme.reactor, mood())
                 : new ReactorView(this, theme.reactor, theme.success);
         reactor = (Beat.Dancer) mark;
         h.addView(mark, new FrameLayout.LayoutParams(dp(124), dp(124), Gravity.CENTER));
@@ -438,11 +466,15 @@ public class HomeActivity extends Activity {
         c.setOrientation(LinearLayout.VERTICAL);
         c.setPadding(dp(20), dp(14), dp(20), dp(12));
         c.setClipChildren(false);
-        GradientDrawable bg = new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,
-                new int[] {Theme.alpha(theme.raised, 225), Theme.alpha(theme.panel, 225)});
-        bg.setCornerRadius(dp(18));
-        bg.setStroke(dp(1), Theme.alpha(theme.accent, 40));
-        c.setBackground(bg);
+        if (glass) {
+            c.setBackground(glassCard(18));
+        } else {
+            GradientDrawable bg = new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,
+                    new int[] {Theme.alpha(theme.raised, 225), Theme.alpha(theme.panel, 225)});
+            bg.setCornerRadius(dp(18));
+            bg.setStroke(dp(1), Theme.alpha(theme.accent, 40));
+            c.setBackground(bg);
+        }
         if (focusable) {
             c.setFocusable(true);
             c.setClickable(true);
@@ -1197,11 +1229,15 @@ public class HomeActivity extends Activity {
         tile.setFocusable(true);
         tile.setClickable(true);
         // Every bottom-row tile looks like the Plex and Spotify ones.
-        GradientDrawable bg = new GradientDrawable(GradientDrawable.Orientation.TL_BR,
-                new int[] {theme.raised, theme.deep});
-        bg.setCornerRadius(dp(12));
-        bg.setStroke(dp(1), Theme.alpha(theme.accent, 70));
-        tile.setBackground(bg);
+        if (glass) {
+            tile.setBackground(glassCard(12));
+        } else {
+            GradientDrawable bg = new GradientDrawable(GradientDrawable.Orientation.TL_BR,
+                    new int[] {theme.raised, theme.deep});
+            bg.setCornerRadius(dp(12));
+            bg.setStroke(dp(1), Theme.alpha(theme.accent, 70));
+            tile.setBackground(bg);
+        }
         tile.setClipToOutline(true);
         tile.setOnFocusChangeListener((v, focused) -> {
             tile.setForeground(focused ? rounded(Color.TRANSPARENT, dp(3), theme.accent) : null);
@@ -1222,6 +1258,33 @@ public class HomeActivity extends Activity {
         lp.setMargins(dp(8), 0, dp(8), 0);
         row.addView(tile, lp);
         if (firstTile == null) firstTile = tile;
+    }
+
+    /**
+     * Frosted glass (Experimenting's Liquid glass): Android can't blur what's
+     * behind a view, so the frost is a milky haze over the panel colour, a
+     * sheen from the top-left and a bright rim; frostier than the backdrop.
+     */
+    private android.graphics.drawable.Drawable glassCard(int radiusDp) {
+        float r = dp(radiusDp);
+        GradientDrawable haze = new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM, new int[] {
+                Theme.alpha(blend(theme.raised, Color.WHITE, 0.18f), 130),
+                Theme.alpha(blend(theme.panel, Color.WHITE, 0.08f), 110)});
+        haze.setCornerRadius(r);
+        GradientDrawable sheen = new GradientDrawable(GradientDrawable.Orientation.TL_BR, new int[] {
+                Color.argb(40, 255, 255, 255), Color.argb(0, 255, 255, 255), Color.argb(0, 255, 255, 255)});
+        sheen.setCornerRadius(r);
+        GradientDrawable rim = new GradientDrawable();
+        rim.setCornerRadius(r);
+        rim.setColor(Color.TRANSPARENT);
+        rim.setStroke(dp(1), Color.argb(80, 255, 255, 255));
+        return new android.graphics.drawable.LayerDrawable(new android.graphics.drawable.Drawable[] {haze, sheen, rim});
+    }
+
+    private static int blend(int a, int b, float f) {
+        return Color.rgb(Math.round(Color.red(a) + (Color.red(b) - Color.red(a)) * f),
+                Math.round(Color.green(a) + (Color.green(b) - Color.green(a)) * f),
+                Math.round(Color.blue(a) + (Color.blue(b) - Color.blue(a)) * f));
     }
 
     private GradientDrawable rounded(int color, int stroke, int strokeColor) {

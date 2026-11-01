@@ -96,6 +96,15 @@ every deploy, so edit the repo copy, not the TV's.
   (`HomeActivity.shownTheme`). `ThemeStream` refetches `/api/theme` when the
   stream's `look` moves, so flipping the switch on the phone reaches the TV
   at once. Both views implement `Beat.Dancer`, so Back in Black still bounces it.
+  Every `NeuralView` on screen must ask for the same mood (`HomeActivity.mood()`):
+  they share one mind. Barn Door's overlay fades in over the home and, on
+  stand-down, a copy fades out over the restored home (no fade from black).
+- **Experimenting lab (8.7)**: Core's glance/`/api/theme` `lab` lists the
+  Experimenting switches showing. `plasma` puts `PlasmaView` (the phone's
+  flowing red/blue, drawn at 1/8 resolution and stretched, ~0 janky frames)
+  behind the home; `glass` draws cards and tiles as frosted glass
+  (`HomeActivity.glassCard`: milky haze, sheen, bright rim; Android can't blur
+  behind a view). `Jarvis.look` (core + lab) changing rebuilds the screen.
 - **Themes**: Arc, Hot Rod, Malibu, Crimson, Mark 85, Spider-Man, McQueen
   ("Ka-chow, sir." and a ⚡ on the date), plus `barnDoor`, Barn Door
   Protocol's red alert, set by JARVIS and never in the picker. While it's

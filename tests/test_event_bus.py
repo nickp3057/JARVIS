@@ -200,8 +200,11 @@ class ClientTokenTests(unittest.TestCase):
         theme.restore()
         theme.set_experiments({"neural": True})
         self.assertEqual(theme.current()["core"], "neural")
+        self.assertEqual(theme.current()["lab"], {"plasma": True, "neural": True, "orb3D": False, "glass": True})
+        theme.set_experiments({"glass": False})
+        self.assertFalse(theme.current()["lab"]["glass"])
         theme.choose("arc")
-        self.assertEqual(theme.current()["core"], "classic")
+        self.assertEqual((theme.current()["core"], theme.current()["lab"]), ("classic", {}))
 
     def test_experiment_switch_moves_the_revision_the_home_stream_carries(self) -> None:
         from brain import theme

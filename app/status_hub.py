@@ -296,6 +296,7 @@ def glance_status() -> dict[str, Any]:
     Every section degrades on its own; the call itself never fails."""
     from brain import event_bus
     from brain import theme as shared_theme
+    shared_look = shared_theme.current()
     with ThreadPoolExecutor(max_workers=4) as pool:
         now = pool.submit(now_status)
         weather = pool.submit(weather_status)
@@ -319,8 +320,7 @@ def glance_status() -> dict[str, Any]:
     return {
         "generated_at": time.time(),
         "address": (os.getenv("ADDRESS") or "sir").strip() or "sir",
-        "theme": shared_theme.current()["theme"],
-        "core": shared_theme.current()["core"],  # "neural" or "classic" reactor (TV)
+        **{key: shared_look[key] for key in ("theme", "core", "lab")},  # lab: Experimenting switches showing (TV)
         "weather": sections["weather"],
         "now": sections["now"],
         "events": sections["events"] if isinstance(sections["events"], list) else [],

@@ -58,7 +58,7 @@ def _stamp(data: dict[str, Any], key: str) -> float:
 
 
 def current() -> dict[str, object]:
-    """``{"theme", "chosen", "updated_at", "experiments", "revision", "core"}``; chosen is
+    """``{"theme", "chosen", "updated_at", "experiments", "revision", "core", "lab"}``; chosen is
     False while it's the .env default. ``revision`` moves with any theme pick or
     experiment switch (the home stream carries it so screens refetch at once)."""
     data = _read()
@@ -69,17 +69,30 @@ def current() -> dict[str, object]:
         updated = _stamp(data, "updated_at")
         underneath = _saved_before() if theme == "barnDoor" else theme
         return {"theme": theme, "chosen": True, "updated_at": updated, "experiments": experiments,
-                "revision": max(updated, switched), "core": _core(underneath, experiments)}
+                "revision": max(updated, switched), **_looks(underneath, experiments)}
     default = os.getenv("JARVIS_THEME", "arc").strip()
     default = _RETIRED.get(default, default)
     return {"theme": default if default in THEMES else "arc", "chosen": False, "updated_at": 0.0,
-            "experiments": experiments, "revision": switched, "core": _core(default, experiments)}
+            "experiments": experiments, "revision": switched, **_looks(default, experiments)}
 
 
-def _core(underneath: str | None, experiments: dict[str, bool]) -> str:
-    """Which reactor the screens draw: "neural" when Experimenting is the pick
-    (or what Barn Door replaced) and its Neural core switch isn't off."""
-    return "neural" if underneath == "experimenting" and experiments.get("neural", True) else "classic"
+# Each experiment's default while nobody has flipped it (the iOS
+# `Experiment.defaultOn`; keep the two in step).
+_LAB_DEFAULTS = {"plasma": True, "neural": True, "orb3D": False, "glass": True}
+
+
+def _lab(underneath: str | None, experiments: dict[str, bool]) -> dict[str, bool]:
+    """The experiments actually showing: every switch with its default filled
+    in while Experimenting is the pick (or what Barn Door replaced), else none.
+    The TV reads this; the phone and iPad apply the switches themselves."""
+    if underneath != "experimenting":
+        return {}
+    return {name: experiments.get(name, default) for name, default in _LAB_DEFAULTS.items()}
+
+
+def _looks(underneath: str | None, experiments: dict[str, bool]) -> dict[str, object]:
+    lab = _lab(underneath, experiments)
+    return {"core": "neural" if lab.get("neural") else "classic", "lab": lab}
 
 
 def choose(theme: str, remember: bool = False) -> dict[str, object]:

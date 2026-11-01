@@ -276,7 +276,7 @@ struct LevelPanel: View {
         }
         .padding(28)
         .fixedSize()
-        .background(JarvisTheme.panelGradient, in: .rect(cornerRadius: 28))
+        .jarvisSurface(in: .rect(cornerRadius: 28))
         .overlay(RoundedRectangle(cornerRadius: 28).strokeBorder(JarvisTheme.border))
         .shadow(color: .black.opacity(0.5), radius: 30)
         .padding(20)

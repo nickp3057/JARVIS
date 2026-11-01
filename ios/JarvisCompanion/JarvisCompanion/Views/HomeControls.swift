@@ -147,7 +147,7 @@ struct SceneFocusMenu: View {
             }
             .padding(12)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(JarvisTheme.panelGradient, in: .rect(cornerRadius: 18))
+            .jarvisSurface(in: .rect(cornerRadius: 18))
             .overlay(RoundedRectangle(cornerRadius: 18).strokeBorder(JarvisTheme.border))
             .contentShape(Rectangle())
         }

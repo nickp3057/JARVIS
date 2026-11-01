@@ -57,6 +57,21 @@ final class Jarvis {
      * The TV's theme: Core's shared pick (the phone's too), unless a pick on
      * the TV couldn't be saved to Core (old token without settings:write).
      */
+    /** Core's {@code lab}: an Experimenting switch that's showing (plasma, glass, ...). */
+    static boolean lab(Context c, String experiment) {
+        JSONObject g = cached(c);
+        JSONObject lab = g != null ? g.optJSONObject("lab") : null;
+        return lab != null && lab.optBoolean(experiment, false);
+    }
+
+    /** Everything about the look that rebuilds the screen when it changes. */
+    static String look(Context c) {
+        JSONObject g = cached(c);
+        if (g == null) return "";
+        JSONObject lab = g.optJSONObject("lab");
+        return g.optString("core") + "|" + (lab != null ? lab.toString() : "");
+    }
+
     /** Core's {@code core}: draw the neural core instead of the classic reactor. */
     static boolean neural(Context c) {
         JSONObject g = cached(c);
@@ -136,12 +151,16 @@ final class Jarvis {
         try {
             JSONObject theme = getJson(base(c), "/api/theme", token(c), 4000);
             String shared = theme.optString("theme"), core = theme.optString("core");
+            JSONObject lab = theme.optJSONObject("lab");
+            JSONObject oldLab = g.optJSONObject("lab");
+            boolean newLab = lab != null && (oldLab == null || !lab.toString().equals(oldLab.toString()));
             boolean picked = !prefs(c).getString(THEME, "").isEmpty();
             boolean newTheme = !picked && !shared.isEmpty() && !shared.equals(g.optString("theme"));
             boolean newCore = !core.isEmpty() && !core.equals(g.optString("core"));
-            if (!newTheme && !newCore) return false;
+            if (!newTheme && !newCore && !newLab) return false;
             if (newTheme) g.put("theme", shared);
             if (newCore) g.put("core", core);
+            if (newLab) g.put("lab", lab);
             prefs(c).edit().putString("glance", g.toString()).apply();
             return true;
         } catch (Exception e) {

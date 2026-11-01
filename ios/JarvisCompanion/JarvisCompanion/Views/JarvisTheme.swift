@@ -398,7 +398,7 @@ struct CockpitPanel<Content: View, Trailing: View>: View {
             content()
         }
         .padding(16)
-        .background(JarvisTheme.panelGradient, in: .rect(cornerRadius: 20))
+        .jarvisSurface(in: .rect(cornerRadius: 20))
         .overlay {
             RoundedRectangle(cornerRadius: 20)
                 .strokeBorder(

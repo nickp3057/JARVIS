@@ -16,6 +16,8 @@ struct RootView: View {
     @AppStorage(JarvisPalette.storageKey) private var palette = JarvisPalette.arc.rawValue
     /// The palette the tabs are built with; follows `palette` inside an animation.
     @State private var shownPalette = JarvisPalette.current.rawValue
+    /// True while a theme crossfade runs: a solid backdrop sits under it.
+    @State private var fading = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.scenePhase) private var scenePhase
     @ObservedObject private var wakeRinging = WakeRinging.shared
@@ -58,6 +60,11 @@ struct RootView: View {
 
     var body: some View {
         ZStack {
+        if fading {
+            // Under the crossfade, so the two screens never let black through
+            // (that was the dim dip mid-change). Only there while it runs.
+            JarvisBackdrop()
+        }
         TabView(selection: $selection) {
             if Self.isMac {
                 HubView(model: hub, onAsk: ask, onNavigate: navigate, onSend: sendNow, focus: .desk)
@@ -106,7 +113,12 @@ struct RootView: View {
         .transition(.opacity)
         }
         .onChange(of: palette) { _, new in
-            withAnimation(reduceMotion ? nil : .easeInOut(duration: 1.4)) { shownPalette = new }
+            fading = !reduceMotion
+            withAnimation(reduceMotion ? nil : .easeInOut(duration: 1.4)) {
+                shownPalette = new
+            } completion: {
+                fading = false
+            }
         }
         .tint(JarvisTheme.reactor)
         .simultaneousGesture(DragGesture(minimumDistance: 30).onChanged(track).onEnded(swipe))

@@ -204,8 +204,12 @@ install on the phone and iPad, then check:
   it spiky full-screen and fades in. Untested on screen (the TV was asleep;
   a JVM stress run of `NeuralNet` through every mood was clean). Watch for
   frame drops on the TCL (`adb shell dumpsys gfxinfo com.tvhome`).
-- [ ] **Barn Door crossfade (5.48)** on phone and iPad: should dissolve
-  over ~1.4 s both ways.
+- [ ] **Barn Door crossfade (5.48–5.49)** on phone and iPad: should dissolve
+  over ~1.4 s both ways with no dim dip (5.49 backdrop under the fade).
+- [ ] **Liquid glass + TV plasma (5.49 / TV 8.7)**: needs Core pulled for
+  `lab`. Cards frosted on all three; backdrop frost thinner. Knobs: iOS
+  `FrostedGlass` (material, tint 0.30), TV `glassCard` alphas (130/110),
+  `PlasmaView` frost wash (60 with glass, 110 without).
 
 ### Voice ID, presence, motion (asked 2026-11-01)
 

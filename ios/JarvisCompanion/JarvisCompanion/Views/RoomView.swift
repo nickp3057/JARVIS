@@ -654,7 +654,7 @@ private extension View {
     func roomPanel(fill: Bool = false) -> some View {
         padding(20)
             .frame(maxWidth: .infinity, maxHeight: fill ? .infinity : nil, alignment: .topLeading)
-            .background(JarvisTheme.panelGradient, in: .rect(cornerRadius: 24))
+            .jarvisSurface(in: .rect(cornerRadius: 24))
             .overlay(RoundedRectangle(cornerRadius: 24).strokeBorder(JarvisTheme.border))
     }
 }

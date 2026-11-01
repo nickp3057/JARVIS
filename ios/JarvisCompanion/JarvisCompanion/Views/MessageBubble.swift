@@ -146,7 +146,7 @@ struct MessageBubble: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(12)
-        .background(JarvisTheme.panelGradient, in: .rect(cornerRadius: 16))
+        .jarvisSurface(in: .rect(cornerRadius: 16))
         .overlay(
             RoundedRectangle(cornerRadius: 16)
                 .strokeBorder(JarvisTheme.amber.opacity(0.35), lineWidth: 1)
@@ -218,7 +218,7 @@ struct TypingIndicator: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
-        .background(JarvisTheme.panelGradient, in: .rect(cornerRadius: 18))
+        .jarvisSurface(in: .rect(cornerRadius: 18))
         .overlay(RoundedRectangle(cornerRadius: 18).strokeBorder(JarvisTheme.border))
         .frame(maxWidth: .infinity, alignment: .leading)
         .onAppear { animating = !reduceMotion }

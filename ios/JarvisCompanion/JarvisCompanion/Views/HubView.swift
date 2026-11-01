@@ -293,7 +293,7 @@ struct HubView: View {
                 Image(systemName: "chevron.right").font(.footnote.weight(.semibold)).foregroundStyle(.secondary)
             }
             .padding(16)
-            .background(JarvisTheme.panelGradient, in: .rect(cornerRadius: 20))
+            .jarvisSurface(in: .rect(cornerRadius: 20))
             .overlay(RoundedRectangle(cornerRadius: 20).strokeBorder(JarvisTheme.border))
             .contentShape(Rectangle())
         }
@@ -310,7 +310,7 @@ struct HubView: View {
                 Image(systemName: "chevron.right").font(.footnote.weight(.semibold)).foregroundStyle(.secondary)
             }
             .padding(16)
-            .background(JarvisTheme.panelGradient, in: .rect(cornerRadius: 20))
+            .jarvisSurface(in: .rect(cornerRadius: 20))
             .overlay(RoundedRectangle(cornerRadius: 20).strokeBorder(JarvisTheme.border))
             .contentShape(Rectangle())
         }
@@ -455,7 +455,7 @@ struct HubView: View {
         }
         .padding(20)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(JarvisTheme.panelGradient, in: .rect(cornerRadius: 24))
+        .jarvisSurface(in: .rect(cornerRadius: 24))
         .overlay(RoundedRectangle(cornerRadius: 24).strokeBorder(JarvisTheme.border))
     }
 
@@ -701,7 +701,7 @@ struct HubView: View {
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 12)
-        .background(JarvisTheme.panelGradient, in: .rect(cornerRadius: 16))
+        .jarvisSurface(in: .rect(cornerRadius: 16))
         .overlay(RoundedRectangle(cornerRadius: 16).strokeBorder(JarvisTheme.border))
     }
 
@@ -726,7 +726,7 @@ struct HubView: View {
         }
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(JarvisTheme.panelGradient, in: .rect(cornerRadius: 20))
+        .jarvisSurface(in: .rect(cornerRadius: 20))
         .overlay(RoundedRectangle(cornerRadius: 20).strokeBorder(JarvisTheme.border))
     }
 
@@ -1427,7 +1427,7 @@ private extension View {
         padding(14)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             .frame(minHeight: 96)
-            .background(JarvisTheme.panelGradient, in: .rect(cornerRadius: 20))
+            .jarvisSurface(in: .rect(cornerRadius: 20))
             .overlay(RoundedRectangle(cornerRadius: 20).strokeBorder(JarvisTheme.border))
     }
 

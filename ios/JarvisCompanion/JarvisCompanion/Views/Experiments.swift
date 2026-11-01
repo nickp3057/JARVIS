@@ -15,7 +15,7 @@ import simd
 /// pulsing the whole view; colour as glow on a dark base, never a red
 /// background; Reduce Motion and Low Power Mode get the still frame.
 enum Experiment: String, CaseIterable, Identifiable {
-    case plasma, neural, orb3D
+    case plasma, neural, orb3D, glass
 
     var id: String { rawValue }
 
@@ -24,6 +24,7 @@ enum Experiment: String, CaseIterable, Identifiable {
         case .plasma: return "Flowing plasma"
         case .neural: return "Neural core"
         case .orb3D: return "Orbit orb"
+        case .glass: return "Liquid glass"
         }
     }
 
@@ -32,10 +33,12 @@ enum Experiment: String, CaseIterable, Identifiable {
         case .plasma: return "Red and blue light flowing behind frosted glass, speeding up and easing off on its own."
         case .neural: return "The reactor becomes a layered mind of data nodes with thoughts cascading out from its core. It opens into a green eye while the camera watches and bristles red for Barn Door."
         case .orb3D: return "A lit sphere with tilted orbiting rings (Neural core wins if both are on)."
+        case .glass: return "Every card turns to frosted Liquid Glass, and the background's frost thins so the colour comes through."
         }
     }
 
-    /// Default when Nick hasn't flipped it on any device.
+    /// Default when Nick hasn't flipped it on any device (Core's
+    /// `brain/theme._LAB_DEFAULTS` mirrors these for the TV).
     var defaultOn: Bool { self != .orb3D }
 
     var storageKey: String { "jarvis.experiment.\(rawValue)" }
@@ -78,6 +81,8 @@ private struct Gust {
 struct PlasmaBackdrop: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.colorScheme) private var scheme
+    /// With Liquid glass on the frost moves to the cards: the backdrop's thins.
+    @AppStorage(Experiment.glass.storageKey) private var glassOn = Experiment.glass.defaultOn
 
     private struct Blob {
         let color: Color
@@ -145,8 +150,8 @@ struct PlasmaBackdrop: View {
             }
             // The frost: a thin material evens the colour out like glass, then a
             // whisper of the background keeps text contrast where it was.
-            Rectangle().fill(.ultraThinMaterial).opacity(0.35)
-            JarvisTheme.backgroundDeep.opacity(dark ? 0.18 : 0.08)
+            Rectangle().fill(.ultraThinMaterial).opacity(glassOn ? 0.15 : 0.35)
+            JarvisTheme.backgroundDeep.opacity((dark ? 0.18 : 0.08) * (glassOn ? 0.6 : 1))
         }
         .ignoresSafeArea()
         .accessibilityHidden(true)
@@ -771,6 +776,55 @@ struct OrbitOrb: View {
             ring(seconds, tilt: (12, 74 + wobble), period: 22, inset: size * 0.02, width: max(1, size / 110), opacity: 0.30)
         }
         .compositingGroup()
+    }
+}
+
+// MARK: - Liquid glass
+
+extension View {
+    /// The background every card and panel uses: the theme's panel gradient,
+    /// or frosted Liquid Glass while Experimenting has its glass switch on.
+    func jarvisSurface<S: Shape>(in shape: S) -> some View {
+        modifier(JarvisSurface(shape: shape))
+    }
+}
+
+private struct JarvisSurface<S: Shape>: ViewModifier {
+    let shape: S
+    @AppStorage(JarvisPalette.storageKey) private var palette = JarvisPalette.arc.rawValue
+    @AppStorage(Experiment.glass.storageKey) private var glassOn = Experiment.glass.defaultOn
+
+    func body(content: Content) -> some View {
+        if palette == JarvisPalette.experimenting.rawValue && glassOn {
+            content.background { FrostedGlass(shape: shape) }
+        } else {
+            content.jarvisSurface(in: shape)
+        }
+    }
+}
+
+/// Frosted glass: a thick blur of whatever flows behind (the plasma), a
+/// whisper of the panel colour so text keeps its contrast, a light sheen from
+/// the top-left and a bright rim. On iOS 26+ the rim and sheen are Apple's
+/// Liquid Glass itself, laid over the frost.
+private struct FrostedGlass<S: Shape>: View {
+    let shape: S
+    @Environment(\.colorScheme) private var scheme
+
+    var body: some View {
+        let dark = scheme == .dark
+        ZStack {
+            shape.fill(.regularMaterial)
+            shape.fill(JarvisTheme.panel.opacity(dark ? 0.30 : 0.18))
+            if #available(iOS 26, macCatalyst 26, *) {
+                Color.clear.glassEffect(.regular.tint(JarvisTheme.reactor.opacity(0.06)), in: shape)
+            } else {
+                shape.fill(LinearGradient(colors: [.white.opacity(dark ? 0.10 : 0.30), .white.opacity(0)],
+                                          startPoint: .topLeading, endPoint: .center))
+                shape.stroke(LinearGradient(colors: [.white.opacity(0.45), .white.opacity(0.06), .white.opacity(0.18)],
+                                                  startPoint: .topLeading, endPoint: .bottomTrailing), lineWidth: 1)
+            }
+        }
     }
 }
 

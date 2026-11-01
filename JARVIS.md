@@ -855,6 +855,21 @@ CALENDAR_ALERT_LEAD_MIN=10  # warn this many minutes before a meeting
     Barn Door replaced, and the `neural` switch isn't off), and the TV draws
     the same neural core (`NeuralNet`/`NeuralView`, a Java port), spiky
     full-screen for Barn Door; see tv/README.md.
+  - **5.49 / TV 8.7**: **Liquid glass** experiment (`glass`, default on):
+    every card and panel goes through `View.jarvisSurface(in:)`
+    (Experiments.swift), which is the panel gradient normally and frosted
+    glass under Experimenting (`.regularMaterial` + a panel tint + iOS 26
+    `glassEffect` rim/sheen); the plasma backdrop's own frost thins
+    (material 0.35 → 0.15) while it's on. Theme crossfade no longer dims:
+    a `JarvisBackdrop` sits under the two fading screens while it runs.
+    Core's theme/glance add `lab`, the switches actually showing with
+    defaults filled in (`brain/theme._LAB_DEFAULTS` mirrors
+    `Experiment.defaultOn`); the TV draws `PlasmaView` (rendered at 1/8 size
+    and stretched: full-size gradients ran the TCL at ~7 fps) and frosted
+    `glassCard`s from it. TV Barn Door now fades its overlay in over the
+    home screen and out on stand-down (no dip to black), and every neural
+    core on screen asks for the same mood (`HomeActivity.mood()`); the
+    header's thinking core used to tug the shared mind back from spiky.
 
 - **Voice ID backbone (2026-11-01, untested on the Optiplex)** — who's
   talking decides what a voice may do. `brain/voice_trust.py` holds the

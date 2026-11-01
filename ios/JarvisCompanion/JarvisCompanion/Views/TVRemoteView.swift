@@ -60,7 +60,7 @@ struct TVRemoteView: View {
         Button { press(key) } label: {
             Label(title, systemImage: symbol).font(.subheadline.weight(.semibold))
                 .frame(maxWidth: .infinity, minHeight: 46)
-                .background(JarvisTheme.panelGradient, in: .rect(cornerRadius: 14))
+                .jarvisSurface(in: .rect(cornerRadius: 14))
                 .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(JarvisTheme.border))
         }
         .buttonStyle(CockpitButtonStyle())
@@ -110,7 +110,7 @@ struct TVRemoteView: View {
         Button { press(key) } label: {
             Image(systemName: symbol).font(.title3)
                 .frame(width: 64, height: 64)
-                .background(JarvisTheme.panelGradient, in: .circle)
+                .jarvisSurface(in: .circle)
                 .overlay(Circle().strokeBorder(JarvisTheme.border))
         }
         .buttonStyle(CockpitButtonStyle())
@@ -122,7 +122,7 @@ struct TVRemoteView: View {
         Button { press(key) } label: {
             Label(title, systemImage: symbol).font(.subheadline.weight(.semibold))
                 .padding(.horizontal, 22).padding(.vertical, 12)
-                .background(JarvisTheme.panelGradient, in: .capsule)
+                .jarvisSurface(in: .capsule)
                 .overlay(Capsule().strokeBorder(JarvisTheme.border))
         }
         .buttonStyle(CockpitButtonStyle())
