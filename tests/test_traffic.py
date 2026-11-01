@@ -14,9 +14,12 @@ class TrafficTests(unittest.TestCase):
 
     def test_host_nodes(self) -> None:
         with patch.dict(os.environ, {"HOME_ASSISTANT_URL": "http://nas.lan:8123", "PLEX_URL": ""}):
-            self.assertEqual(traffic.host_node("http://nas.lan:8123/api/states"), ("nas", "home assistant"))
-            self.assertEqual(traffic.host_node("http://100.97.1.2:7878/api"), ("nas", "radarr"))
+            self.assertEqual(traffic.host_node("http://nas.lan:8123/api/states?x=secret"),
+                             ("nas", "home assistant /api/states"))
+            self.assertEqual(traffic.host_node("http://100.97.1.2:7878/api"), ("nas", "radarr /api"))
             self.assertEqual(traffic.host_node("https://api.anthropic.com/v1/messages")[0], "internet")
+            self.assertEqual(traffic.host_node("https://api.push.apple.com/3/device/" + "ab" * 32),
+                             ("internet", "api.push.apple.com /3/device/…"))
             self.assertEqual(traffic.host_node("http://127.0.0.1:11434/x")[0], "core")
 
     def test_ring_buffer_and_since(self) -> None:

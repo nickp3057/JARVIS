@@ -829,6 +829,16 @@ CALENDAR_ALERT_LEAD_MIN=10  # warn this many minutes before a meeting
   `light.desk_lights_2=light.desk_lights,light.nick_strip_lights=light.strip_lights`:
   Govee cloud = Govee LAN).
 
+- **Tappable Link map (2026-11-01, iOS 5.60 / build 203)** — tap any
+  endpoint on the Link map to read its last 60 signals (kept in
+  `TrafficFeed.history`, 400 max): direction, a plain-English description
+  (`TrafficWords`: "Home Assistant: light turn on", "Asking Claude", "Reply:
+  camera frame"), the raw label and how long ago; tap again or ✕ to go back
+  to the live "Just now" list. Core's outbound labels now carry the path too
+  (`traffic.host_node`: "home assistant /api/services/light/turn_on"), never
+  the query string, with any path segment of 24+ characters masked (APNs
+  device tokens, bot tokens).
+
 - **Bigger core, smaller nodes, deeper pool (2026-11-01, iOS 5.58 / build
   201, TV 9.4)** — `NeuralCore` node boxes shrink (`size / 125`) while the
   wires keep their weight. The Room's Wake-up row moved into the Menu (its

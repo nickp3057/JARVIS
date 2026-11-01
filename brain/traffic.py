@@ -45,7 +45,7 @@ def record(source: str, target: str, label: str = "") -> None:
         return
     with _lock:
         _seq += 1
-        _log.append({"seq": _seq, "at": time.time(), "from": source, "to": target, "label": label[:60]})
+        _log.append({"seq": _seq, "at": time.time(), "from": source, "to": target, "label": label[:90]})
 
 
 def seq() -> int:
@@ -87,9 +87,20 @@ def _nas_hosts() -> set[str]:
 
 
 def host_node(url: str) -> tuple[str, str]:
-    """(node, label) for an outbound URL."""
+    """(node, label) for an outbound URL. The label is the service (or host)
+    and the path, never the query string: "home assistant /api/states"."""
     try:
         parts = urlsplit(str(url))
+    except ValueError:
+        return "internet", ""
+    node, service = _host_node(parts)
+    # Long segments are often secrets (APNs device tokens, bot tokens): masked.
+    path = "/".join("…" if len(seg) >= 24 else seg for seg in parts.path.rstrip("/").split("/"))
+    return node, f"{service} {path}".strip() if path and node != "core" else service
+
+
+def _host_node(parts) -> tuple[str, str]:
+    try:
         host = (parts.hostname or "").lower()
         port = parts.port
     except ValueError:
