@@ -24,7 +24,7 @@ class HistoryStorageTests(unittest.TestCase):
             session = history.start_new_session()
             history.append_turn("question", "answer", session)
             self.assertEqual(len(history.load_session_messages(session)), 2)
-            history.list_sessions()
+            self.assertEqual(history.list_sessions()[0]["last_message_id"], 2)
             self.assertTrue(all(c.closed for c in connections))
             conn = history._connect()
             try:

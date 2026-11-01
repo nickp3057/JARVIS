@@ -330,3 +330,5 @@ regressions run with:
 When the installed SDK has no matching simulator runtime, type-check the app
 and test sources against the device SDK; this does not replace visual or
 on-device validation.
+
+- Companion history sync uses the server’s `last_message_id` revision to skip unchanged transcripts while still updating titles. Revisions are cached in the local archive; older servers without revisions still fetch normally. Live turns are skipped before fetching, message matching is indexed, and date formatters are reused.

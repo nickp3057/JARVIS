@@ -210,6 +210,7 @@ def list_sessions(limit: int = 30) -> list[dict[str, Any]]:
                     s.summary,
                     s.summarized_at,
                     COUNT(c.id) / 2            AS turn_count,
+                    MAX(c.id)                 AS last_message_id,
                     (
                         SELECT first.content
                         FROM conversation AS first

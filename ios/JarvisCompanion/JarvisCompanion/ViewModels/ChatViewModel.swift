@@ -167,10 +167,26 @@ final class ChatViewModel: ObservableObject {
             guard !Task.isCancelled else { return }
             for remote in remoteSessions {
                 if pendingEdits.contains(where: { $0.sessionID == remote.sessionID && $0.title == nil }) { continue }
+                let existing = conversations.first(where: { $0.serverSessionID == remote.sessionID })
+                if let existing, existing.id == activeConversationID && isAwaitingReply { continue }
+                if let revision = remote.lastMessageID, existing?.serverLastMessageID == revision,
+                   existing?.messages.last?.role == .jarvis {
+                    if !pendingEdits.contains(where: { $0.sessionID == remote.sessionID }),
+                       let title = remote.title, !title.isEmpty,
+                       let index = conversations.firstIndex(where: { $0.serverSessionID == remote.sessionID }) {
+                        conversations[index].customTitle = title
+                    }
+                    continue
+                }
                 let remoteMessages = try await client.messages(for: remote.sessionID)
                 guard !Task.isCancelled else { return }
                 if deletedSessionIDs.contains(remote.sessionID) { continue }
-                let existing = conversations.first(where: { $0.serverSessionID == remote.sessionID })
+                var byID: [Int: ChatMessage] = [:]
+                var byRequest: [String: ChatMessage] = [:]
+                for message in existing?.messages ?? [] {
+                    if let id = message.serverID { byID[id] = message }
+                    if let request = message.requestID { byRequest["\(request)|\(message.role.rawValue)"] = message }
+                }
                 let converted = remoteMessages.compactMap { item -> ChatMessage? in
                     let role: ChatMessage.Role
                     switch item.role {
@@ -178,10 +194,8 @@ final class ChatViewModel: ObservableObject {
                     case "assistant": role = .jarvis
                     default: return nil
                     }
-                    let previous = existing?.messages.first(where: {
-                        (item.id != nil && $0.serverID == item.id)
-                            || (item.requestID != nil && $0.requestID == item.requestID && $0.role == role)
-                    })
+                    let previous = item.id.flatMap { byID[$0] }
+                        ?? item.requestID.flatMap { byRequest["\($0)|\(role.rawValue)"] }
                     return ChatMessage(id: previous?.id ?? UUID(), role: role, text: item.content,
                                        date: parseServerDate(item.createdAt), serverID: item.id, requestID: item.requestID)
                 }
@@ -197,6 +211,7 @@ final class ChatViewModel: ObservableObject {
                         continue
                     }
                     conversations[index].messages = converted
+                    conversations[index].serverLastMessageID = remote.lastMessageID
                     if !pendingEdits.contains(where: { $0.sessionID == remote.sessionID }),
                        let title = remote.title, !title.isEmpty { conversations[index].customTitle = title }
                     conversations[index].updatedAt = converted.last?.date ?? conversations[index].updatedAt
@@ -210,7 +225,8 @@ final class ChatViewModel: ObservableObject {
                         updatedAt: converted.last?.date ?? Date(),
                         messages: converted,
                         customTitle: remote.title,
-                        serverSessionID: remote.sessionID
+                        serverSessionID: remote.sessionID,
+                        serverLastMessageID: remote.lastMessageID
                     ))
                 }
             }
@@ -220,13 +236,18 @@ final class ChatViewModel: ObservableObject {
         }
     }
 
-    private func parseServerDate(_ value: String?) -> Date {
-        guard let value else { return Date() }
+    private static let serverDateFormatter: DateFormatter = {
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.timeZone = TimeZone(secondsFromGMT: 0)
         formatter.dateFormat = "yyyy-MM-dd HH:mm:ss"
-        return formatter.date(from: value) ?? ISO8601DateFormatter().date(from: value) ?? Date()
+        return formatter
+    }()
+    private static let serverISOFormatter = ISO8601DateFormatter()
+
+    private func parseServerDate(_ value: String?) -> Date {
+        guard let value else { return Date() }
+        return Self.serverDateFormatter.date(from: value) ?? Self.serverISOFormatter.date(from: value) ?? Date()
     }
 
     func startNewConversation(now: Date = Date()) {

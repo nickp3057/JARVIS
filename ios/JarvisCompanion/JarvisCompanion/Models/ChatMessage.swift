@@ -38,6 +38,7 @@ struct ChatConversation: Identifiable, Codable, Equatable {
     var messages: [ChatMessage]
     var customTitle: String?
     var serverSessionID: String?
+    var serverLastMessageID: Int?
     var draft: String?
 
     init(
@@ -47,7 +48,8 @@ struct ChatConversation: Identifiable, Codable, Equatable {
         messages: [ChatMessage] = [],
         customTitle: String? = nil,
         serverSessionID: String? = nil,
-        draft: String? = nil
+        draft: String? = nil,
+        serverLastMessageID: Int? = nil
     ) {
         self.id = id
         self.createdAt = createdAt
@@ -55,6 +57,7 @@ struct ChatConversation: Identifiable, Codable, Equatable {
         self.messages = messages
         self.customTitle = customTitle
         self.serverSessionID = serverSessionID
+        self.serverLastMessageID = serverLastMessageID
         self.draft = draft
     }
 

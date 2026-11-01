@@ -148,6 +148,38 @@ final class CompanionTests: XCTestCase {
         XCTAssertEqual(chat.messages.last?.text, "New reply")
     }
 
+    func testUnchangedHistorySkipsTranscriptButChangedHistoryLoads() async throws {
+        let requests = NSLock()
+        var transcriptRequests = 0
+        var revision = 2
+        MockProtocol.handler = { request in
+            requests.lock()
+            defer { requests.unlock() }
+            switch request.url!.path {
+            case "/health": return (200, "{}", 0)
+            case "/sessions": return (200, """
+                {"sessions":[{"session_id":"session","title":"Renamed","last_message_id":\(revision)}]}
+                """, 0)
+            default:
+                transcriptRequests += 1
+                return (200, """
+                    {"messages":[{"id":1,"role":"user","content":"old"},
+                    {"id":\(revision),"role":"assistant","content":"Changed answer"}]}
+                    """, 0)
+            }
+        }
+        let conversation = ChatConversation(messages: [ChatMessage(role: .jarvis, text: "Old answer")],
+            serverSessionID: "session", serverLastMessageID: 2)
+        let chat = model(store: MemoryStore(ChatArchive(conversations: [conversation], activeConversationID: conversation.id)))
+        chat.refreshConnectionStatus()
+        try await waitUntil({ chat.activeTitle == "Renamed" })
+        XCTAssertEqual(requests.withLock { transcriptRequests }, 0)
+        requests.withLock { revision = 4 }
+        chat.refreshConnectionStatus()
+        try await waitUntil({ chat.messages.last?.text == "Changed answer" })
+        XCTAssertEqual(requests.withLock { transcriptRequests }, 1)
+    }
+
     func testRepeatedTextDoesNotRecoverAnOlderAnswer() async throws {
         MockProtocol.handler = { request in
             switch request.url!.path {

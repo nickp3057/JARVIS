@@ -2075,3 +2075,5 @@ to prevent duplicate monitors, and server shutdown stops them.
 - Schwab quotes carry receipt timestamps. Only quotes at least as recent as the account snapshot and no older than 60 seconds override account values; stale quotes fall back to the REST holdings.
 - History connections now close explicitly after commit/rollback. An index on `(session_id, id)` supports conversation loading, summaries and pruning as the archive grows.
 - Phone alert delivery uses a bounded FIFO worker (200 pending pushes), leaving monitor publishing and SSE delivery unblocked by APNs/HA timeouts. Queue saturation logs the missed push; the alert remains in the bus replay history.
+
+- Companion history sync uses the server’s `last_message_id` revision to skip unchanged transcripts while still updating titles. Revisions are cached in the local archive; older servers without revisions still fetch normally. Live turns are skipped before fetching, message matching is indexed, and date formatters are reused.
