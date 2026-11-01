@@ -75,6 +75,37 @@ class ServerTests(unittest.TestCase):
                 self.assertEqual(self.client.get("/api/knowledge/note", params={"path": bad},
                                                  headers=self.headers).status_code, 404)
 
+    def test_knowledge_graph_maps_folders_topics_and_wikilinks(self) -> None:
+        vault = Path(self.tempdir.name) / "vault"
+        (vault / "Jarvis Memory" / "Notes").mkdir(parents=True)
+        (vault / "Private").mkdir()
+        (vault / "Jarvis Memory" / "Profile.md").write_text(
+            "# Profile\n\n## music\n\n- Likes AC/DC\n- Hates jazz\n\n## school\n\n- Calc II\n")
+        (vault / "Jarvis Memory" / "Notes" / "Plan.md").write_text("See [[Profile|me]] and [[Secret]].")
+        (vault / "Private" / "Secret.md").write_text("nope")
+        with patch.dict(os.environ, {"OBSIDIAN_VAULT_PATH": str(vault), "OBSIDIAN_INDEX_FOLDERS": "Jarvis Memory"}):
+            self.assertEqual(self.client.get("/api/knowledge/graph").status_code, 401)
+            graph = self.client.get("/api/knowledge/graph", headers=self.headers).json()
+        ids = {n["id"]: n for n in graph["nodes"]}
+        self.assertNotIn("Private/Secret.md", ids)
+        self.assertEqual(ids["topic:music"]["weight"], 2)
+        self.assertEqual(ids["topic:school"]["weight"], 1)
+        edges = {(e["from"], e["to"], e["kind"]) for e in graph["edges"]}
+        self.assertIn(("Jarvis Memory/Notes/Plan.md", "Jarvis Memory/Profile.md", "link"), edges)
+        self.assertIn(("Jarvis Memory/Notes/Plan.md", "folder:Jarvis Memory/Notes", "tree"), edges)
+        self.assertIn(("folder:Jarvis Memory/Notes", "folder:Jarvis Memory", "tree"), edges)
+        self.assertIn(("folder:Jarvis Memory", "root", "tree"), edges)
+        self.assertEqual(sum(1 for e in edges if e[2] == "link"), 1)
+
+    def test_requests_are_logged_as_traffic_by_device(self) -> None:
+        from brain import traffic
+        start = traffic.seq()
+        self.client.get("/health", headers={**self.headers, "X-Jarvis-Device": "ipad"})
+        self.client.get("/health", headers=self.headers)
+        self.client.get("/health")  # no token: not a signal from anyone
+        logged = [(t["from"], t["to"], t["label"]) for t in traffic.since(start)]
+        self.assertEqual(logged, [("ipad", "core", "health"), ("iphone", "core", "health")])
+
     def test_auth_sessions_chat_history_rename_and_delete(self) -> None:
         self.assertEqual(self.client.get("/health").status_code, 401)
         health = self.client.get("/health", headers=self.headers)

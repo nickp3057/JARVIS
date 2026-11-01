@@ -19,6 +19,10 @@ import android.view.View;
  * same moment (t = 40 s) the phone shows with Reduce Motion, then just blitted.
  * Under Liquid glass it's vivid and unfrosted; otherwise a wash of the deep
  * background is the frost.
+ *
+ * Under the header's core ({@link #setAnchor}) the passing colour thins and a
+ * soft pool of red holds instead, so full red and full blue can't stack
+ * behind JARVIS and wash him out (phone/iPad: {@code PlasmaAnchor}).
  */
 final class PlasmaView extends View {
     /** Speed = rate·(1 + Σ a·cos(2πt/p + o)), integrated so position never jumps. */
@@ -52,6 +56,19 @@ final class PlasmaView extends View {
     private final double[] radius, opacity, phase;
     private final Gust[] gx, gy, spin;
     private Bitmap still;
+    private float anchorX = -1, anchorY = -1, anchorR;
+    private final Paint cut = new Paint(Paint.ANTI_ALIAS_FLAG);
+
+    /** Where JARVIS's core sits (view coordinates) and its radius; redraws once. */
+    void setAnchor(float x, float y, float r) {
+        if (Math.abs(x - anchorX) < 1 && Math.abs(y - anchorY) < 1 && Math.abs(r - anchorR) < 1) return;
+        anchorX = x;
+        anchorY = y;
+        anchorR = r;
+        if (still != null) still.recycle();
+        still = null;
+        invalidate();
+    }
 
     PlasmaView(Context context, Theme theme, boolean glass) {
         super(context);
@@ -84,6 +101,21 @@ final class PlasmaView extends View {
         double t = MOMENT;
         paint.setShader(new LinearGradient(0, 0, w, h, background, deep, Shader.TileMode.CLAMP));
         canvas.drawRect(0, 0, w, h, paint);
+        boolean anchored = anchorX >= 0;
+        float poolR = Math.max(anchorR, side * 0.12f);
+        if (anchored) {
+            // The pool under JARVIS, on the background like the iPad's.
+            float r = poolR * 1.9f;
+            paint.setShader(new RadialGradient(0, 0, r, new int[] {a(colors[0], glass ? 0.77 : 0.55), a(colors[0], glass ? 0.6 : 0.19),
+                    a(colors[0], glass ? 0.19 : 0.0), a(colors[0], 0)}, new float[] {0f, 0.3f, 0.65f, 1f}, Shader.TileMode.CLAMP));
+            canvas.save();
+            canvas.translate(anchorX, anchorY);
+            canvas.scale(1.18f, 1 / 1.18f);
+            canvas.drawCircle(0, 0, r, paint);
+            canvas.restore();
+        }
+        // The flowing blobs go on their own layer, so the cut under JARVIS thins only them.
+        int layer = canvas.saveLayer(0, 0, w, h, null);
         for (int i = 0; i < colors.length; i++) {
             double px = 2 * Math.PI * gx[i].phase(t) + phase[i];
             double py = 2 * Math.PI * gy[i].phase(t) + phase[i] * 1.3;
@@ -112,6 +144,14 @@ final class PlasmaView extends View {
             canvas.drawCircle(0, 0, r, paint);
             canvas.restore();
         }
+        if (anchored) {
+            float r = poolR * 1.6f;
+            cut.setXfermode(new android.graphics.PorterDuffXfermode(android.graphics.PorterDuff.Mode.DST_OUT));
+            cut.setShader(new RadialGradient(anchorX, anchorY, r, new int[] {Color.argb(158, 0, 0, 0), Color.argb(102, 0, 0, 0), 0},
+                    new float[] {0f, 0.5f, 1f}, Shader.TileMode.CLAMP));
+            canvas.drawCircle(anchorX, anchorY, r, cut);
+        }
+        canvas.restoreToCount(layer);
         paint.setShader(null);
         if (!glass) {
             // The frost: a wash of the deep background evens the colour out.

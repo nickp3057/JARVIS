@@ -114,6 +114,8 @@ public class HomeActivity extends Activity {
     private static Theme shownTheme;
     /** The header's reactor or neural core (the Barn Door core flies from and back to it). */
     private View headerMark;
+    /** The Experimenting backdrop, told where the header core sits (its red pool). */
+    private PlasmaView plasma;
     /** Barn Door's layers on this screen, hidden while the snapshot is taken. */
     private View alertLayer, alertOrb;
     /**
@@ -296,9 +298,11 @@ public class HomeActivity extends Activity {
         stage = new FrameLayout(this);
         if (Jarvis.lab(this, "plasma") && theme != Theme.BARN_DOOR) {
             // Experimenting: red and blue flowing behind everything, like the phone.
-            stage.addView(new PlasmaView(this, theme, glass), new FrameLayout.LayoutParams(
+            plasma = new PlasmaView(this, theme, glass);
+            stage.addView(plasma, new FrameLayout.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
         } else {
+            plasma = null;
             stage.setBackground(new GradientDrawable(GradientDrawable.Orientation.TL_BR,
                     new int[] {theme.background, theme.deep}));
         }
@@ -574,6 +578,13 @@ public class HomeActivity extends Activity {
         reactor = (Beat.Dancer) mark;
         headerMark = mark;
         h.addView(mark, new FrameLayout.LayoutParams(dp(124), dp(124), Gravity.CENTER));
+        mark.addOnLayoutChangeListener((v, l, t, r, b, ol, ot, or, ob) -> {
+            if (plasma == null) return;
+            int[] at = new int[2], origin = new int[2];
+            v.getLocationInWindow(at);
+            plasma.getLocationInWindow(origin);
+            plasma.setAnchor(at[0] - origin[0] + v.getWidth() / 2f, at[1] - origin[1] + v.getHeight() / 2f, v.getWidth() / 2f);
+        });
 
         LinearLayout time = new LinearLayout(this);
         time.setOrientation(LinearLayout.VERTICAL);

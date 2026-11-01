@@ -663,6 +663,8 @@ OBSIDIAN_MAX_RESULTS=4      # maximum note excerpts retrieved per turn
 OBSIDIAN_MAX_CHARS=4000     # hard cap on retrieved note text per turn
 OBSIDIAN_MAX_FILE_BYTES=1000000 # skip unusually large Markdown files
 OBSIDIAN_JOURNAL_FOLDER=Jarvis Memory/Journal  # vault-relative daily-note folder
+TRAFFIC_NAS_HOSTS=          # extra hostnames counted as the NAS on the link map (HA/Plex/arr URLs count already)
+TV_HOST=                    # the TV's IP, so direct calls to it show as TV on the link map
 OBSIDIAN_NOTES_FOLDER=Jarvis Memory/Notes      # vault-relative folder for titled captures
 MEMORY_AUTO_EXTRACT=true    # background post-turn fact extraction (ChatGPT-style memory)
 MEMORY_EXTRACT_MODEL=claude-haiku-4-5-20251001 # cheap model used for extraction
@@ -825,6 +827,38 @@ CALENDAR_ALERT_LEAD_MIN=10  # warn this many minutes before a meeting
   off plus its twin under the other integration (`LIGHT_TWINS`, default
   `light.desk_lights_2=light.desk_lights,light.nick_strip_lights=light.strip_lights`:
   Govee cloud = Govee LAN).
+
+- **Calmer plasma, red under JARVIS, Memory map, Link map (2026-11-01, iOS
+  5.55 / build 198, TV 9.2)** — `PlasmaBackdrop`'s speed bursts are half
+  what they were (`Gust(swing: 0.5)`, slower base loops) and a blob only
+  stretches while it's actually moving, so a slow one never swings round in
+  a blink (that read as a notification in the corner of Nick's eye). The
+  Room's core reports where it sits (`PlasmaAnchor`): the backdrop keeps a
+  slow pool of the accent red under it and thins the passing blobs there
+  (`destinationOut` on their layer), so full red + full blue can't stack
+  behind JARVIS and wash him out, without a dark patch. TV 9.2 does the same
+  under the header core (`PlasmaView.setAnchor`). iPad Room landscape: left
+  card wider (≤400 pt), the core fills its free space, and the lights card
+  stretches so the right column ends flush at the bottom.
+  New `brain/traffic.py`: a 400-entry in-memory log of every signal between
+  `core`, `nas`, `tv`, `iphone`, `ipad`, `mac` and `internet`. Fed by an ASGI
+  tap in `app/server.py` (each authorized request = client -> core; the
+  companion sends `X-Jarvis-Device`, client tokens are named by their token
+  name), the voice/home/alert streams as they push (core -> client),
+  `status_hub.home_changed` (HA websocket = nas -> core), and a wrapper on
+  `requests` / `httpx` installed at server import (core -> NAS or internet,
+  classified by `HOME_ASSISTANT_URL`/`PLEX_URL`/arr URLs, `TRAFFIC_NAS_HOSTS`,
+  private/Tailscale addresses, `TV_HOST`). `GET /api/traffic/stream`
+  (status:read, SSE `traffic` batches every 100 ms, no replay). The iPad's
+  Room holds the stream open (`TrafficFeed`) and each signal fires one
+  neural-core thought from that device's own neuron (outward from the core
+  when Core sends, inward from the outer shell when Core receives); idle
+  thoughts slow while it's wired. Memory tab toolbar: **Memory map**
+  (`GET /api/knowledge/graph`: root, folders, notes, Profile `##` topics
+  weighted by fact count, resolved `[[wikilinks]]`; titles only; a live
+  force layout that blooms and settles, pinch/drag, tap for links, Open) and
+  **Link map** (`Views/LinkMap.swift`: every endpoint, packets running along
+  the links as real signals cross, last six listed).
 
 - **Vivid glass backdrop, still TV plasma, Barn Door fly-in (2026-11-01, iOS
   5.53 / build 196, TV 9.1)** — with Liquid glass on, `PlasmaBackdrop` drops

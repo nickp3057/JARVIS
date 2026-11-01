@@ -26,7 +26,7 @@ from brain.debug_reports import create_debug_report
 from brain.agent import stream_round_breaks
 from brain.runtime import JarvisRuntime
 from app import client_tokens
-from brain import event_bus, voice_presence
+from brain import event_bus, traffic, voice_presence
 from integrations import media_doctor, media_requests
 from brain import incident_reports, maintenance, self_repair
 from jarvis_logger import get_logger
@@ -56,6 +56,47 @@ async def lifespan(_: FastAPI):
 
 
 app = FastAPI(title="JARVIS Core", version="1.0", lifespan=lifespan)
+traffic.install()  # Core -> NAS / internet calls feed the companion's link map
+
+
+def _caller(authorization: str | None, device: str | None) -> str:
+    """The traffic node a request came from (brain/traffic.py)."""
+    supplied = authorization.removeprefix("Bearer ").strip() if authorization else ""
+    client = client_tokens.scopes_for(supplied) if supplied else None
+    return traffic.client_node(client[0] if client else None, device)
+
+
+def _pushed(request: Request, label: str) -> None:
+    """A stream just pushed to its client: a Core -> client signal."""
+    try:
+        traffic.record("core", _caller(request.headers.get("authorization"),
+                                       request.headers.get("x-jarvis-device")), label)
+    except Exception:  # noqa: BLE001 - the map must never break a stream
+        pass
+
+
+class _TrafficTap:
+    """Every request is a signal from its client to Core (the link map and the
+    iPad's neural core light up with it). The traffic stream itself isn't.
+    Plain ASGI, not ``@app.middleware``, so the SSE streams pass untouched."""
+
+    def __init__(self, inner):
+        self.inner = inner
+
+    async def __call__(self, scope, receive, send):
+        if scope.get("type") == "http":
+            path = scope.get("path", "")
+            headers = {k.decode("latin-1").lower(): v.decode("latin-1") for k, v in scope.get("headers", [])}
+            if path != "/api/traffic/stream" and headers.get("authorization"):
+                try:
+                    traffic.record(_caller(headers["authorization"], headers.get("x-jarvis-device")), "core",
+                                   path.removeprefix("/api/").removeprefix("/"))
+                except Exception:  # noqa: BLE001 - the map must never break a request
+                    pass
+        await self.inner(scope, receive, send)
+
+
+app.add_middleware(_TrafficTap)
 
 _COMPANION_API_VERSION = 1
 _COMPANION_CAPABILITIES: dict[str, object] = {
@@ -724,6 +765,14 @@ def knowledge_note(path: str, _: None = Depends(authorize)) -> dict[str, object]
     return note
 
 
+@app.get("/api/knowledge/graph")
+def knowledge_graph(_: None = Depends(authorize)) -> dict[str, object]:
+    """The vault as a map: folders, notes, Profile topics and [[wikilinks]]
+    (titles only). The iPad's Memory map draws it."""
+    from brain import knowledge_vault
+    return knowledge_vault.graph()
+
+
 # --- Shared colour theme (phone and TV follow one pick; brain/theme.py) -----
 
 
@@ -907,6 +956,7 @@ async def voice_stream(request: Request, _: None = _status_read) -> StreamingRes
             latest = voice_presence.current()
             if latest["seq"] != state["seq"]:
                 state, quiet_since = latest, time.monotonic()
+                _pushed(request, "voice")
                 yield f"event: voice\ndata: {json.dumps(state)}\n\n"
             elif time.monotonic() - quiet_since > _SSE_KEEPALIVE_S:
                 quiet_since = time.monotonic()
@@ -943,7 +993,30 @@ async def home_stream(request: Request, _: None = _status_read) -> StreamingResp
             latest = pulse()
             if latest != state:
                 state, quiet_since = latest, time.monotonic()
+                _pushed(request, "home")
                 yield f"event: home\ndata: {json.dumps(state)}\n\n"
+            elif time.monotonic() - quiet_since > _SSE_KEEPALIVE_S:
+                quiet_since = time.monotonic()
+                yield ": keep-alive\n\n"
+
+    return StreamingResponse(events(), media_type="text/event-stream",
+                             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
+
+@app.get("/api/traffic/stream")
+async def traffic_stream(request: Request, _: None = _status_read) -> StreamingResponse:
+    """Server-sent ``traffic`` events: every signal between Core, the NAS,
+    the TV, the phone, the iPad and the internet as it happens (batched every
+    100 ms; brain/traffic.py). Starts from now, no replay."""
+    async def events():
+        last = traffic.seq()
+        quiet_since = time.monotonic()
+        while not await request.is_disconnected():
+            await asyncio.sleep(0.1)
+            batch = traffic.since(last)
+            if batch:
+                last, quiet_since = batch[-1]["seq"], time.monotonic()
+                yield f"event: traffic\ndata: {json.dumps(batch)}\n\n"
             elif time.monotonic() - quiet_since > _SSE_KEEPALIVE_S:
                 quiet_since = time.monotonic()
                 yield ": keep-alive\n\n"
@@ -1006,6 +1079,7 @@ async def client_events(
                     continue
                 if alert.id > last:
                     last = alert.id
+                    _pushed(request, "alert")
                     yield frame(alert)
         finally:
             event_bus.unsubscribe(name)

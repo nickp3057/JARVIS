@@ -292,7 +292,22 @@ struct JarvisAPIClient {
         request.timeoutInterval = timeout
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Accept")
+        // Which device is talking, for Core's link map (brain/traffic.py).
+        request.setValue(Self.device, forHTTPHeaderField: "X-Jarvis-Device")
         return request
+    }
+
+    private static let device: String = {
+        if ProcessInfo.processInfo.isMacCatalystApp { return "mac" }
+        // The hardware model ("iPad13,4") is readable off the main thread, unlike the idiom.
+        return modelIsPad ? "ipad" : "iphone"
+    }()
+
+    private static var modelIsPad: Bool {
+        var info = utsname()
+        uname(&info)
+        let machine = withUnsafeBytes(of: &info.machine) { String(decoding: $0.prefix { $0 != 0 }, as: UTF8.self) }
+        return machine.hasPrefix("iPad")
     }
 
     private func validate(_ response: URLResponse, data: Data? = nil) throws -> HTTPURLResponse {
@@ -844,6 +859,30 @@ struct JarvisAPIClient {
 
     func knowledgeNote(_ path: String) async throws -> KnowledgeNoteText {
         try await getJSON(KnowledgeNoteText.self, path: "api/knowledge/note", query: [URLQueryItem(name: "path", value: path)])
+    }
+
+    func knowledgeGraph() async throws -> KnowledgeGraph {
+        try await getJSON(KnowledgeGraph.self, path: "api/knowledge/graph")
+    }
+
+    /// Every signal between Core, the NAS, the TV, the phone, the iPad and the
+    /// internet (`GET /api/traffic/stream`), a batch per event, until cancelled.
+    func streamTraffic(onSignals: @escaping @MainActor ([TrafficSignal]) -> Void) async throws {
+        var request = request(path: "api/traffic/stream")
+        request.timeoutInterval = 60  // Core sends a keep-alive every 15 s
+        request.setValue("text/event-stream", forHTTPHeaderField: "Accept")
+        do {
+            let (bytes, response) = try await session.bytes(for: request)
+            _ = try validate(response)
+            for try await line in bytes.lines {
+                try Task.checkCancellation()
+                guard line.hasPrefix("data: "), let data = line.dropFirst(6).data(using: .utf8),
+                      let batch = try? JSONDecoder().decode([TrafficSignal].self, from: data) else { continue }
+                await onSignals(batch)
+            }
+        } catch let error as URLError {
+            throw JarvisAPIError.transport(error)
+        }
     }
 
     func glance() async throws -> Glance {

@@ -122,6 +122,8 @@ _home_seq = 0
 
 def home_changed(scenes: bool = False) -> None:
     global _home_seq
+    from brain import traffic
+    traffic.record("nas", "core", "home assistant")  # HA's websocket push
     invalidate("entities")
     if scenes:
         invalidate("scenes")

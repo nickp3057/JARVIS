@@ -90,12 +90,14 @@ struct RoomView: View {
             } else if wide {
                 HStack(alignment: .top, spacing: 18) {
                     clockPanel(fill: true)
-                        .frame(width: min(340, geo.size.width * 0.3))
+                        .frame(width: min(400, geo.size.width * 0.34))
+                    // The lights card stretches so the column ends flush with the
+                    // clock's, no gap under Scenes.
                     VStack(spacing: 18) {
                         devicesPanel
                         scenesPanel
                     }
-                    .frame(maxHeight: .infinity, alignment: .top)
+                    .frame(maxHeight: .infinity)
                 }
                 .padding(20)
             } else {
@@ -197,6 +199,14 @@ struct RoomView: View {
                 try? await Task.sleep(for: .seconds(5))
                 if !model.homeStreamLive { await model.refreshEntities() }
             }
+        }
+        .task(id: scenePhase) {
+            // The house's live traffic: every real signal fires one of the
+            // neural core's thoughts (TrafficFeed). Open while the Room is up.
+            guard scenePhase == .active else { return }
+            TrafficFeed.shared.hold(settings: settings)
+            defer { TrafficFeed.shared.release() }
+            while !Task.isCancelled { try? await Task.sleep(for: .seconds(3600)) }
         }
         .task(id: scenePhase) {
             // The next alarm changes rarely; once a minute is plenty.
@@ -329,17 +339,22 @@ struct RoomView: View {
             }
             // The reactor: its glow lifts while "Hey JARVIS" is listening;
             // three quick taps engage (or stand down) Barn Door Protocol.
-            JarvisCoreMark(size: fill ? 200 : 170, active: voice.active)
-                .barnDoorTaps()
-                .frame(maxWidth: .infinity)
-                .accessibilityLabel("JARVIS. Triple-tap for Barn Door Protocol.")
+            // Landscape: as big as the card's free space allows.
+            if fill {
+                GeometryReader { box in
+                    core(size: max(170, min(box.size.width, box.size.height)))
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
+                .frame(minHeight: 170)
+            } else {
+                core(size: 170)
+            }
             Divider().overlay(JarvisTheme.border)
             infoRow("alarm", title: "Wake-up", value: wakeText) { showingWake = true }
             if let event = model.now.value?.nextEvent {
                 infoRow("calendar", title: "Next up", value: eventText(event))
             }
             ForEach(timers.prefix(2)) { timerRow($0) }
-            if fill { Spacer(minLength: 0) }
             RoomVolumeControl()
             HStack(spacing: 10) {
                 Button { showingRemote = true } label: {
@@ -361,6 +376,19 @@ struct RoomView: View {
             .buttonStyle(CockpitButtonStyle())
         }
         .roomPanel(fill: fill)
+    }
+
+    private func core(size: CGFloat) -> some View {
+        JarvisCoreMark(size: size, active: voice.active)
+            .barnDoorTaps()
+            .frame(maxWidth: .infinity)
+            .accessibilityLabel("JARVIS. Triple-tap for Barn Door Protocol.")
+            // Tell the plasma where he is, so it keeps its pool of red under him.
+            .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { frame in
+                PlasmaAnchor.center = CGPoint(x: frame.midX, y: frame.midY)
+                PlasmaAnchor.radius = min(size, frame.height) / 2
+            }
+            .onDisappear { PlasmaAnchor.center = nil }
     }
 
     /// Heading out: everything off, plugs too (HA's Peace scene), then the
@@ -472,7 +500,7 @@ struct RoomView: View {
                     .font(.subheadline).foregroundStyle(.secondary)
             }
         }
-        .roomPanel()
+        .roomPanel(fill: wideLayout)
     }
 
     private func deviceTile(_ entity: HomeEntity) -> some View {

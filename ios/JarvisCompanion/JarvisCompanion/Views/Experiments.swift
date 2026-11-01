@@ -56,12 +56,15 @@ private struct Gust {
     let rate: Double                       // average cycles per second
     let waves: [(amp: Double, period: Double, offset: Double)]
 
-    init(rate: Double, seed: Double) {
+    /// `swing` scales the speed changes: 1 is the original (0.12×–1.88× the
+    /// average speed), the backdrop uses 0.5 so a burst never reads as
+    /// something popping up in the corner of your eye.
+    init(rate: Double, seed: Double, swing: Double = 1) {
         self.rate = rate
-        // Periods ~6–31 s, mutually unrelated; amplitudes sum to 0.88.
-        self.waves = [(0.42, 6.3 + seed.truncatingRemainder(dividingBy: 3.1), seed * 1.7),
-                      (0.28, 13.7 + seed.truncatingRemainder(dividingBy: 5.3), seed * 2.9),
-                      (0.18, 31.1 - seed.truncatingRemainder(dividingBy: 7.7), seed * 0.6)]
+        // Periods ~6–31 s, mutually unrelated; amplitudes sum to 0.88 × swing.
+        self.waves = [(0.42 * swing, 6.3 + seed.truncatingRemainder(dividingBy: 3.1), seed * 1.7),
+                      (0.28 * swing, 13.7 + seed.truncatingRemainder(dividingBy: 5.3), seed * 2.9),
+                      (0.18 * swing, 31.1 - seed.truncatingRemainder(dividingBy: 7.7), seed * 0.6)]
     }
 
     /// Cycles completed by time `t` (seconds): ∫ rate·(1 + Σ a·cos(2πt/p + o)) dt.
@@ -74,15 +77,31 @@ private struct Gust {
     }
 }
 
+/// Where JARVIS's core sits on screen (window coordinates), so the backdrop
+/// can keep a warm pool of red under him. Set by the Room's core while it's
+/// on screen; nil everywhere else.
+enum PlasmaAnchor {
+    static var center: CGPoint?
+    static var radius: CGFloat = 0
+}
+
 /// Blobs of the palette's red and blue flowing on wandering paths over the
 /// deep background, stretched along their travel, with frosted glass on top.
 /// One `Canvas` of radial gradients (no blur filter), cheap enough to sit
 /// behind every screen.
+///
+/// Calm on purpose (Nick, 2026-11-01): speed bursts are half what they were,
+/// and a blob only stretches while it's actually moving, so a slow blob
+/// never swings round in a blink. Under JARVIS's core (`PlasmaAnchor`) the
+/// passing colour thins and a slow pool of red holds instead: full red and
+/// full blue can't stack there and wash him out, and it isn't a dark patch.
 struct PlasmaBackdrop: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.colorScheme) private var scheme
     /// With Liquid glass on the frost moves to the cards: the backdrop goes clear and vivid.
     @AppStorage(Experiment.glass.storageKey) private var glassOn = Experiment.glass.defaultOn
+    /// This backdrop's own top-left in the window, to place the anchor (sheets sit inset).
+    @State private var origin = CGPoint.zero
 
     private struct Blob {
         let color: Color
@@ -96,9 +115,9 @@ struct PlasmaBackdrop: View {
         let red = JarvisTheme.cyan, blue = JarvisTheme.blue, ice = JarvisTheme.reactor
         func blob(_ color: Color, _ radius: Double, _ seed: Double, _ dark: Double, _ light: Double) -> Blob {
             Blob(color: color, radius: radius,
-                 x: Gust(rate: 1 / (34 + seed * 4), seed: seed),
-                 y: Gust(rate: 1 / (27 + seed * 5), seed: seed + 11.3),
-                 spin: Gust(rate: 1 / (60 + seed * 7), seed: seed + 5.9),
+                 x: Gust(rate: 1 / (40 + seed * 4), seed: seed, swing: 0.5),
+                 y: Gust(rate: 1 / (33 + seed * 5), seed: seed + 11.3, swing: 0.5),
+                 spin: Gust(rate: 1 / (70 + seed * 7), seed: seed + 5.9, swing: 0.5),
                  phase: seed * 1.37, opacity: (dark, light))
         }
         return [
@@ -113,6 +132,14 @@ struct PlasmaBackdrop: View {
     }
 
     private var moving: Bool { !reduceMotion && !ProcessInfo.processInfo.isLowPowerModeEnabled }
+
+    /// A wandering path: two harmonics per axis so it doesn't trace an ellipse.
+    private func position(_ blob: Blob, _ t: Double) -> (Double, Double) {
+        let px = 2 * .pi * blob.x.phase(t) + blob.phase
+        let py = 2 * .pi * blob.y.phase(t) + blob.phase * 1.3
+        return (0.5 + 0.34 * sin(px) + 0.12 * sin(2.3 * px + 1.1),
+                0.5 + 0.32 * cos(py) + 0.12 * cos(1.7 * py + 0.4))
+    }
 
     /// Soft and even under frost; with Liquid glass (the cards are the glass)
     /// vivid: stronger colour, a bright centre that holds, then a quicker fade.
@@ -140,25 +167,48 @@ struct PlasmaBackdrop: View {
                 let t = moving ? context.date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: 86_400) : 40
                 Canvas { canvas, size in
                     let side = max(size.width, size.height)
-                    for blob in blobs {
-                        let px = 2 * .pi * blob.x.phase(t) + blob.phase
-                        let py = 2 * .pi * blob.y.phase(t) + blob.phase * 1.3
-                        // A wandering path: two harmonics per axis so it doesn't trace an ellipse.
-                        let x = 0.5 + 0.34 * sin(px) + 0.12 * sin(2.3 * px + 1.1)
-                        let y = 0.5 + 0.32 * cos(py) + 0.12 * cos(1.7 * py + 0.4)
-                        // Stretch along the direction of travel: flow, not floating discs.
-                        let dx = 0.34 * cos(px) + 0.276 * cos(2.3 * px + 1.1)
-                        let dy = -(0.32 * sin(py) + 0.204 * sin(1.7 * py + 0.4))
-                        let angle = atan2(dy, dx) + 0.4 * sin(2 * .pi * blob.spin.phase(t))
-                        let r = side * blob.radius
-                        let stretch = 1.35
-                        var layer = canvas
-                        layer.translateBy(x: x * size.width, y: y * size.height)
-                        layer.rotate(by: .radians(angle))
-                        layer.scaleBy(x: stretch, y: 1 / stretch)
-                        layer.fill(Path(ellipseIn: CGRect(x: -r, y: -r, width: r * 2, height: r * 2)), with: .radialGradient(
-                            gradient(blob.color, dark ? blob.opacity.dark : blob.opacity.light),
+                    let origin = self.origin
+                    let anchor = PlasmaAnchor.center.map { CGPoint(x: $0.x - origin.x, y: $0.y - origin.y) }
+                    // The pool under JARVIS: wide, soft, drifting a little, never still-looking.
+                    if let anchor {
+                        let r = max(PlasmaAnchor.radius, side * 0.12) * 1.9
+                        let drift = CGPoint(x: anchor.x + r * 0.08 * sin(2 * .pi * t / 47),
+                                            y: anchor.y + r * 0.06 * cos(2 * .pi * t / 39))
+                        var pool = canvas
+                        pool.translateBy(x: drift.x, y: drift.y)
+                        pool.rotate(by: .radians(0.3 * sin(2 * .pi * t / 83)))
+                        pool.scaleBy(x: 1.18, y: 1 / 1.18)
+                        pool.fill(Path(ellipseIn: CGRect(x: -r, y: -r, width: r * 2, height: r * 2)), with: .radialGradient(
+                            gradient(JarvisTheme.cyan, dark ? 0.55 : 0.28),
                             center: .zero, startRadius: 0, endRadius: r))
+                    }
+                    canvas.drawLayer { layer in
+                        for blob in blobs {
+                            let (x, y) = position(blob, t)
+                            // Direction and stretch from where it's actually heading in the next
+                            // half second: round when slow, so it never visibly spins.
+                            let (ax, ay) = position(blob, t + 0.5)
+                            let vx = (ax - x) * size.width, vy = (ay - y) * size.height
+                            let speed = (vx * vx + vy * vy).squareRoot() / side
+                            let stretch = 1 + 0.35 * min(1, speed / 0.015)
+                            let angle = atan2(vy, vx) + 0.4 * sin(2 * .pi * blob.spin.phase(t))
+                            let r = side * blob.radius
+                            var blobLayer = layer
+                            blobLayer.translateBy(x: x * size.width, y: y * size.height)
+                            blobLayer.rotate(by: .radians(angle))
+                            blobLayer.scaleBy(x: stretch, y: 1 / stretch)
+                            blobLayer.fill(Path(ellipseIn: CGRect(x: -r, y: -r, width: r * 2, height: r * 2)), with: .radialGradient(
+                                gradient(blob.color, dark ? blob.opacity.dark : blob.opacity.light),
+                                center: .zero, startRadius: 0, endRadius: r))
+                        }
+                        // Thin the passing colour right under JARVIS (the pool shows through).
+                        if let anchor {
+                            let r = max(PlasmaAnchor.radius, side * 0.12) * 1.6
+                            layer.blendMode = .destinationOut
+                            layer.fill(Path(ellipseIn: CGRect(x: anchor.x - r, y: anchor.y - r, width: r * 2, height: r * 2)),
+                                       with: .radialGradient(Gradient(colors: [.black.opacity(0.62), .black.opacity(0.4), .clear]),
+                                                             center: anchor, startRadius: 0, endRadius: r))
+                        }
                     }
                 }
             }
@@ -171,6 +221,7 @@ struct PlasmaBackdrop: View {
             }
         }
         .ignoresSafeArea()
+        .onGeometryChange(for: CGPoint.self) { $0.frame(in: .global).origin } action: { origin = $0 }
         .accessibilityHidden(true)
     }
 }
@@ -252,6 +303,27 @@ final class NeuralNetwork {
     private var yaw = 0.6, ringSpin = 0.0
     private var lastTime: Double?
     private var rng = SplitMix(seed: 0x0A6E_0F17)
+    /// Real signals waiting to fire (see `fire(from:to:)`), and until when
+    /// the brain counts as wired to the house (its own idle thoughts slow).
+    private var pending: [(start: Int, inward: Bool)] = []
+    private var liveUntil = 0.0
+
+    /// A real signal between Core and a device (`TrafficFeed`): one thought.
+    /// Each device has its own neuron, so the same link always lights the
+    /// same spot: Core sending fires from the core outward; something
+    /// arriving at Core comes in from the outer shell, from that device's
+    /// side. Bursts are capped so a busy poll doesn't turn it into static.
+    func fire(from source: String, to target: String) {
+        guard pending.count < 4 else { return }
+        let inward = target == "core"
+        let device = inward ? source : target
+        let layer = inward ? 2 : 0
+        var hash: UInt64 = 5381
+        for byte in device.utf8 { hash = (hash &* 33) &+ UInt64(byte) }
+        let members = nodes.indices.filter { nodes[$0].layer == layer }
+        pending.append((members[Int(hash % UInt64(members.count))], inward))
+        liveUntil = clock + 30
+    }
 
     private init() {
         build()
@@ -472,6 +544,17 @@ final class NeuralNetwork {
             }
         }
 
+        // Real signals first: one per frame, so a batch reads as a ripple.
+        if !pending.isEmpty, mood == .thinking {
+            let (start, inward) = pending.removeFirst()
+            nodes[start].glow = 1
+            let onward = neighbours[start].filter { nodes[$0].layer == nodes[start].layer + (inward ? -1 : 1) }
+            for j in pick(onward, 2) { send(start, j, .thought, direction: inward ? -1 : 1, alert: false) }
+        } else if mood != .thinking {
+            pending.removeAll()
+        }
+        let wired = clock < liveUntil
+
         // A new thought: from the core outward (inward from the iris to the
         // pupil while watching).
         if clock >= nextThought {
@@ -488,14 +571,15 @@ final class NeuralNetwork {
             case .watching: (low, spread) = (1.2, 1.2)
             case .thinking: (low, spread) = active ? (0.5, 0.6) : (1.8, 1.8)
             }
-            nextThought = clock + low + rng.next01() * spread
+            // Wired to the house: the real traffic does most of the thinking.
+            nextThought = clock + (low + rng.next01() * spread) * (wired && mood == .thinking ? 3 : 1)
         }
         // Stray sparks between thoughts.
         let sparkRate: Double
         switch mood {
         case .alert: sparkRate = 7
         case .watching: sparkRate = 1.2
-        case .thinking: sparkRate = active ? 5 : 1.6
+        case .thinking: sparkRate = (active ? 5 : 1.6) * (wired ? 0.5 : 1)
         }
         if rng.next01() < sparkRate * dt {
             let shellCount = Self.shellCounts.reduce(0, +)

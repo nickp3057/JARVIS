@@ -33,6 +33,8 @@ struct KnowledgeView: View {
     @State private var selection: KnowledgeNote.ID?
     @State private var error: String?
     @State private var loaded = false
+    @State private var showingMap = false
+    @State private var showingLinks = false
 
     private var sections: [(String, [KnowledgeNote])] {
         var order: [String] = []
@@ -65,6 +67,12 @@ struct KnowledgeView: View {
             .background { JarvisBackdrop() }
             .navigationTitle("What JARVIS knows")
             .refreshable { await load() }
+            .toolbar {
+                ToolbarItemGroup(placement: .primaryAction) {
+                    Button { showingMap = true } label: { Label("Memory map", systemImage: "point.3.connected.trianglepath.dotted") }
+                    Button { showingLinks = true } label: { Label("Link map", systemImage: "dot.radiowaves.left.and.right") }
+                }
+            }
         } detail: {
             if let selection {
                 NoteDetail(path: selection).id(selection)
@@ -78,6 +86,10 @@ struct KnowledgeView: View {
             await load()
             if selection == nil { selection = notes.first?.id }
         }
+        .fullScreenCover(isPresented: $showingMap) {
+            MemoryMapView { path in selection = path }
+        }
+        .fullScreenCover(isPresented: $showingLinks) { LinkMapView() }
     }
 
     private func load() async {

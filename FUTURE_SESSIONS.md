@@ -184,6 +184,23 @@ install on the phone and iPad, then check:
 - [ ] Decide what graduates: a real theme, a switch on every theme, or
   binned. Orbit orb is still there (off by default).
 
+### Calmer plasma, Memory map, Link map (iOS 5.55, TV 9.2, 2026-11-01): check
+
+- [ ] **Deploy Core** (`git pull` + restart): `/api/traffic/stream`,
+  `/api/knowledge/graph` and the traffic tap live there. Until then the Link
+  map says "Connecting…" and the Memory map can't load.
+- [ ] iPad Room: is the red pool under JARVIS enough (knobs: pool opacity
+  0.55 and radius ×1.9, cut 0.62/0.4 at ×1.6 in `PlasmaBackdrop`)? Any
+  remaining corner "pop"? (`Gust swing` 0.5, stretch ramp `speed / 0.015`.)
+- [ ] Core size in the left card, and the lights card reaching the bottom.
+- [ ] Neural core firing with real traffic: busy enough, not static? Pending
+  cap 4, idle thoughts ×3 slower while wired (`NeuralNetwork.fire`).
+- [ ] Link map: are phone vs iPad told apart (`X-Jarvis-Device`)? Does the
+  TV token's name contain "tv"? NAS calls classified right (check
+  `TRAFFIC_NAS_HOSTS` if HA shows as internet)?
+- [ ] Memory map with the real vault: layout readable at a few hundred notes?
+- [ ] TV 9.2: the pool sits under the header core, not offset.
+
 ### Wake-up fixes, Memory view (iOS 5.52, TV 9.0, 2026-11-01): check
 
 - [ ] Goodnight / Peace actually turn the desk lights off (Core forces every

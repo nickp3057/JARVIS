@@ -271,6 +271,76 @@ def read_note(relative: str) -> dict[str, Any] | None:
     return None
 
 
+_WIKILINK_RE = re.compile(r"\[\[([^\]|#]+)(?:[#|][^\]]*)?\]\]")
+_HEADING2_RE = re.compile(r"^## +(.+?)\s*$")
+
+
+def graph(max_notes: int = 400) -> dict[str, Any]:
+    """The vault as a map for the companion (``GET /api/knowledge/graph``).
+
+    Nodes: a ``root`` (JARVIS's memory), each folder, each note, and the
+    Profile note's topics (its ``## category`` headings, weighted by how many
+    facts sit under each). Edges: folder tree, note -> its folder, Profile ->
+    topics, and every ``[[wikilink]]`` that resolves to another authorized
+    note (``kind: "link"``). Titles only, never note text."""
+    files = list(_markdown_files())[:max_notes]
+    nodes: list[dict[str, Any]] = [{"id": "root", "title": "Memory", "kind": "root", "weight": 1}]
+    edges: list[dict[str, str]] = []
+    by_stem: dict[str, str] = {}
+    by_path: dict[str, str] = {}
+    folders: set[str] = set()
+
+    def folder(path: str) -> str:
+        if path in ("", "."):
+            return "root"
+        node = f"folder:{path}"
+        if path not in folders:
+            folders.add(path)
+            nodes.append({"id": node, "title": path.split("/")[-1], "kind": "folder", "weight": 1})
+            parent = path.rsplit("/", 1)[0] if "/" in path else ""
+            edges.append({"from": node, "to": folder(parent), "kind": "tree"})
+        return node
+
+    texts: dict[str, str] = {}
+    for path, relative in files:
+        rel = relative.as_posix()
+        try:
+            text = path.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        texts[rel] = text
+        nodes.append({"id": rel, "title": path.stem, "kind": "note",
+                      "weight": max(1, min(12, len(text) // 800 + 1))})
+        edges.append({"from": rel, "to": folder(relative.parent.as_posix()), "kind": "tree"})
+        by_stem.setdefault(path.stem.lower(), rel)
+        by_path[rel.lower().removesuffix(".md")] = rel
+
+    for rel, text in texts.items():
+        for target in {m.group(1).strip().lower() for m in _WIKILINK_RE.finditer(text)}:
+            resolved = by_path.get(target) or by_stem.get(target.rsplit("/", 1)[-1])
+            if resolved and resolved != rel:
+                edges.append({"from": rel, "to": resolved, "kind": "link"})
+
+    profile = texts.get(_PROFILE_NOTE.as_posix())
+    if profile:
+        topic, count = None, 0
+
+        def close() -> None:
+            if topic:
+                nodes.append({"id": f"topic:{topic}", "title": topic, "kind": "topic", "weight": max(1, count)})
+                edges.append({"from": f"topic:{topic}", "to": _PROFILE_NOTE.as_posix(), "kind": "topic"})
+
+        for line in profile.splitlines():
+            heading = _HEADING2_RE.match(line)
+            if heading:
+                close()
+                topic, count = heading.group(1), 0
+            elif topic and line.startswith("- "):
+                count += 1
+        close()
+    return {"nodes": nodes, "edges": edges}
+
+
 # --- Writing: quick capture and the daily journal ---------------------------
 
 _NOTE_NAME_RE = re.compile(r"[^A-Za-z0-9 _\-]+")
