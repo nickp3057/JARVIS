@@ -5,18 +5,37 @@ import UIKit
 /// shows it above everything: JARVIS listening, what you're saying as you
 /// say it, then the answer (or a tick for a quick home command).
 ///
-/// The overlay lives in its own window above the app's, so it covers sheets,
-/// the night screen and anything else that's open.
+/// On the Room tab the conversation shows in place (`RoomView`): the side
+/// reactor grows and glows and the lights column turns into the dialogue, so
+/// there's never a second orb on top of the first. Anywhere else (another
+/// tab, a sheet, movie mode) it's an overlay in its own window above the
+/// app's, covering whatever's open.
 @MainActor
 final class VoicePresence: ObservableObject {
     static let shared = VoicePresence()
 
     @Published private(set) var state = VoiceState.idle
+    /// Something to show: the voice is busy, or its last words are lingering
+    /// so they can be read.
+    @Published private(set) var showing = false
+    /// The Room tab is on screen and uncovered: it shows the conversation
+    /// itself, so the overlay window stays hidden.
+    private(set) var inlineHost = false
     private var task: Task<Void, Never>?
     private var window: UIWindow?
     private var hideTask: Task<Void, Never>?
 
     var active: Bool { state.phase != "idle" }
+
+    func setInlineHost(_ inline: Bool) {
+        guard inline != inlineHost else { return }
+        inlineHost = inline
+        if inline {
+            window?.isHidden = true
+        } else if showing {
+            showWindow()
+        }
+    }
 
     /// Connect while the app is in front (iPad only); reconnects on its own.
     func start(_ settings: AppSettings) {
@@ -45,19 +64,29 @@ final class VoicePresence: ObservableObject {
     }
 
     private func apply(_ new: VoiceState) {
+        let was = state
         state = new
         if new.phase == "idle" {
-            // Let a reply or the tick stay readable for a moment.
+            guard showing else { return }
+            // Let a reply or the tick stay readable for a moment (longer for
+            // more words).
+            let linger = new.reply.isEmpty ? 2.5 : min(8, 3 + Double(new.reply.count) / 40)
             hideTask?.cancel()
             hideTask = Task { [weak self] in
-                try? await Task.sleep(for: .seconds(2.5))
-                guard !Task.isCancelled, self?.active == false else { return }
-                self?.window?.isHidden = true
+                try? await Task.sleep(for: .seconds(linger))
+                guard !Task.isCancelled, let self, !self.active else { return }
+                self.hide()
             }
         } else {
             hideTask?.cancel()
-            showWindow()
+            if was != new || !showing { showing = true }
+            if !inlineHost { showWindow() }
         }
+    }
+
+    private func hide() {
+        showing = false
+        window?.isHidden = true
     }
 
     private func showWindow() {
@@ -77,7 +106,8 @@ final class VoicePresence: ObservableObject {
 
     /// Tap to put it away early (the voice carries on regardless).
     func dismiss() {
-        window?.isHidden = true
+        hideTask?.cancel()
+        hide()
     }
 }
 
@@ -127,8 +157,10 @@ struct VoiceOverlayView: View {
         .accessibilityAddTraits(.updatesFrequently)
     }
 
-    private var title: String {
-        switch state.phase {
+    private var title: String { Self.title(for: state.phase) }
+
+    static func title(for phase: String) -> String {
+        switch phase {
         case "listening": return "Listening…"
         case "thinking": return "One moment…"
         case "speaking": return "JARVIS"
@@ -136,5 +168,53 @@ struct VoiceOverlayView: View {
         case "error": return "That didn't work"
         default: return ""
         }
+    }
+}
+
+/// The Room tab's conversation, in place of the lights and scenes: what Nick
+/// said, smaller, then JARVIS's answer big enough to read across the room.
+/// An announcement (nothing said to him first) is just its words. Tap to put
+/// it away early.
+struct RoomDialogue: View {
+    @ObservedObject var presence: VoicePresence
+
+    private var state: VoiceState { presence.state }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 22) {
+            HStack(spacing: 10) {
+                if state.phase == "done" {
+                    Image(systemName: "checkmark.circle.fill").foregroundStyle(JarvisTheme.success)
+                }
+                Text(VoiceOverlayView.title(for: state.phase).isEmpty ? "JARVIS" : VoiceOverlayView.title(for: state.phase))
+                    .font(.headline)
+                    .foregroundStyle(state.phase == "error" ? JarvisTheme.amber : JarvisTheme.cyan)
+            }
+            if !state.transcript.isEmpty {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("You").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                    Text(state.transcript)
+                        .font(.system(size: state.reply.isEmpty ? 38 : 26, weight: .medium, design: .rounded))
+                        .foregroundStyle(.white.opacity(state.reply.isEmpty ? 1 : 0.7))
+                        .lineLimit(4)
+                        .animation(nil, value: state.transcript)
+                }
+            }
+            if !state.reply.isEmpty {
+                Text(state.reply)
+                    .font(.system(size: 42, weight: .regular, design: .rounded))
+                    .foregroundStyle(.white)
+                    .lineLimit(8)
+                    .minimumScaleFactor(0.5)
+            }
+            Spacer(minLength: 0)
+        }
+        .multilineTextAlignment(.leading)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .contentShape(Rectangle())
+        .onTapGesture { presence.dismiss() }
+        .accessibilityElement(children: .combine)
+        .accessibilityAddTraits(.updatesFrequently)
+        .accessibilityHint("Tap to put it away")
     }
 }

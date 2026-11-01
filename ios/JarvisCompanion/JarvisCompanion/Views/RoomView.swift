@@ -103,8 +103,12 @@ struct RoomView: View {
                     // The lights card stretches so the column ends flush with the
                     // clock's, no gap under Scenes.
                     VStack(spacing: 18) {
-                        devicesPanel
-                        scenesPanel
+                        if talking {
+                            dialoguePanel
+                        } else {
+                            devicesPanel
+                            scenesPanel
+                        }
                     }
                     .frame(maxHeight: .infinity)
                 }
@@ -113,14 +117,20 @@ struct RoomView: View {
                 ScrollView {
                     VStack(spacing: 18) {
                         clockPanel(fill: false)
-                        devicesPanel
-                        scenesPanel
+                        if talking {
+                            dialoguePanel.frame(minHeight: 360)
+                        } else {
+                            devicesPanel
+                            scenesPanel
+                        }
                     }
                     .padding(20)
                 }
             }
         }
         // Full screen really is full: down past the home indicator's strip.
+        .animation(.easeInOut(duration: 0.35), value: talking)
+        .modifier(RoomVoiceHost(voice: voice, covered: covered))
         .ignoresSafeArea(.container, edges: fullScreen && !RootView.isMac ? .all : [])
         .onGeometryChange(for: Bool.self) { $0.size.width > $0.size.height } action: { wideLayout = $0 }
         .modifier(RoomMemoryCovers(cover: $roomCover, showingImport: $showingImport, openNote: $openNote))
@@ -195,7 +205,7 @@ struct RoomView: View {
         .onChange(of: lightsAllOff) { was, off in
             if off == false { lightsOut = false } else if off == true, was == false { lightsOut = true }
         }
-        // "Hey JARVIS" lights the screen back up (the overlay shows above it).
+        // "Hey JARVIS" lights the screen back up (the conversation shows in place).
         .onChange(of: voice.active) { _, active in if active { asleep = false } }
         .task {
             if !holdsPolling {
@@ -248,6 +258,22 @@ struct RoomView: View {
     /// Movie mode stays awake for the whole film (even with Keep screen on
     /// off) and drops the backlight, the iPad's biggest power draw.
     private var movieModeEffects: MovieModeEffects { MovieModeEffects(room: self) }
+
+    /// "Hey JARVIS" (or an announcement) is on: the conversation takes the
+    /// lights' place and the reactor grows a little.
+    private var talking: Bool { voice.showing && !RootView.isMac }
+
+    /// Something's over the panel, so the voice uses its own overlay window.
+    private var covered: Bool {
+        movieMode || showingRemote || showingSettings || showingWake || lightSheet != nil
+            || roomCover != nil || showingImport || openNote != nil
+    }
+
+    private var dialoguePanel: some View {
+        RoomDialogue(presence: voice)
+            .roomPanel(fill: true)
+            .transition(.opacity)
+    }
 
     private static let lightsOutScenes: Set<String> = ["scene.peace", "scene.goodnight"]
     static let favoritesKey = "room.favoriteScenes"
@@ -401,6 +427,17 @@ struct RoomView: View {
 
     private func core(size: CGFloat) -> some View {
         JarvisCoreMark(size: size, active: voice.active)
+            // Talking: he grows and his light lifts, steady (no pulsing).
+            .background {
+                Circle()
+                    .fill(RadialGradient(colors: [JarvisTheme.reactor.opacity(0.35), .clear],
+                                         center: .center, startRadius: 0, endRadius: size * 0.62))
+                    .frame(width: size * 1.25, height: size * 1.25)
+                    .opacity(talking ? 1 : 0)
+                    .allowsHitTesting(false)
+            }
+            .scaleEffect(talking ? 1.12 : 1)
+            .animation(.easeInOut(duration: 0.5), value: talking)
             .barnDoorTaps()
             .frame(maxWidth: .infinity)
             .accessibilityLabel("JARVIS. Triple-tap for Barn Door Protocol.")
@@ -984,6 +1021,24 @@ private struct RoomMemoryCovers: ViewModifier {
                     NoteDetail(path: note.id)
                         .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { openNote = nil } } }
                 }
+            }
+    }
+}
+
+/// Tells `VoicePresence` whether the Room shows the conversation itself (on
+/// screen, nothing over it) so its overlay window stays away.
+private struct RoomVoiceHost: ViewModifier {
+    let voice: VoicePresence
+    let covered: Bool
+    @State private var onScreen = false
+    @Environment(\.scenePhase) private var scenePhase
+
+    func body(content: Content) -> some View {
+        content
+            .onAppear { onScreen = true }
+            .onDisappear { onScreen = false }
+            .onChange(of: onScreen && !covered && scenePhase == .active && !RootView.isMac, initial: true) { _, inline in
+                voice.setInlineHost(inline)
             }
     }
 }

@@ -90,6 +90,20 @@ class VoicePresenceTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             voice_presence.update("dancing")
 
+    def test_announcement_from_idle_drops_last_turns_words(self) -> None:
+        voice_presence.update("listening", transcript="download iron man")
+        voice_presence.update("speaking", reply="On it, sir.")
+        voice_presence.update("idle")
+        voice_presence.update("speaking", reply="Iron Man has finished downloading, sir.")
+        state = voice_presence.current()
+        self.assertEqual((state["transcript"], state["reply"]), ("", "Iron Man has finished downloading, sir."))
+
+    def test_answer_keeps_what_was_asked(self) -> None:
+        voice_presence.update("listening", transcript="what time is it")
+        voice_presence.update("thinking")
+        voice_presence.update("speaking", reply="Half past nine, sir.")
+        self.assertEqual(voice_presence.current()["transcript"], "what time is it")
+
     def test_state_endpoint(self) -> None:
         voice_presence.update("listening", transcript="game time")
         with patch.dict(os.environ, {"JARVIS_API_TOKEN": "t"}):

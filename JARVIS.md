@@ -949,10 +949,14 @@ CALENDAR_ALERT_LEAD_MIN=10  # warn this many minutes before a meeting
     of box-shaped data nodes (16/40/72 at radii 0.15/0.29/0.42, each wired to
     its 3 nearest, axons both ways between shells, each shell swaying out of
     step with the others) inside two tilted orbit rings of 30 nodes, faint
-    glass outlines per shell and light in the core. Thinking: every 1.8–3.6 s
-    (0.5–1.1 s while `active`) a thought starts in the core and cascades
-    outward shell by shell, branching to two, then spreads a little across
-    the outer shell; stray sparks wander between (1.6/s, 5/s active); three
+    glass outlines per shell and light in the core. Thinking is driven by
+    the house's real traffic (5.62): every `TrafficFeed` signal fires a
+    thought that cascades through the shells (outward from Core, inward
+    from a device), and an `activity` level (each signal +0.18, easing back
+    over ~10 s) sets the pace: turn and ring speed (0.35× quiet up to 1.3×),
+    stray sparks (0.25/s quiet up to 2.75/s) and ring-packet speed. Quiet,
+    it only thinks on its own every 7–14 s; while `active` (JARVIS working)
+    it's busy regardless (a thought every 0.5–1.1 s, 5 sparks/s). Three
     packets circle each ring. Gold impulses (Animal Logic's Age of Ultron
     JARVIS: orange, angular, "made out of code or data"), structure in the
     palette's reactor colour. **Moods** (`NeuralMood`) morph the same nodes,
@@ -1210,9 +1214,16 @@ CALENDAR_ALERT_LEAD_MIN=10  # warn this many minutes before a meeting
   the end works ("game time, Jarvis") via a 2 s preroll. State goes to
   `brain/voice_presence.py` (not the event bus: captions would flood its
   history) and out on `GET /api/voice/stream` (SSE) / `GET /api/voice/state`
-  (`status:read`). The iPad (`VoicePresence`, `VoiceOverlay.swift`) shows a
-  window above everything — core mark, "Listening…", the live transcript,
-  then the reply or a tick — and wakes the night screen. Checked in the iPad
+  (`status:read`). On the iPad's Room tab (5.62) the conversation shows in
+  place: the side reactor grows (1.12×) with a steady glow and the lights &
+  scenes column becomes `RoomDialogue` — what Nick said, smaller, then the
+  reply in big type; it lingers 2.5–8 s after (longer replies longer), tap
+  to put away. Anywhere else (another tab, a sheet, movie mode) `VoicePresence`
+  (`VoiceOverlay.swift`) shows its window above everything — core mark,
+  "Listening…", the live transcript, then the reply or a tick. Either way it
+  wakes the night screen. Speaking straight from `idle` is an announcement
+  (a download finished, a timer, a reminder): `voice_presence` clears last
+  turn's transcript so only the announcement's words show. Checked in the iPad
   mini simulator against a local Core cycling fake states; the Optiplex mic
   and speaker path is untested.
 - **Smart-speaker room voice (2026-10-28, untested on hardware)** — before

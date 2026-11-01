@@ -253,10 +253,12 @@ enum NeuralMood {
 /// breathing a little against the others) inside two orbit rings, all
 /// turning slowly in 3D.
 ///
-/// Thinking looks like thinking: every few seconds a thought starts in the
-/// core and cascades outward shell by shell, branching as it goes; between
-/// thoughts, single sparks wander the shells and data packets circle the
-/// rings. Busier while JARVIS is working (`active`).
+/// Thinking looks like thinking, and it's the house's real thinking: every
+/// signal to or from Core (`TrafficFeed`) fires a thought that cascades
+/// through the shells, and the traffic's recent pace (`activity`) sets how
+/// fast it turns, how many sparks wander and how quick the ring packets run.
+/// With nothing going on it settles: a slow turn and a rare idle thought.
+/// Busy while JARVIS is working (`active`).
 ///
 /// Every node also has an eye position and a spike length, so the same
 /// network opens into an eye (iris fibres, a pupil that glances around)
@@ -307,10 +309,11 @@ final class NeuralNetwork {
     private var yaw = 0.6, ringSpin = 0.0
     private var lastTime: Double?
     private var rng = SplitMix(seed: 0x0A6E_0F17)
-    /// Real signals waiting to fire (see `fire(from:to:)`), and until when
-    /// the brain counts as wired to the house (its own idle thoughts slow).
+    /// Real signals waiting to fire (see `fire(from:to:)`).
     private var pending: [(start: Int, inward: Bool)] = []
-    private var liveUntil = 0.0
+    /// The traffic's recent pace, 0 (quiet) to 1 (busy): each real signal
+    /// lifts it, and it eases back over ten seconds or so.
+    private(set) var activity = 0.0
 
     /// A real signal between Core and a device (`TrafficFeed`): one thought.
     /// Each device has its own neuron, so the same link always lights the
@@ -326,7 +329,7 @@ final class NeuralNetwork {
         for byte in device.utf8 { hash = (hash &* 33) &+ UInt64(byte) }
         let members = nodes.indices.filter { nodes[$0].layer == layer }
         pending.append((members[Int(hash % UInt64(members.count))], inward))
-        liveUntil = clock + 30
+        activity = min(1, activity + 0.18)
     }
 
     private init() {
@@ -502,9 +505,13 @@ final class NeuralNetwork {
             mix[layer] += (mood.target - mix[layer]) * min(1, dt * rate)
         }
         let w = mix[2]
+        activity = max(0, activity - dt * activity * 0.12 - dt * 0.004)
+        // How lively the brain is: calm when the house is quiet, quicker with
+        // traffic, quickest while JARVIS is working.
+        let pace = active ? 1.4 : 0.35 + 0.95 * activity
         // Still in the eye (it faces you), restless in the alert.
-        yaw += dt * 2 * .pi / 32 * (w.x + 0.1 * w.y + 2.6 * w.z)
-        ringSpin += dt * (0.45 * w.x + 0.15 * w.y + 1.6 * w.z)
+        yaw += dt * 2 * .pi / 32 * (w.x * pace + 0.1 * w.y + 2.6 * w.z)
+        ringSpin += dt * (0.45 * w.x * pace + 0.15 * w.y + 1.6 * w.z)
 
         // The eye glances around: a quick move, then a hold of 0.8–3.4 s.
         if clock >= nextLook {
@@ -517,7 +524,7 @@ final class NeuralNetwork {
         var arrived: [Signal] = []
         signals = signals.compactMap { signal in
             var s = signal
-            s.progress += dt * s.speed
+            s.progress += dt * s.speed * (s.kind == .orbit && mood == .thinking ? pace : 1)
             if s.progress >= 1 { arrived.append(s); return nil }
             return s
         }
@@ -557,7 +564,6 @@ final class NeuralNetwork {
         } else if mood != .thinking {
             pending.removeAll()
         }
-        let wired = clock < liveUntil
 
         // A new thought: from the core outward (inward from the iris to the
         // pupil while watching).
@@ -573,17 +579,17 @@ final class NeuralNetwork {
             switch mood {
             case .alert: (low, spread) = (0.45, 0.45)
             case .watching: (low, spread) = (1.2, 1.2)
-            case .thinking: (low, spread) = active ? (0.5, 0.6) : (1.8, 1.8)
+            // Quiet: a rare thought of its own; real traffic does the rest.
+            case .thinking: (low, spread) = active ? (0.5, 0.6) : (7, 7)
             }
-            // Wired to the house: the real traffic does most of the thinking.
-            nextThought = clock + (low + rng.next01() * spread) * (wired && mood == .thinking ? 3 : 1)
+            nextThought = clock + low + rng.next01() * spread
         }
         // Stray sparks between thoughts.
         let sparkRate: Double
         switch mood {
         case .alert: sparkRate = 7
         case .watching: sparkRate = 1.2
-        case .thinking: sparkRate = (active ? 5 : 1.6) * (wired ? 0.5 : 1)
+        case .thinking: sparkRate = active ? 5 : 0.25 + 2.5 * activity
         }
         if rng.next01() < sparkRate * dt {
             let shellCount = Self.shellCounts.reduce(0, +)

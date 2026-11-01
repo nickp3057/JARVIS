@@ -23,12 +23,21 @@ _state: dict[str, Any] = {"seq": 0, "phase": "idle", "transcript": "", "reply": 
 
 
 def update(phase: str | None = None, *, transcript: str | None = None, reply: str | None = None) -> None:
-    """Change any of phase / transcript / reply; a new ``listening`` clears both texts."""
+    """Change any of phase / transcript / reply.
+
+    A new ``listening`` clears both texts, and so does speaking straight from
+    ``idle`` (an announcement, not an answer).
+    """
     with _cond:
         if phase is not None:
             if phase not in PHASES:
                 raise ValueError(f"unknown voice phase {phase!r}")
             if phase == "listening" and _state["phase"] != "listening":
+                _state["transcript"], _state["reply"] = "", ""
+            elif phase in ("speaking", "done") and _state["phase"] == "idle":
+                # Speaking out of nowhere is an announcement ("Iron Man has
+                # finished downloading, sir."): nobody asked, so last turn's
+                # words don't belong on screen with it.
                 _state["transcript"], _state["reply"] = "", ""
             _state["phase"] = phase
         if transcript is not None:
