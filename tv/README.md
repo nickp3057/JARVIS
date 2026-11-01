@@ -87,6 +87,13 @@ every deploy, so edit the repo copy, not the TV's.
   and close `WakeActivity` (9.0: I'm up used to leave it playing). Core
   rings a phone snooze again itself, and also sends `MEDIA_PAUSE` through
   HA on I'm up in case this stream is down.
+- **Barn Door fly-in, still plasma (9.1)**: entering Barn Door, a snapshot of
+  the old home (taken in `HomeActivity.recreate()`) fades off the red home,
+  the header's core flies to the middle growing into the spiky one, then the
+  lockdown screen fades in behind it; standing down reverses it. Durations
+  are divided by the TV's animator scale (0.5) so they play at full length.
+  `NeuralView` drawn big adds a bloom pass. `PlasmaView` renders once at
+  full resolution and holds still.
 - **Neural core (8.6)**: when Core's glance/`/api/theme` says `core:
   "neural"` (Experimenting picked on the phone, or underneath Barn Door, with
   its Neural core switch on), the header draws `NeuralView` instead of

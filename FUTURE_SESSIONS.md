@@ -198,7 +198,10 @@ install on the phone and iPad, then check:
   while it rings shows I'm up / Snooze; after Snooze it shows "Back at …".
 - [ ] iPad Memory tab: profile note and journal render readably.
 - [ ] Room settings › Theme on the iPad (picking one closes the sheet as the
-  app re-themes; fine?). Liquid glass background clear enough now?
+  app re-themes; fine?).
+- [ ] (5.53 / TV 9.1) Vivid Liquid glass backdrop on phone/iPad; still TV
+  plasma; Barn Door fly-in on a real Barn Door (checked with the TV preview
+  receiver on 2026-11-01). Too bright / too slow?
 
 ### Neural core v2 (iOS 5.47): check
 

@@ -815,6 +815,20 @@ CALENDAR_ALERT_LEAD_MIN=10  # warn this many minutes before a meeting
 
 ## Recently Shipped
 
+- **Vivid glass backdrop, still TV plasma, Barn Door fly-in (2026-11-01, iOS
+  5.53 / build 196, TV 9.1)** — with Liquid glass on, `PlasmaBackdrop` drops
+  the material and the dark wash entirely and its blobs go vivid (opacity
+  ×1.4, a bright centre held to 30% then a quicker fade). The TV's
+  `PlasmaView` no longer moves: it renders once at full resolution (the
+  phone's Reduce Motion frame, t = 40 s, dithered) and just blits it. Barn
+  Door on the TV: the big `NeuralView` gets a bloom (wide faint strokes
+  under wires, spikes and impulses, thicker strokes, stronger halo), since
+  the TV draws at 1080p and the panel stretches it to 4K. Going in, the old
+  home (a snapshot taken in `recreate()`) fades off the red one, the core
+  flies from the header to the middle growing and bristling, then the
+  lockdown screen rises behind it; standing down runs it backwards.
+  Timings ignore the TV's 0.5 animator scale (`real()`).
+
 - **Wake-up fixes, Memory view, theme in Room settings (2026-11-01, iOS 5.52 /
   build 195, TV 9.0)** — I'm up (phone, TV, voice) now stops the TV's music;
   the wake-up push is time-sensitive and the alarm screen opens whenever the

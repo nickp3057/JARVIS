@@ -19,6 +19,11 @@ import android.view.View;
  * picked, Neural core switch on), and in the alert mood as Barn Door's
  * full-screen reactor. All views share {@link NeuralNet#SHARED}, so a mood
  * change (Barn Door recreating the screen) morphs instead of cutting.
+ *
+ * Drawn big (Barn Door's full-screen core) it adds a bloom: every wire, spike
+ * and impulse gets a wide faint stroke under it, and the strokes thicken. The
+ * TV renders at 1080p and the panel stretches it to 4K, so hairlines alone
+ * looked thin and jaggy (TV 9.1).
  */
 final class NeuralView extends View implements Beat.Dancer {
     private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
@@ -106,13 +111,21 @@ final class NeuralView extends View implements Beat.Dancer {
             py[i] = (float) (cy + pose[i][1] * scale);
             depth[i] = (float) Math.max(0.15, Math.min(1, pose[i][2] + 0.55 + lift));
         }
-        float stroke = Math.max(0.6f * density, side / 240f);
+        boolean hero = side > 400 * density / 2; // Barn Door's big core, not the header's
+        float stroke = hero ? Math.max(1.2f * density, side / 190f) : Math.max(0.6f * density, side / 240f);
 
         // Halo.
         paint.setStyle(Paint.Style.FILL);
-        paint.setShader(new RadialGradient(cx, cy, side * 0.48f,
-                new int[] {alpha(line, 0.15 + 0.12 * m[2]), alpha(line, 0)}, null, Shader.TileMode.CLAMP));
-        canvas.drawCircle(cx, cy, side * 0.48f, paint);
+        if (hero) {
+            paint.setShader(new RadialGradient(cx, cy, side * 0.55f,
+                    new int[] {alpha(line, 0.26 + 0.2 * m[2]), alpha(line, 0.09 + 0.08 * m[2]), alpha(line, 0)},
+                    new float[] {0f, 0.45f, 1f}, Shader.TileMode.CLAMP));
+            canvas.drawCircle(cx, cy, side * 0.55f, paint);
+        } else {
+            paint.setShader(new RadialGradient(cx, cy, side * 0.48f,
+                    new int[] {alpha(line, 0.15 + 0.12 * m[2]), alpha(line, 0)}, null, Shader.TileMode.CLAMP));
+            canvas.drawCircle(cx, cy, side * 0.48f, paint);
+        }
         paint.setShader(null);
 
         // The eye's pupil: open, just light around its rim.
@@ -151,7 +164,15 @@ final class NeuralView extends View implements Beat.Dancer {
             for (int i = 0; i < net.count; i++) {
                 if (net.layer[i] != 2 || net.spike[i] <= 1.3) continue;
                 float rx = cx + (px[i] - cx) * 0.2f, ry = cy + (py[i] - cy) * 0.2f;
-                int c = alpha(line, (0.5 + 0.5 * depth[i]) * m[2]);
+                double strength = (0.5 + 0.5 * depth[i]) * m[2];
+                if (hero) {
+                    paint.setStrokeWidth(stroke * 6);
+                    paint.setShader(new android.graphics.LinearGradient(rx, ry, px[i], py[i], alpha(line, 0),
+                            alpha(line, 0.22 * strength), Shader.TileMode.CLAMP));
+                    canvas.drawLine(rx, ry, px[i], py[i], paint);
+                    paint.setStrokeWidth(stroke * 1.6f);
+                }
+                int c = alpha(line, strength);
                 paint.setShader(new android.graphics.LinearGradient(rx, ry, px[i], py[i], alpha(line, 0), c, Shader.TileMode.CLAMP));
                 canvas.drawLine(rx, ry, px[i], py[i], paint);
             }
@@ -172,7 +193,15 @@ final class NeuralView extends View implements Beat.Dancer {
             if (lineCount[slot] == 0) continue;
             double wgt = weight[slot / 3];
             if (wgt <= 0.01) continue;
-            paint.setColor(alpha(line, (0.10 + 0.32 * bucketDepth[slot % 3]) * wgt));
+            double strength = (0.10 + 0.32 * bucketDepth[slot % 3]) * wgt;
+            if (hero) {
+                paint.setStrokeWidth(stroke * 4);
+                paint.setColor(alpha(line, 0.2 * strength));
+                canvas.drawLines(lines[slot], 0, lineCount[slot], paint);
+                paint.setStrokeWidth(stroke);
+                strength = Math.min(1, strength * 1.3);
+            }
+            paint.setColor(alpha(line, strength));
             canvas.drawLines(lines[slot], 0, lineCount[slot], paint);
         }
         // Warm wires near firing nodes.
@@ -199,6 +228,10 @@ final class NeuralView extends View implements Beat.Dancer {
             paint.setColor(alpha(impulse, 0.6 * d * strength));
             canvas.drawLine(tx, ty, hx, hy, paint);
             paint.setStyle(Paint.Style.FILL);
+            if (hero) {
+                paint.setColor(alpha(impulse, 0.22 * d * strength));
+                canvas.drawCircle(hx, hy, stroke * 7, paint);
+            }
             paint.setColor(alpha(hot, d * strength));
             canvas.drawCircle(hx, hy, stroke * (s.kind == NeuralNet.THOUGHT ? 2.6f : 2f), paint);
         }
@@ -207,7 +240,7 @@ final class NeuralView extends View implements Beat.Dancer {
         paint.setStyle(Paint.Style.FILL);
         for (int i = 0; i < net.count; i++) {
             boolean ring = net.layer[i] >= 3;
-            float box = (float) (Math.max(1.1f * density, side / 105f) * (0.6 + 0.6 * depth[i])
+            float box = (float) (Math.max(1.1f * density, side / (hero ? 90f : 105f)) * (0.6 + 0.6 * depth[i])
                     * (ring ? 0.7 : 1) * (1 + net.glow[i] * 0.8));
             int b = bucket(depth[i]);
             paint.setColor(alpha(line, 0.25 + 0.55 * bucketDepth[b]));

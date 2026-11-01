@@ -33,7 +33,7 @@ enum Experiment: String, CaseIterable, Identifiable {
         case .plasma: return "Red and blue light flowing behind frosted glass, speeding up and easing off on its own."
         case .neural: return "The reactor becomes a layered mind of data nodes with thoughts cascading out from its core. It opens into a green eye while the camera watches and bristles red for Barn Door."
         case .orb3D: return "A lit sphere with tilted orbiting rings (Neural core wins if both are on)."
-        case .glass: return "Every card turns to Liquid Glass (as clear or tinted as your Liquid Glass setting), and the background loses its frost so the colour comes through clear."
+        case .glass: return "Every card turns to Liquid Glass (as clear or tinted as your Liquid Glass setting), and the background loses its frost and turns vivid."
         }
     }
 
@@ -81,7 +81,7 @@ private struct Gust {
 struct PlasmaBackdrop: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.colorScheme) private var scheme
-    /// With Liquid glass on the frost moves to the cards: the backdrop's thins.
+    /// With Liquid glass on the frost moves to the cards: the backdrop goes clear and vivid.
     @AppStorage(Experiment.glass.storageKey) private var glassOn = Experiment.glass.defaultOn
 
     private struct Blob {
@@ -114,6 +114,21 @@ struct PlasmaBackdrop: View {
 
     private var moving: Bool { !reduceMotion && !ProcessInfo.processInfo.isLowPowerModeEnabled }
 
+    /// Soft and even under frost; with Liquid glass (the cards are the glass)
+    /// vivid: stronger colour, a bright centre that holds, then a quicker fade.
+    private func gradient(_ color: Color, _ opacity: Double) -> Gradient {
+        guard glassOn else {
+            return Gradient(colors: [color.opacity(opacity), color.opacity(opacity * 0.35), .clear])
+        }
+        let o = min(0.95, opacity * 1.4)
+        return Gradient(stops: [
+            .init(color: color.opacity(o), location: 0),
+            .init(color: color.opacity(o * 0.8), location: 0.3),
+            .init(color: color.opacity(o * 0.25), location: 0.65),
+            .init(color: .clear, location: 1),
+        ])
+    }
+
     var body: some View {
         let blobs = self.blobs
         let dark = scheme == .dark
@@ -137,13 +152,12 @@ struct PlasmaBackdrop: View {
                         let angle = atan2(dy, dx) + 0.4 * sin(2 * .pi * blob.spin.phase(t))
                         let r = side * blob.radius
                         let stretch = 1.35
-                        let opacity = dark ? blob.opacity.dark : blob.opacity.light
                         var layer = canvas
                         layer.translateBy(x: x * size.width, y: y * size.height)
                         layer.rotate(by: .radians(angle))
                         layer.scaleBy(x: stretch, y: 1 / stretch)
                         layer.fill(Path(ellipseIn: CGRect(x: -r, y: -r, width: r * 2, height: r * 2)), with: .radialGradient(
-                            Gradient(colors: [blob.color.opacity(opacity), blob.color.opacity(opacity * 0.35), .clear]),
+                            gradient(blob.color, dark ? blob.opacity.dark : blob.opacity.light),
                             center: .zero, startRadius: 0, endRadius: r))
                     }
                 }
@@ -153,8 +167,8 @@ struct PlasmaBackdrop: View {
             // Liquid glass the cards are the glass: the backdrop is left clear.
             if !glassOn {
                 Rectangle().fill(.ultraThinMaterial).opacity(0.35)
+                JarvisTheme.backgroundDeep.opacity(dark ? 0.18 : 0.08)
             }
-            JarvisTheme.backgroundDeep.opacity((dark ? 0.18 : 0.08) * (glassOn ? 0.3 : 1))
         }
         .ignoresSafeArea()
         .accessibilityHidden(true)

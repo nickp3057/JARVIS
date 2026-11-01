@@ -5,6 +5,8 @@ import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
+import android.graphics.Bitmap;
+import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
@@ -19,6 +21,7 @@ import android.view.Gravity;
 import android.view.KeyEvent;
 import android.view.View;
 import android.view.ViewGroup;
+import android.view.animation.AccelerateDecelerateInterpolator;
 import android.widget.FrameLayout;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
@@ -109,6 +112,41 @@ public class HomeActivity extends Activity {
     private boolean glass;
     /** The theme the last home screen was built with, so a change fades in. */
     private static Theme shownTheme;
+    /** The header's reactor or neural core (the Barn Door core flies from and back to it). */
+    private View headerMark;
+    /** Barn Door's layers on this screen, hidden while the snapshot is taken. */
+    private View alertLayer, alertOrb;
+    /**
+     * The home as it looked just before a recreate into or out of Barn Door:
+     * laid over the new screen and faded off it, so the cards and words turn
+     * red (or back) instead of cutting.
+     */
+    private static Bitmap snapshot;
+
+    @Override
+    public void recreate() {
+        boolean alert = theme == Theme.BARN_DOOR, next = Jarvis.theme(this) == Theme.BARN_DOOR;
+        if (alert != next) takeSnapshot();
+        super.recreate();
+    }
+
+    private void takeSnapshot() {
+        if (snapshot != null) snapshot.recycle();
+        snapshot = null;
+        if (stage == null || stage.getWidth() == 0 || stage.getHeight() == 0) return;
+        int layer = alertLayer != null ? alertLayer.getVisibility() : 0, orb = alertOrb != null ? alertOrb.getVisibility() : 0;
+        if (alertLayer != null) alertLayer.setVisibility(View.INVISIBLE);
+        if (alertOrb != null) alertOrb.setVisibility(View.INVISIBLE);
+        try {
+            Bitmap b = Bitmap.createBitmap(stage.getWidth(), stage.getHeight(), Bitmap.Config.RGB_565);
+            stage.draw(new Canvas(b));
+            snapshot = b;
+        } catch (RuntimeException | OutOfMemoryError e) {
+            snapshot = null; // no crossfade, just the fades below
+        }
+        if (alertLayer != null) alertLayer.setVisibility(layer);
+        if (alertOrb != null) alertOrb.setVisibility(orb);
+    }
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -341,21 +379,113 @@ public class HomeActivity extends Activity {
         addContinueTile(apps);
         addSettingsTile(apps);
 
-        // Barn Door fades in over the home screen and, on stand-down, back out
-        // of it (no dip to black); the neural core morphs inside it meanwhile.
+        // Barn Door comes on in steps (no dip to black): the home's colours
+        // fade to red, the core flies from the header to the middle growing
+        // and bristling into spikes, then the dark lockdown screen rises
+        // behind it. Standing down runs it backwards.
         boolean wasAlert = shownTheme == Theme.BARN_DOOR;
+        boolean entering = theme == Theme.BARN_DOOR && shownTheme != null && !wasAlert;
+        boolean leaving = theme != Theme.BARN_DOOR && wasAlert;
+        Bitmap before = snapshot;
+        snapshot = null;
+        View old = null;
+        if ((entering || leaving) && before != null) {
+            ImageView picture = new ImageView(this);
+            picture.setScaleType(ImageView.ScaleType.FIT_XY);
+            picture.setImageBitmap(before);
+            stage.addView(picture, new FrameLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+            old = picture;
+        } else if (before != null) {
+            before.recycle();
+        }
+        View oldScreen = old;
         if (theme == Theme.BARN_DOOR) {
-            View alert = addBarnDoor(false);
-            if (shownTheme != null && !wasAlert) {
-                alert.setAlpha(0f);
-                alert.animate().alpha(1f).setDuration(1400).start();
+            addBarnDoor(false);
+            View layer = alertLayer, orb = alertOrb;
+            if (orb != null) headerMark.setVisibility(View.INVISIBLE);
+            if (entering) {
+                if (oldScreen != null) fadeAway(oldScreen, 0, 1300, before);
+                layer.setAlpha(0f);
+                layer.animate().alpha(1f).setStartDelay(real(1000)).setDuration(real(1300)).start();
+                if (orb != null) afterLayout(orb, () -> fly(orb, false, 150, null));
             }
-        } else if (wasAlert) {
-            View leaving = addBarnDoor(true);
-            leaving.animate().alpha(0f).setDuration(1400).withEndAction(() -> stage.removeView(leaving)).start();
+        } else if (leaving) {
+            addBarnDoor(true);
+            View layer = alertLayer, orb = alertOrb;
+            layer.animate().alpha(0f).setDuration(real(1100)).withEndAction(() -> stage.removeView(layer)).start();
+            if (oldScreen != null) fadeAway(oldScreen, 900, 1300, before);
+            if (orb != null) {
+                headerMark.setVisibility(View.INVISIBLE);
+                afterLayout(orb, () -> fly(orb, true, 300, () -> {
+                    headerMark.setVisibility(View.VISIBLE);
+                    stage.removeView(orb);
+                }));
+            }
+            alertLayer = alertOrb = null;
         }
         setContentView(stage);
         shownTheme = theme;
+    }
+
+    /**
+     * Barn Door's steps at their real length: the TV's animator scale is 0.5
+     * (snappier menus), which crammed the whole sequence into a second.
+     */
+    private long real(long ms) {
+        float scale = android.provider.Settings.Global.getFloat(getContentResolver(),
+                android.provider.Settings.Global.ANIMATOR_DURATION_SCALE, 1f);
+        return scale > 0.01f ? Math.round(ms / scale) : ms;
+    }
+
+    private void fadeAway(View v, long delay, long duration, Bitmap bitmap) {
+        v.animate().alpha(0f).setStartDelay(real(delay)).setDuration(real(duration)).withEndAction(() -> {
+            stage.removeView(v);
+            if (bitmap != null) bitmap.recycle();
+        }).start();
+    }
+
+    /** Run once both views have their size (lambda, not an inner class: see WakeActivity). */
+    private static void afterLayout(View v, Runnable then) {
+        View.OnLayoutChangeListener[] once = new View.OnLayoutChangeListener[1];
+        once[0] = (view, l, t, r, b, ol, ot, or, ob) -> {
+            view.removeOnLayoutChangeListener(once[0]);
+            view.post(then);
+        };
+        v.addOnLayoutChangeListener(once[0]);
+    }
+
+    /**
+     * The Barn Door core between the header's spot and the middle of the
+     * screen: it's laid out full size in the middle and scaled/moved so it
+     * starts (or ends) exactly over the header's core. Both draw the one
+     * shared mind, so the swap at either end can't be seen.
+     */
+    private void fly(View orb, boolean home, long delay, Runnable done) {
+        int[] from = new int[2], to = new int[2];
+        headerMark.getLocationInWindow(from);
+        orb.getLocationInWindow(to);
+        float side = Math.min(orb.getWidth(), orb.getHeight());
+        if (side <= 0) {
+            if (done != null) done.run();
+            return;
+        }
+        float scale = Math.min(headerMark.getWidth(), headerMark.getHeight()) / side;
+        float dx = from[0] + headerMark.getWidth() / 2f - (to[0] + orb.getWidth() / 2f);
+        float dy = from[1] + headerMark.getHeight() / 2f - (to[1] + orb.getHeight() / 2f);
+        if (!home) {
+            orb.setTranslationX(dx);
+            orb.setTranslationY(dy);
+            orb.setScaleX(scale);
+            orb.setScaleY(scale);
+        }
+        android.view.ViewPropertyAnimator a = orb.animate()
+                .translationX(home ? dx : 0).translationY(home ? dy : 0)
+                .scaleX(home ? scale : 1).scaleY(home ? scale : 1)
+                .setInterpolator(new AccelerateDecelerateInterpolator())
+                .setStartDelay(real(delay)).setDuration(real(1900));
+        if (done != null) a.withEndAction(done);
+        a.start();
     }
 
     /**
@@ -366,17 +496,17 @@ public class HomeActivity extends Activity {
      * normal home sits underneath (its timers keep running) and comes back
      * when JARVIS stands down and the theme changes.
      */
-    private View addBarnDoor(boolean leaving) {
+    private void addBarnDoor(boolean leaving) {
         Theme theme = Theme.BARN_DOOR; // also while it fades out over the restored theme
         FrameLayout alert = new FrameLayout(this);
         alert.setBackgroundColor(theme.deep);
         alert.setClickable(!leaving);
+        View orb = null;
         if (neural) {
             // Experimenting underneath: the neural core bristles into red spikes.
-            FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT);
-            lp.setMargins(0, dp(48), 0, dp(80));
-            alert.addView(new NeuralView(this, theme.reactor, mood()), lp);
+            // Its own layer over the lockdown screen, so it can fly in from the
+            // header while the screen behind it fades.
+            orb = new NeuralView(this, theme.reactor, mood());
         } else {
             alert.addView(new RedAlertView(this, theme.reactor, Color.rgb(255, 72, 56)), new FrameLayout.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
@@ -401,8 +531,15 @@ public class HomeActivity extends Activity {
 
         stage.addView(alert, new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+        if (orb != null) {
+            FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT);
+            lp.setMargins(0, dp(48), 0, dp(80));
+            stage.addView(orb, lp);
+        }
         if (!leaving) screen.setDescendantFocusability(ViewGroup.FOCUS_BLOCK_DESCENDANTS);
-        return alert;
+        alertLayer = alert;
+        alertOrb = orb;
     }
 
     /**
@@ -435,6 +572,7 @@ public class HomeActivity extends Activity {
         View mark = neural ? new NeuralView(this, theme.reactor, mood())
                 : new ReactorView(this, theme.reactor, theme.success);
         reactor = (Beat.Dancer) mark;
+        headerMark = mark;
         h.addView(mark, new FrameLayout.LayoutParams(dp(124), dp(124), Gravity.CENTER));
 
         LinearLayout time = new LinearLayout(this);

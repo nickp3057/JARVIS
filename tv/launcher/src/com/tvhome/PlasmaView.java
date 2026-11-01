@@ -3,7 +3,6 @@ package com.tvhome;
 import android.content.Context;
 import android.graphics.Bitmap;
 import android.graphics.Canvas;
-import android.graphics.Rect;
 import android.graphics.Color;
 import android.graphics.LinearGradient;
 import android.graphics.Paint;
@@ -12,16 +11,14 @@ import android.graphics.Shader;
 import android.view.View;
 
 /**
- * The Experimenting theme's flowing red and blue backdrop, ported from the
- * phone's PlasmaBackdrop (ios/.../Views/Experiments.swift): seven soft blobs on
- * wandering paths, stretched along their travel, each axis driven by a
- * {@link Gust} so they speed up and ease off at random-looking times without
- * ever jumping or reversing. A thin wash of the deep background on top is the
- * frost (nearly clear while Liquid glass puts the frost on the cards).
- *
- * Drawn into a bitmap an eighth of the screen's size and stretched up with
- * filtering: it's all soft gradients, so it looks the same, and the TV's GPU
- * fills 1/64 of the pixels (seven full-screen gradients dropped it to ~7 fps).
+ * The Experimenting theme's red and blue backdrop, ported from the phone's
+ * PlasmaBackdrop (ios/.../Views/Experiments.swift): seven soft blobs placed on
+ * their wandering paths (each axis a {@link Gust}), stretched along their
+ * travel. On the TV it holds still (TV 9.1, Nick: "higher res but not
+ * moving" so the TV isn't overloaded): drawn once, at full resolution, at the
+ * same moment (t = 40 s) the phone shows with Reduce Motion, then just blitted.
+ * Under Liquid glass it's vivid and unfrosted; otherwise a wash of the deep
+ * background is the frost.
  */
 final class PlasmaView extends View {
     /** Speed = rate·(1 + Σ a·cos(2πt/p + o)), integrated so position never jumps. */
@@ -46,19 +43,15 @@ final class PlasmaView extends View {
         }
     }
 
-    private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private static final double MOMENT = 40;
+    private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.DITHER_FLAG);
+    private final Paint blit = new Paint(Paint.FILTER_BITMAP_FLAG | Paint.DITHER_FLAG);
     private final int background, deep;
     private final boolean glass;
     private final int[] colors;
     private final double[] radius, opacity, phase;
     private final Gust[] gx, gy, spin;
-    private final Shader[] shaders;
-    private float shaderSide = -1;
-    private static final int SHRINK = 8;
-    private Bitmap small;
-    private Canvas smallCanvas;
-    private final Paint blit = new Paint(Paint.FILTER_BITMAP_FLAG);
-    private final Rect src = new Rect(), dst = new Rect();
+    private Bitmap still;
 
     PlasmaView(Context context, Theme theme, boolean glass) {
         super(context);
@@ -75,7 +68,6 @@ final class PlasmaView extends View {
         gx = new Gust[n];
         gy = new Gust[n];
         spin = new Gust[n];
-        shaders = new Shader[n];
         for (int i = 0; i < n; i++) {
             double seed = i;
             gx[i] = new Gust(1 / (34 + seed * 4), seed);
@@ -85,31 +77,13 @@ final class PlasmaView extends View {
         }
     }
 
-    @Override
-    protected void onDraw(Canvas screen) {
-        int sw = Math.max(1, getWidth() / SHRINK), sh = Math.max(1, getHeight() / SHRINK);
-        if (small == null || small.getWidth() != sw || small.getHeight() != sh) {
-            small = Bitmap.createBitmap(sw, sh, Bitmap.Config.ARGB_8888);
-            smallCanvas = new Canvas(small);
-        }
-        Canvas canvas = smallCanvas;
-        float w = sw, h = sh;
-        float side = Math.max(w, h);
-        double t = (System.currentTimeMillis() / 1000.0) % 86_400;
-
+    private Bitmap render(int width, int height) {
+        Bitmap bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888);
+        Canvas canvas = new Canvas(bitmap);
+        float w = width, h = height, side = Math.max(w, h);
+        double t = MOMENT;
         paint.setShader(new LinearGradient(0, 0, w, h, background, deep, Shader.TileMode.CLAMP));
         canvas.drawRect(0, 0, w, h, paint);
-
-        if (side != shaderSide) {
-            for (int i = 0; i < colors.length; i++) {
-                float r = (float) (side * radius[i]);
-                int c = colors[i];
-                shaders[i] = new RadialGradient(0, 0, r,
-                        new int[] {Theme.alpha(c, (int) (255 * opacity[i])), Theme.alpha(c, (int) (255 * opacity[i] * 0.35)), Theme.alpha(c, 0)},
-                        new float[] {0f, 0.5f, 1f}, Shader.TileMode.CLAMP);
-            }
-            shaderSide = side;
-        }
         for (int i = 0; i < colors.length; i++) {
             double px = 2 * Math.PI * gx[i].phase(t) + phase[i];
             double py = 2 * Math.PI * gy[i].phase(t) + phase[i] * 1.3;
@@ -119,23 +93,53 @@ final class PlasmaView extends View {
             double dy = -(0.32 * Math.sin(py) + 0.204 * Math.sin(1.7 * py + 0.4));
             double angle = Math.atan2(dy, dx) + 0.4 * Math.sin(2 * Math.PI * spin[i].phase(t));
             float r = (float) (side * radius[i]);
+            int c = colors[i];
+            if (glass) {
+                // Vivid: stronger colour, a bright centre that holds, a quicker fade.
+                double o = Math.min(0.95, opacity[i] * 1.4);
+                paint.setShader(new RadialGradient(0, 0, r,
+                        new int[] {a(c, o), a(c, o * 0.8), a(c, o * 0.25), a(c, 0)},
+                        new float[] {0f, 0.3f, 0.65f, 1f}, Shader.TileMode.CLAMP));
+            } else {
+                paint.setShader(new RadialGradient(0, 0, r,
+                        new int[] {a(c, opacity[i]), a(c, opacity[i] * 0.35), a(c, 0)},
+                        new float[] {0f, 0.5f, 1f}, Shader.TileMode.CLAMP));
+            }
             canvas.save();
             canvas.translate((float) (x * w), (float) (y * h));
             canvas.rotate((float) Math.toDegrees(angle));
             canvas.scale(1.35f, 1 / 1.35f);
-            paint.setShader(shaders[i]);
             canvas.drawCircle(0, 0, r, paint);
             canvas.restore();
         }
         paint.setShader(null);
-        // The frost: a wash of the deep background evens the colour out.
-        paint.setColor(Theme.alpha(deep, glass ? 22 : 110));
-        canvas.drawRect(0, 0, w, h, paint);
+        if (!glass) {
+            // The frost: a wash of the deep background evens the colour out.
+            paint.setColor(Theme.alpha(deep, 110));
+            canvas.drawRect(0, 0, w, h, paint);
+        }
+        return bitmap;
+    }
 
-        src.set(0, 0, sw, sh);
-        dst.set(0, 0, getWidth(), getHeight());
-        screen.drawBitmap(small, src, dst, blit);
-        // ~24 fps is plenty for something this slow, and spares the TV.
-        if (isAttachedToWindow()) postInvalidateDelayed(40);
+    private static int a(int color, double opacity) {
+        return Theme.alpha(color, (int) Math.round(255 * Math.max(0, Math.min(1, opacity))));
+    }
+
+    @Override
+    protected void onDraw(Canvas screen) {
+        int w = getWidth(), h = getHeight();
+        if (w <= 0 || h <= 0) return;
+        if (still == null || still.getWidth() != w || still.getHeight() != h) {
+            if (still != null) still.recycle();
+            still = render(w, h);
+        }
+        screen.drawBitmap(still, 0, 0, blit);
+    }
+
+    @Override
+    protected void onDetachedFromWindow() {
+        super.onDetachedFromWindow();
+        if (still != null) still.recycle();
+        still = null;
     }
 }
