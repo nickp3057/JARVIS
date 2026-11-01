@@ -354,7 +354,8 @@ struct RoomView: View {
             // Landscape: as big as the card's free space allows.
             if fill {
                 GeometryReader { box in
-                    core(size: max(170, min(box.size.width, box.size.height)))
+                    // He may spill into the card's side padding: his rings rarely reach the edge.
+                    core(size: max(170, min(box.size.width + 36, box.size.height)))
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
                 .frame(minHeight: 170)
@@ -362,7 +363,6 @@ struct RoomView: View {
                 core(size: 170)
             }
             Divider().overlay(JarvisTheme.border)
-            infoRow("alarm", title: "Wake-up", value: wakeText) { showingWake = true }
             if let event = model.now.value?.nextEvent {
                 infoRow("calendar", title: "Next up", value: eventText(event))
             }
@@ -382,7 +382,8 @@ struct RoomView: View {
             // One menu for the rarely used things: settings, and JARVIS's memory.
             Menu {
                 Button { showingSettings = true } label: { Label("Room settings", systemImage: "gearshape") }
-                Button { showingWake = true } label: { Label("Wake-up", systemImage: "alarm") }
+                // The wake-up row lives here now (more room for JARVIS), its time in the label.
+                Button { showingWake = true } label: { Label("Wake-up · \(wakeText)", systemImage: "alarm") }
                 Divider()
                 Button { roomCover = .memoryMap } label: { Label("Memory map", systemImage: "point.3.connected.trianglepath.dotted") }
                 Button { roomCover = .linkMap } label: { Label("Link map", systemImage: "dot.radiowaves.left.and.right") }

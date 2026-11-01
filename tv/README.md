@@ -90,7 +90,7 @@ every deploy, so edit the repo copy, not the TV's.
 - **Dark pool under the core (9.2, dark since 9.3)**: `PlasmaView.setAnchor`
   (set by the header core's layout listener) keeps a soft pool of the deep
   background under JARVIS and thins the flowing blobs there, so red + blue
-  can't stack behind him.
+  can't stack behind him. 9.4: a touch darker and bigger.
 - **Barn Door fly-in, still plasma (9.1)**: entering Barn Door, a snapshot of
   the old home (taken in `HomeActivity.recreate()`) fades off the red home,
   the header's core flies to the middle growing into the spiky one, then the

@@ -829,6 +829,14 @@ CALENDAR_ALERT_LEAD_MIN=10  # warn this many minutes before a meeting
   `light.desk_lights_2=light.desk_lights,light.nick_strip_lights=light.strip_lights`:
   Govee cloud = Govee LAN).
 
+- **Bigger core, smaller nodes, deeper pool (2026-11-01, iOS 5.58 / build
+  201, TV 9.4)** — `NeuralCore` node boxes shrink (`size / 125`) while the
+  wires keep their weight. The Room's Wake-up row moved into the Menu (its
+  label shows the next alarm) and the core may spill 18 pt into the card's
+  side padding, so it fills the left card. The dark pool is a touch darker
+  (0.86/0.58) and bigger (radius ×2.15, cut ×1.8), and its shape slowly
+  morphs over a minute; the TV's `PlasmaView` matches.
+
 - **Dark pool, heavier core lines, Room menu, memory import (2026-11-01, iOS
   5.56 / build 199, TV 9.3)** — the pool under the core is now a soft shade
   of the deep background, not red (Nick's pick), on the iPad/phone and TV.

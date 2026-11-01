@@ -105,9 +105,9 @@ final class PlasmaView extends View {
         float poolR = Math.max(anchorR, side * 0.12f);
         if (anchored) {
             // The pool under JARVIS, on the background like the iPad's.
-            float r = poolR * 1.9f;
+            float r = poolR * 2.15f;
             // A soft dark pool (Nick picked dark over red, 9.3).
-            paint.setShader(new RadialGradient(0, 0, r, new int[] {a(deep, 0.78), a(deep, 0.5), a(deep, 0)},
+            paint.setShader(new RadialGradient(0, 0, r, new int[] {a(deep, 0.86), a(deep, 0.58), a(deep, 0)},
                     new float[] {0f, 0.5f, 1f}, Shader.TileMode.CLAMP));
             canvas.save();
             canvas.translate(anchorX, anchorY);
@@ -146,7 +146,7 @@ final class PlasmaView extends View {
             canvas.restore();
         }
         if (anchored) {
-            float r = poolR * 1.6f;
+            float r = poolR * 1.8f;
             cut.setXfermode(new android.graphics.PorterDuffXfermode(android.graphics.PorterDuff.Mode.DST_OUT));
             cut.setShader(new RadialGradient(anchorX, anchorY, r, new int[] {Color.argb(158, 0, 0, 0), Color.argb(102, 0, 0, 0), 0},
                     new float[] {0f, 0.5f, 1f}, Shader.TileMode.CLAMP));

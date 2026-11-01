@@ -172,16 +172,18 @@ struct PlasmaBackdrop: View {
                     // The pool under JARVIS: a soft shade of the deep background (Nick
                     // picked dark over red, 2026-11-01), drifting a little.
                     if let anchor {
-                        let r = max(PlasmaAnchor.radius, side * 0.12) * 1.9
+                        let r = max(PlasmaAnchor.radius, side * 0.12) * 2.15
                         let drift = CGPoint(x: anchor.x + r * 0.08 * sin(2 * .pi * t / 47),
                                             y: anchor.y + r * 0.06 * cos(2 * .pi * t / 39))
                         var pool = canvas
                         pool.translateBy(x: drift.x, y: drift.y)
                         pool.rotate(by: .radians(0.3 * sin(2 * .pi * t / 83)))
-                        pool.scaleBy(x: 1.18, y: 1 / 1.18)
+                        // Its shape slowly morphs (a minute-long ease, no brightness change).
+                        let squash = 1.18 + 0.08 * sin(2 * .pi * t / 61)
+                        pool.scaleBy(x: squash, y: 1 / squash)
                         pool.fill(Path(ellipseIn: CGRect(x: -r, y: -r, width: r * 2, height: r * 2)), with: .radialGradient(
-                            .init(colors: [JarvisTheme.backgroundDeep.opacity(dark ? 0.78 : 0.4),
-                                           JarvisTheme.backgroundDeep.opacity(dark ? 0.5 : 0.24), .clear]),
+                            .init(colors: [JarvisTheme.backgroundDeep.opacity(dark ? 0.86 : 0.45),
+                                           JarvisTheme.backgroundDeep.opacity(dark ? 0.58 : 0.28), .clear]),
                             center: .zero, startRadius: 0, endRadius: r))
                     }
                     canvas.drawLayer { layer in
@@ -205,7 +207,7 @@ struct PlasmaBackdrop: View {
                         }
                         // Thin the passing colour right under JARVIS (the pool shows through).
                         if let anchor {
-                            let r = max(PlasmaAnchor.radius, side * 0.12) * 1.6
+                            let r = max(PlasmaAnchor.radius, side * 0.12) * 1.8
                             layer.blendMode = .destinationOut
                             layer.fill(Path(ellipseIn: CGRect(x: anchor.x - r, y: anchor.y - r, width: r * 2, height: r * 2)),
                                        with: .radialGradient(Gradient(colors: [.black.opacity(0.62), .black.opacity(0.4), .clear]),
@@ -793,7 +795,7 @@ struct NeuralCore: View {
         for (i, node) in nodes.enumerated() {
             let (p, depth) = projected[i]
             let ring = node.layer >= 3
-            let box = max(1.2, size.width / 92) * (0.6 + 0.6 * depth) * (ring ? 0.7 : 1) * (1 + node.glow * 0.8)
+            let box = max(1.0, size.width / 125)   // small nodes, heavier wires * (0.6 + 0.6 * depth) * (ring ? 0.7 : 1) * (1 + node.glow * 0.8)
             let turn = Double.pi / 4 * mix[node.layer].z
             var shape = Path()
             for corner in 0..<4 {
