@@ -184,6 +184,22 @@ install on the phone and iPad, then check:
 - [ ] Decide what graduates: a real theme, a switch on every theme, or
   binned. Orbit orb is still there (off by default).
 
+### Neural core v2 (iOS 5.47): check
+
+- [ ] **Deploy Core** (`git pull` + restart) so switch flips reach the other
+  device at once (home stream `look`), not only after a theme change.
+- [ ] **Thinking**: round and layered enough? Knobs in `NeuralNetwork`:
+  `shellRadii`/`shellCounts`, shell sway (`0.32 * sin(...)` in `pose`),
+  thought intervals in `step` (1.8–3.6 s idle, 0.5–1.1 s active).
+- [ ] **Eye**: open the camera on the iPad with Experimenting on; the brain
+  should open into the green eye over ~1–2 s and close back when it stops.
+  Lid shape `0.56 / 0.33` in `build`, glance size in `step`.
+- [ ] **Barn Door**: engage it with Experimenting picked; the brain should
+  bristle red (not cut to the old red reactor), and come back on stand-down.
+  Spike lengths `1.42 + 0.18·r` in `build`.
+- [ ] Performance on the iPad: ~190 nodes, ~400 wires batched into 12
+  strokes, at 30 fps.
+
 ### Voice ID, presence, motion (asked 2026-11-01)
 
 - [ ] **Deploy and enrol voice ID** (backbone built 2026-11-01, JARVIS.md

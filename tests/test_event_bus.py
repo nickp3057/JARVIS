@@ -189,6 +189,15 @@ class ClientTokenTests(unittest.TestCase):
         self.assertEqual(put({"experiments": {"bad name!": True}}).status_code, 422)
         self.assertEqual(put({}).status_code, 422)
 
+    def test_experiment_switch_moves_the_revision_the_home_stream_carries(self) -> None:
+        from brain import theme
+        admin = {"Authorization": "Bearer admin"}
+        before = self.client.put("/api/theme", headers=admin, json={"theme": "experimenting"}).json()["revision"]
+        with patch("brain.theme.time.time", return_value=before + 5):
+            after = self.client.put("/api/theme", headers=admin, json={"experiments": {"neural": False}}).json()
+        self.assertEqual(after["revision"], before + 5)  # theme unchanged, but screens still refetch
+        self.assertEqual(theme.current()["revision"], before + 5)
+
     def test_wake_schedule_editor_is_admin_only(self) -> None:
         tv = {"Authorization": "Bearer " + client_tokens.create("tv", ["status:read", "settings:write"])}
         admin = {"Authorization": "Bearer admin"}

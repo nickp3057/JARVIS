@@ -30,7 +30,7 @@ enum Experiment: String, CaseIterable, Identifiable {
     var blurb: String {
         switch self {
         case .plasma: return "Red and blue light flowing behind frosted glass, speeding up and easing off on its own."
-        case .neural: return "The reactor becomes a brain of data nodes, gold impulses firing through it; busier while JARVIS thinks."
+        case .neural: return "The reactor becomes a layered mind of data nodes with thoughts cascading out from its core. It opens into a green eye while the camera watches and bristles red for Barn Door."
         case .orb3D: return "A lit sphere with tilted orbiting rings (Neural core wins if both are on)."
         }
     }
@@ -155,102 +155,355 @@ struct PlasmaBackdrop: View {
 
 // MARK: - Neural core
 
-/// JARVIS's mind as the films drew it in Age of Ultron: a body of angular,
-/// box-like data nodes wired together, warm gold light running through it.
-/// Here it's shaped as two hemispheres (a brain), turning slowly in 3D; the
-/// structure takes the palette's reactor colour and the impulses are gold.
+/// What the neural core is doing; it morphs between these instead of cutting.
+enum NeuralMood {
+    case thinking   // the brain: layered shells, thoughts cascading outward
+    case watching   // the room camera is on: it opens into a green eye
+    case alert      // Barn Door: it bristles into red spikes
+
+    var target: SIMD3<Double> {
+        switch self {
+        case .thinking: return [1, 0, 0]
+        case .watching: return [0, 1, 0]
+        case .alert: return [0, 0, 1]
+        }
+    }
+}
+
+/// JARVIS's mind as the films drew it in Age of Ultron: angular, box-like
+/// data nodes wired together, warm gold light running through them. Here
+/// it's round and layered: a core, a middle and an outer shell (each
+/// breathing a little against the others) inside two orbit rings, all
+/// turning slowly in 3D.
 ///
-/// Impulses travel along the wires; when one reaches a node the node lights
-/// and may pass it on to a neighbour or two, so firing spreads in chains.
-/// Spontaneous firing runs ~2.4 per second, about three times that while
-/// JARVIS is thinking (`active`).
+/// Thinking looks like thinking: every few seconds a thought starts in the
+/// core and cascades outward shell by shell, branching as it goes; between
+/// thoughts, single sparks wander the shells and data packets circle the
+/// rings. Busier while JARVIS is working (`active`).
+///
+/// Every node also has an eye position and a spike length, so the same
+/// network opens into an eye (iris fibres, a pupil that glances around)
+/// when the camera watches, and bristles into spikes for Barn Door. The
+/// change runs core first, outer rings last, over a second or two.
 final class NeuralNetwork {
-    struct Node { let p: SIMD3<Double>; var glow: Double = 0 }
-    struct Signal { let from: Int, to: Int; var progress: Double; let speed: Double }
+    /// One brain for every core on screen. A theme change rebuilds the views
+    /// (Barn Door swaps the palette), so the network lives outside them and
+    /// keeps morphing instead of starting over.
+    static let shared = NeuralNetwork()
+
+    struct Node {
+        let base: SIMD3<Double>     // position before rotation (unit circle for ring nodes)
+        let layer: Int              // 0 core, 1 middle, 2 outer shell; 3 and 4 the orbit rings
+        let eye: SIMD3<Double>      // where it sits in the eye, in view space
+        let spike: Double           // radial stretch in the alert pose
+        let seed: Double
+        var glow: Double = 0
+    }
+
+    enum EdgeKind: CaseIterable { case inner, outer, axon, orbit }
+
+    struct Signal {
+        enum Kind { case spark, thought, orbit }
+        let from: Int, to: Int
+        var progress: Double
+        let speed: Double
+        let kind: Kind
+        var direction = 1           // thoughts: +1 outward, -1 inward
+    }
+
+    static let shellRadii = [0.15, 0.29, 0.42]
+    static let shellCounts = [16, 40, 72]
+    static let ringCount = 30
+    static let ringRadius = 0.52
 
     private(set) var nodes: [Node] = []
-    private(set) var edges: [(Int, Int)] = []
+    private(set) var edges: [(a: Int, b: Int, kind: EdgeKind)] = []
     private var neighbours: [[Int]] = []
     private(set) var signals: [Signal] = []
+    /// Mood mix (thinking, watching, alert) per layer; inner layers change first.
+    private(set) var mix = [SIMD3<Double>](repeating: [1, 0, 0], count: 5)
+    private(set) var look = SIMD2<Double>(0, 0)
+    private var lookTarget = SIMD2<Double>(0, 0)
+    private var nextLook = 0.0
+    private var nextThought = 1.5
+    private var clock = 20.0
+    private var yaw = 0.6, ringSpin = 0.0
     private var lastTime: Double?
     private var rng = SplitMix(seed: 0x0A6E_0F17)
 
-    init(count: Int = 96) {
-        build(count: count)
+    private init() {
+        build()
     }
 
-    private func build(count: Int) {
-        // Two hemispheres with a gap between them (the fissure); points spread
-        // by a Fibonacci spiral, every fifth pulled inward for depth.
+    // MARK: Building
+
+    private func build() {
         let golden = Double.pi * (3 - 5.0.squareRoot())
-        var points: [SIMD3<Double>] = []
-        let half = count / 2
-        for side in [-1.0, 1.0] {
-            for i in 0..<half {
-                let y = 1 - (Double(i) + 0.5) / Double(half) * 2
+        var built: [Node] = []
+        for layer in 0..<3 {
+            let count = Self.shellCounts[layer], radius = Self.shellRadii[layer]
+            // A Fibonacci sphere per shell, each a touch ragged.
+            let points: [SIMD3<Double>] = (0..<count).map { i in
+                let y = 1 - (Double(i) + 0.5) / Double(count) * 2
                 let ring = (1 - y * y).squareRoot()
-                let theta = golden * Double(i)
-                let x = abs(cos(theta) * ring) * side
-                let z = sin(theta) * ring * 1.08
-                let depth = i % 5 == 0 ? 0.72 : 1.0
-                // Longer front to back than wide, flatter than tall: a brain, not a ball;
-                // the underside tucks in where the temporal lobes would be.
-                let tuck = y < -0.55 ? 0.85 : 1.0
-                points.append(SIMD3(x * 0.36 * tuck + side * 0.06, y * 0.31, z * 0.52) * depth)
+                let theta = golden * Double(i) + Double(layer)
+                return SIMD3(cos(theta) * ring, y, sin(theta) * ring) * radius * (0.94 + 0.12 * rng.next01())
+            }
+            // The eye: shells become the pupil rim, the inner iris and the outer
+            // iris, in the order their points sit around the view axis, so the
+            // wires between shells become iris fibres.
+            let order = points.indices.sorted { atan2(points[$0].y, points[$0].x) < atan2(points[$1].y, points[$1].x) }
+            var eye = [SIMD3<Double>](repeating: .zero, count: count)
+            for (rank, index) in order.enumerated() {
+                let angle = -Double.pi + 2 * .pi * (Double(rank) + 0.5) / Double(count)
+                let r = [0.085, 0.18, 0.29][layer] * (layer == 0 ? 1 : 0.9 + 0.16 * rng.next01())
+                eye[index] = SIMD3(cos(angle) * r, sin(angle) * r, [0.10, 0.06, 0.02][layer])
+            }
+            for i in 0..<count {
+                let roll = rng.next01()
+                let spike: Double
+                switch layer {
+                case 0: spike = 0.72
+                case 1: spike = 0.9 + 0.1 * roll
+                default: spike = roll < 0.34 ? 1.42 + 0.18 * rng.next01() : (roll < 0.62 ? 1.08 : 0.84)
+                }
+                built.append(Node(base: points[i], layer: layer, eye: eye[i], spike: spike, seed: rng.next01()))
             }
         }
-        nodes = points.map { Node(p: $0) }
-        func distance(_ a: Int, _ b: Int) -> Double { simd_length(nodes[a].p - nodes[b].p) }
-        // Wire each node to its three nearest in its own hemisphere, plus a
-        // few bridges across the middle (the corpus callosum).
-        var set = Set<[Int]>()
-        for i in nodes.indices {
-            let near = nodes.indices.filter { $0 != i && (nodes[$0].p.x > 0) == (nodes[i].p.x > 0) }
-                .sorted { distance($0, i) < distance($1, i) }
-                .prefix(3)
-            for j in near { set.insert([min(i, j), max(i, j)]) }
-        }
-        let left = nodes.indices.filter { nodes[$0].p.x < 0 && abs(nodes[$0].p.x) < 0.16 }
-        let right = nodes.indices.filter { nodes[$0].p.x > 0 && abs(nodes[$0].p.x) < 0.16 }
-        for (k, i) in left.enumerated() where k % 2 == 0 {
-            if let j = right.min(by: { distance($0, i) < distance($1, i) }) {
-                set.insert([min(i, j), max(i, j)])
+        for ring in 0..<2 {
+            for i in 0..<Self.ringCount {
+                let angle = 2 * .pi * Double(i) / Double(Self.ringCount)
+                // Ring 0 becomes the eyelids (an almond, pointed at the corners);
+                // ring 1 a circle around the eye, placed live in pose().
+                let lid = SIMD3(0.56 * cos(angle), 0.33 * sin(angle) * pow(1 - abs(cos(angle)), 0.35), 0)
+                built.append(Node(base: SIMD3(cos(angle), 0, sin(angle)), layer: 3 + ring, eye: ring == 0 ? lid : .zero,
+                                  spike: i % 2 == 0 ? 1.24 : 1.0, seed: rng.next01()))
             }
         }
-        edges = set.map { ($0[0], $0[1]) }.sorted { $0.0 == $1.0 ? $0.1 < $1.1 : $0.0 < $1.0 }
-        neighbours = Array(repeating: [], count: nodes.count)
-        for (a, b) in edges { neighbours[a].append(b); neighbours[b].append(a) }
+        nodes = built
+
+        var kinds: [[Int]: EdgeKind] = [:]
+        func link(_ i: Int, _ j: Int, _ kind: EdgeKind) {
+            let key = [min(i, j), max(i, j)]
+            if kinds[key] == nil { kinds[key] = kind }
+        }
+        func distance(_ a: Int, _ b: Int) -> Double { simd_length(built[a].base - built[b].base) }
+        let shells = (0..<3).map { layer in built.indices.filter { built[$0].layer == layer } }
+        for (layer, members) in shells.enumerated() {
+            // Each node to its three nearest on the same shell...
+            for i in members {
+                for j in members.filter({ $0 != i }).sorted(by: { distance($0, i) < distance($1, i) }).prefix(3) {
+                    link(i, j, layer == 2 ? .outer : .inner)
+                }
+            }
+            // ...and axons both ways to the next shell out, so every node can pass a thought on.
+            guard layer < 2 else { continue }
+            let next = shells[layer + 1]
+            for i in members { if let j = next.min(by: { distance($0, i) < distance($1, i) }) { link(i, j, .axon) } }
+            for j in next { if let i = members.min(by: { distance($0, j) < distance($1, j) }) { link(i, j, .axon) } }
+        }
+        for ring in 0..<2 {
+            let first = built.count - (2 - ring) * Self.ringCount
+            for i in 0..<Self.ringCount { link(first + i, first + (i + 1) % Self.ringCount, .orbit) }
+        }
+        edges = kinds.map { (a: $0.key[0], b: $0.key[1], kind: $0.value) }
+            .sorted { $0.a == $1.a ? $0.b < $1.b : $0.a < $1.a }
+        neighbours = Array(repeating: [], count: built.count)
+        for edge in edges {
+            neighbours[edge.a].append(edge.b)
+            neighbours[edge.b].append(edge.a)
+        }
+        // Data packets that circle the rings forever, three per ring, opposite ways.
+        for ring in 0..<2 {
+            let first = built.count - (2 - ring) * Self.ringCount
+            for k in 0..<3 {
+                let from = first + k * 10
+                let to = first + (k * 10 + (ring == 0 ? 1 : Self.ringCount - 1)) % Self.ringCount
+                signals.append(Signal(from: from, to: to, progress: rng.next01(), speed: 1.7, kind: .orbit))
+            }
+        }
     }
 
-    /// Advance the simulation to `time` (seconds).
-    func step(to time: Double, active: Bool) {
-        let dt = min(0.1, max(0, time - (lastTime ?? time)))
+    // MARK: Pose
+
+    private static func rotateY(_ p: SIMD3<Double>, _ a: Double) -> SIMD3<Double> {
+        SIMD3(p.x * cos(a) + p.z * sin(a), p.y, -p.x * sin(a) + p.z * cos(a))
+    }
+
+    private static func rotateX(_ p: SIMD3<Double>, _ a: Double) -> SIMD3<Double> {
+        SIMD3(p.x, p.y * cos(a) - p.z * sin(a), p.y * sin(a) + p.z * cos(a))
+    }
+
+    private static func rotateZ(_ p: SIMD3<Double>, _ a: Double) -> SIMD3<Double> {
+        SIMD3(p.x * cos(a) - p.y * sin(a), p.x * sin(a) + p.y * cos(a), p.z)
+    }
+
+    /// Every node in view space (x right, y down, z toward the viewer), each
+    /// layer blended between its brain, eye and spike positions by its mix.
+    func pose() -> [SIMD3<Double>] {
+        let pitch = 0.30 + 0.10 * sin(clock * 2 * .pi / 17)
+        func view(_ p: SIMD3<Double>) -> SIMD3<Double> { Self.rotateX(Self.rotateY(p, yaw), pitch) }
+        var out: [SIMD3<Double>] = []
+        out.reserveCapacity(nodes.count)
+        for node in nodes {
+            let w = mix[node.layer]
+            var local: SIMD3<Double>
+            var eye = node.eye
+            if node.layer < 3 {
+                // The shells breathe against each other: a slow sway each, out of step.
+                let k = Double(node.layer)
+                local = Self.rotateY(node.base, 0.32 * sin(clock * 2 * .pi / (8 + 5 * k) + k * 2.1))
+                eye.x += look.x
+                eye.y += look.y
+            } else {
+                let ring = node.layer - 3
+                let start = atan2(node.base.z, node.base.x)
+                let a = start + (ring == 0 ? ringSpin : 1.3 - ringSpin * 0.8)
+                local = SIMD3(cos(a), 0, sin(a)) * Self.ringRadius
+                local = Self.rotateX(local, ring == 0 ? 1.2 : -1.05)
+                local = Self.rotateZ(local, ring == 0 ? 0.35 : -0.55 + 0.2 * sin(clock * 2 * .pi / 23))
+                if ring == 1 {
+                    let e = start + ringSpin * 0.15
+                    eye = SIMD3(cos(e), sin(e), -0.02) * 0.62
+                }
+            }
+            let tremble = node.spike + 0.045 * sin(clock * 13 + node.seed * 40)
+            let brain = view(local)
+            var spiked = view(local * tremble)
+            if node.layer >= 3 {
+                // Alert rings: jagged crowns facing you, spinning opposite ways.
+                let ring = node.layer - 3
+                let a = atan2(node.base.z, node.base.x) + (ring == 0 ? ringSpin : -ringSpin) * 0.6
+                let r = (ring == 0 ? 0.50 : 0.60) * (node.spike > 1.1 ? 1.12 : 0.9) * (1 + 0.02 * sin(clock * 11 + node.seed * 30))
+                spiked = SIMD3(cos(a) * r, sin(a) * r, -0.05)
+            }
+            out.append(brain * w.x + eye * w.y + spiked * w.z)
+        }
+        return out
+    }
+
+    // MARK: Simulation
+
+    /// Jump straight to a mood (Reduce Motion, Low Power, the still frame).
+    func settle(_ mood: NeuralMood) {
+        mix = Array(repeating: mood.target, count: mix.count)
+        look = .zero
+    }
+
+    /// Advance to `time` (seconds, any steadily increasing clock). Several
+    /// views can call this each frame; only the first moves it on.
+    func step(to time: Double, mood: NeuralMood, active: Bool) {
+        guard let last = lastTime else { lastTime = time; return }
+        guard time > last else { return }
         lastTime = time
-        guard dt > 0 else { return }
-        for i in nodes.indices { nodes[i].glow = max(0, nodes[i].glow - dt * 1.6) }
-        var arrived: [Int] = []
+        let dt = min(0.1, time - last)
+        clock += dt
+
+        // Morph: the core leads, the outer ring follows about a second later.
+        for (layer, rate) in [3.2, 2.5, 1.9, 1.5, 1.3].enumerated() {
+            mix[layer] += (mood.target - mix[layer]) * min(1, dt * rate)
+        }
+        let w = mix[2]
+        // Still in the eye (it faces you), restless in the alert.
+        yaw += dt * 2 * .pi / 32 * (w.x + 0.1 * w.y + 2.6 * w.z)
+        ringSpin += dt * (0.45 * w.x + 0.15 * w.y + 1.6 * w.z)
+
+        // The eye glances around: a quick move, then a hold of 0.8–3.4 s.
+        if clock >= nextLook {
+            lookTarget = SIMD2((rng.next01() - 0.5) * 0.12, (rng.next01() - 0.5) * 0.07)
+            nextLook = clock + 0.8 + rng.next01() * 2.6
+        }
+        look += (lookTarget - look) * min(1, dt * 9)
+
+        for i in nodes.indices { nodes[i].glow = max(0, nodes[i].glow - dt * 1.5) }
+        var arrived: [Signal] = []
         signals = signals.compactMap { signal in
             var s = signal
             s.progress += dt * s.speed
-            if s.progress >= 1 { arrived.append(s.to); return nil }
+            if s.progress >= 1 { arrived.append(s); return nil }
             return s
         }
-        for node in arrived {
-            nodes[node].glow = 1
-            // Pass it on: usually one neighbour, sometimes two, sometimes it dies out.
-            let roll = rng.next01()
-            let fanOut = roll < 0.30 ? 0 : (roll < 0.86 ? 1 : 2)
-            for _ in 0..<fanOut { fire(from: node) }
+        let alert = mood == .alert
+        for s in arrived {
+            nodes[s.to].glow = s.kind == .orbit ? max(nodes[s.to].glow, 0.55) : 1
+            switch s.kind {
+            case .orbit:
+                if let next = neighbours[s.to].first(where: { $0 != s.from }) {
+                    signals.append(Signal(from: s.to, to: next, progress: s.progress - 1, speed: s.speed, kind: .orbit))
+                }
+            case .thought:
+                let layer = nodes[s.to].layer
+                let onward = neighbours[s.to].filter { nodes[$0].layer == layer + s.direction }
+                if !onward.isEmpty {
+                    for j in pick(onward, 2) { send(s.to, j, .thought, direction: s.direction, alert: alert) }
+                } else if !alert {
+                    // Reached the last shell: it spreads across it a little and fades
+                    // (in the alert it stops at the spike's tip).
+                    let across = neighbours[s.to].filter { nodes[$0].layer == layer }
+                    for j in pick(across, 2) { send(s.to, j, .spark, alert: alert) }
+                }
+            case .spark:
+                let roll = rng.next01()
+                let fanOut = roll < 0.35 ? 0 : (roll < 0.88 ? 1 : 2)
+                let onShells = neighbours[s.to].filter { sparkable(s.to, $0, alert: alert) }
+                for j in pick(onShells, fanOut) { send(s.to, j, .spark, alert: alert) }
+            }
         }
-        let rate = active ? 7.0 : 2.4
-        if rng.next01() < rate * dt { fire(from: Int(rng.next01() * Double(nodes.count)) % nodes.count) }
+
+        // A new thought: from the core outward (inward from the iris to the
+        // pupil while watching).
+        if clock >= nextThought {
+            let inward = mood == .watching
+            let layer = inward ? 2 : 0
+            let starts = nodes.indices.filter { nodes[$0].layer == layer }
+            let start = starts[Int(rng.next01() * Double(starts.count)) % starts.count]
+            nodes[start].glow = 1
+            let onward = neighbours[start].filter { nodes[$0].layer == layer + (inward ? -1 : 1) }
+            for j in pick(onward, alert ? 3 : 2) { send(start, j, .thought, direction: inward ? -1 : 1, alert: alert) }
+            let (low, spread): (Double, Double)
+            switch mood {
+            case .alert: (low, spread) = (0.45, 0.45)
+            case .watching: (low, spread) = (1.2, 1.2)
+            case .thinking: (low, spread) = active ? (0.5, 0.6) : (1.8, 1.8)
+            }
+            nextThought = clock + low + rng.next01() * spread
+        }
+        // Stray sparks between thoughts.
+        let sparkRate: Double
+        switch mood {
+        case .alert: sparkRate = 7
+        case .watching: sparkRate = 1.2
+        case .thinking: sparkRate = active ? 5 : 1.6
+        }
+        if rng.next01() < sparkRate * dt {
+            let shellCount = Self.shellCounts.reduce(0, +)
+            let from = Int(rng.next01() * Double(shellCount)) % shellCount
+            if let to = pick(neighbours[from].filter { sparkable(from, $0, alert: alert) }, 1).first {
+                nodes[from].glow = max(nodes[from].glow, 0.7)
+                send(from, to, .spark, alert: alert)
+            }
+        }
     }
 
-    private func fire(from node: Int) {
-        guard signals.count < 70, !neighbours[node].isEmpty else { return }
-        let next = neighbours[node][Int(rng.next01() * Double(neighbours[node].count)) % neighbours[node].count]
-        nodes[node].glow = max(nodes[node].glow, 0.7)
-        signals.append(Signal(from: node, to: next, progress: 0, speed: 1.6 + rng.next01() * 1.8))
+    /// Sparks stay on the shells; in the alert they keep off the stretched outer mesh.
+    private func sparkable(_ from: Int, _ to: Int, alert: Bool) -> Bool {
+        nodes[to].layer < 3 && !(alert && nodes[from].layer == 2 && nodes[to].layer == 2)
+    }
+
+    private func send(_ from: Int, _ to: Int, _ kind: Signal.Kind, direction: Int = 1, alert: Bool) {
+        guard signals.count < 130 else { return }
+        let base = kind == .thought ? 2.4 + rng.next01() : 1.6 + rng.next01() * 1.8
+        signals.append(Signal(from: from, to: to, progress: 0, speed: base * (alert ? 1.7 : 1),
+                              kind: kind, direction: direction))
+    }
+
+    /// Up to `count` distinct picks from `options`.
+    private func pick(_ options: [Int], _ count: Int) -> [Int] {
+        var pool = options, out: [Int] = []
+        while out.count < count, !pool.isEmpty {
+            out.append(pool.remove(at: Int(rng.next01() * Double(pool.count)) % pool.count))
+        }
+        return out
     }
 }
 
@@ -272,88 +525,189 @@ struct NeuralCore: View {
     var size: CGFloat
     var moving: Bool
     var active = false
-    @State private var network = NeuralNetwork()
+    var mood: NeuralMood = .thinking
+    private let network = NeuralNetwork.shared
 
+    // Thinking: the palette's reactor wiring, gold impulses (the films' JARVIS).
     private static let gold = Color(red: 1.0, green: 0.68, blue: 0.22)
     private static let hot = Color(red: 1.0, green: 0.90, blue: 0.62)
+    // Watching: the camera orb's greens.
+    private static let watchLine = Color(red: 0.20, green: 0.85, blue: 0.45)
+    private static let watchImpulse = Color(red: 0.55, green: 1.0, blue: 0.70)
+    private static let watchHot = Color(red: 0.85, green: 1.0, blue: 0.90)
+    // Alert: the TV's red-alert reds.
+    private static let alertLine = Color(red: 1.0, green: 0.18, blue: 0.16)
+    private static let alertImpulse = Color(red: 1.0, green: 0.42, blue: 0.28)
+    private static let alertHot = Color(red: 1.0, green: 0.80, blue: 0.70)
 
     var body: some View {
         TimelineView(.animation(minimumInterval: 1.0 / 30, paused: !moving)) { context in
-            let t = context.date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: 86_400)
+            let now = context.date.timeIntervalSinceReferenceDate
             Canvas { canvas, canvasSize in
-                if moving { network.step(to: t, active: active) }
-                draw(in: &canvas, size: canvasSize, seconds: moving ? t : 12)
+                if moving { network.step(to: now, mood: mood, active: active) } else { network.settle(mood) }
+                draw(in: &canvas, size: canvasSize)
             }
         }
     }
 
-    /// Rotate (a slow turn with a gentle nod), then perspective-project.
-    private func project(_ p: SIMD3<Double>, seconds: Double, size: CGSize) -> (CGPoint, Double) {
-        let yaw = seconds * 2 * .pi / 28
-        let pitch = 0.32 + 0.10 * sin(seconds * 2 * .pi / 17)
-        let x1 = p.x * cos(yaw) + p.z * sin(yaw)
-        let z1 = -p.x * sin(yaw) + p.z * cos(yaw)
-        let y1 = p.y * cos(pitch) - z1 * sin(pitch)
-        let z2 = p.y * sin(pitch) + z1 * cos(pitch)
-        let scale = Double(min(size.width, size.height)) * 1.3 / (1.6 - z2 * 0.6)
-        let point = CGPoint(x: size.width / 2 + x1 * scale, y: size.height / 2 + y1 * scale)
-        return (point, max(0.15, min(1, z2 + 0.5)))  // depth: ~0 at the back, 1 at the front
+    private func blend(_ colors: (Color, Color, Color), _ w: SIMD3<Double>, in env: EnvironmentValues) -> Color {
+        let a = colors.0.resolve(in: env), b = colors.1.resolve(in: env), c = colors.2.resolve(in: env)
+        let x = Float(w.x), y = Float(w.y), z = Float(w.z)
+        return Color(Color.Resolved(red: a.red * x + b.red * y + c.red * z,
+                                    green: a.green * x + b.green * y + c.green * z,
+                                    blue: a.blue * x + b.blue * y + c.blue * z))
     }
 
-    private func draw(in canvas: inout GraphicsContext, size: CGSize, seconds: Double) {
-        let nodes = network.nodes
-        let projected = nodes.map { project($0.p, seconds: seconds, size: size) }
-        let line = max(0.6, size.width / 220)
-        let reactor = JarvisTheme.reactor
+    private func project(_ p: SIMD3<Double>, size: CGSize, lift: Double) -> (CGPoint, Double) {
+        let scale = Double(min(size.width, size.height)) * 1.15 / (1.6 - p.z * 0.6)
+        let point = CGPoint(x: size.width / 2 + p.x * scale, y: size.height / 2 + p.y * scale)
+        return (point, max(0.15, min(1, p.z + 0.55 + lift)))  // depth: ~0 at the back, 1 at the front
+    }
 
-        // Soft halo so the brain sits in light, not on nothing.
+    private func draw(in canvas: inout GraphicsContext, size: CGSize) {
+        let env = canvas.environment
+        let mix = network.mix
+        let w = mix[2]
+        let line = blend((JarvisTheme.reactor, Self.watchLine, Self.alertLine), w, in: env)
+        let impulse = blend((Self.gold, Self.watchImpulse, Self.alertImpulse), w, in: env)
+        let hot = blend((Self.hot, Self.watchHot, Self.alertHot), w, in: env)
+        let nodes = network.nodes
+        let lift = 0.3 * w.y   // the eye faces you, so it's lit like the front
+        let projected = network.pose().map { project($0, size: size, lift: lift) }
+        let stroke = max(0.6, size.width / 240)
         let center = CGPoint(x: size.width / 2, y: size.height / 2)
+        let unit = Double(min(size.width, size.height)) * 1.15 / 1.6
+
+        // Soft halo so it sits in light, not on nothing.
         canvas.fill(Path(ellipseIn: CGRect(origin: .zero, size: size)), with: .radialGradient(
-            Gradient(colors: [reactor.opacity(active ? 0.22 : 0.15), .clear]),
+            Gradient(colors: [line.opacity((active ? 0.22 : 0.15) + 0.12 * w.z), .clear]),
             center: center, startRadius: 0, endRadius: size.width * 0.48))
 
+        // The eye's pupil: a dark well with light around it, following the glance.
+        let seeing = mix[0].y
+        if seeing > 0.01 {
+            let look = network.look
+            let pupil = CGPoint(x: center.x + look.x * unit, y: center.y + look.y * unit)
+            let r = 0.075 * unit
+            canvas.fill(Path(ellipseIn: CGRect(x: pupil.x - r * 4, y: pupil.y - r * 4, width: r * 8, height: r * 8)),
+                        with: .radialGradient(Gradient(colors: [impulse.opacity(0.22 * seeing), .clear]),
+                                              center: pupil, startRadius: r, endRadius: r * 4))
+            canvas.fill(Path(ellipseIn: CGRect(x: pupil.x - r, y: pupil.y - r, width: r * 2, height: r * 2)),
+                        with: .color(JarvisTheme.backgroundDeep.opacity(0.9 * seeing)))
+        }
+
         canvas.blendMode = .plusLighter
-        for (a, b) in network.edges {
-            let (pa, da) = projected[a], (pb, db) = projected[b]
-            var path = Path()
-            path.move(to: pa)
-            path.addLine(to: pb)
-            canvas.stroke(path, with: .color(reactor.opacity(0.10 + 0.32 * (da + db) / 2)), lineWidth: line)
-            let warm = max(nodes[a].glow, nodes[b].glow)
-            if warm > 0.05 {
-                canvas.stroke(path, with: .color(Self.gold.opacity(0.55 * warm)), lineWidth: line * 1.4)
+        // The layers as glass: a faint outline per shell and light in the core,
+        // so it reads as spheres inside spheres, not one tangle.
+        let layered = mix[1].x
+        if layered > 0.01 {
+            canvas.fill(Path(ellipseIn: CGRect(x: center.x - 0.2 * unit, y: center.y - 0.2 * unit, width: 0.4 * unit, height: 0.4 * unit)),
+                        with: .radialGradient(Gradient(colors: [impulse.opacity((active ? 0.30 : 0.20) * layered), .clear]),
+                                              center: center, startRadius: 0, endRadius: 0.2 * unit))
+            for (k, radius) in NeuralNetwork.shellRadii.enumerated() {
+                let r = radius * unit
+                canvas.stroke(Path(ellipseIn: CGRect(x: center.x - r, y: center.y - r, width: r * 2, height: r * 2)),
+                              with: .color(line.opacity([0.20, 0.14, 0.10][k] * layered)), lineWidth: stroke)
             }
         }
+        // Barn Door: the long nodes become spikes out from the middle.
+        if w.z > 0.01 {
+            for (i, node) in nodes.enumerated() where node.layer == 2 && node.spike > 1.3 {
+                let (tip, depth) = projected[i]
+                let root = CGPoint(x: center.x + (tip.x - center.x) * 0.2, y: center.y + (tip.y - center.y) * 0.2)
+                var spike = Path()
+                spike.move(to: root)
+                spike.addLine(to: tip)
+                canvas.stroke(spike, with: .linearGradient(Gradient(colors: [line.opacity(0), line.opacity((0.5 + 0.5 * depth) * w.z)]),
+                                                           startPoint: root, endPoint: tip),
+                              style: StrokeStyle(lineWidth: stroke * 1.6, lineCap: .round))
+            }
+        }
+        // Wires, batched by kind and depth: a dozen strokes, not four hundred.
+        func bucket(_ depth: Double) -> Int { depth < 0.45 ? 0 : (depth < 0.75 ? 1 : 2) }
+        var paths = [NeuralNetwork.EdgeKind: [Path]]()
+        for kind in NeuralNetwork.EdgeKind.allCases { paths[kind] = [Path(), Path(), Path()] }
+        func weight(_ kind: NeuralNetwork.EdgeKind) -> Double {
+            switch kind {
+            case .inner: return 1.25 - 0.85 * w.z           // the inner shells carry the light
+            case .outer: return 0.7 - 0.7 * w.z             // spikes read clearer without the outer mesh
+            case .axon: return 0.8 - 0.3 * w.z + 0.5 * w.y   // iris fibres
+            case .orbit: return 0.9
+            }
+        }
+        var warm: [(Path, Double)] = []
+        for edge in network.edges {
+            let (pa, da) = projected[edge.a], (pb, db) = projected[edge.b]
+            let b = bucket((da + db) / 2)
+            paths[edge.kind]![b].move(to: pa)
+            paths[edge.kind]![b].addLine(to: pb)
+            let heat = max(nodes[edge.a].glow, nodes[edge.b].glow)
+            if heat > 0.05 && edge.kind != .orbit {
+                var path = Path()
+                path.move(to: pa)
+                path.addLine(to: pb)
+                warm.append((path, heat * min(1, weight(edge.kind))))
+            }
+        }
+        for (kind, buckets) in paths {
+            let weight = weight(kind)
+            for (b, path) in buckets.enumerated() {
+                let depth = [0.3, 0.6, 0.88][b]
+                canvas.stroke(path, with: .color(line.opacity((0.10 + 0.32 * depth) * weight)), lineWidth: stroke)
+            }
+        }
+        for (path, heat) in warm {
+            canvas.stroke(path, with: .color(impulse.opacity(0.5 * heat)), lineWidth: stroke * 1.4)
+        }
+
         for signal in network.signals {
             let (pa, da) = projected[signal.from], (pb, db) = projected[signal.to]
-            let f = signal.progress
+            let f = min(1, max(0, signal.progress))
             let head = CGPoint(x: pa.x + (pb.x - pa.x) * f, y: pa.y + (pb.y - pa.y) * f)
-            let tailF = max(0, f - 0.35)
+            let tailF = max(0, f - 0.4)
             let tail = CGPoint(x: pa.x + (pb.x - pa.x) * tailF, y: pa.y + (pb.y - pa.y) * tailF)
             var trail = Path()
             trail.move(to: tail)
             trail.addLine(to: head)
             let depth = da + (db - da) * f
-            canvas.stroke(trail, with: .linearGradient(Gradient(colors: [Self.gold.opacity(0), Self.gold.opacity(0.95 * depth)]),
+            let strength = signal.kind == .orbit ? 0.7 : 1
+            canvas.stroke(trail, with: .linearGradient(Gradient(colors: [impulse.opacity(0), impulse.opacity(0.95 * depth * strength)]),
                                                        startPoint: tail, endPoint: head),
-                          style: StrokeStyle(lineWidth: line * 2, lineCap: .round))
-            let r = line * 2.2
+                          style: StrokeStyle(lineWidth: stroke * 2, lineCap: .round))
+            let r = stroke * (signal.kind == .thought ? 2.6 : 2.0)
             canvas.fill(Path(ellipseIn: CGRect(x: head.x - r, y: head.y - r, width: r * 2, height: r * 2)),
-                        with: .color(Self.hot.opacity(depth)))
+                        with: .color(hot.opacity(depth * strength)))
         }
-        // Nodes: little data boxes (the films' angular JARVIS), gold while lit.
+
+        // Nodes: little data boxes, turning into diamonds as it bristles; batched by depth.
+        var boxes = [Path(), Path(), Path()]
+        var lit: [(CGPoint, Double, Double, Double)] = []
         for (i, node) in nodes.enumerated() {
             let (p, depth) = projected[i]
-            let box = max(1.2, size.width / 95) * (0.6 + 0.6 * depth) * (1 + node.glow * 0.8)
-            let rect = CGRect(x: p.x - box / 2, y: p.y - box / 2, width: box, height: box)
-            canvas.fill(Path(rect), with: .color(reactor.opacity(0.25 + 0.55 * depth)))
-            if node.glow > 0.02 {
-                canvas.fill(Path(rect), with: .color(Self.hot.opacity(node.glow * depth)))
-                let g = box * 3.2
-                canvas.fill(Path(ellipseIn: CGRect(x: p.x - g, y: p.y - g, width: g * 2, height: g * 2)),
-                            with: .radialGradient(Gradient(colors: [Self.gold.opacity(0.45 * node.glow * depth), .clear]),
-                                                  center: p, startRadius: 0, endRadius: g))
+            let ring = node.layer >= 3
+            let box = max(1.1, size.width / 105) * (0.6 + 0.6 * depth) * (ring ? 0.7 : 1) * (1 + node.glow * 0.8)
+            let turn = Double.pi / 4 * mix[node.layer].z
+            var shape = Path()
+            for corner in 0..<4 {
+                let a = turn + Double.pi / 4 + Double(corner) * .pi / 2
+                let q = CGPoint(x: p.x + cos(a) * box * 0.707, y: p.y + sin(a) * box * 0.707)
+                if corner == 0 { shape.move(to: q) } else { shape.addLine(to: q) }
             }
+            shape.closeSubpath()
+            boxes[bucket(depth)].addPath(shape)
+            if node.glow > 0.02 { lit.append((p, box, node.glow, depth)) }
+        }
+        for (b, path) in boxes.enumerated() {
+            canvas.fill(path, with: .color(line.opacity(0.25 + 0.55 * [0.3, 0.6, 0.88][b])))
+        }
+        for (p, box, glow, depth) in lit {
+            let r = box / 2
+            canvas.fill(Path(ellipseIn: CGRect(x: p.x - r, y: p.y - r, width: box, height: box)),
+                        with: .color(hot.opacity(glow * depth)))
+            let g = box * 3.2
+            canvas.fill(Path(ellipseIn: CGRect(x: p.x - g, y: p.y - g, width: g * 2, height: g * 2)),
+                        with: .radialGradient(Gradient(colors: [impulse.opacity(0.45 * glow * depth), .clear]),
+                                              center: p, startRadius: 0, endRadius: g))
         }
     }
 }

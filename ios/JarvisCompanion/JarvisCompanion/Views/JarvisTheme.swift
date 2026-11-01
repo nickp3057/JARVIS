@@ -14,6 +14,9 @@ enum JarvisPalette: String, CaseIterable, Identifiable {
     static let pickable: [JarvisPalette] = allCases.filter { $0 != .barnDoor }
 
     static let storageKey = "jarvis.palette"
+    /// The pick Barn Door replaced (ThemeSync), so the core can tell that
+    /// Experimenting is underneath the red alert.
+    static let beforeAlertKey = "jarvis.palette.beforeAlert"
     var id: String { rawValue }
 
     var name: String {
@@ -263,24 +266,36 @@ struct JarvisCoreMark: View {
     @AppStorage(JarvisPalette.storageKey) private var palette = JarvisPalette.arc.rawValue
     @AppStorage(Experiment.neural.storageKey) private var neuralOn = Experiment.neural.defaultOn
     @AppStorage(Experiment.orb3D.storageKey) private var orb3DOn = Experiment.orb3D.defaultOn
+    @AppStorage(JarvisPalette.beforeAlertKey) private var beforeAlert = ""
     @State private var visible = false
 
     private var moving: Bool {
         animated && !reduceMotion && !ProcessInfo.processInfo.isLowPowerModeEnabled
     }
 
+    private var barnDoor: Bool { palette == JarvisPalette.barnDoor.rawValue }
+
+    /// Experimenting is the pick, or it's what Barn Door's red replaced.
+    private var experimenting: Bool {
+        palette == JarvisPalette.experimenting.rawValue
+            || (barnDoor && beforeAlert == JarvisPalette.experimenting.rawValue)
+    }
+
     var body: some View {
         Group {
-            if cameraWatching {
+            if experimenting && neuralOn && size >= 60 {
+                // One view for all three moods, so the camera's eye and Barn
+                // Door's spikes grow out of the brain instead of cutting to it.
+                // (Below 60 pt the brain is a smudge; the chat's thinking dot keeps the classic mark.)
+                NeuralCore(size: size, moving: moving && visible, active: active,
+                           mood: cameraWatching ? .watching : (barnDoor ? .alert : .thinking))
+            } else if cameraWatching {
                 // iPad lens on: the reactor itself turns into the green orb.
                 CameraWatchOrb(size: size, moving: moving && visible)
-            } else if JarvisPalette.current == .barnDoor {
+            } else if barnDoor {
                 // Barn Door: the same hostile reactor as the TV's red-alert screen.
                 RedAlertMark(size: size, moving: moving && visible)
-            } else if palette == JarvisPalette.experimenting.rawValue && neuralOn && size >= 60 {
-                // (Below 60 pt the brain is a smudge; the chat's thinking dot keeps the classic mark.)
-                NeuralCore(size: size, moving: moving && visible, active: active)
-            } else if palette == JarvisPalette.experimenting.rawValue && orb3DOn {
+            } else if experimenting && orb3DOn {
                 OrbitOrb(size: size, moving: moving && visible, active: active)
             } else {
                 TimelineView(.animation(minimumInterval: 1.0 / 30, paused: !(moving && visible))) { context in

@@ -585,7 +585,7 @@ final class HubViewModel: ObservableObject {
             while !Task.isCancelled {
                 guard let client = try? self?.client() else { return }
                 self?.lastHomeSeq = nil  // a reconnect's first event may hide a missed change
-                try? await client.streamHome { [weak self] seq, theme in self?.homeChanged(seq, theme: theme) }
+                try? await client.streamHome { [weak self] seq, theme, look in self?.homeChanged(seq, theme: theme, look: look) }
                 self?.homeStreamLive = false
                 guard !Task.isCancelled else { return }
                 await self?.refreshEntities()
@@ -598,14 +598,19 @@ final class HubViewModel: ObservableObject {
     private var homeRefetch: Task<Void, Never>?
 
     private var lastTheme: String?
+    private var lastLook: Double?
 
-    private func homeChanged(_ seq: Int, theme: String?) {
+    private func homeChanged(_ seq: Int, theme: String?, look: Double?) {
         homeStreamLive = true
-        if let theme, theme != JarvisPalette.current.rawValue, theme != lastTheme {
-            // Barn Door (or a pick on the TV): follow it now, not at a poll.
+        let newTheme = theme.map { $0 != JarvisPalette.current.rawValue && $0 != lastTheme } ?? false
+        // An Experimenting switch flipped elsewhere moves `look` without changing the theme.
+        let newLook = look != nil && lastLook != nil && look != lastLook
+        if newTheme || newLook {
+            // Barn Door, a pick on the TV or another device: follow it now, not at a poll.
             Task { [settings] in await ThemeSync.pull(settings) }
         }
         lastTheme = theme
+        lastLook = look
         defer { lastHomeSeq = seq }
         guard let last = lastHomeSeq, last != seq else { return }  // the first event is just "connected"
         homeRefetch?.cancel()

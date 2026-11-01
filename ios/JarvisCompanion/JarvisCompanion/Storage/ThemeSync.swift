@@ -2,7 +2,10 @@ import Foundation
 
 /// Keeps the colour theme the same on the phone and the TV: the pick lives on
 /// JARVIS Core (`/api/theme`). Pulled every 10 s while the app is open
-/// (RootView), pushed when Nick picks one. The Experimenting switches ride along. An older Core without the endpoint leaves the local pick alone.
+/// (RootView) while the home stream is down; while it is up, its `look`
+/// field triggers a pull at once (HubViewModel). Pushed when Nick picks one.
+/// The Experimenting switches ride along. An older Core without the endpoint
+/// leaves the local pick alone.
 @MainActor
 enum ThemeSync {
     static func pull(_ settings: AppSettings) async {
@@ -16,6 +19,11 @@ enum ThemeSync {
         }
         if shared.chosen == true {
             if shared.theme != local, JarvisPalette(rawValue: shared.theme) != nil {
+                if shared.theme == JarvisPalette.barnDoor.rawValue {
+                    // Remember what Barn Door replaced: the Experimenting core stays
+                    // itself (spiky) through the alert instead of swapping out.
+                    UserDefaults.standard.set(local, forKey: JarvisPalette.beforeAlertKey)
+                }
                 UserDefaults.standard.set(shared.theme, forKey: JarvisPalette.storageKey)
             }
         } else if shared.theme != local {

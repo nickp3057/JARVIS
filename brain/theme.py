@@ -50,21 +50,29 @@ def _experiments(data: dict[str, Any]) -> dict[str, bool]:
     return {k: v for k, v in raw.items() if isinstance(k, str) and _EXPERIMENT_NAME.match(k) and isinstance(v, bool)}
 
 
+def _stamp(data: dict[str, Any], key: str) -> float:
+    try:
+        return float(data.get(key, 0))
+    except (TypeError, ValueError):
+        return 0.0
+
+
 def current() -> dict[str, object]:
-    """``{"theme", "chosen", "updated_at", "experiments"}``; chosen is False while it's the .env default."""
+    """``{"theme", "chosen", "updated_at", "experiments", "revision"}``; chosen is
+    False while it's the .env default. ``revision`` moves with any theme pick or
+    experiment switch (the home stream carries it so screens refetch at once)."""
     data = _read()
     experiments = _experiments(data)
+    switched = _stamp(data, "experiments_updated_at")
     theme = _RETIRED.get(data.get("theme"), data.get("theme"))
     if theme in THEMES:
-        try:
-            updated = float(data.get("updated_at", 0))
-        except (TypeError, ValueError):
-            updated = 0.0
-        return {"theme": theme, "chosen": True, "updated_at": updated, "experiments": experiments}
+        updated = _stamp(data, "updated_at")
+        return {"theme": theme, "chosen": True, "updated_at": updated, "experiments": experiments,
+                "revision": max(updated, switched)}
     default = os.getenv("JARVIS_THEME", "arc").strip()
     default = _RETIRED.get(default, default)
     return {"theme": default if default in THEMES else "arc", "chosen": False, "updated_at": 0.0,
-            "experiments": experiments}
+            "experiments": experiments, "revision": switched}
 
 
 def choose(theme: str, remember: bool = False) -> dict[str, object]:

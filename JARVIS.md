@@ -800,7 +800,7 @@ CALENDAR_ALERT_LEAD_MIN=10  # warn this many minutes before a meeting
 
 ## Recently Shipped
 
-- **Experimenting theme (2026-11-01, iOS 5.45–5.46 / build 188–189, TV 8.5)** — a
+- **Experimenting theme (2026-11-01, iOS 5.45–5.47 / build 188–190, TV 8.5)** — a
   pickable "visual lab" palette (Spider-Man's colours underneath) whose
   experiments each have a switch under the theme list in Settings
   (`Views/Experiments.swift`, `jarvis.experiment.<name>`). Everything is
@@ -811,16 +811,30 @@ CALENDAR_ALERT_LEAD_MIN=10  # warn this many minutes before a meeting
     is driven by a `Gust`: speed = 1 + three cosines with unrelated 6–31 s
     periods (amplitudes sum to 0.88), integrated analytically, so blobs
     speed up and ease off at random-looking times but never jump or reverse.
-  - **Neural core** (default on; `NeuralCore` + `NeuralNetwork`): the reactor
-    becomes a 3D brain, 96 box-shaped data nodes in two hemispheres (longer
-    front-to-back, a fissure, a few bridges across), each wired to its 3
-    nearest; it turns slowly with a nod. Gold impulses travel the wires;
-    an arriving impulse lights the node and passes on to 0/1/2 neighbours
-    (30/56/14%), so firing spreads in chains. Spontaneous firing ~2.4/s,
-    ~7/s while `active` (JARVIS thinking; the iPad's room view passes the
-    room voice's state). Look after Animal Logic's Age of Ultron JARVIS
-    (orange, angular, "made out of code or data"), structure in the
-    palette's reactor colour. Marks under 60 pt keep the classic reactor.
+  - **Neural core** (default on; `NeuralCore` + `NeuralNetwork`, rebuilt in
+    5.47): the reactor becomes a round, layered mind: three Fibonacci shells
+    of box-shaped data nodes (16/40/72 at radii 0.15/0.29/0.42, each wired to
+    its 3 nearest, axons both ways between shells, each shell swaying out of
+    step with the others) inside two tilted orbit rings of 30 nodes, faint
+    glass outlines per shell and light in the core. Thinking: every 1.8–3.6 s
+    (0.5–1.1 s while `active`) a thought starts in the core and cascades
+    outward shell by shell, branching to two, then spreads a little across
+    the outer shell; stray sparks wander between (1.6/s, 5/s active); three
+    packets circle each ring. Gold impulses (Animal Logic's Age of Ultron
+    JARVIS: orange, angular, "made out of code or data"), structure in the
+    palette's reactor colour. **Moods** (`NeuralMood`) morph the same nodes,
+    core first and rings last (~1–2 s): `watching` (room camera on) is a
+    green eye, the shells becoming pupil rim, inner and outer iris, the
+    axons iris fibres, ring 0 the almond eyelids and ring 1 a circle around
+    it, thoughts running iris → pupil, the pupil glancing about every
+    0.8–3.4 s; `alert` (Barn Door) bristles red: a third of the outer nodes
+    stretch into spikes, the mesh fades, the rings become jagged crowns, it
+    spins faster and fires along the spikes. During Barn Door the palette is
+    `barnDoor`, so `ThemeSync` keeps the replaced pick in
+    `jarvis.palette.beforeAlert` and the core stays neural if that was
+    Experimenting. `NeuralNetwork.shared` lives outside the views because a
+    palette change rebuilds them (`RootView` `.id(palette)`). Marks under
+    60 pt keep the classic reactor (and the camera/red-alert orbs).
   - **Orbit orb** (default off; `OrbitOrb`): lit glass sphere with three
     `rotation3DEffect` rings; Neural core wins when both are on.
   Reduce Motion / Low Power get the still frame. Core accepts
@@ -828,7 +842,11 @@ CALENDAR_ALERT_LEAD_MIN=10  # warn this many minutes before a meeting
   switches are shared too: `PUT /api/theme {"experiments": {"neural": true}}`,
   returned in `GET /api/theme` and applied by `ThemeSync.pull`. Theme names
   are validated only against `brain/theme.THEMES` (the API used to keep its
-  own regex, which refused "experimenting": that was the sync bug). New
+  own regex, which refused "experimenting": that was the sync bug). The
+  home stream's events carry `look` (`theme.current()["revision"]`, the
+  later of the theme pick and the last switch flip), so a switch flipped on
+  one device reaches the other at once: the apps skip the 10 s theme poll
+  while the stream is up, which is why switches used to lag. New
   experiments go in the `Experiment` enum; Core needs no change.
 
 - **Voice ID backbone (2026-11-01, untested on the Optiplex)** — who's

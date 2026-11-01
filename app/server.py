@@ -903,12 +903,16 @@ async def home_stream(request: Request, _: None = _status_read) -> StreamingResp
     the room screens refetch at once instead of on their next poll. A burst
     (a scene flipping eight lights) arrives as a few events, not eight.
     Each event also carries the shared ``theme``: the TV follows it here, so
-    Barn Door reaches it at once instead of on its 5 s theme poll."""
+    Barn Door reaches it at once instead of on its 5 s theme poll. ``look``
+    changes with any theme pick or Experimenting switch, so the phone and
+    iPad refetch /api/theme at once (their 10 s poll pauses while this
+    stream is up)."""
     await asyncio.to_thread(runtime)  # the HA live feed runs on the runtime
     from brain import theme
 
     def pulse() -> dict[str, object]:
-        return {"seq": status_hub.home_seq(), "theme": theme.current()["theme"]}
+        shared = theme.current()
+        return {"seq": status_hub.home_seq(), "theme": shared["theme"], "look": shared["revision"]}
 
     async def events():
         state = pulse()
