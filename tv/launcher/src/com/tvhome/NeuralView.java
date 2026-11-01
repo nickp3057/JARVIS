@@ -115,7 +115,7 @@ final class NeuralView extends View implements Beat.Dancer {
         canvas.drawCircle(cx, cy, side * 0.48f, paint);
         paint.setShader(null);
 
-        // The eye's pupil.
+        // The eye's pupil: open, just light around its rim.
         double seeing = net.mix[0][1];
         if (seeing > 0.01) {
             float ex = (float) (cx + net.look[0] * unit), ey = (float) (cy + net.look[1] * unit);
@@ -124,8 +124,6 @@ final class NeuralView extends View implements Beat.Dancer {
                     new float[] {0.25f, 1f}, Shader.TileMode.CLAMP));
             canvas.drawCircle(ex, ey, r * 4, paint);
             paint.setShader(null);
-            paint.setColor(alpha(Color.rgb(3, 4, 10), 0.9 * seeing));
-            canvas.drawCircle(ex, ey, r, paint);
         }
 
         paint.setXfermode(new PorterDuffXfermode(PorterDuff.Mode.ADD));

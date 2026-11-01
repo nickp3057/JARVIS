@@ -824,7 +824,7 @@ CALENDAR_ALERT_LEAD_MIN=10  # warn this many minutes before a meeting
     JARVIS: orange, angular, "made out of code or data"), structure in the
     palette's reactor colour. **Moods** (`NeuralMood`) morph the same nodes,
     core first and rings last (~1–2 s): `watching` (room camera on) is a
-    green eye, the shells becoming pupil rim, inner and outer iris, the
+    green eye (open pupil, no dark fill since 5.51), the shells becoming pupil rim, inner and outer iris, the
     axons iris fibres, ring 0 the almond eyelids and ring 1 a circle around
     it, thoughts running iris → pupil, the pupil glancing about every
     0.8–3.4 s; `alert` (Barn Door) bristles red: a third of the outer nodes

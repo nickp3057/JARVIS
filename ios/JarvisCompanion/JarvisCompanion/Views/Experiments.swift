@@ -588,7 +588,8 @@ struct NeuralCore: View {
             Gradient(colors: [line.opacity((active ? 0.22 : 0.15) + 0.12 * w.z), .clear]),
             center: center, startRadius: 0, endRadius: size.width * 0.48))
 
-        // The eye's pupil: a dark well with light around it, following the glance.
+        // The eye's pupil: open (no dark fill, Nick's call), light around its
+        // rim of nodes, following the glance.
         let seeing = mix[0].y
         if seeing > 0.01 {
             let look = network.look
@@ -597,8 +598,6 @@ struct NeuralCore: View {
             canvas.fill(Path(ellipseIn: CGRect(x: pupil.x - r * 4, y: pupil.y - r * 4, width: r * 8, height: r * 8)),
                         with: .radialGradient(Gradient(colors: [impulse.opacity(0.22 * seeing), .clear]),
                                               center: pupil, startRadius: r, endRadius: r * 4))
-            canvas.fill(Path(ellipseIn: CGRect(x: pupil.x - r, y: pupil.y - r, width: r * 2, height: r * 2)),
-                        with: .color(JarvisTheme.backgroundDeep.opacity(0.9 * seeing)))
         }
 
         canvas.blendMode = .plusLighter
