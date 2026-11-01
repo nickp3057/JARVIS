@@ -429,24 +429,12 @@ struct RoomView: View {
         JarvisCoreMark(size: size, active: voice.active)
             // Talking: he grows and his light lifts, steady (no pulsing).
             .background {
-                ZStack {
-                    // A dark circle behind him, on the card itself (the plasma's
-                    // pool sits under the card's frost, so it barely showed).
-                    // Solid in the middle, soft at the rim; it doesn't move.
-                    Circle()
-                        .fill(RadialGradient(stops: [
-                            .init(color: JarvisTheme.backgroundDeep.opacity(0.92), location: 0),
-                            .init(color: JarvisTheme.backgroundDeep.opacity(0.85), location: 0.62),
-                            .init(color: JarvisTheme.backgroundDeep.opacity(0), location: 1),
-                        ], center: .center, startRadius: 0, endRadius: size * 0.58))
-                        .frame(width: size * 1.16, height: size * 1.16)
-                    Circle()
-                        .fill(RadialGradient(colors: [JarvisTheme.reactor.opacity(0.35), .clear],
-                                             center: .center, startRadius: 0, endRadius: size * 0.62))
-                        .frame(width: size * 1.25, height: size * 1.25)
-                        .opacity(talking ? 1 : 0)
-                }
-                .allowsHitTesting(false)
+                Circle()
+                    .fill(RadialGradient(colors: [JarvisTheme.reactor.opacity(0.35), .clear],
+                                         center: .center, startRadius: 0, endRadius: size * 0.62))
+                    .frame(width: size * 1.25, height: size * 1.25)
+                    .opacity(talking ? 1 : 0)
+                    .allowsHitTesting(false)
             }
             .scaleEffect(talking ? 1.12 : 1)
             .animation(.easeInOut(duration: 0.5), value: talking)
