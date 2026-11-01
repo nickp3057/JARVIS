@@ -33,7 +33,7 @@ enum Experiment: String, CaseIterable, Identifiable {
         case .plasma: return "Red and blue light flowing behind frosted glass, speeding up and easing off on its own."
         case .neural: return "The reactor becomes a layered mind of data nodes with thoughts cascading out from its core. It opens into a green eye while the camera watches and bristles red for Barn Door."
         case .orb3D: return "A lit sphere with tilted orbiting rings (Neural core wins if both are on)."
-        case .glass: return "Every card turns to frosted Liquid Glass, and the background's frost thins so the colour comes through."
+        case .glass: return "Every card turns to Liquid Glass (as clear or tinted as your Liquid Glass setting), and the background's frost thins so the colour comes through."
         }
     }
 
@@ -798,31 +798,34 @@ private struct JarvisSurface<S: Shape>: ViewModifier {
         if palette == JarvisPalette.experimenting.rawValue && glassOn {
             content.background { FrostedGlass(shape: shape) }
         } else {
-            content.jarvisSurface(in: shape)
+            // Not jarvisSurface(in:) itself: that recursed forever (5.49's
+            // launch crash with glass switched off).
+            content.background(JarvisTheme.panelGradient, in: shape)
         }
     }
 }
 
-/// Frosted glass: a thick blur of whatever flows behind (the plasma), a
-/// whisper of the panel colour so text keeps its contrast, a light sheen from
-/// the top-left and a bright rim. On iOS 26+ the rim and sheen are Apple's
-/// Liquid Glass itself, laid over the frost.
+/// The card glass. On iOS 26+ it's Apple's Liquid Glass and nothing else, so
+/// it follows the phone's own setting (Settings > Display & Brightness >
+/// Liquid Glass: Clear or Tinted) and Reduce Transparency, like the system's
+/// own glass. Older iOS gets a frosted stand-in: a blur of the plasma, a
+/// whisper of the panel colour, a sheen and a bright rim.
 private struct FrostedGlass<S: Shape>: View {
     let shape: S
     @Environment(\.colorScheme) private var scheme
 
     var body: some View {
-        let dark = scheme == .dark
-        ZStack {
-            shape.fill(.regularMaterial)
-            shape.fill(JarvisTheme.panel.opacity(dark ? 0.30 : 0.18))
-            if #available(iOS 26, macCatalyst 26, *) {
-                Color.clear.glassEffect(.regular.tint(JarvisTheme.reactor.opacity(0.06)), in: shape)
-            } else {
+        if #available(iOS 26, macCatalyst 26, *) {
+            Color.clear.glassEffect(.regular, in: shape)
+        } else {
+            let dark = scheme == .dark
+            ZStack {
+                shape.fill(.regularMaterial)
+                shape.fill(JarvisTheme.panel.opacity(dark ? 0.30 : 0.18))
                 shape.fill(LinearGradient(colors: [.white.opacity(dark ? 0.10 : 0.30), .white.opacity(0)],
                                           startPoint: .topLeading, endPoint: .center))
                 shape.stroke(LinearGradient(colors: [.white.opacity(0.45), .white.opacity(0.06), .white.opacity(0.18)],
-                                                  startPoint: .topLeading, endPoint: .bottomTrailing), lineWidth: 1)
+                                            startPoint: .topLeading, endPoint: .bottomTrailing), lineWidth: 1)
             }
         }
     }

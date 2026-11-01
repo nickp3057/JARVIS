@@ -1263,13 +1263,14 @@ public class HomeActivity extends Activity {
     /**
      * Frosted glass (Experimenting's Liquid glass): Android can't blur what's
      * behind a view, so the frost is a milky haze over the panel colour, a
-     * sheen from the top-left and a bright rim; frostier than the backdrop.
+     * sheen from the top-left and a bright rim. Kept clear, like Nick's
+     * phone (Liquid Glass set to Clear).
      */
     private android.graphics.drawable.Drawable glassCard(int radiusDp) {
         float r = dp(radiusDp);
         GradientDrawable haze = new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM, new int[] {
-                Theme.alpha(blend(theme.raised, Color.WHITE, 0.18f), 130),
-                Theme.alpha(blend(theme.panel, Color.WHITE, 0.08f), 110)});
+                Theme.alpha(blend(theme.raised, Color.WHITE, 0.12f), 95),
+                Theme.alpha(blend(theme.panel, Color.WHITE, 0.05f), 80)});
         haze.setCornerRadius(r);
         GradientDrawable sheen = new GradientDrawable(GradientDrawable.Orientation.TL_BR, new int[] {
                 Color.argb(40, 255, 255, 255), Color.argb(0, 255, 255, 255), Color.argb(0, 255, 255, 255)});

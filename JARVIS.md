@@ -858,8 +858,12 @@ CALENDAR_ALERT_LEAD_MIN=10  # warn this many minutes before a meeting
   - **5.49 / TV 8.7**: **Liquid glass** experiment (`glass`, default on):
     every card and panel goes through `View.jarvisSurface(in:)`
     (Experiments.swift), which is the panel gradient normally and frosted
-    glass under Experimenting (`.regularMaterial` + a panel tint + iOS 26
-    `glassEffect` rim/sheen); the plasma backdrop's own frost thins
+    glass under Experimenting: since 5.50 on iOS 26+ that's only
+    `glassEffect(.regular)`, so it follows the phone's Liquid Glass setting
+    (Nick's is Clear) and Reduce Transparency; older iOS gets a material
+    stand-in. 5.49 crashed at launch whenever the switch was off or the
+    theme wasn't Experimenting: a find-and-replace turned the fallback into
+    `content.jarvisSurface(in:)`, which recursed forever. The plasma backdrop's own frost thins
     (material 0.35 → 0.15) while it's on. Theme crossfade no longer dims:
     a `JarvisBackdrop` sits under the two fading screens while it runs.
     Core's theme/glance add `lab`, the switches actually showing with

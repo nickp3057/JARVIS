@@ -207,8 +207,8 @@ install on the phone and iPad, then check:
 - [ ] **Barn Door crossfade (5.48–5.49)** on phone and iPad: should dissolve
   over ~1.4 s both ways with no dim dip (5.49 backdrop under the fade).
 - [ ] **Liquid glass + TV plasma (5.49 / TV 8.7)**: needs Core pulled for
-  `lab`. Cards frosted on all three; backdrop frost thinner. Knobs: iOS
-  `FrostedGlass` (material, tint 0.30), TV `glassCard` alphas (130/110),
+  `lab`. Cards glass on all three; backdrop frost thinner. iOS follows the
+  system Liquid Glass setting (5.50); TV `glassCard` alphas (95/80, kept clear),
   `PlasmaView` frost wash (60 with glass, 110 without).
 
 ### Voice ID, presence, motion (asked 2026-11-01)
