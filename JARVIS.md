@@ -663,6 +663,7 @@ OBSIDIAN_MAX_RESULTS=4      # maximum note excerpts retrieved per turn
 OBSIDIAN_MAX_CHARS=4000     # hard cap on retrieved note text per turn
 OBSIDIAN_MAX_FILE_BYTES=1000000 # skip unusually large Markdown files
 OBSIDIAN_JOURNAL_FOLDER=Jarvis Memory/Journal  # vault-relative daily-note folder
+OBSIDIAN_IMPORT_FOLDER=Jarvis Memory/Imported  # where pasted memory imports are saved
 TRAFFIC_NAS_HOSTS=          # extra hostnames counted as the NAS on the link map (HA/Plex/arr URLs count already)
 TV_HOST=                    # the TV's IP, so direct calls to it show as TV on the link map
 OBSIDIAN_NOTES_FOLDER=Jarvis Memory/Notes      # vault-relative folder for titled captures
@@ -827,6 +828,23 @@ CALENDAR_ALERT_LEAD_MIN=10  # warn this many minutes before a meeting
   off plus its twin under the other integration (`LIGHT_TWINS`, default
   `light.desk_lights_2=light.desk_lights,light.nick_strip_lights=light.strip_lights`:
   Govee cloud = Govee LAN).
+
+- **Dark pool, heavier core lines, Room menu, memory import (2026-11-01, iOS
+  5.56 / build 199, TV 9.3)** — the pool under the core is now a soft shade
+  of the deep background, not red (Nick's pick), on the iPad/phone and TV.
+  `NeuralCore` lines are a hair heavier (`size / 185`, nodes `/ 92`). Room:
+  the Room settings button became a **Menu** (Room settings, Wake-up, Memory
+  map, Link map, Import memory); full screen ignores the safe area so the
+  cards reach the bottom edge. Link map: Core is drawn as JARVIS's own orb
+  ("JARVIS", "Core · Optiplex"); APNs and HA-fallback pushes now count as
+  core -> device signals (`notifications._traffic`). Memory map: tapping a
+  folder (Journal) lists its notes to open; vaults of ≤60 nodes label every
+  dot. Vault search scores each heading's section separately (up to three
+  per note, `_SECTIONS_PER_NOTE`), so one long note answers from the right
+  part. New `POST /api/knowledge/import` (admin token, `{title, text}` up to
+  200k chars) saves pasted text to `Jarvis Memory/Imported/<title>.md`
+  (`OBSIDIAN_IMPORT_FOLDER`); the Memory tab and the Room menu have an
+  Import memory sheet.
 
 - **Calmer plasma, red under JARVIS, Memory map, Link map (2026-11-01, iOS
   5.55 / build 198, TV 9.2)** — `PlasmaBackdrop`'s speed bursts are half

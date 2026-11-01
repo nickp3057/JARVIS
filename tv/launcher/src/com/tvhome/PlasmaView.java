@@ -21,7 +21,7 @@ import android.view.View;
  * background is the frost.
  *
  * Under the header's core ({@link #setAnchor}) the passing colour thins and a
- * soft pool of red holds instead, so full red and full blue can't stack
+ * soft dark pool holds instead, so full red and full blue can't stack
  * behind JARVIS and wash him out (phone/iPad: {@code PlasmaAnchor}).
  */
 final class PlasmaView extends View {
@@ -106,8 +106,9 @@ final class PlasmaView extends View {
         if (anchored) {
             // The pool under JARVIS, on the background like the iPad's.
             float r = poolR * 1.9f;
-            paint.setShader(new RadialGradient(0, 0, r, new int[] {a(colors[0], glass ? 0.77 : 0.55), a(colors[0], glass ? 0.6 : 0.19),
-                    a(colors[0], glass ? 0.19 : 0.0), a(colors[0], 0)}, new float[] {0f, 0.3f, 0.65f, 1f}, Shader.TileMode.CLAMP));
+            // A soft dark pool (Nick picked dark over red, 9.3).
+            paint.setShader(new RadialGradient(0, 0, r, new int[] {a(deep, 0.78), a(deep, 0.5), a(deep, 0)},
+                    new float[] {0f, 0.5f, 1f}, Shader.TileMode.CLAMP));
             canvas.save();
             canvas.translate(anchorX, anchorY);
             canvas.scale(1.18f, 1 / 1.18f);

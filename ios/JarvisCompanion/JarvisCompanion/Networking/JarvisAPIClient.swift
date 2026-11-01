@@ -861,6 +861,12 @@ struct JarvisAPIClient {
         try await getJSON(KnowledgeNoteText.self, path: "api/knowledge/note", query: [URLQueryItem(name: "path", value: path)])
     }
 
+    /// Saves pasted text as a vault note under Jarvis Memory/Imported; returns its path.
+    func importKnowledge(title: String, text: String) async throws -> String {
+        struct Saved: Decodable { let path: String }
+        return try await postJSON(Saved.self, path: "api/knowledge/import", body: ["title": title, "text": text]).path
+    }
+
     func knowledgeGraph() async throws -> KnowledgeGraph {
         try await getJSON(KnowledgeGraph.self, path: "api/knowledge/graph")
     }

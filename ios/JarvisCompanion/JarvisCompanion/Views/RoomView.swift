@@ -70,6 +70,15 @@ struct RoomView: View {
     /// Landscape: no scrolling, so a plain drag on a tile sets its level.
     @State private var wideLayout = true
     @State private var showingSettings = false
+    @State private var showingImport = false
+    @State private var roomCover: RoomCover?
+    /// A note opened from the Memory map.
+    @State private var openNote: String?
+
+    enum RoomCover: String, Identifiable {
+        case memoryMap, linkMap
+        var id: String { rawValue }
+    }
     @AppStorage(RoomView.favoritesKey) private var favoriteScenes = RoomView.defaultFavorites
     /// "Back to the panel" during a movie; cleared when the scene changes.
     @State private var movieDismissed = false
@@ -111,7 +120,10 @@ struct RoomView: View {
                 }
             }
         }
+        // Full screen really is full: down past the home indicator's strip.
+        .ignoresSafeArea(.container, edges: fullScreen && !RootView.isMac ? .all : [])
         .onGeometryChange(for: Bool.self) { $0.size.width > $0.size.height } action: { wideLayout = $0 }
+        .modifier(RoomMemoryCovers(cover: $roomCover, showingImport: $showingImport, openNote: $openNote))
         .background { JarvisBackdrop().ignoresSafeArea() }
         .toolbar(fullScreen && !RootView.isMac ? .hidden : .automatic, for: .tabBar)
         .statusBarHidden(fullScreen && !RootView.isMac)
@@ -367,8 +379,16 @@ struct RoomView: View {
                 .buttonStyle(CockpitButtonStyle())
                 TVPowerButton()  // the TV on or off in one tap
             }
-            Button { showingSettings = true } label: {
-                Label("Room settings", systemImage: "gearshape")
+            // One menu for the rarely used things: settings, and JARVIS's memory.
+            Menu {
+                Button { showingSettings = true } label: { Label("Room settings", systemImage: "gearshape") }
+                Button { showingWake = true } label: { Label("Wake-up", systemImage: "alarm") }
+                Divider()
+                Button { roomCover = .memoryMap } label: { Label("Memory map", systemImage: "point.3.connected.trianglepath.dotted") }
+                Button { roomCover = .linkMap } label: { Label("Link map", systemImage: "dot.radiowaves.left.and.right") }
+                Button { showingImport = true } label: { Label("Import memory", systemImage: "square.and.arrow.down") }
+            } label: {
+                Label("Menu", systemImage: "line.3.horizontal")
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, minHeight: 40)
@@ -932,6 +952,37 @@ private struct MovieModeEffects: ViewModifier {
                 if room.movieTouches > 0 { room.setMovieDim(1.0) }
                 try? await Task.sleep(for: .seconds(20))
                 if !Task.isCancelled, room.movieMode { room.setMovieDim(0.15) }
+            }
+    }
+}
+
+private struct NotePath: Identifiable {
+    let id: String
+}
+
+/// The Room menu's memory screens: the maps full screen, Import and an
+/// opened note as sheets.
+private struct RoomMemoryCovers: ViewModifier {
+    @Binding var cover: RoomView.RoomCover?
+    @Binding var showingImport: Bool
+    @Binding var openNote: String?
+
+    func body(content: Content) -> some View {
+        content
+            .fullScreenCover(item: $cover) { cover in
+                switch cover {
+                case .memoryMap:
+                    // After the map has finished closing: a sheet can't open mid-dismiss.
+                    MemoryMapView { path in DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { openNote = path } }
+                case .linkMap: LinkMapView()
+                }
+            }
+            .sheet(isPresented: $showingImport) { ImportMemoryView() }
+            .sheet(item: Binding(get: { openNote.map(NotePath.init) }, set: { openNote = $0?.id })) { note in
+                NavigationStack {
+                    NoteDetail(path: note.id)
+                        .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { openNote = nil } } }
+                }
             }
     }
 }

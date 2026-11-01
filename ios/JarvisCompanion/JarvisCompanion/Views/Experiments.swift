@@ -93,8 +93,8 @@ enum PlasmaAnchor {
 /// Calm on purpose (Nick, 2026-11-01): speed bursts are half what they were,
 /// and a blob only stretches while it's actually moving, so a slow blob
 /// never swings round in a blink. Under JARVIS's core (`PlasmaAnchor`) the
-/// passing colour thins and a slow pool of red holds instead: full red and
-/// full blue can't stack there and wash him out, and it isn't a dark patch.
+/// passing colour thins and a soft dark pool holds instead, so full red and
+/// full blue can't stack there and wash him out.
 struct PlasmaBackdrop: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.colorScheme) private var scheme
@@ -169,7 +169,8 @@ struct PlasmaBackdrop: View {
                     let side = max(size.width, size.height)
                     let origin = self.origin
                     let anchor = PlasmaAnchor.center.map { CGPoint(x: $0.x - origin.x, y: $0.y - origin.y) }
-                    // The pool under JARVIS: wide, soft, drifting a little, never still-looking.
+                    // The pool under JARVIS: a soft shade of the deep background (Nick
+                    // picked dark over red, 2026-11-01), drifting a little.
                     if let anchor {
                         let r = max(PlasmaAnchor.radius, side * 0.12) * 1.9
                         let drift = CGPoint(x: anchor.x + r * 0.08 * sin(2 * .pi * t / 47),
@@ -179,7 +180,8 @@ struct PlasmaBackdrop: View {
                         pool.rotate(by: .radians(0.3 * sin(2 * .pi * t / 83)))
                         pool.scaleBy(x: 1.18, y: 1 / 1.18)
                         pool.fill(Path(ellipseIn: CGRect(x: -r, y: -r, width: r * 2, height: r * 2)), with: .radialGradient(
-                            gradient(JarvisTheme.cyan, dark ? 0.55 : 0.28),
+                            .init(colors: [JarvisTheme.backgroundDeep.opacity(dark ? 0.78 : 0.4),
+                                           JarvisTheme.backgroundDeep.opacity(dark ? 0.5 : 0.24), .clear]),
                             center: .zero, startRadius: 0, endRadius: r))
                     }
                     canvas.drawLayer { layer in
@@ -680,7 +682,8 @@ struct NeuralCore: View {
         let nodes = network.nodes
         let lift = 0.3 * w.y   // the eye faces you, so it's lit like the front
         let projected = network.pose().map { project($0, size: size, lift: lift) }
-        let stroke = max(0.6, size.width / 240)
+        // A hair heavier than it was (/240): reads over the vivid backdrop.
+        let stroke = max(0.7, size.width / 185)
         let center = CGPoint(x: size.width / 2, y: size.height / 2)
         let unit = Double(min(size.width, size.height)) * 1.15 / 1.6
 
@@ -790,7 +793,7 @@ struct NeuralCore: View {
         for (i, node) in nodes.enumerated() {
             let (p, depth) = projected[i]
             let ring = node.layer >= 3
-            let box = max(1.1, size.width / 105) * (0.6 + 0.6 * depth) * (ring ? 0.7 : 1) * (1 + node.glow * 0.8)
+            let box = max(1.2, size.width / 92) * (0.6 + 0.6 * depth) * (ring ? 0.7 : 1) * (1 + node.glow * 0.8)
             let turn = Double.pi / 4 * mix[node.layer].z
             var shape = Path()
             for corner in 0..<4 {

@@ -120,6 +120,18 @@ def _best_excerpt(text: str, query_tokens: set[str], limit: int) -> tuple[str, i
     return excerpt[:limit], best_score
 
 
+_SECTIONS_PER_NOTE = 3
+_HEADING_LINE_RE = re.compile(r"^#{1,6} ", re.MULTILINE)
+
+
+def _sections(text: str) -> list[str]:
+    """The note split at its headings (each section keeps its heading)."""
+    starts = [m.start() for m in _HEADING_LINE_RE.finditer(text)]
+    if not starts or starts[0] != 0:
+        starts.insert(0, 0)
+    return [text[a:b] for a, b in zip(starts, starts[1:] + [len(text)]) if text[a:b].strip()]
+
+
 def search_vault(query: str, *, max_results: int | None = None, max_chars: int | None = None) -> list[dict[str, Any]]:
     """Search authorized Markdown folders and return bounded excerpts."""
     query_tokens = set(_tokens(query))
@@ -134,22 +146,21 @@ def search_vault(query: str, *, max_results: int | None = None, max_chars: int |
             continue  # Structured profile facts are already rendered separately.
         try:
             text = path.read_text(encoding="utf-8")
-            excerpt, body_score = _best_excerpt(text, query_tokens, per_excerpt)
             title_tokens = set(_tokens(relative.stem))
             title_score = len(query_tokens & title_tokens) * 4
-            score = body_score + title_score
-            if score <= 0 or not excerpt:
-                continue
-            results.append(
-                {
-                    "source": relative.as_posix(),
-                    "excerpt": excerpt,
-                    "score": score,
-                    "modified_at": datetime.fromtimestamp(
-                        path.stat().st_mtime, tz=timezone.utc
-                    ).isoformat(),
-                }
-            )
+            modified = datetime.fromtimestamp(path.stat().st_mtime, tz=timezone.utc).isoformat()
+            # Each heading's section competes on its own, so one long note (a
+            # big "everything about me" import) can answer with the right
+            # part, and up to three parts, instead of one excerpt per file.
+            hits = []
+            for section in _sections(text):
+                excerpt, body_score = _best_excerpt(section, query_tokens, per_excerpt)
+                if body_score > 0 and excerpt:
+                    hits.append((body_score + title_score, excerpt))
+            hits.sort(key=lambda hit: -hit[0])
+            for score, excerpt in hits[:_SECTIONS_PER_NOTE]:
+                results.append({"source": relative.as_posix(), "excerpt": excerpt,
+                                "score": score, "modified_at": modified})
         except (OSError, UnicodeError) as exc:
             log.warning("Could not index Obsidian note %s: %s", path, exc)
     results.sort(key=lambda item: (-item["score"], item["source"].lower()))
@@ -467,3 +478,30 @@ def capture_note(text: str, title: str = "") -> str:
     except OSError as exc:
         log.error("Could not write to the vault: %s", exc)
         return f"Could not write to the vault: {exc}"
+
+
+# --- Importing: a pasted "everything you know about me" list ------------------
+
+_IMPORT_MAX_CHARS = 200_000
+
+
+def import_note(title: str, text: str) -> str:
+    """Save pasted text (e.g. what another assistant knows about Nick) as a
+    note under ``Jarvis Memory/Imported`` and return its vault-relative path.
+    Searched like any note, section by section, so headings help. An existing
+    note of the same name is replaced. Raises ValueError on empty input."""
+    text = (text or "").strip()
+    if not text:
+        raise ValueError("Nothing to import.")
+    if len(text) > _IMPORT_MAX_CHARS:
+        raise ValueError(f"That's over {_IMPORT_MAX_CHARS:,} characters; split it into a few imports.")
+    name = " ".join(_NOTE_NAME_RE.sub(" ", title or "").split())[:80] or datetime.now().strftime("Import %Y-%m-%d %H%M")
+    folder = _vault_folder("OBSIDIAN_IMPORT_FOLDER", "Jarvis Memory/Imported")
+    folder.mkdir(parents=True, exist_ok=True)
+    target = folder / f"{name}.md"
+    stamp = datetime.now(timezone.utc).isoformat()
+    body = f"---\nimported: {stamp}\n---\n\n# {name}\n\n{text}\n"
+    temporary = target.with_suffix(".md.tmp")
+    temporary.write_text(body, encoding="utf-8")
+    temporary.replace(target)
+    return target.relative_to(vault_path()).as_posix()

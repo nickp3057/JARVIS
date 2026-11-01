@@ -184,6 +184,17 @@ install on the phone and iPad, then check:
 - [ ] Decide what graduates: a real theme, a switch on every theme, or
   binned. Orbit orb is still there (off by default).
 
+### Dark pool, Room menu, memory import (iOS 5.56, TV 9.3, 2026-11-01): check
+
+- [ ] **Deploy Core**: `/api/knowledge/import`, section search, push traffic.
+- [ ] Dark pool under the core: too dark / not enough? (`PlasmaBackdrop`
+  pool 0.78/0.5 dark; TV `PlasmaView` same.) Core line weight on the iPad.
+- [ ] Room full screen reaches the bottom edge; Menu items all open.
+- [ ] Memory map: tap Journal, pick a day, it opens (from the Memory tab and
+  from the Room menu).
+- [ ] Import Nick's Claude/ChatGPT "everything about me" list; ask JARVIS
+  something only that list knows.
+
 ### Calmer plasma, Memory map, Link map (iOS 5.55, TV 9.2, 2026-11-01): check
 
 - [ ] **Deploy Core** (`git pull` + restart): `/api/traffic/stream`,

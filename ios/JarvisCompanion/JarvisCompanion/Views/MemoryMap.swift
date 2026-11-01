@@ -154,7 +154,7 @@ struct MemoryMapView: View {
                         with: .radialGradient(Gradient(colors: [c.opacity(0.35 * alpha), .clear]), center: p, startRadius: 0, endRadius: r * 2.4))
             canvas.fill(Path(ellipseIn: CGRect(x: p.x - r, y: p.y - r, width: r * 2, height: r * 2)), with: .color(c.opacity(alpha)))
             // Names: hubs and topics always; notes once zoomed in, or when they're in focus.
-            if node.kind != "note" || scale > 1.6 || lit {
+            if node.kind != "note" || scale > 1.6 || lit || graph.nodes.count <= 60 {
                 let title = node.kind == "root" ? "JARVIS" : node.title
                 canvas.draw(Text(title).font(.caption2.weight(node.kind == "note" ? .regular : .semibold))
                                 .foregroundStyle(.white.opacity(0.85 * alpha)),
@@ -177,20 +177,36 @@ struct MemoryMapView: View {
     @ViewBuilder private var caption: some View {
         if let graph, let selected, graph.nodes.indices.contains(selected) {
             let node = graph.nodes[selected]
-            HStack(spacing: 12) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(node.kind == "root" ? "JARVIS's memory" : node.title).font(.headline)
-                    Text(describe(node, links: layout.neighbours[selected].count))
-                        .font(.caption).foregroundStyle(.secondary)
+            // A folder (Journal...) lists its notes, newest first; each one opens.
+            let notes = node.kind == "folder"
+                ? layout.neighbours[selected].map { graph.nodes[$0] }.filter { $0.kind == "note" }.sorted { $0.title > $1.title }
+                : []
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(spacing: 12) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(node.kind == "root" ? "JARVIS's memory" : node.title).font(.headline)
+                        Text(describe(node, links: layout.neighbours[selected].count))
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                    Spacer(minLength: 0)
+                    if node.kind == "note" {
+                        Button("Open") { dismiss(); onOpen(node.id) }
+                            .buttonStyle(.borderedProminent).tint(JarvisTheme.reactor)
+                    }
                 }
-                Spacer(minLength: 0)
-                if node.kind == "note" {
-                    Button("Open") { dismiss(); onOpen(node.id) }
-                        .buttonStyle(.borderedProminent).tint(JarvisTheme.reactor)
+                if !notes.isEmpty {
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 8) {
+                            ForEach(notes, id: \.id) { note in
+                                Button(note.title) { dismiss(); onOpen(note.id) }
+                                    .buttonStyle(.bordered).tint(JarvisTheme.cyan)
+                            }
+                        }
+                    }
                 }
             }
             .padding(16)
-            .frame(maxWidth: 520)
+            .frame(maxWidth: 560)
             .jarvisSurface(in: .rect(cornerRadius: 20))
             .padding(20)
         } else if let graph {

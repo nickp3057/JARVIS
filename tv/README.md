@@ -87,9 +87,10 @@ every deploy, so edit the repo copy, not the TV's.
   and close `WakeActivity` (9.0: I'm up used to leave it playing). Core
   rings a phone snooze again itself, and also sends `MEDIA_PAUSE` through
   HA on I'm up in case this stream is down.
-- **Red under the core (9.2)**: `PlasmaView.setAnchor` (set by the header
-  core's layout listener) keeps a soft pool of the accent red under JARVIS
-  and thins the flowing blobs there, so red + blue can't stack behind him.
+- **Dark pool under the core (9.2, dark since 9.3)**: `PlasmaView.setAnchor`
+  (set by the header core's layout listener) keeps a soft pool of the deep
+  background under JARVIS and thins the flowing blobs there, so red + blue
+  can't stack behind him.
 - **Barn Door fly-in, still plasma (9.1)**: entering Barn Door, a snapshot of
   the old home (taken in `HomeActivity.recreate()`) fades off the red home,
   the header's core flies to the middle growing into the spiky one, then the

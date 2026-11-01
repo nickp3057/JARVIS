@@ -765,6 +765,23 @@ def knowledge_note(path: str, _: None = Depends(authorize)) -> dict[str, object]
     return note
 
 
+class KnowledgeImport(BaseModel):
+    title: str = Field(default="", max_length=120)
+    text: str = Field(min_length=1, max_length=200_000)
+
+
+@app.post("/api/knowledge/import")
+def knowledge_import(request: KnowledgeImport, _: None = Depends(authorize)) -> dict[str, object]:
+    """Paste-in memory: saves the text as a note under Jarvis Memory/Imported
+    (knowledge_vault.import_note), searched section by section each turn."""
+    from brain import knowledge_vault
+    try:
+        path = knowledge_vault.import_note(request.title, request.text)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return {"path": path}
+
+
 @app.get("/api/knowledge/graph")
 def knowledge_graph(_: None = Depends(authorize)) -> dict[str, object]:
     """The vault as a map: folders, notes, Profile topics and [[wikilinks]]

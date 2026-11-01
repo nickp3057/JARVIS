@@ -35,6 +35,7 @@ struct KnowledgeView: View {
     @State private var loaded = false
     @State private var showingMap = false
     @State private var showingLinks = false
+    @State private var showingImport = false
 
     private var sections: [(String, [KnowledgeNote])] {
         var order: [String] = []
@@ -71,6 +72,7 @@ struct KnowledgeView: View {
                 ToolbarItemGroup(placement: .primaryAction) {
                     Button { showingMap = true } label: { Label("Memory map", systemImage: "point.3.connected.trianglepath.dotted") }
                     Button { showingLinks = true } label: { Label("Link map", systemImage: "dot.radiowaves.left.and.right") }
+                    Button { showingImport = true } label: { Label("Import memory", systemImage: "square.and.arrow.down") }
                 }
             }
         } detail: {
@@ -90,6 +92,14 @@ struct KnowledgeView: View {
             MemoryMapView { path in selection = path }
         }
         .fullScreenCover(isPresented: $showingLinks) { LinkMapView() }
+        .sheet(isPresented: $showingImport) {
+            ImportMemoryView { path in
+                Task {
+                    await load()
+                    selection = path
+                }
+            }
+        }
     }
 
     private func load() async {
@@ -103,7 +113,8 @@ struct KnowledgeView: View {
     }
 }
 
-private struct NoteDetail: View {
+/// One vault note, read-only. Also opened from the Room's menu (Memory map).
+struct NoteDetail: View {
     @EnvironmentObject private var settings: AppSettings
     let path: String
     @State private var note: KnowledgeNoteText?
@@ -183,5 +194,65 @@ private struct MarkdownBlocks: View {
     private func inline(_ text: String) -> AttributedString {
         (try? AttributedString(markdown: text, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)))
             ?? AttributedString(text)
+    }
+}
+
+/// Paste in what another assistant (or anyone) knows about Nick; it's saved
+/// as a vault note (`POST /api/knowledge/import`) and JARVIS searches it each
+/// turn, a section at a time, so headings like "## Food" help him find things.
+struct ImportMemoryView: View {
+    @EnvironmentObject private var settings: AppSettings
+    @Environment(\.dismiss) private var dismiss
+    var onSaved: (String) -> Void = { _ in }
+    @State private var title = ""
+    @State private var text = ""
+    @State private var saving = false
+    @State private var error: String?
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    TextField("Name (e.g. From Claude)", text: $title)
+                }
+                Section {
+                    TextEditor(text: $text)
+                        .frame(minHeight: 320)
+                        .font(.callout)
+                } header: {
+                    Text("Paste it here")
+                } footer: {
+                    Text("Saved as a note in Jarvis Memory/Imported. Headings (## Food, ## School...) help JARVIS find the right part. Same name replaces the old one.")
+                }
+                if let error {
+                    Label(error, systemImage: "exclamationmark.triangle").foregroundStyle(JarvisTheme.amber)
+                }
+            }
+            .scrollContentBackground(.hidden)
+            .background { JarvisBackdrop() }
+            .navigationTitle("Import memory")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+                ToolbarItem(placement: .confirmationAction) {
+                    if saving { ProgressView() } else {
+                        Button("Save") { Task { await save() } }
+                            .disabled(text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    }
+                }
+            }
+        }
+    }
+
+    private func save() async {
+        saving = true
+        defer { saving = false }
+        do {
+            let path = try await JarvisAPIClient.make(from: settings).importKnowledge(title: title, text: text)
+            onSaved(path)
+            dismiss()
+        } catch {
+            self.error = error.localizedDescription
+        }
     }
 }

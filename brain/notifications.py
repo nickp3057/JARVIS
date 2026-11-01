@@ -244,6 +244,7 @@ def _send_apns(title: str, message: str, *, thread_id: str = "", collapse_id: st
                     moved[device] = other
             if status == 200:
                 delivered += 1
+                _traffic(info.get("name"), "push")
                 continue
             if status == 410 or reason in {"Unregistered", "BadDeviceToken", "DeviceTokenNotForTopic"}:
                 removed.add(device)
@@ -291,7 +292,18 @@ def _send_home_assistant(title: str, message: str, *, thread_id: str = "", colla
     if data:
         service_data["data"] = data
     ok, detail = home_assistant.call_service("notify", service, service_data=service_data)
+    if ok:
+        _traffic("iphone", "push via HA")
     return ok, "sent" if ok else str(detail)[:200]
+
+
+def _traffic(device: object, label: str) -> None:
+    """A push landed: a Core -> device signal on the companion's link map."""
+    try:
+        from brain import traffic
+        traffic.record("core", traffic.client_node(None, str(device or "") or None), label)
+    except Exception:  # noqa: BLE001 - the map must never break a push
+        pass
 
 
 def configured() -> bool:

@@ -66,6 +66,16 @@ class KnowledgeVaultTests(unittest.TestCase):
         self.assertEqual(len(results), 2)
         self.assertLessEqual(sum(len(item["excerpt"]) for item in results), 240)
 
+    def test_long_note_answers_from_its_matching_sections(self) -> None:
+        body = "".join(f"## Topic {n}\n" + "filler words here\n" * 30 for n in range(20))
+        body += "## Food\nFavourite meal is ramen.\n## Cars\nDrives a ramen-yellow Miata.\n"
+        (self.allowed / "About Nick.md").write_text(body, encoding="utf-8")
+        results = vault.search_vault("ramen")
+        excerpts = " ".join(item["excerpt"] for item in results)
+        self.assertIn("Favourite meal is ramen", excerpts)
+        self.assertIn("Miata", excerpts)
+        self.assertTrue(all(item["source"] == "Notes/About Nick.md" for item in results))
+
     def test_empty_and_stop_word_queries_return_nothing(self) -> None:
         (self.allowed / "Note.md").write_text("anything", encoding="utf-8")
         self.assertEqual(vault.search_vault(""), [])

@@ -97,6 +97,18 @@ class ServerTests(unittest.TestCase):
         self.assertIn(("folder:Jarvis Memory", "root", "tree"), edges)
         self.assertEqual(sum(1 for e in edges if e[2] == "link"), 1)
 
+    def test_knowledge_import_saves_a_searchable_note(self) -> None:
+        vault = Path(self.tempdir.name) / "vault"
+        with patch.dict(os.environ, {"OBSIDIAN_VAULT_PATH": str(vault), "OBSIDIAN_INDEX_FOLDERS": "Jarvis Memory"}):
+            self.assertEqual(self.client.post("/api/knowledge/import", json={"text": "x"}).status_code, 401)
+            reply = self.client.post("/api/knowledge/import", headers=self.headers,
+                                     json={"title": "From Claude/GPT", "text": "## Food\nLoves ramen."})
+            self.assertEqual(reply.json()["path"], "Jarvis Memory/Imported/From Claude GPT.md")
+            from brain import knowledge_vault
+            self.assertIn("ramen", knowledge_vault.search_vault("ramen")[0]["excerpt"])
+            self.assertEqual(self.client.post("/api/knowledge/import", headers=self.headers,
+                                              json={"text": "   "}).status_code, 422)
+
     def test_requests_are_logged_as_traffic_by_device(self) -> None:
         from brain import traffic
         start = traffic.seq()

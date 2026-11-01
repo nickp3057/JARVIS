@@ -87,7 +87,7 @@ struct LinkMapView: View {
 
     /// Core in the middle; everything else around it, roughly where it lives.
     private static let endpoints: [Endpoint] = [
-        .init(id: "core", name: "Core · Optiplex", symbol: "cpu", spot: CGPoint(x: 0.5, y: 0.5)),
+        .init(id: "core", name: "JARVIS", symbol: "cpu", spot: CGPoint(x: 0.5, y: 0.5)),
         .init(id: "nas", name: "NAS · HA, Plex, arr", symbol: "externaldrive.connected.to.line.below", spot: CGPoint(x: 0.14, y: 0.5)),
         .init(id: "tv", name: "TV", symbol: "tv", spot: CGPoint(x: 0.5, y: 0.12)),
         .init(id: "ipad", name: "iPad", symbol: "ipad.landscape", spot: CGPoint(x: 0.86, y: 0.5)),
@@ -185,6 +185,25 @@ struct LinkMapView: View {
         // Lit when a packet lands on it (or leaves it).
         let lit = heat({ ($0.to == endpoint.id || $0.from == endpoint.id) }, now: now)
         let core = endpoint.id == "core"
+        return Group {
+            if core { coreBadge(lit: lit) } else { deviceBadge(endpoint, lit: lit) }
+        }
+    }
+
+    /// Core is JARVIS himself: his orb (neural core on Experimenting, the
+    /// live traffic firing it), his name, and the machine underneath.
+    private func coreBadge(lit: Double) -> some View {
+        VStack(spacing: 2) {
+            JarvisCoreMark(size: 128, active: lit > 0.3)
+                .shadow(color: JarvisTheme.cyan.opacity(0.5 * lit), radius: 18 * lit)
+            Text("JARVIS").font(.headline.weight(.semibold)).tracking(3)
+            Text("Core · Optiplex").font(.caption2).foregroundStyle(.secondary)
+        }
+        .fixedSize()
+    }
+
+    private func deviceBadge(_ endpoint: Endpoint, lit: Double) -> some View {
+        let core = false
         return VStack(spacing: 6) {
             ZStack {
                 Circle().fill(JarvisTheme.cyan.opacity(0.10 + 0.35 * lit))
