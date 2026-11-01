@@ -829,6 +829,14 @@ CALENDAR_ALERT_LEAD_MIN=10  # warn this many minutes before a meeting
   `light.desk_lights_2=light.desk_lights,light.nick_strip_lights=light.strip_lights`:
   Govee cloud = Govee LAN).
 
+- **Spoken download names (2026-11-01, iOS 5.61 / build 204)** — the
+  download-complete announcement says "Iron Man has finished downloading,
+  sir." instead of the release name: `integrations/qbittorrent.friendly_name`
+  drops the extension, [tags], quality/codec/source tokens and the release
+  year (the last year before the tags, so "Blade Runner 2049" and "1917"
+  survive), and reads S02E03 as "season 2, episode 3" and anime "- 12" as
+  "episode 12". The event log keeps the raw name.
+
 - **Tappable Link map (2026-11-01, iOS 5.60 / build 203)** — tap any
   endpoint on the Link map to read its last 60 signals (kept in
   `TrafficFeed.history`, 400 max): direction, a plain-English description

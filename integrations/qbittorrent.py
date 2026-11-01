@@ -27,6 +27,49 @@ _session_cache: tuple[requests.Session, str, str, str] | None = None
 _login_lock = threading.Lock()
 
 
+_RELEASE_EXT_RE = re.compile(r"\.(mkv|mp4|avi|m4v|mov|ts|iso)$", re.IGNORECASE)
+_RELEASE_TAG_RE = re.compile(r"\[[^\]]*\]")
+_EPISODE_RE = re.compile(r"\bS(\d{1,2})(?:E(\d{1,3}))?\b", re.IGNORECASE)
+_YEAR_RE = re.compile(r"\(?\b(19\d{2}|20\d{2})\b\)?")
+_JUNK_RE = re.compile(
+    r"\b(2160p|1080p|720p|576p|480p|4k|uhd|hdr10?|dv|dolby|atmos|bluray|blu-ray|bdrip|brrip|remux|web-?dl|webrip|web|"
+    r"hdtv|dvdrip|x26[45]|h\.?26[45]|hevc|avc|aac|ac3|ddp?5?|dts|10bit|proper|repack|extended|unrated|"
+    r"remastered|complete|multi|subs?|imax|amzn|nf|hmax|dsnp)\b", re.IGNORECASE)
+
+
+def friendly_name(release: str) -> str:
+    """A torrent's release name as a person would say it.
+
+    "Iron.Man.2008.1080p.BluRay.x264-SPARKS" -> "Iron Man";
+    "The.Office.US.S02E03.720p.WEB-DL" -> "The Office US, season 2, episode 3";
+    "Andor.S01.2160p" -> "Andor, season 1". Falls back to the raw name if
+    cleaning would leave nothing."""
+    raw = (release or "").strip()
+    text = _RELEASE_TAG_RE.sub(" ", _RELEASE_EXT_RE.sub("", raw))
+    text = re.sub(r"[._]+", " ", text)
+    cut = len(text)
+    episode = _EPISODE_RE.search(text)
+    suffix = ""
+    if episode:
+        cut = min(cut, episode.start())
+        suffix = f", season {int(episode.group(1))}"
+        if episode.group(2):
+            suffix += f", episode {int(episode.group(2))}"
+    junk = _JUNK_RE.search(text)
+    if junk and junk.start() > 0:
+        cut = min(cut, junk.start())
+    # The release year is the last year before the tags ("Blade Runner 2049 2017",
+    # "1917 2019"); one at the very start is part of the title.
+    years = [m for m in _YEAR_RE.finditer(text[:cut]) if m.start() > 0]
+    if years:
+        cut = years[-1].start()
+    title = " ".join(text[:cut].replace("(", " ").replace(")", " ").split()).strip(" -")
+    anime = re.search(r"\s+-\s+(\d{1,4})$", title)  # "Frieren - 12"
+    if anime and not suffix:
+        title, suffix = title[:anime.start()], f", episode {int(anime.group(1))}"
+    return f"{title}{suffix}" if title else raw
+
+
 def _unreachable(exc: Exception) -> str:
     log.warning("qBittorrent request failed: %s", exc)
     url, _, _ = _config()

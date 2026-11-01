@@ -1278,8 +1278,10 @@ class JarvisRuntime:
                     name = str(item.get("name", "Download"))
                     if old_progress < 1 <= progress:
                         if announce_completions:
+                            # Spoken: "Iron Man has finished downloading, sir", not the release name.
+                            from integrations.qbittorrent import friendly_name
                             self.announce(
-                                f"Download complete: {name}",
+                                f"{friendly_name(name)} has finished downloading, sir.",
                                 source="downloads",
                                 title="Download complete",
                             )
