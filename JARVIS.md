@@ -950,11 +950,13 @@ CALENDAR_ALERT_LEAD_MIN=10  # warn this many minutes before a meeting
     its 3 nearest, axons both ways between shells, each shell swaying out of
     step with the others) inside two tilted orbit rings of 30 nodes, faint
     glass outlines per shell and light in the core. Thinking is driven by
-    the house's real traffic (5.62): every `TrafficFeed` signal fires a
-    thought that cascades through the shells (outward from Core, inward
-    from a device), and an `activity` level (each signal +0.18, easing back
-    over ~10 s) sets the pace: turn and ring speed (0.35× quiet up to 1.3×),
-    stray sparks (0.25/s quiet up to 2.75/s) and ring-packet speed. Quiet,
+    the house's real traffic (5.62, calmed in 5.63): a `TrafficFeed` signal
+    fires a single-branch thread through the shells (outward from Core,
+    inward from a device), but each link fires at most once per 5 s, so the
+    iPad's steady polling (camera status ~1/s) reads as background. An
+    `activity` level (each fired thought +0.12, easing back over ~10 s) sets
+    the pace: turn and ring speed (0.3× quiet up to 1×), stray sparks
+    (0.2/s quiet up to 1.4/s) and ring-packet speed. Quiet,
     it only thinks on its own every 7–14 s; while `active` (JARVIS working)
     it's busy regardless (a thought every 0.5–1.1 s, 5 sparks/s). Three
     packets circle each ring. Gold impulses (Animal Logic's Age of Ultron

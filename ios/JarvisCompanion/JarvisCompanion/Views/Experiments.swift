@@ -311,9 +311,14 @@ final class NeuralNetwork {
     private var rng = SplitMix(seed: 0x0A6E_0F17)
     /// Real signals waiting to fire (see `fire(from:to:)`).
     private var pending: [(start: Int, inward: Bool)] = []
-    /// The traffic's recent pace, 0 (quiet) to 1 (busy): each real signal
-    /// lifts it, and it eases back over ten seconds or so.
+    /// The traffic's recent pace, 0 (quiet) to 1 (busy): each thought a real
+    /// signal fires lifts it, and it eases back over ten seconds or so.
     private(set) var activity = 0.0
+    /// When each link last fired a thought: the iPad's steady polling (the
+    /// camera's status about once a second) is background, so one link fires
+    /// at most every `linkQuiet` seconds; a burst across devices still shows.
+    private var lastFired: [String: Double] = [:]
+    private static let linkQuiet = 5.0
 
     /// A real signal between Core and a device (`TrafficFeed`): one thought.
     /// Each device has its own neuron, so the same link always lights the
@@ -321,15 +326,18 @@ final class NeuralNetwork {
     /// arriving at Core comes in from the outer shell, from that device's
     /// side. Bursts are capped so a busy poll doesn't turn it into static.
     func fire(from source: String, to target: String) {
-        guard pending.count < 4 else { return }
+        guard pending.count < 3 else { return }
         let inward = target == "core"
         let device = inward ? source : target
+        let link = "\(source)>\(target)"
+        if let last = lastFired[link], clock - last < Self.linkQuiet { return }
+        lastFired[link] = clock
         let layer = inward ? 2 : 0
         var hash: UInt64 = 5381
         for byte in device.utf8 { hash = (hash &* 33) &+ UInt64(byte) }
         let members = nodes.indices.filter { nodes[$0].layer == layer }
         pending.append((members[Int(hash % UInt64(members.count))], inward))
-        activity = min(1, activity + 0.18)
+        activity = min(1, activity + 0.12)
     }
 
     private init() {
@@ -508,7 +516,7 @@ final class NeuralNetwork {
         activity = max(0, activity - dt * activity * 0.12 - dt * 0.004)
         // How lively the brain is: calm when the house is quiet, quicker with
         // traffic, quickest while JARVIS is working.
-        let pace = active ? 1.4 : 0.35 + 0.95 * activity
+        let pace = active ? 1.4 : 0.3 + 0.7 * activity
         // Still in the eye (it faces you), restless in the alert.
         yaw += dt * 2 * .pi / 32 * (w.x * pace + 0.1 * w.y + 2.6 * w.z)
         ringSpin += dt * (0.45 * w.x * pace + 0.15 * w.y + 1.6 * w.z)
@@ -560,7 +568,8 @@ final class NeuralNetwork {
             let (start, inward) = pending.removeFirst()
             nodes[start].glow = 1
             let onward = neighbours[start].filter { nodes[$0].layer == nodes[start].layer + (inward ? -1 : 1) }
-            for j in pick(onward, 2) { send(start, j, .thought, direction: inward ? -1 : 1, alert: false) }
+            // One branch, not two: a real signal is a thread of light, not a flood of gold.
+            for j in pick(onward, 1) { send(start, j, .thought, direction: inward ? -1 : 1, alert: false) }
         } else if mood != .thinking {
             pending.removeAll()
         }
@@ -589,7 +598,7 @@ final class NeuralNetwork {
         switch mood {
         case .alert: sparkRate = 7
         case .watching: sparkRate = 1.2
-        case .thinking: sparkRate = active ? 5 : 0.25 + 2.5 * activity
+        case .thinking: sparkRate = active ? 5 : 0.2 + 1.2 * activity
         }
         if rng.next01() < sparkRate * dt {
             let shellCount = Self.shellCounts.reduce(0, +)
