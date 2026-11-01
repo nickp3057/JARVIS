@@ -34,3 +34,5 @@ memory/room_volume.json
 memory/sounds/
 memory/tts_cache/
 memory/*.p8
+memory/voiceprint.json
+models/

@@ -630,6 +630,14 @@ apps: it runs inside Core on the shared runtime (`ROOM_VOICE=1`), uses
 for its quick home commands, and reports its state through
 `brain/voice_presence.py` (`/api/voice/stream`) so screens can show it.
 
+Voice trust (2026-11-01): voice front ends run each turn inside
+`brain.voice_trust.speaking(speaker)`. The speaker comes from the
+Perception layer (`brain/speaker_id.py`, Nick's voiceprint) and is enforced
+in one place, `brain/tools.execute_tool`, plus the two learning/approval
+paths in the agent (memory extraction, staged-fix approval). Never check
+"who is talking" in a UI or the speech loop; add the tool to
+`voice_trust.LOCKED_TOOLS` instead.
+
 ### Review corrections (2026-10-29)
 
 - Repair command definitions are administrative `.env` configuration only, never editable through `update_setting`. Command repairs require Nick’s session-bound chat confirmation or app approval, and are bound to the exact command digest at diagnosis; changed/legacy commands require a fresh proposal.

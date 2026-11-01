@@ -73,7 +73,7 @@ def _vocabulary_prompt() -> str:
     except Exception:  # noqa: BLE001 - Home Assistant down: the generic words still help
         log.debug("No HA names for the Whisper prompt", exc_info=True)
     listed = ", ".join(dict.fromkeys(n.replace("’", "'") for n in names if n))
-    base = "Hey Jarvis, turn on the lights. Set a timer for 10 minutes. Volume up. What's the weather? Pause the music."
+    base = "Hey Jarvis, turn on the lights. Set a timer for 10 minutes. Volume up. What's the weather? Pause the music. Barn Door Protocol, stand down."
     return f"{base} {listed}." if listed else base
 
 
@@ -416,8 +416,15 @@ class RoomVoice:
 
     def _handle(self, audio: np.ndarray) -> bool:
         """Transcribe and act. True keeps a follow-up window open."""
+        from brain import speaker_id, voice_trust
         from speech import good_morning, goodnight, quick_answers, quick_commands
         voice_presence.update("thinking")
+        if speaker_id.enrolling():  # "learn my voice": this sentence is a sample, not a command
+            said = speaker_id.take_sample(audio)
+            voice_presence.update("speaking", reply=said)
+            self._speak(said)
+            voice_presence.update("idle")
+            return speaker_id.enrolling()  # keep listening without the wake word until done
         started = time.perf_counter()
         text = strip_wake_word(self.final.transcribe(audio)).strip()
         log.info("Room voice heard %r (%.0f ms)", text, (time.perf_counter() - started) * 1000)
@@ -425,6 +432,7 @@ class RoomVoice:
         if not text:
             voice_presence.update("idle")
             return False
+        speaker = speaker_id.identify(audio)  # Nick, or a guest who can't use locked tools
 
         if (self._alarming() or self._wake_ringing()) and _DISMISS.search(text.lower()):
             self._dismiss_alarms()
@@ -476,7 +484,8 @@ class RoomVoice:
         shortcut = voice_shortcuts.lookup(text)
         if shortcut is not None:  # learned from how Claude handled this phrase before
             from brain import tool_health, tools
-            result = tools.execute_tool(*shortcut)
+            with voice_trust.speaking(speaker):
+                result = tools.execute_tool(*shortcut)
             worked = not tool_health.looks_like_failure(result) and not result.startswith("Tool error")
             voice_shortcuts.used(text, worked)
             log.info("Room voice shortcut %r -> %s: %s", text, shortcut[0], result[:120])
@@ -484,7 +493,8 @@ class RoomVoice:
             return False
 
         try:
-            reply = self.runtime.respond(text, spoken=True)
+            with voice_trust.speaking(speaker):
+                reply = self.runtime.respond(text, spoken=True)
         except Exception:  # noqa: BLE001
             log.exception("Room voice turn failed")
             self._finish("error", "Something went wrong, sir.")

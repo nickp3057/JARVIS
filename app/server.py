@@ -113,12 +113,13 @@ def require_scope(scope: str):
     """Admin token (JARVIS_API_TOKEN) or a client token holding ``scope``.
 
     Client tokens (app/client_tokens.py) let a TV or dashboard read alerts
-    and status without ever holding the admin token."""
-    def dependency(authorization: str | None = Header(default=None)) -> None:
+    and status without ever holding the admin token. Returns the client's
+    name, or None for the admin token."""
+    def dependency(authorization: str | None = Header(default=None)) -> str | None:
         supplied = authorization.removeprefix("Bearer ").strip() if authorization else ""
         expected = os.getenv("JARVIS_API_TOKEN", "").strip()
         if expected and hmac.compare_digest(supplied, expected):
-            return
+            return None
         client = client_tokens.scopes_for(supplied)
         if client is None:
             if not expected:
@@ -126,6 +127,7 @@ def require_scope(scope: str):
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
         if scope not in client[1]:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=f"Token lacks scope {scope}")
+        return client[0]
     return dependency
 
 
@@ -221,11 +223,18 @@ def _resolve_session(request: ChatRequest) -> str:
 
 
 @app.post("/chat", response_model=ChatResponse)
-def chat(request: ChatRequest, _: None = Depends(require_scope("chat"))) -> ChatResponse:
+def chat(request: ChatRequest, client: str | None = Depends(require_scope("chat"))) -> ChatResponse:
+    """Nick's token speaks as Nick; a client token (the TV remote's mic) is
+    whoever is holding it, so it can't use voice-locked tools
+    (``brain/voice_trust.py``) unless listed in ``VOICE_TRUSTED_CLIENTS``."""
+    from brain import voice_trust
     session_id = _resolve_session(request)
+    speaker = (voice_trust.OWNER if client is None or client.lower() in voice_trust.trusted_clients()
+               else voice_trust.guest(f"client token {client}"))
     try:
         kwargs = {"request_id": request.request_id} if request.request_id else {}
-        reply = runtime().respond_in_session(session_id, request.message.strip(), **kwargs)
+        with voice_trust.speaking(speaker):
+            reply = runtime().respond_in_session(session_id, request.message.strip(), **kwargs)
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     return ChatResponse(reply=reply, session_id=session_id)

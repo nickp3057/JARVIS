@@ -702,6 +702,26 @@ def _tool_barn_door_protocol(args: dict[str, Any]) -> str:
     return protocols.engage()
 
 
+def _tool_voice_id(args: dict[str, Any]) -> str:
+    from brain import speaker_id
+    action = str(args.get("action", "status")).lower()
+    if action == "enroll":
+        if not speaker_id.available():
+            return ("Can't enrol yet: the speaker model isn't installed on Core "
+                    f"(sherpa-onnx and {speaker_id.model_path().name}). Nothing was changed.")
+        count = speaker_id.start_enrollment()
+        return (f"Enrolment armed for 10 minutes. Nick says \"Hey JARVIS\" then any sentence, then {count - 1} "
+                "more sentences (no wake word needed between them), in his normal voice from where he "
+                "usually talks. Each one is counted out loud.")
+    if action == "cancel":
+        speaker_id.cancel_enrollment()
+        return "Enrolment cancelled. The old voiceprint, if any, is unchanged."
+    if action == "reset":
+        removed = speaker_id.reset()
+        return "Voiceprint deleted; every voice counts as Nick until he enrols again." if removed else "There was no voiceprint to delete."
+    return speaker_id.status_text()
+
+
 def _tool_tv_power(args: dict[str, Any]) -> str:
     from integrations import tv_remote
     return tv_remote.power(str(args.get("state", "on")).lower() != "off")[1]
@@ -1901,6 +1921,20 @@ _CUSTOM_TOOLS: list[dict[str, Any]] = [
             "properties": {"action": {"type": "string", "enum": ["engage", "stand_down"]}},
         },
     },
+    # --- Voice ID ---------------------------------------------------------
+    {
+        "name": "voice_id",
+        "description": (
+            "Nick's voiceprint for the room mic (who may use locked tools like memory, settings and "
+            "Barn Door by voice). status: is voice ID on and enrolled. enroll: learn Nick's voice from "
+            "his next few room-mic sentences (\"learn my voice\"). cancel: stop an enrolment. reset: "
+            "delete the voiceprint."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {"action": {"type": "string", "enum": ["status", "enroll", "cancel", "reset"]}},
+        },
+    },
     # --- Nick's room TV ----------------------------------------------------
     {
         "name": "tv_power",
@@ -2410,6 +2444,7 @@ _DISPATCH: dict[str, Callable[[dict[str, Any]], str]] = {
     "tv_power": _tool_tv_power,
     "kill_camera": _tool_kill_camera,
     "barn_door_protocol": _tool_barn_door_protocol,
+    "voice_id": _tool_voice_id,
     "cancel_wake_up": _tool_cancel_wake_up,
     "watch_price": _tool_watch_price,
     "list_price_watches": _tool_list_price_watches,
@@ -2514,6 +2549,11 @@ def execute_tool(name: str, args: dict[str, Any], session_id: str | None = None)
     if handler is None:
         log.warning("Unknown tool requested: %s", name)
         return f"Tool error: no such tool '{name}'."
+    from brain import voice_trust
+    refused = voice_trust.refusal(name)
+    if refused is not None:  # a guest voice asked for a locked tool
+        log.info("Refused locked tool %s for %s (%s)", name, voice_trust.current().name, voice_trust.current().reason)
+        return refused
     started = time.monotonic()
     try:
         safe_args = dict(args or {})

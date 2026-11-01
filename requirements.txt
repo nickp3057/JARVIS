@@ -34,3 +34,6 @@ h2>=4.1,<5
 # Without it the browser still reads pages. After installing, run once:
 #   .venv/bin/python -m playwright install --with-deps chromium
 playwright>=1.48
+
+# Voice ID (brain/speaker_id.py): Nick's voiceprint for the room mic
+sherpa-onnx>=1.10

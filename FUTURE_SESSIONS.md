@@ -166,6 +166,43 @@ install on the phone and iPad, then check:
 - [ ] Add `/api/camera/leave` and `/api/device/battery` to JARVIS.md (left
   out because JARVIS.md had another session's uncommitted edits).
 
+### Voice ID, presence, motion (asked 2026-11-01)
+
+- [ ] **Deploy and enrol voice ID** (backbone built 2026-11-01, JARVIS.md
+  "Voice ID backbone"): on the Optiplex `pip install sherpa-onnx`, download
+  the TitaNet model, `VOICE_ID=1`, restart, type "learn my voice" in the
+  phone app, say five sentences to the room mic. Then watch `jarvis.log` for
+  `Voice ID: Nick (score …)` / `guest (score …)` for a few days and tune
+  `VOICE_ID_THRESHOLD`. Test with his sister: siblings sound alike, so her
+  score is the one that sets the threshold. Short commands ("Barn Door")
+  may score lower than sentences; if Nick gets refused a lot, look at
+  scoring only the speech after the wake word or keeping several centroids.
+- [ ] **Voice ID next steps**: the room voice could say "Sorry, only Nick
+  can do that" without a model call when a guest's command maps to a locked
+  tool; a "who am I talking to?" line in the iPad's voice overlay; maybe
+  per-person profiles (sister, guests) later. Goodnight still lets anyone
+  answer the alarm question; decide if that should be Nick-only.
+- [ ] **Leave home → lights out / Peace (backup-to-the-backup)**: when
+  Nick leaves the house, turn the room off or run Peace automatically. First
+  check whether his iPhone shows up in Home Assistant as a `person.*` or
+  `device_tracker.*` (the HA Companion app on the phone provides one with
+  zones; JARVIS's own app doesn't report location). If it does, add a
+  runtime monitor that watches it going `home` → `not_home` for a few
+  minutes and runs the scene (with a push saying so). Same signal would arm
+  the motion alert below.
+- [ ] **Baby motion alert (low priority, Nick isn't sure he needs it)**:
+  two options. (a) The iPad diffs tiny greyscale frames on-device, posts a
+  frameless "motion" event; Core raises an alert when armed (away, asleep,
+  or "arm the motion sensor"). Needs the app open on the iPad, iOS's green
+  dot shows, keep a small "Motion sensor armed" label. Watch for false
+  alarms from the TV, headlights and the iPad's own dimming. (b) A ~$15
+  Zigbee/Wi-Fi PIR sensor in HA; Core just watches a `binary_sensor`. No
+  camera, works with the iPad off; simplest and most private.
+- [ ] **Better room mic** if "Barn Door Protocol" still mishears after the
+  Whisper vocabulary hint (added 2026-11-01): a far-field array (ReSpeaker
+  XVF3800 / similar with beamforming + noise suppression) beats the CMTECK
+  USB mic for across-the-room speech; it also helps voice ID.
+
 ### Loose ends (Nick)
 
 - [ ] Reserve the Optiplex's IP on the home router (it drifted 10.0.0.80 →

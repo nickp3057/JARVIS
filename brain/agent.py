@@ -407,8 +407,11 @@ class JarvisAgent:
             return self._session_id
 
     def _arr_stack_action(self, user_input: str) -> str | None:
-        from brain import confirm_gate
+        from brain import confirm_gate, voice_trust
         from brain.arr_stack import conversation_action
+        if not voice_trust.trusted():  # only Nick approves fixes; a guest's message still disarms "yes"
+            confirm_gate.conversation_action(user_input, self._session_id, handled=True)
+            return None
         reply = conversation_action(user_input, self._session_id)
         # Always called so every message disarms a pending bare "yes".
         gate_reply = confirm_gate.conversation_action(
@@ -715,6 +718,8 @@ class JarvisAgent:
                 "Answer in one short sentence (two at most), no lists or markdown. If you only "
                 "carried out a home action and it worked, reply exactly \"Done.\""
             )
+        from brain import voice_trust
+        dynamic += voice_trust.context_note()
         return dynamic if dynamic.strip() else ""
 
     def _prepare_turn(self) -> tuple[list[dict[str, Any]], list[dict[str, Any]], int]:
@@ -736,8 +741,11 @@ class JarvisAgent:
         if len(tool_uses) == 1:
             outcomes = [run(tool_uses[0])]
         else:
+            # Each worker gets a copy of this turn's context (the speaker, the
+            # request id), which threads don't inherit on their own.
+            contexts = [contextvars.copy_context() for _ in tool_uses]
             with ThreadPoolExecutor(max_workers=min(4, len(tool_uses))) as pool:
-                outcomes = list(pool.map(run, tool_uses))
+                outcomes = list(pool.map(lambda pair: pair[0].run(run, pair[1]), zip(contexts, tool_uses)))
         results: list[dict[str, Any]] = []
         for use, (tool_input, result_text) in zip(tool_uses, outcomes):
             tool_context.append({"tool": use.name, "input": tool_input, "result": result_text})
@@ -756,6 +764,10 @@ class JarvisAgent:
         the offline paths still record habit signals with no model call.
         """
         self.turn_tools = tuple(getattr(self, "_last_turn_tools", ()))
+        from brain import voice_trust
+        if not voice_trust.trusted():  # a guest's words never become facts about Nick or JARVIS
+            self._last_turn_tools = []
+            return
         try:
             memory_extractor.observe_turn(self._client, user_input, reply, self._last_turn_tools)
         except Exception:  # noqa: BLE001
