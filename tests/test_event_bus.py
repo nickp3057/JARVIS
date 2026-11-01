@@ -189,6 +189,20 @@ class ClientTokenTests(unittest.TestCase):
         self.assertEqual(put({"experiments": {"bad name!": True}}).status_code, 422)
         self.assertEqual(put({}).status_code, 422)
 
+    def test_core_is_neural_under_experimenting_and_through_barn_door(self) -> None:
+        from brain import theme
+        theme.choose("experimenting")
+        self.assertEqual(theme.current()["core"], "neural")
+        theme.choose("barnDoor", remember=True)
+        self.assertEqual(theme.current()["core"], "neural")  # spiky, not the old red reactor
+        theme.set_experiments({"neural": False})
+        self.assertEqual(theme.current()["core"], "classic")
+        theme.restore()
+        theme.set_experiments({"neural": True})
+        self.assertEqual(theme.current()["core"], "neural")
+        theme.choose("arc")
+        self.assertEqual(theme.current()["core"], "classic")
+
     def test_experiment_switch_moves_the_revision_the_home_stream_carries(self) -> None:
         from brain import theme
         admin = {"Authorization": "Bearer admin"}

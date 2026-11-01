@@ -320,6 +320,7 @@ def glance_status() -> dict[str, Any]:
         "generated_at": time.time(),
         "address": (os.getenv("ADDRESS") or "sir").strip() or "sir",
         "theme": shared_theme.current()["theme"],
+        "core": shared_theme.current()["core"],  # "neural" or "classic" reactor (TV)
         "weather": sections["weather"],
         "now": sections["now"],
         "events": sections["events"] if isinstance(sections["events"], list) else [],

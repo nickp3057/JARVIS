@@ -17,7 +17,7 @@ import android.view.View;
  * (16 s and 10 s) and a waveform at the core. Sizes are fractions of the
  * mark, as on the phone; the dial only shows at 60 dp and up.
  */
-final class ReactorView extends View {
+final class ReactorView extends View implements Beat.Dancer {
     private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final RectF oval = new RectF();
     private final int color, core;
@@ -26,7 +26,8 @@ final class ReactorView extends View {
     /** 0..1 from Beat (the Back in Black easter egg); 0 is the normal mark. */
     private float level;
 
-    void setLevel(float level) {
+    @Override
+    public void setLevel(float level) {
         this.level = level;
     }
 

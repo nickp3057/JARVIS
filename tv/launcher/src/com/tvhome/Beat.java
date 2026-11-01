@@ -16,6 +16,11 @@ import android.util.Log;
  * {@link #spin} makes the rings run faster on the loud bits.
  */
 final class Beat {
+    /** A reactor that can bounce: ReactorView or NeuralView. */
+    interface Dancer {
+        void setLevel(float level);
+    }
+
     private static final String TAG = "TvHomeBeat";
     private static final float BPM = 94f;
     private static final Handler MAIN = new Handler(Looper.getMainLooper());
@@ -26,14 +31,14 @@ final class Beat {
 
     private static Visualizer viz;
     private static byte[] wave;
-    private static ReactorView view;
+    private static Dancer view;
     private static boolean fallback;
     private static float smooth, peak;
     private static long startedAt;
 
     private Beat() {}
 
-    static void start(Context c, ReactorView v) {
+    static void start(Context c, Dancer v) {
         if (view == v) return;
         stop();
         view = v;

@@ -14,6 +14,8 @@ struct RootView: View {
     @State private var swipeOffset: CGFloat = 0
     /// Re-identifies the tab content so every palette colour re-resolves.
     @AppStorage(JarvisPalette.storageKey) private var palette = JarvisPalette.arc.rawValue
+    /// The palette the tabs are built with; follows `palette` inside an animation.
+    @State private var shownPalette = JarvisPalette.current.rawValue
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.scenePhase) private var scenePhase
     @ObservedObject private var wakeRinging = WakeRinging.shared
@@ -55,6 +57,7 @@ struct RootView: View {
     }
 
     var body: some View {
+        ZStack {
         TabView(selection: $selection) {
             if Self.isMac {
                 HubView(model: hub, onAsk: ask, onNavigate: navigate, onSend: sendNow, focus: .desk)
@@ -97,7 +100,14 @@ struct RootView: View {
                 .tabItem { Label("Settings", systemImage: "slider.horizontal.3") }
                 .tag(RootTab.settings)
         }
-        .id(palette)
+        .id(shownPalette)
+        // A theme change (Barn Door engaging or standing down, a pick on another
+        // device) crossfades the old colours into the new instead of cutting.
+        .transition(.opacity)
+        }
+        .onChange(of: palette) { _, new in
+            withAnimation(reduceMotion ? nil : .easeInOut(duration: 1.4)) { shownPalette = new }
+        }
         .tint(JarvisTheme.reactor)
         .simultaneousGesture(DragGesture(minimumDistance: 30).onChanged(track).onEnded(swipe))
         .simultaneousGesture(TapGesture().onEnded { touches &+= 1 })

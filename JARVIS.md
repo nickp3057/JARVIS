@@ -800,7 +800,7 @@ CALENDAR_ALERT_LEAD_MIN=10  # warn this many minutes before a meeting
 
 ## Recently Shipped
 
-- **Experimenting theme (2026-11-01, iOS 5.45–5.47 / build 188–190, TV 8.5)** — a
+- **Experimenting theme (2026-11-01, iOS 5.45–5.48 / build 188–191, TV 8.5–8.6)** — a
   pickable "visual lab" palette (Spider-Man's colours underneath) whose
   experiments each have a switch under the theme list in Settings
   (`Views/Experiments.swift`, `jarvis.experiment.<name>`). Everything is
@@ -848,6 +848,13 @@ CALENDAR_ALERT_LEAD_MIN=10  # warn this many minutes before a meeting
   one device reaches the other at once: the apps skip the 10 s theme poll
   while the stream is up, which is why switches used to lag. New
   experiments go in the `Experiment` enum; Core needs no change.
+  - **5.48 / TV 8.6**: any theme change (Barn Door engaging or standing
+    down) crossfades the whole app over 1.4 s (`RootView` `shownPalette`,
+    `.transition(.opacity)`) instead of cutting. `theme.current()` and the
+    glance carry `core` (`"neural"` when Experimenting is the pick, or what
+    Barn Door replaced, and the `neural` switch isn't off), and the TV draws
+    the same neural core (`NeuralNet`/`NeuralView`, a Java port), spiky
+    full-screen for Barn Door; see tv/README.md.
 
 - **Voice ID backbone (2026-11-01, untested on the Optiplex)** — who's
   talking decides what a voice may do. `brain/voice_trust.py` holds the

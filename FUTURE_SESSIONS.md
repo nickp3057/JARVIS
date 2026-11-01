@@ -199,6 +199,13 @@ install on the phone and iPad, then check:
   Spike lengths `1.42 + 0.18·r` in `build`.
 - [ ] Performance on the iPad: ~190 nodes, ~400 wires batched into 12
   strokes, at 30 fps.
+- [ ] **TV (8.6, deployed; needs Core pulled for `core`)**: with
+  Experimenting picked the TV header shows the neural core; Barn Door shows
+  it spiky full-screen and fades in. Untested on screen (the TV was asleep;
+  a JVM stress run of `NeuralNet` through every mood was clean). Watch for
+  frame drops on the TCL (`adb shell dumpsys gfxinfo com.tvhome`).
+- [ ] **Barn Door crossfade (5.48)** on phone and iPad: should dissolve
+  over ~1.4 s both ways.
 
 ### Voice ID, presence, motion (asked 2026-11-01)
 

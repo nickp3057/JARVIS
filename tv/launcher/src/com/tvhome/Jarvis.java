@@ -57,6 +57,12 @@ final class Jarvis {
      * The TV's theme: Core's shared pick (the phone's too), unless a pick on
      * the TV couldn't be saved to Core (old token without settings:write).
      */
+    /** Core's {@code core}: draw the neural core instead of the classic reactor. */
+    static boolean neural(Context c) {
+        JSONObject g = cached(c);
+        return g != null && "neural".equals(g.optString("core"));
+    }
+
     static Theme theme(Context c) {
         if (prefs(c).getLong("preview_until", 0) > System.currentTimeMillis()) {
             return Theme.named(prefs(c).getString("preview_theme", "")); // PreviewReceiver, adb only
@@ -125,13 +131,18 @@ final class Jarvis {
      * has been shared.
      */
     static boolean followTheme(Context c) {
-        if (!prefs(c).getString(THEME, "").isEmpty()) return false;
         JSONObject g = cached(c);
         if (g == null) return false;
         try {
-            String shared = getJson(base(c), "/api/theme", token(c), 4000).optString("theme");
-            if (shared.isEmpty() || shared.equals(g.optString("theme"))) return false;
-            prefs(c).edit().putString("glance", g.put("theme", shared).toString()).apply();
+            JSONObject theme = getJson(base(c), "/api/theme", token(c), 4000);
+            String shared = theme.optString("theme"), core = theme.optString("core");
+            boolean picked = !prefs(c).getString(THEME, "").isEmpty();
+            boolean newTheme = !picked && !shared.isEmpty() && !shared.equals(g.optString("theme"));
+            boolean newCore = !core.isEmpty() && !core.equals(g.optString("core"));
+            if (!newTheme && !newCore) return false;
+            if (newTheme) g.put("theme", shared);
+            if (newCore) g.put("core", core);
+            prefs(c).edit().putString("glance", g.toString()).apply();
             return true;
         } catch (Exception e) {
             return false;

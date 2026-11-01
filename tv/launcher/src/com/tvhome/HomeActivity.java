@@ -78,7 +78,7 @@ public class HomeActivity extends Activity {
         @Override
         public void onReceive(Context context, Intent intent) {
             // A new shared theme (ThemeStream: Barn Door) rebuilds the screen.
-            if (Jarvis.theme(home) != home.theme) home.recreate();
+            if (Jarvis.theme(home) != home.theme || Jarvis.neural(home) != home.neural) home.recreate();
             else home.render();
         }
     }
@@ -100,12 +100,17 @@ public class HomeActivity extends Activity {
     private TextView musicLabel, songTitle, songArtist;
     private MediaIcon playIcon;
     private View prevButton, playButton, nextButton;
-    private ReactorView reactor;
+    private Beat.Dancer reactor;
+    /** Drawing the neural core (Core's {@code core: "neural"}) rather than the classic reactor. */
+    private boolean neural;
+    /** The theme the last home screen was built with, so a change fades in. */
+    private static Theme shownTheme;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         theme = Jarvis.theme(this);
+        neural = Jarvis.neural(this);
         build();
         RemoteBridgeService.start(this);
     }
@@ -113,7 +118,7 @@ public class HomeActivity extends Activity {
     @Override
     protected void onResume() {
         super.onResume();
-        if (Jarvis.theme(this) != theme) {
+        if (Jarvis.theme(this) != theme || Jarvis.neural(this) != neural) {
             recreate();
             return;
         }
@@ -326,6 +331,13 @@ public class HomeActivity extends Activity {
 
         if (theme == Theme.BARN_DOOR) addBarnDoor();
         setContentView(stage);
+        // A theme change (Barn Door engaging or standing down) fades the new
+        // screen in instead of cutting; the neural core morphs underneath.
+        if (shownTheme != null && shownTheme != theme) {
+            stage.setAlpha(0f);
+            stage.animate().alpha(1f).setDuration(1400).start();
+        }
+        shownTheme = theme;
     }
 
     /**
@@ -340,8 +352,16 @@ public class HomeActivity extends Activity {
         FrameLayout alert = new FrameLayout(this);
         alert.setBackgroundColor(theme.deep);
         alert.setClickable(true);
-        alert.addView(new RedAlertView(this, theme.reactor, Color.rgb(255, 72, 56)), new FrameLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+        if (neural) {
+            // Experimenting underneath: the neural core bristles into red spikes.
+            FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT);
+            lp.setMargins(0, dp(48), 0, dp(80));
+            alert.addView(new NeuralView(this, theme.reactor, NeuralNet.ALERT), lp);
+        } else {
+            alert.addView(new RedAlertView(this, theme.reactor, Color.rgb(255, 72, 56)), new FrameLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+        }
 
         TextView status = label("●  LOCKDOWN ACTIVE  ·  ROOM SEALED", 12, Theme.alpha(theme.accent, 220));
         status.setLetterSpacing(0.35f);
@@ -384,8 +404,10 @@ public class HomeActivity extends Activity {
         h.addView(words, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.START | Gravity.CENTER_VERTICAL));
 
-        reactor = new ReactorView(this, theme.reactor, theme.success);
-        h.addView(reactor, new FrameLayout.LayoutParams(dp(124), dp(124), Gravity.CENTER));
+        View mark = neural ? new NeuralView(this, theme.reactor, NeuralNet.THINKING)
+                : new ReactorView(this, theme.reactor, theme.success);
+        reactor = (Beat.Dancer) mark;
+        h.addView(mark, new FrameLayout.LayoutParams(dp(124), dp(124), Gravity.CENTER));
 
         LinearLayout time = new LinearLayout(this);
         time.setOrientation(LinearLayout.VERTICAL);

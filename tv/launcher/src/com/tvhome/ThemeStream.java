@@ -55,11 +55,17 @@ final class ThemeStream {
             BufferedReader in = new BufferedReader(
                     new InputStreamReader(conn.getInputStream(), StandardCharsets.UTF_8));
             String line;
+            double lastLook = -1;
             while ((line = in.readLine()) != null) {
                 if (!line.startsWith("data:")) continue;
-                String shared = new JSONObject(line.substring(5).trim()).optString("theme");
+                JSONObject pulse = new JSONObject(line.substring(5).trim());
+                String shared = pulse.optString("theme");
+                // look moves with any theme pick or Experimenting switch (the neural core).
+                double look = pulse.optDouble("look", -1);
+                boolean newLook = lastLook >= 0 && look != lastLook;
+                lastLook = look;
                 JSONObject g = Jarvis.cached(c);
-                if (shared.isEmpty() || g == null || shared.equals(g.optString("theme"))) continue;
+                if (g == null || (!newLook && (shared.isEmpty() || shared.equals(g.optString("theme"))))) continue;
                 if (Jarvis.followTheme(c)) Jarvis.notifyUpdated(c);
             }
         } finally {

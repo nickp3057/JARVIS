@@ -85,6 +85,17 @@ every deploy, so edit the repo copy, not the TV's.
 - **Phone snooze**: `wake_snooze` / `wake_dismiss` bus events (from the
   phone's notification buttons) pause and count down, or close
   `WakeActivity`. Core rings a phone snooze again itself.
+- **Neural core (8.6)**: when Core's glance/`/api/theme` says `core:
+  "neural"` (Experimenting picked on the phone, or underneath Barn Door, with
+  its Neural core switch on), the header draws `NeuralView` instead of
+  `ReactorView`, and Barn Door draws it in the alert mood (red spikes)
+  instead of `RedAlertView`. `NeuralNet` is a line-for-line port of the
+  phone's `NeuralNetwork` (same seed, same shells, rings and moods); one
+  shared instance, so recreating the screen for Barn Door morphs it rather
+  than restarting it. A theme change fades the new screen in over 1.4 s
+  (`HomeActivity.shownTheme`). `ThemeStream` refetches `/api/theme` when the
+  stream's `look` moves, so flipping the switch on the phone reaches the TV
+  at once. Both views implement `Beat.Dancer`, so Back in Black still bounces it.
 - **Themes**: Arc, Hot Rod, Malibu, Crimson, Mark 85, Spider-Man, McQueen
   ("Ka-chow, sir." and a ⚡ on the date), plus `barnDoor`, Barn Door
   Protocol's red alert, set by JARVIS and never in the picker. While it's
