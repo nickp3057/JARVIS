@@ -586,8 +586,16 @@ or a much newer CPU), bigger Whisper models, or running cameras/vision
   is only the JARVIS → PC side: the desktop is much faster than the Mac, so
   it sleeps until a movie needs processing, then wakes, runs Cleancut, and
   sleeps again. The Mac isn't part of it.
-  - **Flow:** Nick asks JARVIS to process a movie (a NAS path) →
-    `process_movie(path)` tool → Wake-on-LAN magic packet to the PC's MAC
+  - **How it starts (Nick, 2026-11-02):** not by asking JARVIS. Nick
+    starts a job from Cleancut's own little program on his computer (the
+    Mac, presumably; confirm), and that program asks JARVIS to wake the PC
+    before it scans/processes. So JARVIS's side is an API endpoint first
+    (e.g. `POST /api/pc/wake` returning once SSH answers, or a job endpoint
+    that queues the run), called with its own scoped client token
+    (`app/client_tokens.py`, like the TV; never `JARVIS_API_TOKEN`). A
+    voice/chat `process_movie` tool is optional later.
+  - **Flow:** Cleancut's program calls JARVIS with the movie (a NAS path)
+    → Wake-on-LAN magic packet to the PC's MAC
     from the Optiplex (or the NAS) → poll the PC's SSH port until it answers
     (expect 20-40 s, time out and say so rather than hang) → SSH in
     (key auth, Windows OpenSSH Server) and run Cleancut as a CLI job → the PC
