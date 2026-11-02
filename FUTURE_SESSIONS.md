@@ -580,6 +580,45 @@ or a much newer CPU), bigger Whisper models, or running cameras/vision
   verify), so `--voice` mode could run there as the house's always-listening
   JARVIS once Nick wants it.
 
+- [ ] **Cleancut: wake the Windows PC to process movies (Nick, 2026-11-02;
+  not started, no code yet).** Cleancut is Nick's own VidAngel-style movie
+  filter, already worked out; **don't design or rebuild it**. JARVIS's job
+  is only the JARVIS → PC side: the desktop is much faster than the Mac, so
+  it sleeps until a movie needs processing, then wakes, runs Cleancut, and
+  sleeps again. The Mac isn't part of it.
+  - **Flow:** Nick asks JARVIS to process a movie (a NAS path) →
+    `process_movie(path)` tool → Wake-on-LAN magic packet to the PC's MAC
+    from the Optiplex (or the NAS) → poll the PC's SSH port until it answers
+    (expect 20-40 s, time out and say so rather than hang) → SSH in
+    (key auth, Windows OpenSSH Server) and run Cleancut as a CLI job → the PC
+    reads the movie from the NAS over SMB and writes the result back into
+    the Plex library → PC sleeps.
+  - **Rules:** a job queue, so a second request never sleeps the PC
+    mid-render; sleep only when the queue is empty and the last job is done.
+    Sleep, not shutdown (wakes more reliably). Log each job's start, end and
+    result. Over SSH it must be a CLI process; if anything's GUI-only, use a
+    scheduled-task workaround. Back it with its own module
+    (`integrations/` or `brain/`) like timers/reminders, not inline in
+    `tools.py`.
+  - **PC setup (Nick, at home):** Wake-on-LAN in BIOS/UEFI (turn off
+    ErP/EuP Ready if present); Device Manager → NIC: allow wake, magic
+    packet only, "Wake on Magic Packet"; turn off Fast Startup; note the MAC
+    (`ipconfig /all`) and give the PC a fixed IP (on the PC itself, like the
+    TV, since router reservations need his dad's Xfinity app); install
+    OpenSSH Server with JARVIS's key; mount the NAS SMB share and check
+    read/write.
+  - **Still to ask Nick:** is the PC on Ethernet (WoL over Wi-Fi is
+    unreliable)? motherboard/NIC model (for exact BIOS steps)? Cleancut's
+    command line (how JARVIS invokes it, what it reports while running)?
+    where output goes and how Plex should name it (replace the original or
+    a separate version)?
+- [ ] **Progress bar on the iPad for anything running (Nick, 2026-11-02;
+  later).** Whenever a long job is going (Cleancut first, then downloads,
+  renders, etc.), a progress bar pops up on the iPad's Room tab with what
+  it is and how far along, and goes away when it's done. Natural fit: jobs
+  publish progress events on the event bus and the iPad shows them; needs
+  Cleancut (or the job wrapper) to report percent done.
+
 ### Companion apps
 
 - [ ] **Speak replies in JARVIS's voice on the phone**: the app's mic is
