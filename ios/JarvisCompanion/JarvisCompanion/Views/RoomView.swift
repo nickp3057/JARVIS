@@ -236,6 +236,15 @@ struct RoomView: View {
             while !Task.isCancelled { try? await Task.sleep(for: .seconds(3600)) }
         }
         .task(id: scenePhase) {
+            // The weather beside the date; Core refreshes it every few minutes.
+            guard scenePhase == .active else { return }
+            model.wantsGlance = true
+            while !Task.isCancelled {
+                await model.refreshGlance()
+                try? await Task.sleep(for: .seconds(600))
+            }
+        }
+        .task(id: scenePhase) {
             // The next alarm changes rarely; once a minute is plenty.
             while scenePhase == .active, !Task.isCancelled {
                 try? await Task.sleep(for: .seconds(60))
@@ -357,6 +366,23 @@ struct RoomView: View {
         _ = await (entities, scenes, now, wake)
     }
 
+    /// The weather beside the date: icon and temperature (Core's glance,
+    /// the same snapshot as the Mac's Desk and the TV). Nothing while it's
+    /// unknown, rather than a placeholder.
+    @ViewBuilder private var weatherBadge: some View {
+        if let weather = model.glance.value?.weather, weather.online != false, (weather.error ?? "").isEmpty,
+           let temp = weather.temperatureF {
+            HStack(spacing: 5) {
+                Image(systemName: weather.symbol(night: model.sun == "below_horizon"))
+                    .symbolRenderingMode(.multicolor)
+                Text("\(Int(temp.rounded()))°").monospacedDigit()
+            }
+            .fixedSize()
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("\(Int(temp.rounded())) degrees, \(weather.description ?? "")")
+        }
+    }
+
     private func loadWake() async {
         wake = try? await JarvisAPIClient.make(from: settings).wakeSchedule()
     }
@@ -375,11 +401,14 @@ struct RoomView: View {
                             .monospacedDigit()
                             .lineLimit(1)
                             .minimumScaleFactor(0.6)
-                        Text(context.date, format: .dateTime.weekday(.wide).month(.wide).day())
-                            .font(.title3)
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
-                            .minimumScaleFactor(0.8)
+                        HStack(spacing: 12) {
+                            Text(context.date, format: .dateTime.weekday(.wide).month(.wide).day())
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.8)
+                            weatherBadge
+                        }
+                        .font(.title3)
+                        .foregroundStyle(.secondary)
                     }
                 }
             }

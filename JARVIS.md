@@ -1064,6 +1064,12 @@ CALENDAR_ALERT_LEAD_MIN=10  # warn this many minutes before a meeting
   the firing score; the default `WAKE_THRESHOLD` is raised 0.5 -> 0.6. Both
   are live-tunable in `.env`. (`speech/room_voice.py`, `speech/wake.py`.)
 
+- **Weather beside the date on the iPad (2026-11-02, iOS 5.67 / build
+  210)** — the Room tab's date line shows the weather icon and temperature
+  from `GET /api/glance` (the Mac Desk's snapshot), refreshed every 10 min
+  while the app is open; hidden while unknown. A full "weather today" screen
+  is on hold in FUTURE_SESSIONS.md (rich answer screens).
+
 - **TV power: iPad square and instant voice (2026-10-31, iOS 5.36 / build
   179)** — a square power button beside "TV remote" on the iPad's Room tab
   (`TVPowerButton`, amber while the TV is on; state from the new `GET

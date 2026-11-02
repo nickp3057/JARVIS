@@ -495,6 +495,19 @@ Little things mentioned along the way, roughly smallest first:
   the real HTTP / Cloudflare code (separate chat prompt written 2026-10-28).
 - [ ] NAS: allow-listed, confirm-gated "update one container" action.
 - [ ] Reserve the Optiplex's IP on the router (still drifting).
+- [x] iPad Room tab: weather beside the date (icon + temperature from
+  `/api/glance`, refreshed every 10 min; iOS 5.67, 2026-11-02). Check it
+  shows and fits on one line at home.
+- [ ] **Rich answer screens ("interactive returns", asked 2026-11-02, on
+  hold).** When Nick asks JARVIS something with a visual shape, the iPad
+  (and phone) pulls up a screen for it instead of only speaking: first one
+  is "what's the weather?" → a today screen (now, hourly temps and rain
+  chance, high/low, sunrise/sunset, wind). Sketch: the tool result carries a
+  typed card (`{"card": "weather_today", ...}`) that Core publishes on the
+  event bus; the Room tab's dialogue / a sheet renders it and it dismisses
+  itself after a minute or on tap. Needs an hourly forecast from the weather
+  integration (open-meteo already has it). Later cards: calendar day, timers,
+  a movie's details, the TV remote.
 
 ### Is the Optiplex enough? (checked 2026-10-28)
 
