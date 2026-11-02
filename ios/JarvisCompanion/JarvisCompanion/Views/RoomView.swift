@@ -24,7 +24,8 @@ import UIKit
 /// same 3 s later, day or night. Any light coming on, sunrise or a timer going off
 /// brings it back. A tap anywhere wakes it and turns on the tap-to-wake light
 /// (Bedroom Lights unless changed); with the room still dark it sleeps again
-/// 45 s later (after dark). iPads don't let apps read their light sensor, so
+/// 45 s later (after dark). The wake-up alarm's screen keeps it away until
+/// the alarm is answered or closed. iPads don't let apps read their light sensor, so
 /// the room's own lights stand in for it.
 ///
 /// Full screen hides the tab bar, status bar and home indicator so the iPad
@@ -58,6 +59,7 @@ struct RoomView: View {
     @State fileprivate var movieTouches = 0
     @Environment(\.cameraWatching) fileprivate var cameraWatching
     @ObservedObject private var voice = VoicePresence.shared
+    @ObservedObject private var wakeRinging = WakeRinging.shared
     @StateObject private var holds = HoldSuppressor()
     @StateObject private var dragger = LevelDragger()
     /// The tile a hold is in progress on; resets when the finger lifts or the hold is cancelled.
@@ -189,7 +191,10 @@ struct RoomView: View {
                 asleep = false
             }
         }
-        .onChange(of: asleep) { _, sleeping in setDimmed(sleeping) }
+        .onChange(of: asleep) { _, sleeping in
+            setDimmed(sleeping)
+            wakeRinging.nightScreenUp = sleeping
+        }
         .onChange(of: model.runningScene) { ran, running in
             if running == nil, let ran, Self.lightsOutScenes.contains(ran) { lightsOut = true }
         }
@@ -244,6 +249,7 @@ struct RoomView: View {
             }
             UIApplication.shared.isIdleTimerDisabled = false
             asleep = false
+            wakeRinging.nightScreenUp = false
             setDimmed(false)
             setMovieDim(nil)
         }
@@ -310,7 +316,9 @@ struct RoomView: View {
 
     /// Lights out, and either after dark with Keep screen on or just after Peace/Goodnight.
     private var roomIsDark: Bool {
+        // The wake-up alarm's screen beats the night screen (WakeRinging).
         guard !RootView.isMac, nightScreen, scenePhase == .active, !voice.active, !timers.contains(where: { $0.state == "alarming" }),
+              !wakeRinging.showing, !wakeRinging.opening,
               lightsOut || (keepAwake && model.sun == "below_horizon") else { return false }
         return lightsAllOff == true
     }

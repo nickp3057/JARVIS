@@ -74,7 +74,9 @@ toolbar buttons open the Memory map, `GET /api/knowledge/graph`, and the live
 Link map, `GET /api/traffic/stream`); the
 phone opens it from Settings › Memory. The full-screen wake-up alarm
 (`WakeRingingView`) opens whenever the app is open while Core says an alarm
-is ringing (`GET /api/wake` → `ringing`), not just from the push.
+is ringing (`GET /api/wake` → `ringing`), not just from the push; a snooze
+or I'm up from any device closes it everywhere, and the Room tab's night
+screen gives way to it.
 
 ## Architecture
 

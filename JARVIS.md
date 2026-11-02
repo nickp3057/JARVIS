@@ -372,9 +372,13 @@ RMS envelope from ElevenLabs audio drives the orb in real time using a monotonic
   FUTURE_SESSIONS.md) and keeps its I'm up / Snooze buttons. While an alarm is
   unanswered or snoozed (`wake_alarm.ringing_state()`, in `GET /api/wake` and
   glance `wake.ringing`: `state` ringing/snoozed, `since`, `detail`, `until`)
-  the phone and iPad open the full-screen alarm whenever the app is open
-  (RootView polls every 15 s, and the push landing in the foreground opens it
-  at once); answered anywhere, it closes. Close hides it for that alarm only.
+  the phone and iPad open the full-screen alarm whenever the app is open and
+  the state is `ringing` (RootView polls every 15 s, and the push landing in
+  the foreground opens it at once); answered anywhere, I'm up or Snooze, it
+  closes (iOS 5.66: a snooze used to keep it up on the iPad). Close hides it
+  for that alarm only. The iPad's night screen stays down while the alarm
+  screen is up and is dropped before it opens (5.66: the two full-screen
+  covers used to take turns knocking each other off).
   Ringing state is in memory and lapses after an hour (`RINGING_WINDOW_S`).
 - **I'm up stops the music (Core, TV 9.0):** the TV pauses Spotify on
   `wake_dismiss` and on its own I'm up (only within an hour of an alarm or

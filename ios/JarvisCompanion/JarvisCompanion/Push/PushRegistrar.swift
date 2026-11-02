@@ -111,7 +111,7 @@ final class PushAppDelegate: NSObject, UIApplicationDelegate, UNUserNotification
             // Tapped the push itself: open on the alarm screen.
             Task { @MainActor in
                 WakeRinging.shared.detail = content.body
-                WakeRinging.shared.showing = true
+                WakeRinging.shared.open()
                 completionHandler()
             }
             return
@@ -147,7 +147,7 @@ final class PushAppDelegate: NSObject, UIApplicationDelegate, UNUserNotification
         // The alarm went off with the app open: straight to I'm up / Snooze.
         Task { @MainActor in
             WakeRinging.shared.detail = content.body
-            WakeRinging.shared.showing = true
+            WakeRinging.shared.open()
             completionHandler([.list, .sound])
         }
     }
