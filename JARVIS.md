@@ -761,7 +761,7 @@ HOME_DASHBOARD_ENTITIES=    # comma-separated HA entity_ids for /api/home/entiti
 SCHWAB_APP_KEY=             # JARVIS's own Schwab developer app (developer.schwab.com); empty = Schwab off
 SCHWAB_APP_SECRET=
 SCHWAB_CALLBACK_URL=https://127.0.0.1:8182   # exactly what the Schwab app has registered
-BARN_DOOR_LIGHTS=light.nick_strip_lights,light.strip_lights,light.desk_lights,light.desk_lights_2,light.nicks_fan   # go red
+BARN_DOOR_LIGHTS=light.nick_strip_lights,light.strip_lights,light.desk_lights,light.desk_lights_2,light.lamp   # go red (default; the lamp too since 2026-11-03)
 BARN_DOOR_OFF=light.bedroom_lights,switch.avengers_tower_socket_1   # can't go red, so go dark (lights or switches)
 BARN_DOOR_EFFECTS=light.nick_strip_lights=Rainbow-A,light.desk_lights_2=Rainbow   # effects to return to when HA can't see the running one
 #   Govee DIY scenes (Nick's own rainbows) go by their dropdown instead:

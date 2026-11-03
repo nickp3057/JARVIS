@@ -38,7 +38,8 @@ class BarnDoorTests(unittest.TestCase):
         snapshot = self.calls("scene", "create")[0].kwargs["service_data"]
         self.assertIn("light.nicks_fan", snapshot["snapshot_entities"])
         red = self.calls("light", "turn_on")
-        self.assertEqual(len(red), 4)
+        self.assertEqual(len(red), 5)
+        self.assertIn("light.lamp", [c.args[2] for c in red])  # the Govee lamp goes red too
         self.assertNotIn("light.nicks_fan", [c.args[2] for c in red])  # the fan light is never turned on
         self.assertIn("light.nicks_fan", [c.args[2] for c in self.calls("light", "turn_off")])
         self.assertEqual(len(self.calls("remote", "turn_on")), 1)  # the TV wakes for the red-alert screen

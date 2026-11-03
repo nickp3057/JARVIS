@@ -43,7 +43,8 @@ from brain import theme
 from integrations import home_assistant
 
 _SCENE = "barn_door_before"
-_COLOUR = "light.nick_strip_lights,light.strip_lights,light.desk_lights,light.desk_lights_2"
+# The Govee lamp joined 2026-11-03 (Nick: "it's now a full part of the room").
+_COLOUR = "light.nick_strip_lights,light.strip_lights,light.desk_lights,light.desk_lights_2,light.lamp"
 _OFF = "light.bedroom_lights,light.nicks_fan,switch.avengers_tower_socket_1"  # not red: dark
 _EFFECTS_FILE = Path(__file__).resolve().parents[1] / "memory" / "barn_door_effects.json"
 _TV_FILE = Path(__file__).resolve().parents[1] / "memory" / "barn_door_tv.json"
