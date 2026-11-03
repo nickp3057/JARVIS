@@ -355,7 +355,7 @@ or, for grouped arr incidents, `runtime.push_to_phone`). Publishers never pick a
 channel. Subscribers: the phone (`runtime._deliver_alert_to_phone` →
 `brain/notifications.py`: APNs companion push, HA notify only as fallback;
 `push=False` alerts skip it) and each open `GET /api/clients/events` SSE
-stream (replay via `Last-Event-ID`, 15 s keep-alives). `GET /api/alerts/recent` (status:read) returns the same in-memory history newest first for polling clients; the Hub's Needs attention card uses it; `POST /api/alerts/clear` (and the `clear_alerts` tool) hides everything raised so far from it. History is in memory only and resets when jarvis-api restarts. New monitors should
+stream (replay via `Last-Event-ID`, 15 s keep-alives). `GET /api/alerts/recent` (status:read) returns the same in-memory history newest first for polling clients; the Hub's Needs attention card uses it; `POST /api/alerts/clear` (and the `clear_alerts` tool) hides everything raised so far from it. Repeats of one problem (`event_bus.condense_key`) are one row with a `repeats` count, share a push `collapse_id`, and are dropped outright within `ALERT_REPEAT_WINDOW_S`. History is in memory only and resets when jarvis-api restarts. New monitors should
 call `raise_alert`, not `notifications.send`.
 
 Clients other than the iOS companion use their own scoped tokens

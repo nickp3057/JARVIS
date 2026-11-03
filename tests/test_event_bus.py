@@ -58,6 +58,24 @@ class BusTests(unittest.TestCase):
         self.assertIsNotNone(first)
         self.assertIsNone(second)
 
+    def test_same_warning_again_is_dropped_even_after_a_restart(self) -> None:
+        first = event_bus.publish("schwab_login", "Schwab needs you", "Log in.", source="s")
+        self.assertIsNotNone(first)
+        self.assertEqual(first.grouping["collapse_id"], "a-" + event_bus.condense_key(
+            "schwab_login", "Schwab needs you", "Log in."))
+        self.assertEqual(first.grouping["thread_id"], "schwab_login")
+        event_bus._repeats = None  # a restart: reload from the file
+        self.assertIsNone(event_bus.publish("schwab_login", "Schwab needs you", "Log in.", source="s"))
+        self.assertIsNotNone(event_bus.publish("schwab_login", "Schwab needs you", "Other.", source="s"))
+        self.assertIsNotNone(event_bus.publish("x", "Back online", "m", source="s", severity="info"))
+        self.assertIsNotNone(event_bus.publish("x", "Back online", "m", source="s", severity="info"))
+        with patch.dict(os.environ, {"ALERT_REPEAT_WINDOW_S": "0"}):
+            self.assertIsNotNone(event_bus.publish("schwab_login", "Schwab needs you", "Log in.", source="s"))
+
+    def test_explicit_collapse_id_wins(self) -> None:
+        alert = event_bus.publish("x", "t", "m", source="s", collapse_id="wake-up")
+        self.assertEqual(alert.grouping["collapse_id"], "wake-up")
+
     def test_since_replays_newer_alerts(self) -> None:
         for n in range(3):
             event_bus.publish("x", f"t{n}", "m", source="s")
@@ -151,6 +169,15 @@ class ClientTokenTests(unittest.TestCase):
         from brain.tools import execute_tool
         self.assertIn("Cleared 1 alert", execute_tool("clear_alerts", {}))
         self.assertIn("already empty", execute_tool("clear_alerts", {}))
+
+    def test_recent_alerts_condense_the_same_problem(self) -> None:
+        with patch.dict(os.environ, {"ALERT_REPEAT_WINDOW_S": "0"}):
+            for _ in range(3):
+                event_bus.publish("stall", "Download stalled", "Deadpool", source="s")
+            event_bus.publish("stall", "Download stalled", "Dune", source="s")
+        body = self.client.get("/api/alerts/recent", headers={"Authorization": "Bearer admin"}).json()
+        self.assertEqual([(a["message"], a["repeats"]) for a in body["alerts"]], [("Dune", 1), ("Deadpool", 3)])
+        self.assertEqual(body["alerts"][1]["id"], 3)  # the newest of the three
 
     def test_glance_for_tv_degrades_per_section(self) -> None:
         event_bus.publish("x", "Disk filling", "m", source="s")

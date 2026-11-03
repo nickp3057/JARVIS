@@ -463,8 +463,17 @@ def recent_alerts(limit: int = 10, hours: float = 24, _: None = _status_read) ->
     card). Info-level alerts (e.g. "back online") are included so a client
     can tell a problem cleared."""
     cutoff = time.time() - max(0.0, hours) * 3600
-    alerts = [a.to_dict() for a in reversed(event_bus.since(0, limit=200))
-              if a.created_at >= cutoff and not event_bus.is_cleared(a)]
+    alerts: list[dict[str, object]] = []
+    seen: dict[str, dict[str, object]] = {}
+    for a in reversed(event_bus.since(0, limit=200)):  # newest first
+        if a.created_at < cutoff or event_bus.is_cleared(a):
+            continue
+        key = event_bus.condense_key(a.kind, a.title, a.message, a.context)
+        if key in seen:  # the same problem again: one row, counted
+            seen[key]["repeats"] = int(seen[key]["repeats"]) + 1
+            continue
+        seen[key] = {**a.to_dict(), "repeats": 1}
+        alerts.append(seen[key])
     return {"alerts": alerts[: max(1, min(50, limit))]}
 
 

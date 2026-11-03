@@ -110,11 +110,13 @@ struct JarvisAlert: Decodable, Identifiable, Hashable {
     let message: String
     let source: String
     let createdAt: Double
+    /// How many times the same problem was raised (Core condenses them; 5.69+).
+    var repeats: Int? = nil
 
     var date: Date { Date(timeIntervalSince1970: createdAt) }
 
     enum CodingKeys: String, CodingKey {
-        case id, kind, severity, title, message, source
+        case id, kind, severity, title, message, source, repeats
         case createdAt = "created_at"
     }
 }

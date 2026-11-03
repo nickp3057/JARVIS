@@ -500,6 +500,13 @@ RMS envelope from ElevenLabs audio drives the orb in real time using a monotonic
 ### Self-diagnosis *(new)*
 - `system_health` — which tools/integrations are failing right now (consecutive
   errors, last error text, when), which recovered, and which are slow.
+- Repeat alerts are condensed (2026-11-03; Nick saw the same error twice
+  with different times): `event_bus.condense_key` (kind + title + context,
+  else the exact text) gives every push a default `collapse_id` so a repeat
+  replaces the earlier notification on the phone, `/api/alerts/recent` shows
+  one row per problem with `repeats` (the Hub shows "3×"), and the same
+  warning raised again within `ALERT_REPEAT_WINDOW_S` is dropped, persisted
+  so a jarvis-api restart doesn't resend everything.
 - `clear_alerts` — empty the app's Needs attention list ("things need you")
   when Nick says it's handled; `POST /api/alerts/clear` (admin token) is the
   Hub card's Clear button. Cleared alerts drop out of `/api/alerts/recent`
@@ -739,7 +746,8 @@ ROOM_ANNOUNCEMENTS=1        # speak runtime announcements (never in quiet hours)
 ROOM_QUIET_HOURS=22-7       # night mode hours; empty turns night mode off
 ROOM_NIGHT_VOLUME=3         # 0-10 speaker level in quiet hours (voice changes at night override)
 ROOM_VOLUME_CONTROL=Master  # ALSA mixer control for "volume 4" / "louder"
-LIGHT_RAINBOWS=             # light=select:DIY option pairs for the Rainbow button (defaults to Nick's strip + desk)
+LIGHT_RAINBOWS=             # light=select:option pairs for the Rainbow button (defaults to Nick's strip + desk DIY scenes, and the lamp's built-in Rainbow scene)
+ALERT_REPEAT_WINDOW_S=1800  # the same warning again within this long is dropped, even across restarts (memory/alert_repeats.json); 0 = off
 RING_LIGHTS=light.nicks_fan # colour-only lights: the apps never send white (the fan's RGB ring)
 RESTING_SCENES=scene.normal,scene.peace,scene.goodnight  # running one means "no scene"
 NORMAL_LIGHT=light.bedroom_lights  # left on when a scene tile leaves its scene and HA has no Normal scene
@@ -1386,7 +1394,8 @@ CALENDAR_ALERT_LEAD_MIN=10  # warn this many minutes before a meeting
   empty it opened the onboard jack, so "Hey JARVIS" never heard anything).
 - **Rainbow in the light sheet, on phone and iPad (iOS 4.11 / build 133)** —
   lights in `LIGHT_RAINBOWS` (default: Nick Strip Lights → its DIY "Real
-  Rainbow", Desk Lights → "New Rainbow", via `select.<light>_diy_scene`)
+  Rainbow", Desk Lights → "New Rainbow", via `select.<light>_diy_scene`;
+  the Govee lamp → its built-in rotating "Rainbow" via `select.lamp_scene`)
   report `light.rainbow: true`; `POST /api/home/light {"rainbow": true}`
   turns the light on and picks that DIY scene. The sheet shows a Rainbow
   button; the phone's light tiles (Hub/Home quick actions) now open the same

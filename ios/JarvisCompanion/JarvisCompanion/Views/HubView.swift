@@ -992,6 +992,12 @@ struct HubView: View {
                                 if model.reportingAlertID == alert.id {
                                     ProgressView().controlSize(.small)
                                 } else {
+                                    if let repeats = alert.repeats, repeats > 1 {
+                                        Text("\(repeats)×")
+                                            .font(.caption2.monospacedDigit().weight(.semibold))
+                                            .foregroundStyle(JarvisTheme.amber)
+                                            .accessibilityLabel("\(repeats) times")
+                                    }
                                     Text(alert.date, style: .relative)
                                         .font(.caption2.monospacedDigit())
                                         .foregroundStyle(.secondary)

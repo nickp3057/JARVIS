@@ -695,7 +695,9 @@ def _home_entities_uncached() -> dict[str, Any]:
 # (the Govee app's own pick never shows in HA). LIGHT_RAINBOWS overrides:
 # "light.x=select.x_diy_scene:Name,...".
 _DEFAULT_RAINBOWS = ("light.nick_strip_lights=select.nick_strip_lights_diy_scene:Real Rainbow,"
-                     "light.desk_lights_2=select.desk_lights_diy_scene:New Rainbow")
+                     "light.desk_lights_2=select.desk_lights_diy_scene:New Rainbow,"
+                     # the Govee lamp's own rotating rainbow (a built-in scene, not DIY)
+                     "light.lamp=select.lamp_scene:Rainbow")
 
 
 def rainbows() -> dict[str, tuple[str, str]]:

@@ -36,3 +36,4 @@ memory/tts_cache/
 memory/*.p8
 memory/voiceprint.json
 models/
+memory/alert_repeats.json

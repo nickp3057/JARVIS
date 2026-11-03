@@ -19,6 +19,10 @@ from __future__ import annotations
 
 from collections import deque
 from dataclasses import asdict, dataclass, field
+import hashlib
+import json
+import os
+from pathlib import Path
 import threading
 import queue
 import time
@@ -60,6 +64,12 @@ _next_id = 1
 _history: deque[Alert] = deque(maxlen=_HISTORY)
 _last_sent: dict[str, float] = {}
 _subscribers: dict[str, Subscriber] = {}
+# The same warning raised again within ALERT_REPEAT_WINDOW_S (30 min) is
+# dropped, even across a jarvis-api restart (monitors that remember what they
+# already sent in memory re-raised everything on every deploy: Nick saw the
+# same error twice with different times). Persisted here; tests repoint it.
+_REPEATS_FILE = Path(__file__).resolve().parents[1] / "memory" / "alert_repeats.json"
+_repeats: dict[str, float] | None = None
 # Alerts up to this id were cleared by Nick ("clear the needs-you list"):
 # they leave the Hub's Needs attention card but stay in history for replay.
 _cleared_through = 0
@@ -118,6 +128,39 @@ def unsubscribe(name: str) -> None:
         previous.close()
 
 
+def condense_key(kind: str, title: str, message: str, context: dict[str, Any] | None = None) -> str:
+    """Alerts with the same key are one problem: the phone replaces the
+    earlier push and the Needs attention list shows one row. What it's about
+    (context, e.g. a torrent hash) when known, else the exact text."""
+    about = json.dumps(context, sort_keys=True, default=str) if context else (message or "").strip()
+    return hashlib.sha1(f"{kind}|{title}|{about}".encode()).hexdigest()[:20]
+
+
+def _repeat_window() -> float:
+    try:
+        return max(0.0, float(os.getenv("ALERT_REPEAT_WINDOW_S", "1800")))
+    except ValueError:
+        return 1800.0
+
+
+def _load_repeats() -> dict[str, float]:
+    global _repeats
+    if _repeats is None:
+        try:
+            _repeats = {str(k): float(v) for k, v in json.loads(_REPEATS_FILE.read_text()).items()}
+        except (OSError, ValueError, AttributeError):
+            _repeats = {}
+    return _repeats
+
+
+def _save_repeats(snapshot: dict[str, float]) -> None:
+    try:
+        _REPEATS_FILE.parent.mkdir(parents=True, exist_ok=True)
+        _REPEATS_FILE.write_text(json.dumps(snapshot))
+    except OSError:
+        log.debug("Could not save alert repeats", exc_info=True)
+
+
 def publish(kind: str, title: str, message: str, *, source: str, severity: str = "warning",
             push: bool = True, dedupe_key: str | None = None, cooldown_s: float = 0.0,
             context: dict[str, Any] | None = None, **grouping: Any) -> Alert | None:
@@ -125,16 +168,33 @@ def publish(kind: str, title: str, message: str, *, source: str, severity: str =
     global _next_id
     severity = severity if severity in SEVERITIES else "warning"
     now = time.time()
+    key = condense_key(kind, title, (message or "").strip(), context)
+    if push:
+        grouping.setdefault("collapse_id", f"a-{key}")
+        grouping.setdefault("thread_id", kind)
+    snapshot = None
     with _lock:
         if dedupe_key and cooldown_s > 0 and now - _last_sent.get(dedupe_key, -1e18) < cooldown_s:
             return None
         if dedupe_key:
             _last_sent[dedupe_key] = now
+        window = _repeat_window()
+        if severity != "info" and window > 0:
+            repeats = _load_repeats()
+            if now - repeats.get(key, -1e18) < window:
+                log.info("Alert repeat dropped [%s] %s", kind, title)
+                return None
+            repeats[key] = now
+            for old in [k for k, t in repeats.items() if now - t >= window]:
+                repeats.pop(old)
+            snapshot = dict(repeats)
         alert = Alert(_next_id, kind, severity, title, (message or "").strip(), source, now, push,
                       {k: v for k, v in grouping.items() if v}, dict(context or {}))
         _next_id += 1
         _history.append(alert)
         subscribers = list(_subscribers.items())
+    if snapshot is not None:
+        _save_repeats(snapshot)
     log.info("Alert %s [%s/%s] %s", alert.id, kind, severity, title)
     for name, callback in subscribers:
         try:
@@ -165,10 +225,11 @@ def is_cleared(alert: Alert) -> bool:
 
 
 def reset_for_tests() -> None:
-    global _next_id, _cleared_through
+    global _next_id, _cleared_through, _repeats
     with _lock:
         _next_id = 1
         _cleared_through = 0
+        _repeats = {}
         _history.clear()
         _last_sent.clear()
         subscribers = list(_subscribers.values())
