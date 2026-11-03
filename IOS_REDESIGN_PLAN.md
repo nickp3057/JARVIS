@@ -101,6 +101,10 @@ toolbar).
 
 ## Tap-to-chat incident reports (2026-10-27, simulator tests pass)
 
+- 5.69–5.72 (2026-11-03): the card condenses repeats of one problem into one
+  row with a "3×" count (Core's `repeats`), and its ↻ button calls
+  `POST /api/alerts/refresh` so fixed alerts drop off and real ones stay
+  (a Clear button shipped in 5.68 and was replaced).
 - Home → Needs attention rows are buttons: a tap shows a spinner, calls
   `POST /api/alerts/{id}/report`, and drops the returned prompt (report id,
   failing checks, suspected cause) into Chat's composer via `onAsk`. Any

@@ -129,6 +129,34 @@ Nick's running to-do list for the project. When one ships, move it to
 `JARVIS.md` "Recently Shipped" and delete it here. Newest asks at the bottom
 of each group.
 
+### Lamp, alerts, Schwab (2026-11-03, iOS 5.72, Core c1b6ecb..051688f): check
+
+All pushed and installed on the iPhone and iPad; Core needs `git pull` and a
+restart (Nick runs it). Tests pass (945); none of this was tried live.
+- [ ] Govee lamp is `light.lamp` (swap done by Nick with
+  `ops/optiplex/swap_lamp.py`). Its Rainbow button picks the built-in
+  "Rainbow" from `select.lamp_scene`: confirm it's the rotating one Nick
+  wanted. It isn't in HA's Rainbow scene yet (offer to add it).
+- [ ] Barn Door now turns the lamp red and restores it (`brain/protocols.py`
+  `_COLOUR`). Nick said not to test Barn Door that day; check next time he
+  runs it.
+- [ ] Needs attention ↻ Refresh (`brain/alert_checks.py`): fixed alerts drop
+  off. Alerts raised before the restart have no `entity_id`/`torrent_hash`
+  context, so offline-device and download-error ones from then stay until a
+  restart empties the bus.
+- [ ] Repeat alerts: one push per problem (`collapse_id`), one Hub row with
+  "3×", repeats within `ALERT_REPEAT_WINDOW_S` dropped. Watch that a real
+  second failure isn't swallowed.
+- [ ] Schwab revoked the refresh token an hour after Nick's 10:55 login (cause
+  unknown; one Core process, no second login). Now it counts as logged out
+  and alerts "ended the login early". If it keeps happening, check the app's
+  status on developer.schwab.com.
+- [ ] qBittorrent 5 pause/resume (`/torrents/stop`/`start`) untested on the
+  NAS: try "pause <torrent>" once.
+- [ ] `ios/install.sh` prints ✓ even when a device's install fails (the echo
+  runs after the `&&` chain); on 2026-11-03 the iPhone silently stayed on
+  5.60. Make it print ✗ on failure.
+
 ### Room camera + Barn Door polish (built 2026-10-31 from work, untested on hardware)
 
 All three asks are in iOS 5.40 (type-checked, not run on a device). At home,
