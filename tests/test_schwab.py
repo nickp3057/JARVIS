@@ -85,6 +85,23 @@ class SchwabTests(unittest.TestCase):
         self.assertEqual(schwab.login_warning(expires + 1), "expired")
         self.assertIsNone(schwab.login_warning(expires - 3 * 86400))
 
+    def test_revoked_refresh_token_means_log_in_again(self) -> None:
+        self.link()
+        tokens = schwab._load_tokens()
+        tokens["expires_at"] = time.time() + 10
+        schwab._save_tokens(tokens)
+        refused = response({"error": "invalid_grant",
+                            "error_description": "Refresh token is invalid, expired or revoked"}, 400)
+        with patch.object(schwab.requests, "post", return_value=refused):
+            with self.assertRaises(RuntimeError):
+                schwab.access_token()
+        self.assertFalse(schwab.linked())
+        self.assertTrue(schwab.login_revoked())
+        self.assertEqual(schwab.login_warning(), "expired")
+        self.link()  # a fresh login clears it
+        self.assertFalse(schwab.login_revoked())
+        self.assertTrue(schwab.linked())
+
     def test_snapshot_folds_live_prices_into_holdings(self) -> None:
         self.link()
         with patch.object(schwab.requests, "get", return_value=response(ACCOUNTS)):

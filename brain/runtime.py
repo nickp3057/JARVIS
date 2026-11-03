@@ -1118,7 +1118,9 @@ class JarvisRuntime:
             if warning and f"{warning}@{expires}" not in warned:
                 warned.add(f"{warning}@{expires}")
                 detail = ("Schwab's weekly login runs out " + schwab.expires_text(expires) + "."
-                          if warning == "soon" else "Schwab's weekly login ran out; the portfolio is frozen.")
+                          if warning == "soon" else
+                          "Schwab ended the login early; the portfolio is frozen." if schwab.login_revoked()
+                          else "Schwab's weekly login ran out; the portfolio is frozen.")
                 self.raise_alert("schwab_login", "Schwab needs you",
                                  detail + " Open JARVIS > Settings > Charles Schwab > Log in.",
                                  source="schwab", severity="warning")

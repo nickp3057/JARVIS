@@ -94,6 +94,12 @@ def linked() -> bool:
     return expires is not None and expires > time.time()
 
 
+def login_revoked() -> bool:
+    """Schwab refused the login before its 7 days were up."""
+    tokens = _load_tokens()
+    return bool(tokens and tokens.get("revoked"))
+
+
 def _token_request(form: dict[str, str]) -> dict[str, Any]:
     key, secret = os.getenv("SCHWAB_APP_KEY", "").strip(), os.getenv("SCHWAB_APP_SECRET", "").strip()
     basic = base64.b64encode(f"{key}:{secret}".encode()).decode()
@@ -163,7 +169,16 @@ def access_token() -> str:
             raise RuntimeError("Schwab isn't linked. Log in from the companion app.")
         if tokens["expires_at"] - time.time() > 60:
             return tokens["access_token"]
-        data = _token_request({"grant_type": "refresh_token", "refresh_token": tokens["refresh_token"]})
+        try:
+            data = _token_request({"grant_type": "refresh_token", "refresh_token": tokens["refresh_token"]})
+        except RuntimeError as exc:
+            if "invalid_grant" in str(exc) or "expired or revoked" in str(exc):
+                # Schwab ended the login early (2026-11-03: an hour after a
+                # fresh login). Treat it as run out so the apps and the
+                # login alert ask for a new one instead of retrying forever.
+                tokens.update(refresh_issued_at=time.time() - _REFRESH_LIFETIME_S, revoked=True)
+                _save_tokens(tokens)
+            raise
         tokens.update(access_token=data["access_token"],
                       expires_at=time.time() + float(data.get("expires_in", 1800)))
         # The refresh token's 7 days run from login, not from each refresh.

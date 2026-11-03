@@ -323,7 +323,11 @@ RMS envelope from ElevenLabs audio drives the orb in real time using a monotonic
   (no bearer, same `state` check) is there if the app is ever registered with
   Core's Tailscale HTTPS name instead. Access tokens
   refresh every 30 min; Schwab ends the login after 7 days regardless, so the
-  monitor raises `schwab_login` a day before and when it lapses. Nick chose
+  monitor raises `schwab_login` a day before and when it lapses. If Schwab
+  refuses the refresh token early ("invalid, expired or revoked"; seen
+  2026-11-03 an hour after a fresh login), the token file is marked
+  `revoked` and counted as run out, so the apps show Log in and the alert
+  says "Schwab ended the login early" instead of retrying every 30 s. Nick chose
   this over JARVIS logging in himself (2026-10-27): no Schwab password or 2FA
   on Core.
 - Live: holdings/cash from `/trader/v1/accounts?fields=positions` every
