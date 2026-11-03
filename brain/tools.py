@@ -446,6 +446,14 @@ def _tool_clear_tool_health(args: dict[str, Any]) -> str:
     return tool_health.clear(name)
 
 
+def _tool_clear_alerts(_: dict[str, Any]) -> str:
+    from brain import event_bus
+    count = event_bus.clear_attention()
+    if not count:
+        return "The Needs attention list was already empty."
+    return f"Cleared {count} alert{'s' if count != 1 else ''} off the Needs attention list. New ones will still show."
+
+
 def _tool_diagnose_tool(args: dict[str, Any]) -> str:
     return self_repair.diagnose(str(args.get("tool") or ""), session_id=args.get("_jarvis_session_id"))
 
@@ -1669,6 +1677,15 @@ _CUSTOM_TOOLS: list[dict[str, Any]] = [
         },
     },
     {
+        "name": "clear_alerts",
+        "description": (
+            "Clear the app's Needs attention list (the \"things need you\" alerts on the "
+            "Hub) when Nick says they're handled. Alerts raised afterwards still show; "
+            "pending repair proposals are separate (reject_repair)."
+        ),
+        "input_schema": {"type": "object", "properties": {}},
+    },
+    {
         "name": "diagnose_tool",
         "description": (
             "Self-repair step one: probe the subsystem behind a failing tool (settings "
@@ -2422,6 +2439,7 @@ _DISPATCH: dict[str, Callable[[dict[str, Any]], str]] = {
     "voice_shortcuts": _tool_voice_shortcuts,
     "system_health": _tool_system_health,
     "clear_tool_health": _tool_clear_tool_health,
+    "clear_alerts": _tool_clear_alerts,
     "diagnose_tool": _tool_diagnose_tool,
     "apply_repair": _tool_apply_repair,
     "propose_stack_fix": _tool_propose_stack_fix,
@@ -2571,7 +2589,7 @@ def execute_tool(name: str, args: dict[str, Any], session_id: str | None = None)
 
 def _score_tool(name: str, *, ok: bool, error: str, started: float) -> None:
     """Feed the self-diagnosis ledger; never let bookkeeping break a tool call."""
-    if name in ("system_health", "clear_tool_health", "diagnose_tool", "apply_repair", "list_repair_proposals", "reject_repair",
+    if name in ("system_health", "clear_tool_health", "clear_alerts", "diagnose_tool", "apply_repair", "list_repair_proposals", "reject_repair",
                 "propose_stack_fix"):
         return
     try:

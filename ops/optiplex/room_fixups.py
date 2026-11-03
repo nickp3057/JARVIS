@@ -38,7 +38,7 @@ NAMES = {
     "light.bedroom_lights": "Bedroom Lights",
     "fan.nicks_fan": "Nick's Fan",
     "light.nicks_fan": "Fan Light",  # was also "Nick's Fan": voice couldn't tell them apart
-    "switch.lamp": "Lamp",
+    "light.lamp": "Lamp",  # the Govee lamp (2026-11-03; was the switch.lamp plug)
     "switch.avengers_tower_socket_1": "Avengers Tower",
     "switch.scentsy_socket_1": "Scentsy",
     "switch.wii_u": "Wii U",
@@ -70,7 +70,7 @@ NORMAL = {
         "light.nick_strip_lights": {"state": "off"},
         "light.desk_lights_2": {"state": "off"},
         "light.nicks_fan": {"state": "off"},
-        "switch.lamp": {"state": "off"},
+        "light.lamp": {"state": "off"},
         "switch.avengers_tower_socket_1": {"state": "off"},
     },
 }

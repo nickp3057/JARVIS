@@ -450,7 +450,10 @@ RMS envelope from ElevenLabs audio drives the orb in real time using a monotonic
 - `torrent_inventory(limit?)` — list live torrents with exact hashes
 - `manage_torrent(action, hash, confirmed, delete_files?)` — confirm-gated
   pause/resume/recheck/priority/delete; deletion of downloaded files is a
-  separate explicit flag and every action revalidates the live exact hash
+  separate explicit flag and every action revalidates the live exact hash.
+  Pause/resume use qBittorrent 5's `/torrents/stop`/`start` (the NAS runs
+  5.2.3; the old `pause`/`resume` paths 404 there) and fall back to the 4.x
+  names on a 404.
 - Runtime monitor records errors and can announce newly completed downloads.
 
 ### Computer Control *(new)*
@@ -497,6 +500,10 @@ RMS envelope from ElevenLabs audio drives the orb in real time using a monotonic
 ### Self-diagnosis *(new)*
 - `system_health` — which tools/integrations are failing right now (consecutive
   errors, last error text, when), which recovered, and which are slow.
+- `clear_alerts` — empty the app's Needs attention list ("things need you")
+  when Nick says it's handled; `POST /api/alerts/clear` (admin token) is the
+  Hub card's Clear button. Cleared alerts drop out of `/api/alerts/recent`
+  (still in bus history); new ones show as usual. In memory, like the bus.
 - `clear_tool_health(tool?)` — drop the fault flag on one tool (or all) after
   Nick fixes the cause. Backed by `brain/tool_health.py` and
   `memory/tool_health.json`: every `execute_tool` call is scored (a raised
@@ -1310,7 +1317,14 @@ CALENDAR_ALERT_LEAD_MIN=10  # warn this many minutes before a meeting
   run the fan (HA 2026.10 otherwise calls `fan.set_direction` with None:
   "string value is None at 'direction'") and renames the room's entities
   (Strip Lights, Desk Lights, Bedroom Lights, Nick's Fan, Fan Light, Lamp,
-  Avengers Tower, Scentsy, Wii U; entity ids unchanged). The fan's light is
+  Avengers Tower, Scentsy, Wii U; entity ids unchanged). The lamp is a Govee
+  light, `light.lamp` (2026-11-03; it replaced the `switch.lamp` Tuya plug),
+  so the apps give it the same light sheet as the others.
+  `ops/optiplex/swap_lamp.py` made the swap: it reloads the Govee
+  integrations, renames the new lamp `light.lamp` (its LAN twin
+  `light.lamp_lan`, added to `LIGHT_TWINS`), disables the old plug as
+  `switch.old_lamp_plug`, and repoints every scene, automation and `.env`
+  entry from `switch.lamp`. The fan's light is
   one Tuya light with modes white/colour/scene/music: colour mode
   (`light.nicks_fan` with `rgb_color`/`hs_color`) is likely the RGB ring;
   scene mode (its rainbow) isn't reachable through HA's Tuya integration.

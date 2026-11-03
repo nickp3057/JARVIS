@@ -463,8 +463,15 @@ def recent_alerts(limit: int = 10, hours: float = 24, _: None = _status_read) ->
     card). Info-level alerts (e.g. "back online") are included so a client
     can tell a problem cleared."""
     cutoff = time.time() - max(0.0, hours) * 3600
-    alerts = [a.to_dict() for a in reversed(event_bus.since(0, limit=200)) if a.created_at >= cutoff]
+    alerts = [a.to_dict() for a in reversed(event_bus.since(0, limit=200))
+              if a.created_at >= cutoff and not event_bus.is_cleared(a)]
     return {"alerts": alerts[: max(1, min(50, limit))]}
+
+
+@app.post("/api/alerts/clear")
+def clear_alerts(_: None = Depends(authorize)) -> dict[str, object]:
+    """Empty the Needs attention list (alerts raised later still show)."""
+    return {"cleared": event_bus.clear_attention()}
 
 
 class IncidentReportRequest(BaseModel):

@@ -60,6 +60,9 @@ _next_id = 1
 _history: deque[Alert] = deque(maxlen=_HISTORY)
 _last_sent: dict[str, float] = {}
 _subscribers: dict[str, Subscriber] = {}
+# Alerts up to this id were cleared by Nick ("clear the needs-you list"):
+# they leave the Hub's Needs attention card but stay in history for replay.
+_cleared_through = 0
 
 
 class _BufferedSubscriber:
@@ -147,10 +150,25 @@ def since(last_id: int = 0, limit: int = 50) -> list[Alert]:
         return [a for a in _history if a.id > last_id][-limit:]
 
 
+def clear_attention() -> int:
+    """Clear every warning/critical alert so far off the Needs attention list;
+    returns how many were showing. New alerts still appear."""
+    global _cleared_through
+    with _lock:
+        count = sum(1 for a in _history if a.id > _cleared_through and a.severity != "info")
+        _cleared_through = _next_id - 1
+    return count
+
+
+def is_cleared(alert: Alert) -> bool:
+    return alert.id <= _cleared_through
+
+
 def reset_for_tests() -> None:
-    global _next_id
+    global _next_id, _cleared_through
     with _lock:
         _next_id = 1
+        _cleared_through = 0
         _history.clear()
         _last_sent.clear()
         subscribers = list(_subscribers.values())

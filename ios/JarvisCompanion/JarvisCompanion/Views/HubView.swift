@@ -974,6 +974,10 @@ struct HubView: View {
     private var needsAttentionCard: some View {
         CockpitPanel("Needs attention", symbol: "exclamationmark.triangle", trailing: {
             StatusPill(text: "\(attentionAlerts.count)", color: JarvisTheme.amber)
+            Button("Clear") { model.clearAlerts() }
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(JarvisTheme.cyan)
+                .accessibilityHint("Removes these alerts. New ones still show.")
         }) {
             VStack(spacing: 0) {
                 ForEach(Array(attentionAlerts.enumerated()), id: \.element.id) { index, alert in

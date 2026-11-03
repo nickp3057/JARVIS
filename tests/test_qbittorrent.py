@@ -255,8 +255,8 @@ class QBittorrentTests(unittest.TestCase):
         torrent_hash = "c" * 40
         live = [{"hash": torrent_hash, "name": "Linux ISO"}]
         cases = (
-            ("pause", "/torrents/pause", {}),
-            ("resume", "/torrents/resume", {}),
+            ("pause", "/torrents/stop", {}),
+            ("resume", "/torrents/start", {}),
             ("recheck", "/torrents/recheck", {}),
             ("priority_top", "/torrents/topPrio", {}),
             ("delete", "/torrents/delete", {"deleteFiles": "false"}),
@@ -268,6 +268,17 @@ class QBittorrentTests(unittest.TestCase):
                 result = qbit.manage_torrent(action, torrent_hash, confirmed=True)
             self.assertIn("accepted", result.lower())
             post.assert_called_once_with(endpoint, data={"hashes": torrent_hash, **extra})
+
+    def test_pause_falls_back_to_v4_endpoint_on_404(self) -> None:
+        torrent_hash = "f" * 40
+        live = [{"hash": torrent_hash, "name": "Old qBit"}]
+        replies = [(False, "qBittorrent error 404: Not Found"), (True, "ok")]
+        with patch.object(qbit, "torrent_info", return_value=(True, live)), patch.object(
+            qbit, "_post", side_effect=replies,
+        ) as post:
+            result = qbit.manage_torrent("pause", torrent_hash, confirmed=True)
+        self.assertIn("accepted", result.lower())
+        self.assertEqual([c.args[0] for c in post.call_args_list], ["/torrents/stop", "/torrents/pause"])
 
     def test_delete_files_requires_separate_explicit_flag(self) -> None:
         torrent_hash = "d" * 40

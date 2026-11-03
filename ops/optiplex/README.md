@@ -46,3 +46,20 @@ NAS and router so short blips never reach them.
 
 See `JARVIS.md` → "Google Calendar setup": `ssh -L 8765:localhost:8765 jarvis`,
 then `.venv/bin/python -m integrations.google_calendar --auth`.
+
+## Swap the lamp plug for the Govee lamp (2026-11-03)
+
+Add the lamp in the Govee app first (and turn on LAN Control in its device
+settings), then:
+
+```bash
+cd ~/jarvis && git pull
+.venv/bin/python ops/optiplex/swap_lamp.py          # finds it, changes nothing
+.venv/bin/python ops/optiplex/swap_lamp.py --apply  # does the swap
+sudo systemctl restart jarvis-api
+```
+
+The new lamp becomes `light.lamp` "Lamp"; the old `switch.lamp` plug is
+renamed `switch.old_lamp_plug` and disabled; scenes, automations and `.env`
+point at `light.lamp`. If it finds more than one new Govee light, pass the
+lamp's id: `swap_lamp.py --apply light.xxx`.

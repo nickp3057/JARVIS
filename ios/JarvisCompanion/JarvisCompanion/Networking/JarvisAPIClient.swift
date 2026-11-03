@@ -620,6 +620,12 @@ struct JarvisAPIClient {
         try await postJSON(RepairActionResult.self, path: "api/repairs/\(id)/\(action)", body: EmptyBody())
     }
 
+    /// Empties the Hub's Needs attention list; alerts raised later still show.
+    func clearAlerts() async throws {
+        struct Cleared: Decodable { let cleared: Int }
+        _ = try await postJSON(Cleared.self, path: "api/alerts/clear", body: EmptyBody())
+    }
+
     // MARK: - To-dos (open reminders; done deletes)
 
     private struct TodoBody: Encodable { let text: String }

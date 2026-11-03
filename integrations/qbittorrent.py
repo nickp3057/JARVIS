@@ -406,14 +406,16 @@ def torrent_inventory(limit: int = 20) -> str:
 
 
 _TORRENT_ACTIONS = {
-    "pause": ("/torrents/pause", {}),
-    "resume": ("/torrents/resume", {}),
+    # qBittorrent 5 renamed pause/resume to stop/start (the old paths 404).
+    "pause": ("/torrents/stop", {}),
+    "resume": ("/torrents/start", {}),
     "recheck": ("/torrents/recheck", {}),
     "priority_top": ("/torrents/topPrio", {}),
     "priority_bottom": ("/torrents/bottomPrio", {}),
     "priority_increase": ("/torrents/increasePrio", {}),
     "priority_decrease": ("/torrents/decreasePrio", {}),
 }
+_V4_PATHS = {"/torrents/stop": "/torrents/pause", "/torrents/start": "/torrents/resume"}
 _TORRENT_HASH_RE = re.compile(r"^[a-f0-9]{40}$", re.IGNORECASE)
 
 
@@ -451,6 +453,8 @@ def manage_torrent(
     else:
         path, extra = _TORRENT_ACTIONS[action]
     ok, message = _post(path, data={"hashes": torrent_hash, **extra})
+    if not ok and " 404" in message and path in _V4_PATHS:  # qBittorrent 4.x
+        ok, message = _post(_V4_PATHS[path], data={"hashes": torrent_hash, **extra})
     if not ok:
         return message
     file_note = " and its downloaded files" if action == "delete" and delete_files else ""

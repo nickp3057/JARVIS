@@ -137,6 +137,21 @@ class ClientTokenTests(unittest.TestCase):
         events_only = {"Authorization": "Bearer " + client_tokens.create("tv2", ["events:read"])}
         self.assertEqual(self.client.get("/api/alerts/recent", headers=events_only).status_code, 403)
 
+    def test_clearing_empties_needs_attention_but_new_alerts_show(self) -> None:
+        event_bus.publish("x", "Schwab needs you", "m", source="s")
+        event_bus.publish("x", "Back online", "m", source="s", severity="info")
+        admin = {"Authorization": "Bearer admin"}
+        tv = {"Authorization": "Bearer " + client_tokens.create("tv", ["status:read"])}
+        self.assertEqual(self.client.post("/api/alerts/clear", headers=tv).status_code, 401)  # admin only
+        self.assertEqual(self.client.post("/api/alerts/clear", headers=admin).json(), {"cleared": 1})
+        self.assertEqual(self.client.get("/api/alerts/recent", headers=admin).json()["alerts"], [])
+        event_bus.publish("x", "Disk filling", "m", source="s")
+        titles = [a["title"] for a in self.client.get("/api/alerts/recent", headers=admin).json()["alerts"]]
+        self.assertEqual(titles, ["Disk filling"])
+        from brain.tools import execute_tool
+        self.assertIn("Cleared 1 alert", execute_tool("clear_alerts", {}))
+        self.assertIn("already empty", execute_tool("clear_alerts", {}))
+
     def test_glance_for_tv_degrades_per_section(self) -> None:
         event_bus.publish("x", "Disk filling", "m", source="s")
         torrents = {"torrents": [

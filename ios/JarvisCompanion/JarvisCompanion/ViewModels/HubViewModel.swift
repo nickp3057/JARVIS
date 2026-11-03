@@ -259,6 +259,14 @@ final class HubViewModel: ObservableObject {
         await load(\.alerts) { try await $0.recentAlerts() }
     }
 
+    /// The Needs attention card's Clear button.
+    func clearAlerts() {
+        Task {
+            do { try await client().clearAlerts() } catch { actionError = error.localizedDescription }
+            await refreshAlerts()
+        }
+    }
+
     /// An older Core without /api/repairs just leaves this empty.
     func refreshRepairs() async {
         await load(\.repairs) { try await $0.repairs() }
