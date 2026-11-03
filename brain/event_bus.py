@@ -73,6 +73,8 @@ _repeats: dict[str, float] | None = None
 # Alerts up to this id were cleared by Nick ("clear the needs-you list"):
 # they leave the Hub's Needs attention card but stay in history for replay.
 _cleared_through = 0
+# Alerts the Refresh button found fixed (brain/alert_checks.py).
+_resolved: set[int] = set()
 
 
 class _BufferedSubscriber:
@@ -220,8 +222,15 @@ def clear_attention() -> int:
     return count
 
 
+def resolve(ids: list[int]) -> None:
+    """Hide these alerts from the Needs attention list: they're fixed."""
+    with _lock:
+        _resolved.update(ids)
+
+
 def is_cleared(alert: Alert) -> bool:
-    return alert.id <= _cleared_through
+    """Cleared by Nick, or found fixed by a refresh."""
+    return alert.id <= _cleared_through or alert.id in _resolved
 
 
 def reset_for_tests() -> None:
@@ -230,6 +239,7 @@ def reset_for_tests() -> None:
         _next_id = 1
         _cleared_through = 0
         _repeats = {}
+        _resolved.clear()
         _history.clear()
         _last_sent.clear()
         subscribers = list(_subscribers.values())

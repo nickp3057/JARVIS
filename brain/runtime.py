@@ -394,7 +394,7 @@ class JarvisRuntime:
                             minutes = int((now - down_since[entity_id]) // 60)
                             self.raise_alert("device_offline", f"{name} offline",
                                              f"{name} has been unavailable in Home Assistant for {minutes} minutes.",
-                                             source="home")
+                                             source="home", context={"entity_id": entity_id})
                     else:
                         down_since.pop(entity_id, None)
                         if entity_id in alerted:
@@ -1297,7 +1297,9 @@ class JarvisRuntime:
                     state = str(item.get("state", "")).lower()
                     old_state = str(old.get("state", "")).lower()
                     if "error" in state and "error" not in old_state:
-                        self.raise_alert("download_error", "Download error", name, source="downloads")
+                        self.raise_alert("download_error", "Download error", name, source="downloads",
+                                         context={"torrent_hash": str(torrent_hash).lower(),
+                                                  "name": str(name)[:200]})
             now = time.time()
             for torrent_hash, item in current.items():
                 if float(item.get("progress", 0) or 0) >= 1:

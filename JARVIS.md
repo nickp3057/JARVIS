@@ -44,6 +44,7 @@ Pearson-Stark-Jarvis/
 │   ├── apps.py              Windows app launcher (open/close/focus via PowerShell)
 │   ├── automation_workshop.py Staged HA automation drafts, diffs, apply + rollback
 │   ├── clipboard_tool.py    Read/write clipboard via PowerShell Get/Set-Clipboard
+│   ├── alert_checks.py      Needs attention Refresh: re-checks each alert live, hides the fixed ones
 │   ├── debug_reports.py     Durable user-submitted companion failure reports
 │   ├── incident_reports.py  Tap-to-chat incident report: live health, NAS watchdog logs, app log warnings, quoted indexer HTTP/Cloudflare errors, recent changes, rule-based suspected cause
 │   ├── history.py           SQLite conversation history with session support
@@ -511,9 +512,17 @@ RMS envelope from ElevenLabs audio drives the orb in real time using a monotonic
   one row per problem with `repeats` (the Hub shows "3×"), and the same
   warning raised again within `ALERT_REPEAT_WINDOW_S` is dropped, persisted
   so a jarvis-api restart doesn't resend everything.
+- `refresh_alerts` — the Hub's Needs attention Refresh button (↻,
+  `POST /api/alerts/refresh`, admin token; replaced the Clear button
+  2026-11-03): `brain/alert_checks.py` re-checks each alert against the live
+  system and hides the fixed ones (Schwab linked again, the stalled/errored
+  torrent finished, moving or gone, the offline device back, the iPad
+  charging or above 20%). Kinds without a live check count as fixed once the
+  same source has sent an info alert since ("recovered", "back online");
+  anything it can't judge, or whose check breaks, stays.
 - `clear_alerts` — empty the app's Needs attention list ("things need you")
-  when Nick says it's handled; `POST /api/alerts/clear` (admin token) is the
-  Hub card's Clear button. Cleared alerts drop out of `/api/alerts/recent`
+  outright when Nick says it's all handled (`POST /api/alerts/clear`, admin
+  token; voice only now). Cleared alerts drop out of `/api/alerts/recent`
   (still in bus history); new ones show as usual. In memory, like the bus.
 - `clear_tool_health(tool?)` — drop the fault flag on one tool (or all) after
   Nick fixes the cause. Backed by `brain/tool_health.py` and

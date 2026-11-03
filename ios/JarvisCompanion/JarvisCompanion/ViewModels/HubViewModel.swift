@@ -67,6 +67,7 @@ final class HubViewModel: ObservableObject {
     @Published var mediaScrollTarget: String?
     /// Transient, user-visible outcome of the last quick action that failed.
     @Published var actionError: String?
+    @Published private(set) var recheckingAlerts = false
     @Published private(set) var nowSnapshotIsStale = false
 
     private let settings: AppSettings
@@ -259,10 +260,13 @@ final class HubViewModel: ObservableObject {
         await load(\.alerts) { try await $0.recentAlerts() }
     }
 
-    /// The Needs attention card's Clear button.
-    func clearAlerts() {
+    /// The Needs attention card's Refresh button: what's fixed disappears.
+    func recheckAlerts() {
+        guard !recheckingAlerts else { return }
+        recheckingAlerts = true
         Task {
-            do { try await client().clearAlerts() } catch { actionError = error.localizedDescription }
+            defer { recheckingAlerts = false }
+            do { try await client().recheckAlerts() } catch { actionError = error.localizedDescription }
             await refreshAlerts()
         }
     }

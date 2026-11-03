@@ -974,10 +974,17 @@ struct HubView: View {
     private var needsAttentionCard: some View {
         CockpitPanel("Needs attention", symbol: "exclamationmark.triangle", trailing: {
             StatusPill(text: "\(attentionAlerts.count)", color: JarvisTheme.amber)
-            Button("Clear") { model.clearAlerts() }
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(JarvisTheme.cyan)
-                .accessibilityHint("Removes these alerts. New ones still show.")
+            if model.recheckingAlerts {
+                ProgressView().controlSize(.small)
+            } else {
+                Button { model.recheckAlerts() } label: {
+                    Image(systemName: "arrow.clockwise")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(JarvisTheme.cyan)
+                }
+                .accessibilityLabel("Refresh")
+                .accessibilityHint("Checks each alert again. Fixed ones disappear.")
+            }
         }) {
             VStack(spacing: 0) {
                 ForEach(Array(attentionAlerts.enumerated()), id: \.element.id) { index, alert in

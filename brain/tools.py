@@ -454,6 +454,16 @@ def _tool_clear_alerts(_: dict[str, Any]) -> str:
     return f"Cleared {count} alert{'s' if count != 1 else ''} off the Needs attention list. New ones will still show."
 
 
+def _tool_refresh_alerts(_: dict[str, Any]) -> str:
+    from brain import alert_checks
+    result = alert_checks.refresh()
+    fixed, left = result["resolved"], result["remaining"]
+    if not fixed and not left:
+        return "The Needs attention list is empty."
+    return (f"Re-checked the Needs attention list: {fixed} fixed and gone, {left} still need Nick. "
+            "Use clear_alerts only if he says the rest are handled too.")
+
+
 def _tool_diagnose_tool(args: dict[str, Any]) -> str:
     return self_repair.diagnose(str(args.get("tool") or ""), session_id=args.get("_jarvis_session_id"))
 
@@ -1677,6 +1687,15 @@ _CUSTOM_TOOLS: list[dict[str, Any]] = [
         },
     },
     {
+        "name": "refresh_alerts",
+        "description": (
+            "Re-check every alert on the app's Needs attention list against the live "
+            "system: fixed ones disappear, real ones stay (the Hub's Refresh button). "
+            "Use first when Nick asks to refresh or tidy that list."
+        ),
+        "input_schema": {"type": "object", "properties": {}},
+    },
+    {
         "name": "clear_alerts",
         "description": (
             "Clear the app's Needs attention list (the \"things need you\" alerts on the "
@@ -2440,6 +2459,7 @@ _DISPATCH: dict[str, Callable[[dict[str, Any]], str]] = {
     "system_health": _tool_system_health,
     "clear_tool_health": _tool_clear_tool_health,
     "clear_alerts": _tool_clear_alerts,
+    "refresh_alerts": _tool_refresh_alerts,
     "diagnose_tool": _tool_diagnose_tool,
     "apply_repair": _tool_apply_repair,
     "propose_stack_fix": _tool_propose_stack_fix,
@@ -2589,7 +2609,7 @@ def execute_tool(name: str, args: dict[str, Any], session_id: str | None = None)
 
 def _score_tool(name: str, *, ok: bool, error: str, started: float) -> None:
     """Feed the self-diagnosis ledger; never let bookkeeping break a tool call."""
-    if name in ("system_health", "clear_tool_health", "clear_alerts", "diagnose_tool", "apply_repair", "list_repair_proposals", "reject_repair",
+    if name in ("system_health", "clear_tool_health", "clear_alerts", "refresh_alerts", "diagnose_tool", "apply_repair", "list_repair_proposals", "reject_repair",
                 "propose_stack_fix"):
         return
     try:

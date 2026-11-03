@@ -477,6 +477,14 @@ def recent_alerts(limit: int = 10, hours: float = 24, _: None = _status_read) ->
     return {"alerts": alerts[: max(1, min(50, limit))]}
 
 
+@app.post("/api/alerts/refresh")
+def refresh_alerts(_: None = Depends(authorize)) -> dict[str, object]:
+    """The Needs attention Refresh button: re-check each alert against the
+    live system; fixed ones disappear, the rest stay."""
+    from brain import alert_checks
+    return alert_checks.refresh()
+
+
 @app.post("/api/alerts/clear")
 def clear_alerts(_: None = Depends(authorize)) -> dict[str, object]:
     """Empty the Needs attention list (alerts raised later still show)."""
@@ -695,12 +703,15 @@ IPAD_LOW_BATTERY = 0.20
 def device_battery(payload: DeviceBatteryRequest, _: None = Depends(authorize)) -> dict[str, object]:
     """The wall iPad reports its battery when it changes. Below 20% and not
     on the charger, JARVIS warns the phone (at most every few hours)."""
+    from brain import alert_checks
+    alert_checks.battery_reports[payload.device] = (payload.level, payload.charging)
     low = payload.level < IPAD_LOW_BATTERY and not payload.charging
     if low:
         pct = round(payload.level * 100)
         runtime().raise_alert("device_battery", f"{payload.device} battery low",
                               f"The {payload.device} is at {pct}% and not charging.",
                               source="device-battery", dedupe_key=f"battery:{payload.device}",
+                              context={"device": payload.device},
                               cooldown_s=4 * 3600)
     return {"ok": True, "low": low}
 
