@@ -264,6 +264,14 @@ struct RoomView: View {
         }
         .onChange(of: scenePhase) { _, phase in
             if phase != .active { asleep = false; setDimmed(false) }
+            // The Hub tab stops the shared polling (and home stream) when the
+            // app leaves the foreground but only restarts it if it's the one
+            // showing, so the Room restarts it itself: without this the iPad
+            // came back with no scenes, no stream and only the light fallback.
+            if phase == .active, holdsPolling {
+                model.startPolling()
+                Task { await refresh() }
+            }
         }
         .onAppear { if !RootView.isMac { UIApplication.shared.isIdleTimerDisabled = keepAwake || movieMode } }
         .onChange(of: keepAwake) { _, on in if !RootView.isMac { UIApplication.shared.isIdleTimerDisabled = on || movieMode } }

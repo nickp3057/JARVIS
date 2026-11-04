@@ -63,3 +63,21 @@ The new lamp becomes `light.lamp` "Lamp"; the old `switch.lamp` plug is
 renamed `switch.old_lamp_plug` and disabled; scenes, automations and `.env`
 point at `light.lamp`. If it finds more than one new Govee light, pass the
 lamp's id: `swap_lamp.py --apply light.xxx`.
+
+## Room rainbows: lamp and fan ring (2026-11-04)
+
+First, in Smart Life: Scenes → + → Launch Tap-to-Run → action: the fan
+light, Scene mode, its rainbow; name it "Fan Light Rainbow". Then:
+
+```bash
+cd ~/jarvis && git pull
+.venv/bin/python ops/optiplex/room_rainbows.py   # or: ... room_rainbows.py scene.<tuya_scene>
+sudo systemctl restart jarvis-api
+```
+
+Scenes that turn the desk lights on also put the lamp in its Rainbow; Movie
+no longer turns the fan light off; the Tap-to-Run becomes
+`scene.fan_light_rainbow` (the apps' Rainbow button for the fan light); and
+the automation "Fan light follows the strip" turns the ring's rainbow on and
+off with the strip lights. Without the Tap-to-Run it does the scenes and
+tells you what's missing; run it again after.

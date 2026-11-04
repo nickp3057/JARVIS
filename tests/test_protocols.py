@@ -20,7 +20,11 @@ class BarnDoorTests(unittest.TestCase):
         effects = patch.object(protocols, "_EFFECTS_FILE", Path(tmp.name) / "effects.json")
         effects.start()
         self.addCleanup(effects.stop)
+        fan = patch.object(protocols, "_FAN_FILE", Path(tmp.name) / "fan.json")
+        fan.start()
+        self.addCleanup(fan.stop)
         states = {"light.desk_lights_2": {"attributes": {"effect": "Rainbow"}},
+                  "light.nick_strip_lights": {"state": "on", "attributes": {}},
                   "select.desk_lights_diy_scene": {"state": "New Rainbow", "attributes": {}},
                   "select.nick_strip_lights_diy_scene": {"state": "None", "attributes": {}}}
         get = patch.object(protocols.home_assistant, "_request",
@@ -49,12 +53,17 @@ class BarnDoorTests(unittest.TestCase):
         self.assertIn("switch.avengers_tower_socket_1", snapshot["snapshot_entities"])  # comes back on
         self.assertEqual(theme.current()["theme"], "barnDoor")
         self.assertEqual(event_bus.since(0), [])  # no alert banner or Systems line
+        # The ring's follow-the-strip automation is paused, or red would make it rainbow.
+        self.assertEqual(self.calls("automation", "turn_off")[0].args[2], "automation.fan_light_follows_strip")
         # Saying it twice must not snapshot the red room over the real one.
         protocols.engage()
         self.assertEqual(len(self.calls("scene", "create")), 1)
         self.assertIn("mark85", tools.execute_tool("barn_door_protocol", {"action": "stand_down"}))
         self.assertEqual(self.calls("scene", "turn_on")[0].args[2], "scene.barn_door_before")
         self.assertEqual(theme.current()["theme"], "mark85")
+        # The strip was on, so the ring's rainbow comes back and it follows the strip again.
+        self.assertEqual(self.calls("scene", "turn_on")[-1].args[2], "scene.fan_light_rainbow")
+        self.assertEqual(len(self.calls("automation", "turn_on")), 1)
         # Effects come back too: the one HA saw, and the configured Govee one.
         restored = {c.args[2]: c.args[3]["effect"] for c in self.calls("light", "turn_on") if "effect" in c.args[3]}
         self.assertEqual(restored, {"light.desk_lights_2": "Rainbow"})

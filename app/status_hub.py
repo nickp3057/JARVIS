@@ -683,6 +683,9 @@ def _home_entities_uncached() -> dict[str, Any]:
         }
         if entity_id.startswith("light."):
             item["light"] = _light_details(attributes, entity_id)
+            target = rainbows().get(entity_id, ("", ""))[0]
+            if target.startswith("scene.") and target not in by_id:
+                item["light"]["rainbow"] = False  # its Tap-to-Run isn't in HA yet
         elif entity_id.startswith("fan."):
             item["fan"] = _fan_details(attributes)
         entities.append(item)
@@ -693,21 +696,27 @@ def _home_entities_uncached() -> dict[str, Any]:
 
 # Nick's rainbows are Govee DIY scenes picked through each light's dropdown
 # (the Govee app's own pick never shows in HA). LIGHT_RAINBOWS overrides:
-# "light.x=select.x_diy_scene:Name,...".
+# "light.x=select.x_diy_scene:Name,..." or "light.x=scene.y" (a scene that
+# puts the light in its rainbow: the fan ring's multi-colour mode is only
+# reachable through a Smart Life Tap-to-Run, which HA's Tuya integration
+# shows as a scene; ops/optiplex/room_rainbows.py names it).
 _DEFAULT_RAINBOWS = ("light.nick_strip_lights=select.nick_strip_lights_diy_scene:Real Rainbow,"
                      "light.desk_lights_2=select.desk_lights_diy_scene:New Rainbow,"
                      # the Govee lamp's own rotating rainbow (a built-in scene, not DIY)
-                     "light.lamp=select.lamp_scene:Rainbow")
+                     "light.lamp=select.lamp_scene:Rainbow,"
+                     "light.nicks_fan=scene.fan_light_rainbow")
 
 
 def rainbows() -> dict[str, tuple[str, str]]:
-    """light entity -> (DIY-scene select, option) for the Rainbow button."""
+    """light entity -> (DIY-scene select, option) or (scene, "") for the Rainbow button."""
     found = {}
     for pair in os.getenv("LIGHT_RAINBOWS", _DEFAULT_RAINBOWS).split(","):
         light, _, target = pair.partition("=")
         select, _, option = target.partition(":")
         if light.strip() and select.strip().startswith("select.") and option.strip():
             found[light.strip().lower()] = (select.strip(), option.strip())
+        elif light.strip() and select.strip().startswith("scene."):
+            found[light.strip().lower()] = (select.strip().lower(), "")
     return found
 
 
@@ -806,6 +815,11 @@ def set_light(entity_id: str, brightness_pct: int | None = None,
         if entity_id not in rainbows():
             raise ValueError("this light has no rainbow set (LIGHT_RAINBOWS)")
         select, option = rainbows()[entity_id]
+        if select.startswith("scene."):  # the scene turns the light on in its rainbow
+            message = call_discovered_service("scene", "turn_on", entity_id=select)
+            invalidate("entities")
+            ok = _HA_SUCCESS_MARKER in message.lower()
+            return {"error": "" if ok else message, "entity_id": entity_id}
         call_discovered_service("light", "turn_on", entity_id=entity_id,
                                 service_data={"brightness_pct": brightness_pct or 100})
         message = call_discovered_service("select", "select_option", entity_id=select,

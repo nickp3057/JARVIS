@@ -15,8 +15,12 @@ theme over ``/api/home/stream`` at once), then the lights change in
 parallel; they used to go one by one with the theme last, so the TV lagged
 every slow Govee call.
 
-The fan light (``light.nicks_fan``) is only ever turned off (Nick's rule),
-so it goes dark with the bedroom light rather than red.
+The fan light (``light.nicks_fan``) goes dark with the bedroom light. Since
+2026-11-04 it follows the strip in its rainbow (HA automation
+``automation.fan_light_follows_strip``, ops/optiplex/room_rainbows.py), so
+engage pauses that automation (or the strip going red would turn the ring
+rainbow) and stand-down re-enables it and, if the strip was on, puts the
+ring's rainbow (``scene.fan_light_rainbow``) back.
 
 A scene snapshot restores colour and brightness but not animated modes, and
 Govee's app modes (Nick's rainbow) don't show up in Home Assistant at all.
@@ -48,6 +52,10 @@ _COLOUR = "light.nick_strip_lights,light.strip_lights,light.desk_lights,light.de
 _OFF = "light.bedroom_lights,light.nicks_fan,switch.avengers_tower_socket_1"  # not red: dark
 _EFFECTS_FILE = Path(__file__).resolve().parents[1] / "memory" / "barn_door_effects.json"
 _TV_FILE = Path(__file__).resolve().parents[1] / "memory" / "barn_door_tv.json"
+_FAN_FILE = Path(__file__).resolve().parents[1] / "memory" / "barn_door_fan.json"
+_FOLLOW = "automation.fan_light_follows_strip"
+_FAN_RAINBOW = "scene.fan_light_rainbow"
+_STRIP = "light.nick_strip_lights"
 
 
 def _ids(key: str, default: str) -> list[str]:
@@ -57,7 +65,9 @@ def _ids(key: str, default: str) -> list[str]:
 def engage() -> str:
     colour, off = _ids("BARN_DOOR_LIGHTS", _COLOUR), _ids("BARN_DOOR_OFF", _OFF)
     first = theme.current()["theme"] != "barnDoor"  # engaging twice must not snapshot the red
+    home_assistant.call_service("automation", "turn_off", _FOLLOW)  # no rainbow ring mid-alert
     if first:
+        _save_fan(_STRIP)
         home_assistant.call_service("scene", "create", service_data={
             "scene_id": _SCENE, "snapshot_entities": colour + off})
     # No alert: the red room and the TV taking over say it (Nick's call).
@@ -118,6 +128,24 @@ def _tv_back() -> bool:
     return True
 
 
+def _save_fan(strip: str) -> None:
+    """Whether the strip (so the fan ring's rainbow) was on before Barn Door."""
+    ok, state = home_assistant._request("GET", f"/api/states/{strip}")
+    _FAN_FILE.parent.mkdir(parents=True, exist_ok=True)
+    _FAN_FILE.write_text(json.dumps({"strip_on": bool(ok and isinstance(state, dict) and state.get("state") == "on")}))
+
+
+def _fan_back() -> None:
+    try:
+        strip_on = json.loads(_FAN_FILE.read_text()).get("strip_on", False)
+    except (OSError, ValueError):
+        strip_on = False
+    _FAN_FILE.unlink(missing_ok=True)
+    home_assistant.call_service("automation", "turn_on", _FOLLOW)
+    if strip_on:
+        home_assistant.call_service("scene", "turn_on", _FAN_RAINBOW)
+
+
 def _save_effects(entities: list[str]) -> None:
     """Each light's running effect (and each configured DIY-scene dropdown's
     pick), which scene snapshots don't bring back."""
@@ -163,4 +191,5 @@ def stand_down() -> str:
             home_assistant.call_service("select", "select_option", entity, {"option": effect})
         else:
             home_assistant.call_service("light", "turn_on", entity, {"effect": effect})
+    _fan_back()
     return f"Standing down, sir. Lights are back and the theme is {restored} again."

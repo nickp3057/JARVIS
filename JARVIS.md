@@ -759,7 +759,7 @@ ROOM_ANNOUNCEMENTS=1        # speak runtime announcements (never in quiet hours)
 ROOM_QUIET_HOURS=22-7       # night mode hours; empty turns night mode off
 ROOM_NIGHT_VOLUME=3         # 0-10 speaker level in quiet hours (voice changes at night override)
 ROOM_VOLUME_CONTROL=Master  # ALSA mixer control for "volume 4" / "louder"
-LIGHT_RAINBOWS=             # light=select:option pairs for the Rainbow button (defaults to Nick's strip + desk DIY scenes, and the lamp's built-in Rainbow scene)
+LIGHT_RAINBOWS=             # light=select:option (or light=scene.x) pairs for the Rainbow button (defaults to Nick's strip + desk DIY scenes, the lamp's built-in Rainbow scene, and the fan ring's scene.fan_light_rainbow Tap-to-Run)
 ALERT_REPEAT_WINDOW_S=1800  # the same warning again within this long is dropped, even across restarts (memory/alert_repeats.json); 0 = off
 RING_LIGHTS=light.nicks_fan # colour-only lights: the apps never send white (the fan's RGB ring)
 RESTING_SCENES=scene.normal,scene.peace,scene.goodnight  # running one means "no scene"
@@ -1405,6 +1405,23 @@ CALENDAR_ALERT_LEAD_MIN=10  # warn this many minutes before a meeting
   a tap or any light coming on cancels it. Core's room voice now logs
   `Mic open: <device>`; set `MIC_DEVICE=CMTECK` on the Optiplex (left
   empty it opened the onboard jack, so "Hey JARVIS" never heard anything).
+- **Room rainbows: lamp in the desk scenes, the fan ring follows the strip
+  (2026-11-04, iOS 5.78 / build 221)** — `ops/optiplex/room_rainbows.py`
+  (run on the Optiplex) gives every HA scene that turns the desk lights on
+  the lamp at 100% in its rotating Rainbow (`select.lamp_scene`), drops
+  Movie's "fan light off", renames a Smart Life Tap-to-Run that puts the fan
+  ring in its multi-colour scene mode to `scene.fan_light_rainbow` (HA's
+  Tuya integration can't set that mode itself; Nick makes the Tap-to-Run),
+  and adds HA automation `automation.fan_light_follows_strip` (strip off→on
+  runs that scene, strip off turns the fan light off). `LIGHT_RAINBOWS`
+  now takes `light=scene.x`; the fan light's Rainbow button appears once
+  the scene exists. Barn Door pauses the automation while engaged and on
+  stand-down re-enables it (and the ring's rainbow if the strip was on,
+  `memory/barn_door_fan.json`). Nick lifted the "never turn the fan light
+  on" rule for this; white mode is still never sent. iPad Room fix: the
+  Hub tab stops the shared polling when the app leaves the foreground but
+  only restarts it if Hub is showing, so the Room came back with no scene
+  or stream refresh; Room now restarts it on becoming active.
 - **Rainbow in the light sheet, on phone and iPad (iOS 4.11 / build 133)** —
   lights in `LIGHT_RAINBOWS` (default: Nick Strip Lights → its DIY "Real
   Rainbow", Desk Lights → "New Rainbow", via `select.<light>_diy_scene`;

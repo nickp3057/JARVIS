@@ -129,6 +129,19 @@ Nick's running to-do list for the project. When one ships, move it to
 `JARVIS.md` "Recently Shipped" and delete it here. Newest asks at the bottom
 of each group.
 
+### Room rainbows + iPad scenes (2026-11-04, 5.78 / build 221): check
+
+- Nick: make a Smart Life Tap-to-Run "Fan Light Rainbow" (fan light, Scene
+  mode, its rainbow), then on the Optiplex `git pull`,
+  `.venv/bin/python ops/optiplex/room_rainbows.py`, restart jarvis-api.
+- Check the ring really goes multi-colour (not one hue) from the Tap-to-Run;
+  if Smart Life's action can't pick the ring's scene, the fallback is local
+  control (tinytuya + the device's local key) to write its scene DP.
+- Good Morning / Study / Game Time / Rainbow: lamp on in Rainbow. Movie:
+  fan ring on with the strip. Barn Door: ring stays dark, comes back after.
+- iPad: background the app on the Room tab and come back; scenes and the
+  lit tile should refresh (server log shows `/api/home/scenes` again).
+
 ### Lamp, alerts, Schwab (2026-11-03, iOS 5.72, Core c1b6ecb..051688f): check
 
 All pushed and installed on the iPhone and iPad; Core needs `git pull` and a

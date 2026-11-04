@@ -90,6 +90,18 @@ class SceneAndLightTests(unittest.TestCase):
                 status_hub.set_light("light.desk", rainbow=True)  # no rainbow set for the desk
         os.environ.pop("LIGHT_RAINBOWS")
         self.assertIn("light.nick_strip_lights", status_hub.rainbows())  # Nick's defaults
+        self.assertEqual(status_hub.rainbows()["light.nicks_fan"], ("scene.fan_light_rainbow", ""))
+
+    def test_scene_rainbow_runs_the_scene_and_hides_until_it_exists(self) -> None:
+        os.environ["LIGHT_RAINBOWS"] = "light.desk=scene.desk_rainbow"
+        self.assertEqual(status_hub.set_light("light.desk", rainbow=True)["error"], "")
+        self.call.assert_called_once_with("scene", "turn_on", entity_id="scene.desk_rainbow")
+        desk = {"entity_id": "light.desk", "state": "off", "attributes": {"supported_color_modes": ["hs"]}}
+        rainbow = {"entity_id": "scene.desk_rainbow", "state": "x", "attributes": {}}
+        with patch.object(status_hub, "get_states", return_value=(True, [desk])):
+            self.assertFalse(status_hub._home_entities_uncached()["entities"][0]["light"]["rainbow"])
+        with patch.object(status_hub, "get_states", return_value=(True, [desk, rainbow])):
+            self.assertTrue(status_hub._home_entities_uncached()["entities"][0]["light"]["rainbow"])
 
     def test_voice_toggle_skips_the_settle_wait(self) -> None:
         with patch.object(status_hub, "_settled_state") as settle:
