@@ -174,7 +174,7 @@ def add_movie(
         from brain import confirm_gate
 
         year = movie.get("year", "")
-        return confirm_gate.propose(
+        return confirm_gate.act(
             session_id,
             f"add {movie.get('title', 'it')}{f' ({year})' if year else ''} to Radarr on the {profile_detail} profile",
             post,

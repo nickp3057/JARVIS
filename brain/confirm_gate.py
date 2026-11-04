@@ -89,6 +89,22 @@ def propose(session_id: str | None, description: str, run: Callable[[], str]) ->
             f"within {_TTL_S // 60} minutes, sir. Nothing has been changed yet.")
 
 
+def act(session_id: str | None, description: str, run: Callable[[], str]) -> str:
+    """Run an action Nick asked for right away (2026-11-04: he hates the
+    "approve 4033" round trip). A guest voice still only gets a proposal,
+    which only Nick can approve. Use ``propose`` for fixes JARVIS suggests
+    on its own."""
+    from brain import voice_trust
+    if not voice_trust.trusted():
+        return propose(session_id, description, run)
+    log.info("Running requested action for session %s: %s", session_id, description)
+    try:
+        return run()
+    except Exception as exc:  # noqa: BLE001
+        log.exception("Requested action failed: %s", description)
+        return f"That failed ({exc}), sir. Nothing will retry it automatically."
+
+
 def awaiting_yes(session_id: str | None) -> bool:
     """True when a bare "yes" as Nick's next message would approve something."""
     if not session_id:

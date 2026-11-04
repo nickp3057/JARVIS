@@ -242,7 +242,7 @@ def add_series(
         from brain import confirm_gate
 
         year = series.get("year", "")
-        return confirm_gate.propose(
+        return confirm_gate.act(
             session_id,
             f"add {series.get('title', 'it')}{f' ({year})' if year else ''} to Sonarr on the {profile_detail} profile",
             post,

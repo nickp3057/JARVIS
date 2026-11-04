@@ -169,16 +169,14 @@ class DoctorTests(unittest.TestCase):
         self.assertEqual(report["stage"], "sweep")
         self.assertIn("Dune", report["summary"])
 
-    def test_fix_requires_approval_and_runs_once(self) -> None:
+    def test_fix_nick_asked_for_runs_at_once(self) -> None:
         arr = FakeArr({("radarr", "GET", "/api/v3/movie"): [DUNE], ("radarr", "GET", "/api/v3/history/movie"): [],
                        ("radarr", "POST", "/api/v3/command"): {"id": 1}})
         report = self.run_doctor(arr)
         doctor.remember_fixes("s", report)
         with patch.object(servarr, "call", arr.call), patch.object(servarr, "request", arr.request):
-            prompt = doctor.propose_fix("s", "fix1")
-            self.assertIn("Nothing has been changed", prompt)
-            self.assertFalse(any(c[1] == "POST" for c in arr.calls))
-            self.assertIn("Search started", confirm_gate.conversation_action("yes", "s"))
+            self.assertIn("Search started", doctor.propose_fix("s", "fix1"))
+            self.assertIsNone(confirm_gate.conversation_action("yes", "s"))
         posts = [c for c in arr.calls if c[1] == "POST"]
         self.assertEqual(posts[0][3]["json"], {"name": "MoviesSearch", "movieIds": [7]})
         self.assertEqual(len(posts), 1)
@@ -187,7 +185,7 @@ class DoctorTests(unittest.TestCase):
         doctor.remember_fixes("s", self.run_doctor(FakeArr(down={"radarr", "sonarr"})))
         with patch("brain.arr_stack.prepare_restart", return_value="restart prompt") as prepare:
             self.assertEqual(doctor.propose_fix("s", "fix1"), "restart prompt")
-        prepare.assert_called_once_with("s")
+        prepare.assert_called_once_with("s", direct=True)
 
     def test_fix_without_diagnosis_refused(self) -> None:
         self.assertIn("diagnose_media first", doctor.propose_fix("nobody", "fix1"))

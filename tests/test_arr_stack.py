@@ -225,18 +225,23 @@ class ArrMonitorTests(unittest.TestCase):
             result = nas_stack.poll_health()
         self.assertEqual(result['issues'], {})
 
-    def test_update_is_staged_then_held_after_yes(self):
-        from brain import confirm_gate
-        confirm_gate.clear_for_tests()
+    def test_update_runs_at_once_and_holds_alerts(self):
         with patch.object(arr_stack.qbittorrent, 'active_downloads', return_value=(True, [])), \
              patch.object(nas_stack, 'start_update', return_value=(True, {'state': 'accepted'})) as start:
-            prompt = arr_stack.prepare_update('s')
-            start.assert_not_called()
-            self.assertIn('update the arr stack', prompt)
-            self.assertIn('Update started', confirm_gate.conversation_action('yes', 's'))
+            self.assertIn('Update started', arr_stack.prepare_update('s'))
         start.assert_called_once()
         self.assertTrue(arr_stack.recovery_in_progress())
         arr_stack._update_hold_until = 0.0
+
+    def test_guest_update_is_only_staged(self):
+        from brain import confirm_gate
+        confirm_gate.clear_for_tests()
+        with patch('brain.voice_trust.trusted', return_value=False), \
+             patch.object(arr_stack.qbittorrent, 'active_downloads', return_value=(True, [])), \
+             patch.object(nas_stack, 'start_update') as start:
+            self.assertIn('Nothing has been changed', arr_stack.prepare_update('s'))
+        start.assert_not_called()
+        confirm_gate.clear_for_tests()
 
     def test_watchdog_note_recent_and_unknown(self):
         note = nas_stack.watchdog_note((True, {'observed_at': 5000, 'watchdog_actions': {'.last_action': 4800, '.rotate_cooldown': 0}, 'recovery': {'source': 'dht', 'state': 'success', 'updated_at': 4900}}))
@@ -451,18 +456,32 @@ class RestartApprovalTests(unittest.TestCase):
         self.downloads = patch.object(qbittorrent, 'active_downloads', return_value=(True, ['Movie.2026']))
         self.downloads.start()
         self.addCleanup(self.downloads.stop)
+        # The code gate below is what a guest voice gets; Nick's own requests
+        # run at once (tests marked "nick" patch this back to True).
+        self.trust = patch('brain.voice_trust.trusted', return_value=False)
+        self.trust.start()
+        self.addCleanup(self.trust.stop)
 
     @staticmethod
     def code(reply):
         return re.search(r'confirm (\d{4})', reply)[1]
 
-    def test_idle_direct_request_restarts_without_confirmation(self):
-        with patch.object(qbittorrent, 'active_downloads', return_value=(True, [])), \
+    def test_nick_idle_direct_request_restarts_without_confirmation(self):
+        with patch('brain.voice_trust.trusted', return_value=True), \
+                patch.object(qbittorrent, 'active_downloads', return_value=(True, [])), \
                 patch.object(arr_stack, '_run_recovery', return_value='Restart accepted by the NAS, sir.') as run:
             reply = arr_stack.conversation_action('Restart the arr stack.', 'a')
-        self.assertEqual(reply, 'Nothing downloading, restarting now. Restart accepted by the NAS, sir.')
+        self.assertEqual(reply, 'Restarting now. Restart accepted by the NAS, sir.')
         run.assert_called_once()
         self.assertNotIn('a', arr_stack._pending)
+
+    def test_nick_restart_tool_runs_even_while_downloading(self):
+        with patch('brain.voice_trust.trusted', return_value=True), \
+                patch.object(arr_stack, '_run_recovery', return_value='Restart accepted by the NAS, sir.') as run:
+            reply = arr_stack.prepare_restart('a', direct=True)
+        run.assert_called_once()
+        self.assertIn('1 download(s) pause', reply)
+        self.assertNotIn('confirm', reply)
 
     def test_idle_tool_path_never_restarts_by_itself(self):
         with patch.object(qbittorrent, 'active_downloads', return_value=(True, [])), \

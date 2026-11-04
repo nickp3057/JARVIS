@@ -561,5 +561,5 @@ def propose_fix(session_id: str | None, fix_id: str) -> str:
     if fix is None:
         return f"No fix '{fix_id}' in the last diagnosis; options were {', '.join(stored[1]) or 'none'}."
     if fix["id"] == "restart_arr_stack":
-        return arr_stack.prepare_restart(session_id)
-    return confirm_gate.propose(session_id, fix["label"], _run_fix(fix))
+        return arr_stack.prepare_restart(session_id, direct=True)
+    return confirm_gate.act(session_id, fix["label"], _run_fix(fix))

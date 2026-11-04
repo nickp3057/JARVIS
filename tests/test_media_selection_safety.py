@@ -48,7 +48,7 @@ class MediaSelectionSafetyTests(unittest.TestCase):
     @patch("integrations.radarr.servarr.resolve_quality", return_value=(2, "HD-720p"))
     @patch("integrations.radarr.servarr.is_configured", return_value=True)
     @patch("integrations.radarr._lookup")
-    def test_pick_from_several_matches_needs_nicks_yes(
+    def test_pick_from_several_matches_needs_a_yes_only_from_a_guest(
         self, lookup, _configured, _quality, _root, call
     ) -> None:
         from brain import confirm_gate
@@ -58,10 +58,27 @@ class MediaSelectionSafetyTests(unittest.TestCase):
         lookup.side_effect = [(True, [gold, other]), (True, [gold])]
         call.return_value = servarr.Result(True, {"id": 1}, "ok")
         radarr.find_movie("Gold", session_id="phone")
-        prompt = radarr.add_movie(339964, confirmed=True, session_id="phone")
+        with patch("brain.voice_trust.trusted", return_value=False):
+            prompt = radarr.add_movie(339964, confirmed=True, session_id="phone")
         self.assertIn("add Gold (2016) to Radarr", prompt)
         call.assert_not_called()
         self.assertIn("Added Gold (2016)", confirm_gate.conversation_action("yes", "phone"))
+        call.assert_called_once()
+
+    @patch("integrations.radarr.servarr.call")
+    @patch("integrations.radarr.servarr.resolve_root_folder", return_value=(1, "/movies"))
+    @patch("integrations.radarr.servarr.resolve_quality", return_value=(2, "HD-720p"))
+    @patch("integrations.radarr.servarr.is_configured", return_value=True)
+    @patch("integrations.radarr._lookup")
+    def test_nicks_pick_from_several_matches_adds_at_once(
+        self, lookup, _configured, _quality, _root, call
+    ) -> None:
+        gold = {"title": "Gold", "year": 2016, "tmdbId": 339964}
+        other = {"title": "Gold", "year": 2014, "tmdbId": 1}
+        lookup.side_effect = [(True, [gold, other]), (True, [gold])]
+        call.return_value = servarr.Result(True, {"id": 1}, "ok")
+        radarr.find_movie("Gold", session_id="phone")
+        self.assertIn("Added Gold (2016)", radarr.add_movie(339964, confirmed=True, session_id="phone"))
         call.assert_called_once()
 
     @patch("integrations.radarr.servarr.call")

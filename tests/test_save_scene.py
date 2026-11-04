@@ -70,9 +70,16 @@ class ToolTests(unittest.TestCase):
     def test_list_scenes(self) -> None:
         self.assertIn("Saved scenes: Movie.", tools.execute_tool("list_scenes", {}))
 
-    def test_save_only_proposes_until_nick_approves(self) -> None:
+    def test_save_runs_at_once_for_nick(self) -> None:
         with patch("integrations.home_assistant._request", return_value=(True, {})) as request:
             reply = tools.execute_tool("save_scene", {"name": "Movie", "_jarvis_session_id": "s1"})
+        self.assertIn("scene.movie", reply)
+        request.assert_called_once()
+
+    def test_guest_save_only_proposes_until_nick_approves(self) -> None:
+        with patch("integrations.home_assistant._request", return_value=(True, {})) as request:
+            with patch("brain.voice_trust.trusted", return_value=False):
+                reply = tools.execute_tool("save_scene", {"name": "Movie", "_jarvis_session_id": "s1"})
             self.assertIn("replace the scene 'Movie'", reply)
             request.assert_not_called()
             done = confirm_gate.conversation_action("yes", "s1")

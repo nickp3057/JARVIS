@@ -68,7 +68,7 @@ Pearson-Stark-Jarvis/
 │   ├── notifications.py     Phone alert router: companion push (APNs, stubbed) then HA notify fallback
 │   ├── event_bus.py         Single alert bus: publish once; phone (APNs→HA) and SSE client streams subscribe
 │   ├── arr_stack.py         Arr alert hysteresis/per-indexer tracking, restart confirmation gate, async recovery follow-up
-│   ├── confirm_gate.py      Generic session-bound "yes"/"approve <code>" gate for side-effecting fixes (media doctor); several proposals at once, "yes" approves all staged that turn, one message can carry several codes
+│   ├── confirm_gate.py      `act()` runs what Nick asked for at once (a guest voice only gets a proposal); `propose()` is the session-bound "yes"/"approve <code>" gate for fixes JARVIS suggests itself; several proposals at once, "yes" approves all staged that turn, one message can carry several codes
 │   ├── arr_incidents.py     Arr push policy: watchdog-recovery hold + summary, minimum downtime, grouped incidents, daily indexer digest
 │   ├── stack_fixes.py       Tier-2 allowlist of NAS-stack fixes (HA restart, indexer re-test, indexer mirror switch, Plex rescan, arr recovery, download retry), each with a post-fix check
 │   ├── self_repair.py       Governed self-repair: diagnose a subsystem, stage a bounded fix, apply on approval
@@ -197,7 +197,7 @@ RMS envelope from ElevenLabs audio drives the orb in real time using a monotonic
   ("what scenes do I have?")
 - `save_scene(name)` — capture the room's allowlisted lights, plugs and fan
   (`HOME_DASHBOARD_ENTITIES`) and save them as an HA scene via
-  `/api/config/scene/config/<slug>`; confirm-gated (`brain/confirm_gate.py`),
+  `/api/config/scene/config/<slug>`; saves at once (`confirm_gate.act`; a guest voice only proposes),
   replaces a scene of the same name. Never includes `switch.wii_u`; ring lights
   (`RING_LIGHTS`, the fan light) are always saved off; fans get HA 2026.10's
   required `direction`/`preset_mode`. Govee DIY rainbows can't be read back,
@@ -426,7 +426,8 @@ RMS envelope from ElevenLabs audio drives the orb in real time using a monotonic
 - "Add <title>" is the confirmation: when the pick is the only result, or the
   top result with no other result of the same title, the add runs in the same
   turn (`media_selections.is_clear_pick`). Otherwise (two "Gold"s, or the
-  model picked a lower result) it goes through `confirm_gate` for Nick's yes.
+  model picked a lower result) it still adds at once for Nick; only a guest
+  voice gets a `confirm_gate` proposal.
 - `list_quality_profiles(service?)` — the profile names defined in Radarr /
   Sonarr, for when a quality phrase doesn't match.
 - `media_queue(service?)` — live Radarr/Sonarr activity with movie/show/episode,
@@ -435,9 +436,9 @@ RMS envelope from ElevenLabs audio drives the orb in real time using a monotonic
   Servarr health warnings
 - `media_history(service, limit?)` / `missing_media(service, limit?)` /
   `upcoming_media(service, days?)` — bounded read-only operational views
-- **Always confirm first**: the agent must surface the match and get an
-  explicit yes before calling `add_*`; never auto-adds on ambiguous results.
-  Selection receipts bind the allowed TMDB/TVDB IDs to the conversation for
+- **No confirmation round** (2026-11-04: Nick hates "approve 4093"): his
+  request is the yes. When several plausible titles compete the agent asks
+  which one, once. Selection receipts bind the allowed TMDB/TVDB IDs to the conversation for
   15 minutes, and are consumed after a successful add. One selection or “yes”
   is sufficient; configured quality/monitor defaults must not trigger more
   confirmation questions.
@@ -2027,8 +2028,8 @@ CALENDAR_ALERT_LEAD_MIN=10  # warn this many minutes before a meeting
   → Plex, and stops at the first stuck stage in plain English. No title = sweep
   every queued download. Suggested fixes (re-search, monitor + search, replace
   a dead release with blocklist, Plex rescan, restart arr stack) are proposed
-  by `apply_media_fix` and run only after Nick's "yes"/"approve <code>"
-  (`brain/confirm_gate.py`; restart uses the arr restart gate). Also
+  by the diagnosis and run when Nick asks (`apply_media_fix` → `confirm_gate.act`,
+  at once; restart goes through `prepare_restart(direct=True)`). Also
   `GET /api/status/media/diagnose?title=&kind=movie|show` (read-only JSON:
   stage, stalled, summary, steps, fixes, candidates).
 - **Companion media requests** (`integrations/media_requests.py`) — chat-free
@@ -2321,18 +2322,18 @@ hand-test commands. Installation hardens previously writable path/SSH ACLs.
 - Asking directly ("restart the arr stack", "can you restart arr stack
   please") first checks qBittorrent via `qbittorrent.active_downloads()`
   (incomplete torrents in downloading/metaDL/forcedDL/allocating state or with
-  download speed > 0; stalled, queued and paused ones don't count). Zero
-  active: it restarts immediately ("Nothing downloading, restarting now").
-  Otherwise, or if qBittorrent can't be checked, it opens a session-bound
-  request with a 4-digit code: a bare "yes"/"confirm"/"go ahead" works only
+  download speed > 0; stalled, queued and paused ones don't count). From Nick
+  (phone, desktop, his voiceprint) it restarts immediately, downloads or not
+  ("Restarting now; N download(s) pause and pick back up after"). A guest
+  voice instead gets a session-bound request with a 4-digit code: a bare "yes"/"confirm"/"go ahead" works only
   as Nick's very next message (any other message closes that window), and
   "confirm <code>" (or the bare code, or the old long phrase with the code)
   works for ten minutes. A bare "no"/"cancel" as the next message, or
   `cancel arr restart` any time, cancels. The request is consumed once, before
-  SSH. `restart_arr_stack` (the model's tool) never restarts by itself: it
-  only opens the same request. The direct request also works in offline
-  text/voice.
-- `update_arr_stack` stages "update the arr stack" for Nick's yes: the NAS's
+  SSH. `restart_arr_stack` (the model's tool) uses the same direct path, so
+  "restart it" in chat runs at once too. The direct request also works in
+  offline text/voice.
+- `update_arr_stack` updates the arr stack at once when Nick asks: the NAS's
   compose updater (`ops/nas/stack_updater.sh`, the weekly root-cron job) runs
   at once through the recovery key (`update <uuid>`), pulling images and
   recreating only changed containers, never through the UGOS GUI. Arr alerts

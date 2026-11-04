@@ -164,8 +164,8 @@ def _tool_save_scene(args: dict[str, Any]) -> str:
         return f"Saved. '{name}' is {result['entity_id']}, sir."
 
     verb = "replace the scene" if exists else "save the room as a new scene"
-    return confirm_gate.propose(args.get("_jarvis_session_id"),
-                                f"{verb} '{name}' ({status_hub.describe_capture(entities)})", run)
+    return confirm_gate.act(args.get("_jarvis_session_id"),
+                            f"{verb} '{name}' ({status_hub.describe_capture(entities)})", run)
 
 
 def _tool_list_home_services(args: dict[str, Any]) -> str:
@@ -897,12 +897,12 @@ def _tool_voice_shortcuts(args: dict[str, Any]) -> str:
 _CUSTOM_TOOLS: list[dict[str, Any]] = [
     {
         "name": "restart_arr_stack",
-        "description": "Prepare a NAS arr stack restart. Reports whether torrents are actively downloading and opens a session-bound request: Nick approves with a bare \"yes\" as his very next message or \"confirm <4-digit code>\" within 10 minutes. This tool cannot execute recovery. Never claim a restart has happened from this tool.",
+        "description": "Restart (recover) the NAS arr stack now: recreates gluetun and the arr containers; active downloads pause and resume. Call when Nick asks for a restart; it runs at once, no confirmation. Relay its reply; the verified outcome arrives later as an alert, so never claim it succeeded early.",
         "input_schema": {"type": "object", "properties": {}, "additionalProperties": False},
     },
     {
         "name": "update_arr_stack",
-        "description": "Update the NAS arr stack (qBittorrent, Radarr, Sonarr, Prowlarr, gluetun, Byparr, Tailscale, Plex) the safe way: the NAS's own compose updater pulls new images and recreates only changed containers, never the UGOS GUI. Use when Nick asks to update the arr stack / Radarr / Sonarr / Prowlarr, or to clear an \"update available\" warning. Stages it; Nick's yes runs it. Never claim it ran from this tool.",
+        "description": "Update the NAS arr stack (qBittorrent, Radarr, Sonarr, Prowlarr, gluetun, Byparr, Tailscale, Plex) the safe way: the NAS's own compose updater pulls new images and recreates only changed containers, never the UGOS GUI. Use when Nick asks to update the arr stack / Radarr / Sonarr / Prowlarr, or to clear an \"update available\" warning, or asks whether anything needs updating and wants it done. Runs at once, no confirmation. Relay its reply as-is.",
         "input_schema": {"type": "object", "properties": {}, "additionalProperties": False},
     },
     {
@@ -1000,8 +1000,7 @@ _CUSTOM_TOOLS: list[dict[str, Any]] = [
         "name": "save_scene",
         "description": (
             "Save the room's current lights, plugs and fan as a Home Assistant scene with this name "
-            "(\"save this as a scene called Reading\"). Captures now and proposes; Nick approves "
-            "with \"yes\" or the code before anything is written. An existing name is replaced. "
+            "(\"save this as a scene called Reading\"). Captures and saves at once. An existing name is replaced. "
             "The Wii U plug is never included and the fan light is always saved off."
         ),
         "input_schema": {
@@ -2165,9 +2164,8 @@ _CUSTOM_TOOLS: list[dict[str, Any]] = [
     {
         "name": "apply_media_fix",
         "description": (
-            "Propose one fix from the latest diagnose_media result (fix1, fix2, ...). This never "
-            "changes anything itself: it returns a prompt and the fix runs only if Nick replies "
-            "\"yes\" next or \"approve <code>\". Call only when Nick asks for that fix."
+            "Apply one fix from the latest diagnose_media result (fix1, fix2, ...) right away. "
+            "Call only when Nick asks for that fix (\"fix it\", \"do fix1\", \"yes\" to your offer)."
         ),
         "input_schema": {
             "type": "object",
@@ -2391,7 +2389,7 @@ _CUSTOM_TOOLS: list[dict[str, Any]] = [
 # Map each tool name to the local function that executes it. Server tools
 # (like web_search) are intentionally absent - Anthropic runs those.
 _DISPATCH: dict[str, Callable[[dict[str, Any]], str]] = {
-    "restart_arr_stack": lambda args: arr_stack.prepare_restart(args.get("_jarvis_session_id")),
+    "restart_arr_stack": lambda args: arr_stack.prepare_restart(args.get("_jarvis_session_id"), direct=True),
     "update_arr_stack": lambda args: arr_stack.prepare_update(args.get("_jarvis_session_id")),
     "arr_stack_status": lambda args: arr_stack.describe_status(),
     "get_time": _tool_get_time,

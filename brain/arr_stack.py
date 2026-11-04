@@ -240,7 +240,7 @@ def prepare_update(session_id: str | None) -> str:
         why = f"{len(downloading)} torrent(s) downloading will pause while containers restart"
     else:
         why = "nothing is downloading"
-    return confirm_gate.propose(
+    return confirm_gate.act(
         session_id,
         f"update the arr stack on the NAS (pull new images, restart only what changed, about 5 minutes; {why})",
         start_update,
@@ -295,22 +295,26 @@ def _launch(request_id: str) -> tuple[bool, str]:
 
 
 def prepare_restart(session_id: str | None, *, direct: bool = False) -> str:
-    """Restart at once when Nick asked directly and nothing is downloading;
-    otherwise open (or reuse) a session-bound request with a 4-digit code.
-
-    The model's tool path never restarts by itself (direct=False): it only
-    opens the request, so a restart always follows a message Nick sent."""
+    """Restart at once when Nick asked (``direct``, his voice or phone), even
+    with downloads running; they resume. A guest's request, or ``direct=False``,
+    opens (or reuses) a session-bound request with a 4-digit code."""
     if not session_id:
         return 'Restart refused: a conversation session is required, sir.'
     if not nas_stack.enabled('ARR_STACK_RESTART_ENABLED'):
         return 'Arr stack restart is disabled until the restricted NAS keys are installed and tested, sir.'
     checked, downloading = qbittorrent.active_downloads()
-    if direct and checked and not downloading:
+    from brain import voice_trust
+    if direct and voice_trust.trusted():
+        # Nick asked: restart now, no code (2026-11-04). Downloads resume afterwards.
         with _pending_lock:
             _pending.pop(session_id, None)
             _armed.discard(session_id)
         started, reply = _launch(str(uuid.uuid4()))
-        return f'Nothing downloading, restarting now. {reply}' if started else reply
+        if not started:
+            return reply
+        if checked and downloading:
+            return f'Restarting now; {len(downloading)} download(s) pause and pick back up after. {reply}'
+        return f'Restarting now. {reply}'
     now = time.monotonic()
     with _pending_lock:
         # Re-asking (by Nick or by the model retrying the tool) must not churn
