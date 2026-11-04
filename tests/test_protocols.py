@@ -25,6 +25,7 @@ class BarnDoorTests(unittest.TestCase):
         self.addCleanup(fan.stop)
         states = {"light.desk_lights_2": {"attributes": {"effect": "Rainbow"}},
                   "light.nick_strip_lights": {"state": "on", "attributes": {}},
+                  "light.nicks_fan": {"state": "on", "attributes": {}},
                   "select.desk_lights_diy_scene": {"state": "New Rainbow", "attributes": {}},
                   "select.nick_strip_lights_diy_scene": {"state": "None", "attributes": {}}}
         get = patch.object(protocols.home_assistant, "_request",
@@ -42,10 +43,10 @@ class BarnDoorTests(unittest.TestCase):
         snapshot = self.calls("scene", "create")[0].kwargs["service_data"]
         self.assertIn("light.nicks_fan", snapshot["snapshot_entities"])
         red = self.calls("light", "turn_on")
-        self.assertEqual(len(red), 5)
+        self.assertEqual(len(red), 6)
         self.assertIn("light.lamp", [c.args[2] for c in red])  # the Govee lamp goes red too
-        self.assertNotIn("light.nicks_fan", [c.args[2] for c in red])  # the fan light is never turned on
-        self.assertIn("light.nicks_fan", [c.args[2] for c in self.calls("light", "turn_off")])
+        self.assertIn("light.nicks_fan", [c.args[2] for c in red])  # the fan ring goes red (colour, never white)
+        self.assertNotIn("light.nicks_fan", [c.args[2] for c in self.calls("light", "turn_off")])
         self.assertEqual(len(self.calls("remote", "turn_on")), 1)  # the TV wakes for the red-alert screen
         self.assertEqual(red[0].args[3]["rgb_color"], [255, 0, 0])
         self.assertEqual(self.calls("light", "turn_off")[0].args[2], "light.bedroom_lights")
@@ -61,7 +62,7 @@ class BarnDoorTests(unittest.TestCase):
         self.assertIn("mark85", tools.execute_tool("barn_door_protocol", {"action": "stand_down"}))
         self.assertEqual(self.calls("scene", "turn_on")[0].args[2], "scene.barn_door_before")
         self.assertEqual(theme.current()["theme"], "mark85")
-        # The strip was on, so the ring's rainbow comes back and it follows the strip again.
+        # The ring was on with the strip (its rainbow), so the rainbow comes back and it follows the strip again.
         self.assertEqual(self.calls("scene", "turn_on")[-1].args[2], "scene.fan_light_rainbow")
         self.assertEqual(len(self.calls("automation", "turn_on")), 1)
         # Effects come back too: the one HA saw, and the configured Govee one.

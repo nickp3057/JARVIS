@@ -1415,9 +1415,11 @@ CALENDAR_ALERT_LEAD_MIN=10  # warn this many minutes before a meeting
   and adds HA automation `automation.fan_light_follows_strip` (strip off→on
   runs that scene, strip off turns the fan light off). `LIGHT_RAINBOWS`
   now takes `light=scene.x`; the fan light's Rainbow button appears once
-  the scene exists. Barn Door pauses the automation while engaged and on
-  stand-down re-enables it (and the ring's rainbow if the strip was on,
-  `memory/barn_door_fan.json`). Nick lifted the "never turn the fan light
+  the scene exists. Barn Door turns the ring red with the strip (it's in
+  `BARN_DOOR_LIGHTS`' default now, no longer `BARN_DOOR_OFF`), pauses the
+  automation while engaged, and on stand-down the snapshot puts the ring
+  back; if it was on with the strip, its rainbow runs again
+  (`memory/barn_door_fan.json`) and the automation is re-enabled. Nick lifted the "never turn the fan light
   on" rule for this; white mode is still never sent. iPad Room fix: the
   Hub tab stops the shared polling when the app leaves the foreground but
   only restarts it if Hub is showing, so the Room came back with no scene

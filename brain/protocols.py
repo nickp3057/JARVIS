@@ -15,12 +15,14 @@ theme over ``/api/home/stream`` at once), then the lights change in
 parallel; they used to go one by one with the theme last, so the TV lagged
 every slow Govee call.
 
-The fan light (``light.nicks_fan``) goes dark with the bedroom light. Since
-2026-11-04 it follows the strip in its rainbow (HA automation
-``automation.fan_light_follows_strip``, ops/optiplex/room_rainbows.py), so
-engage pauses that automation (or the strip going red would turn the ring
-rainbow) and stand-down re-enables it and, if the strip was on, puts the
-ring's rainbow (``scene.fan_light_rainbow``) back.
+The fan light (``light.nicks_fan``) is its RGB ring, so it goes red with the
+strip (Nick, 2026-11-04; red is a colour, never its white LED). It follows
+the strip in its rainbow (HA automation ``automation.fan_light_follows_strip``,
+ops/optiplex/room_rainbows.py), so engage pauses that automation (or the
+strip going red would turn the ring rainbow) and stand-down re-enables it.
+The snapshot puts the ring back off or in its colour; if it was on with the
+strip (its rainbow, which HA can't read back), ``scene.fan_light_rainbow``
+runs again.
 
 A scene snapshot restores colour and brightness but not animated modes, and
 Govee's app modes (Nick's rainbow) don't show up in Home Assistant at all.
@@ -48,8 +50,9 @@ from integrations import home_assistant
 
 _SCENE = "barn_door_before"
 # The Govee lamp joined 2026-11-03 (Nick: "it's now a full part of the room").
-_COLOUR = "light.nick_strip_lights,light.strip_lights,light.desk_lights,light.desk_lights_2,light.lamp"
-_OFF = "light.bedroom_lights,light.nicks_fan,switch.avengers_tower_socket_1"  # not red: dark
+_COLOUR = ("light.nick_strip_lights,light.strip_lights,light.desk_lights,light.desk_lights_2,light.lamp,"
+           "light.nicks_fan")  # the fan ring goes red too (2026-11-04)
+_OFF = "light.bedroom_lights,switch.avengers_tower_socket_1"  # not red: dark
 _EFFECTS_FILE = Path(__file__).resolve().parents[1] / "memory" / "barn_door_effects.json"
 _TV_FILE = Path(__file__).resolve().parents[1] / "memory" / "barn_door_tv.json"
 _FAN_FILE = Path(__file__).resolve().parents[1] / "memory" / "barn_door_fan.json"
@@ -128,21 +131,25 @@ def _tv_back() -> bool:
     return True
 
 
+def _is_on(entity: str) -> bool:
+    ok, state = home_assistant._request("GET", f"/api/states/{entity}")
+    return bool(ok and isinstance(state, dict) and state.get("state") == "on")
+
+
 def _save_fan(strip: str) -> None:
-    """Whether the strip (so the fan ring's rainbow) was on before Barn Door."""
-    ok, state = home_assistant._request("GET", f"/api/states/{strip}")
+    """Whether the fan ring was in its rainbow (on, with the strip on) before Barn Door."""
     _FAN_FILE.parent.mkdir(parents=True, exist_ok=True)
-    _FAN_FILE.write_text(json.dumps({"strip_on": bool(ok and isinstance(state, dict) and state.get("state") == "on")}))
+    _FAN_FILE.write_text(json.dumps({"rainbow": _is_on(strip) and _is_on("light.nicks_fan")}))
 
 
 def _fan_back() -> None:
     try:
-        strip_on = json.loads(_FAN_FILE.read_text()).get("strip_on", False)
+        rainbow = json.loads(_FAN_FILE.read_text()).get("rainbow", False)
     except (OSError, ValueError):
-        strip_on = False
+        rainbow = False
     _FAN_FILE.unlink(missing_ok=True)
     home_assistant.call_service("automation", "turn_on", _FOLLOW)
-    if strip_on:
+    if rainbow:
         home_assistant.call_service("scene", "turn_on", _FAN_RAINBOW)
 
 
