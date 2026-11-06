@@ -223,6 +223,63 @@ final class CompanionTests: XCTestCase {
         XCTAssertEqual(chat.messages.last?.role, .error)
     }
 
+    func testLiveVoiceUsesChatSessionAndPreservesTypedDraft() async throws {
+        MockProtocol.handler = { request in
+            switch (request.httpMethod ?? "GET", request.url!.path) {
+            case ("POST", "/sessions"): return (201, "{\"session_id\":\"voice-session\"}", 0)
+            case (_, "/health"): return (200, "{}", 0)
+            case (_, "/sessions"): return (200, "{\"sessions\":[]}", 0)
+            default: return (200, "{}", 0)
+            }
+        }
+        let store = MemoryStore()
+        let chat = model(store: store)
+        chat.draft = "An unfinished typed message"
+        let (conversation, session) = try await chat.prepareVoiceConversation()
+        XCTAssertEqual(session, "voice-session")
+        let response = try XCTUnwrap(chat.beginVoiceReply("Lamp on", conversationID: conversation, requestID: "voice-one"))
+        XCTAssertTrue(chat.isAwaitingReply)
+        XCTAssertTrue(chat.receiveVoiceChunk("\u{1D}Checking", responseID: response, conversationID: conversation))
+        XCTAssertTrue(chat.receiveVoiceChunk(" lights\u{1D}Done.", responseID: response, conversationID: conversation))
+        XCTAssertEqual(chat.messages.last?.text, "Done.")
+        chat.finishVoiceReply(responseID: response, conversationID: conversation)
+        XCTAssertFalse(chat.isAwaitingReply)
+        XCTAssertEqual(chat.draft, "An unfinished typed message")
+        XCTAssertEqual(store.archive.conversations.first(where: { $0.id == conversation })?.messages.last?.requestID, "voice-one")
+        try await waitUntil({ chat.connectionState == .online })
+    }
+
+    func testLiveVoiceFailurePreservesReceiptForRetryWithoutPartialBubble() async throws {
+        MockProtocol.handler = { request in
+            switch request.url!.path {
+            case "/health": return (200, "{}", 0)
+            case "/sessions":
+                return request.httpMethod == "POST" ? (201, "{\"session_id\":\"voice-session\"}", 0) : (200, "{\"sessions\":[]}", 0)
+            default: return (200, "{}", 0)
+            }
+        }
+        let chat = model()
+        let (conversation, _) = try await chat.prepareVoiceConversation()
+        let response = try XCTUnwrap(chat.beginVoiceReply("Hello", conversationID: conversation, requestID: "voice-retry"))
+        XCTAssertTrue(chat.receiveVoiceChunk("Partial reply", responseID: response, conversationID: conversation))
+        chat.finishVoiceReply(responseID: response, conversationID: conversation, error: "Disconnected")
+        XCTAssertTrue(chat.canRetry)
+        XCTAssertEqual(chat.messages.filter { $0.role == .jarvis }.count, 0)
+        XCTAssertEqual(chat.messages.first?.requestID, "voice-retry")
+        try await waitUntil({ chat.connectionState == .online })
+    }
+
+    func testLiveVoiceCallbacksCannotCrossConversations() async throws {
+        MockProtocol.handler = { _ in (201, "{\"session_id\":\"voice-session\"}", 0) }
+        let chat = model()
+        let (conversation, _) = try await chat.prepareVoiceConversation()
+        let response = try XCTUnwrap(chat.beginVoiceReply("Hello", conversationID: conversation, requestID: "voice-one"))
+        chat.startNewConversation()
+        XCTAssertFalse(chat.receiveVoiceChunk("Old reply", responseID: response, conversationID: conversation))
+        chat.finishVoiceReply(responseID: response, conversationID: conversation)
+        XCTAssertTrue(chat.messages.isEmpty)
+    }
+
     func testVisualSnapshots() async throws {
         MockProtocol.handler = { request in
             switch request.url!.path {

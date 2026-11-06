@@ -5,6 +5,65 @@ off, JARVIS sounds scattered because a whole tool turn lands in one bubble,
 replies didn't stream, and media adds sometimes fail. He leans toward a
 hub-first app with chat as one tab.
 
+## Phone live voice (5.77 / build 220, 2026-11-03)
+
+Hold the Home orb for 0.3 s; release to send. Slide away or leave the tab during
+capture to cancel. Single tap stays inert and triple-tap Barn Door stays.
+Native phone recognition streams partial transcripts to the Optiplex, with an
+HQ acknowledgement in the voice panel. Release finalizes the last word, binds
+to the current Chat session/request ID, then streams text plus PCM speech back.
+Playback starts on received chunks, not after downloading a full recording.
+Core’s existing ElevenLabs voice is used; Piper is the bounded fallback.
+
+`PushToTalkController`, `LiveVoiceConnection`, `VoiceAudioPlayer` and
+`PushToTalkView` own the client adapters. `VoiceInputController.finish()` stops
+capture immediately and allows a bounded final recognition result. Native hold
+ended/cancelled states keep a cancelled gesture from sending. Voice shares
+Chat’s history and receipts, preserves typed drafts, ignores superseded
+callbacks and stops on backgrounding/interruption. First-time speech/microphone
+permission prompts may cancel a hold; grant permission then hold again. Stop
+ends reception/playback; an action already committed at HQ can still finish.
+This first version exposes the hold gesture on phone Home only; iPad Room
+continues to follow the room microphone. All 38 simulator tests passed; Home
+navigation render inspected. Live Core smoke verified actual streamed PCM,
+transcript acknowledgement, cancel and receipt recovery. Signed 5.77 (220)
+installed on Nick’s iPhone 17 Pro; actual microphone/hold feel remains a device
+check. iPad stays on 5.76.
+
+## Chat chrome and orb taps (5.76 / build 219, 2026-11-03)
+
+Home’s one-tap briefing is removed; triple-tap Barn Door remains. Chat’s
+navigation bar and composer surroundings are transparent. Its connection row
+appears for connection issues or an active reply, without a dark strip. The
+phone tab shell ignores the keyboard safe area while the selected hosting page
+handles input avoidance; keyboard notifications hide/restore the tab row so it
+never lifts above the keyboard. Simulator coverage includes actual text-field
+focus, unchanged shell height, input lifting and tab-row restoration. All 35
+iOS simulator tests passed and Chat renders were inspected. Signed 5.76 (219)
+installed and reopened on Nick’s iPhone 17 Pro and iPad Air.
+
+## Orb sizing (5.75 / build 218, 2026-11-03)
+
+Home’s hero is 190 pt (was 170); accessibility sizes retain 130 pt. The shared
+classic reactor caps arc thickness and tick depth at the phone’s 190 pt
+reference, and uses an ultra-light waveform at larger sizes. Room keeps its
+responsive orb size with the phone’s finer line treatment. The existing visual
+snapshot test passed and the phone navigation render was checked; signed
+5.75 (218) installed on Nick’s iPhone 17 Pro and iPad Air.
+
+## Phone swipe review (5.74 / build 217, 2026-11-03)
+
+Phone tabs use native `UITabBarController` pages with a percent-driven slide.
+The outgoing and incoming pages travel together, retaining navigation and scroll
+state; distance and release velocity decide completion, and cancellation returns
+to the original page. Reduce Motion switches instantly on release. The tab bar,
+left-edge back gestures, sliders and horizontal content scrolling retain control.
+iPad/Mac retain their existing shell; idle work is bumped on release rather than
+every drag update. `PhoneTabsTests` exercises native completion/cancellation,
+persistent page identity and Reduce Motion. All 34 simulator tests passed,
+and the rendered navigation layout was inspected. Signed 5.74 (217) was
+installed on Nick’s iPhone 17 Pro; physical-device feel still needs Nick’s check.
+
 ## Already fixed on the server/app side (this branch)
 
 - Streaming: `/chat/stream` sends `nosniff`, so short replies type out live.
@@ -131,7 +190,7 @@ toolbar).
 
 ## Home as JARVIS (1.89, simulator tests pass)
 
-- Home: hero reactor (220 pt, tap = briefing prompt in Chat), greeting by
+- Home: hero reactor (190 pt as of 5.75; one-tap briefing removed in 5.76), greeting by
   time of day, date, and chips for systems and free space. The chips call
   `onOpenMedia`; `HubViewModel.mediaScrollTarget` tells the Media tab which
   card to scroll to and outline. Home hides its navigation bar; pushed

@@ -19,12 +19,23 @@ final class VoiceInputController: ObservableObject {
     private var draftPrefix = ""
     private var generation = UUID()
     private var startTask: Task<Void, Never>?
+    private var finishTask: Task<Void, Never>?
+    private var finishing = false
+    private var lastTranscript = ""
+    private var finalTranscript: CheckedContinuation<String, Never>?
 
     func toggle(existingText: String, onTranscript: @escaping (String) -> Void) {
         if isListening || isStarting {
             stop()
             return
         }
+        start(existingText: existingText, onTranscript: onTranscript)
+    }
+
+    func start(existingText: String = "", onTranscript: @escaping (String) -> Void) {
+        stop()
+        lastTranscript = ""
+        errorMessage = nil
         isStarting = true
         let token = UUID()
         generation = token
@@ -32,6 +43,12 @@ final class VoiceInputController: ObservableObject {
     }
 
     func stop() {
+        finishTask?.cancel()
+        finishTask = nil
+        finishing = false
+        let continuation = finalTranscript
+        finalTranscript = nil
+        continuation?.resume(returning: lastTranscript)
         generation = UUID()
         startTask?.cancel()
         startTask = nil
@@ -48,6 +65,25 @@ final class VoiceInputController: ObservableObject {
         recognitionRequest = nil
         isListening = false
         try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+    }
+
+    /// Release ends microphone capture immediately, then gives recognition a
+    /// bounded moment to finalize the last word. Cancellation never sends it.
+    func finish() async -> String {
+        guard isListening else { stop(); return lastTranscript }
+        audioEngine.stop()
+        if hasInputTap { audioEngine.inputNode.removeTap(onBus: 0); hasInputTap = false }
+        finishing = true
+        isListening = false
+        recognitionRequest?.endAudio()
+        return await withCheckedContinuation { continuation in
+            finalTranscript = continuation
+            finishTask = Task { [weak self] in
+                try? await Task.sleep(for: .milliseconds(800))
+                guard !Task.isCancelled else { return }
+                self?.stop()
+            }
+        }
     }
 
     private func begin(existingText: String, token: UUID, onTranscript: @escaping (String) -> Void) async {
@@ -87,13 +123,16 @@ final class VoiceInputController: ObservableObject {
 
             recognitionTask = recognizer.recognitionTask(with: request) { [weak self] result, error in
                 Task { @MainActor in
-                    guard let self, self.generation == token, self.isListening else { return }
+                    guard let self, self.generation == token, self.isListening || self.finishing else { return }
                     if let result {
                         let spoken = result.bestTranscription.formattedString
+                        self.lastTranscript = spoken
                         onTranscript([self.draftPrefix, spoken]
                             .filter { !$0.isEmpty }
                             .joined(separator: self.draftPrefix.isEmpty ? "" : " "))
                         if result.isFinal { self.stop() }
+                    } else if self.finishing {
+                        self.stop()
                     } else if let error, self.isListening {
                         self.stop()
                         self.errorMessage = "Dictation stopped: \(error.localizedDescription)"

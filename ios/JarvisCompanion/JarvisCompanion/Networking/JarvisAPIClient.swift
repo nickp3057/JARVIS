@@ -305,6 +305,19 @@ struct JarvisAPIClient {
         return modelIsPad ? "ipad" : "iphone"
     }()
 
+    @MainActor
+    func liveVoiceConnection() throws -> LiveVoiceConnection {
+        var request = request(path: "api/voice/live")
+        guard let url = request.url, var components = URLComponents(url: url, resolvingAgainstBaseURL: false) else {
+            throw JarvisAPIError.invalidBaseURL(baseURL.absoluteString)
+        }
+        components.scheme = components.scheme == "https" ? "wss" : "ws"
+        guard let socketURL = components.url else { throw JarvisAPIError.invalidBaseURL(baseURL.absoluteString) }
+        request.url = socketURL
+        request.timeoutInterval = 180
+        return LiveVoiceConnection(socket: session.webSocketTask(with: request))
+    }
+
     private static var modelIsPad: Bool {
         var info = utsname()
         uname(&info)

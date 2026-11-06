@@ -118,11 +118,6 @@ Current responsibilities:
 
 Near-term responsibilities:
 
-- Narrow runtime lock scope: `_lock` should guard session switching and
-  shared-state mutation, not span an entire Claude turn or stream. Today
-  `respond()` holds it for the full API call (blocking monitor events and UI
-  reads) while `respond_streaming()` takes none — the granularity should be
-  made consistent, leaning on the agent's own conversation lock.
 - Push panel updates instead of polling: cockpit panels currently own QTimers
   and re-read disk/SQLite on fixed intervals. They should subscribe to runtime
   change events (the inbox already exists), with disk reads cached behind
@@ -305,6 +300,37 @@ from the HTTP surface. A successful action invalidates the corresponding
 status cache so the app's next poll reflects the change; a refused or failed
 call returns 200 with an `error` field.
 
+### Live companion voice
+
+The phone’s hold-to-talk capture is another thin adapter to the runtime.
+Native speech recognition stays on the phone; partial transcripts are sent
+live over authenticated `/api/voice/live` and acknowledged without history or
+model/tool calls. Orb release commits final text to the current companion
+session with a stable request ID. `respond_streaming_in_session(...,
+spoken=True)` applies the concise spoken-reply context under the same turn lock
+and resets it in `finally`, without selecting the room microphone’s session.
+The token is the companion admin token, sent in a header; scoped clients cannot
+enter this path. Confirmation and voice-trust boundaries remain unchanged.
+
+`app/companion_voice.py` bridges one model worker and a sentence-speech worker
+to bounded async delivery queues. `speech/remote_voice.py` streams ElevenLabs
+PCM, reusing the configured voice; Piper uses a private temporary WAV only if
+no provider audio has started. Neither route touches global room playback.
+Text and binary mono 22050 Hz signed 16-bit PCM share the connection. Audio
+failure degrades to text, while disconnect/cancel after commit stops delivery
+and synthesis but lets the runtime finish its durable receipt/history. Capture
+has a 120 s limit, reply delivery 180 s, and at most two voice workers. A full
+queue detaches delivery rather than blocking a turn holding the runtime lock.
+Core is still the Optiplex; this does not change NAS access or permissions.
+
+The phone owns microphone/playback, generation-bound callbacks, permission and
+background cancellation, native ended-vs-cancelled hold handling, and bounded
+PCM buffering. Chat owns conversation identity, draft preservation and durable
+messages. Live voice never merges contexts across conversations; retries use
+the existing request receipt. New captures do not require raw audio uploads. Live deployment was verified
+with transcript acknowledgements, cancel-before-commit, streamed PCM, durable
+history and same-request replay on 2026-11-03.
+
 ## Design Rule
 
 New features should plug into the runtime as capabilities or monitors. Avoid
@@ -355,7 +381,7 @@ or, for grouped arr incidents, `runtime.push_to_phone`). Publishers never pick a
 channel. Subscribers: the phone (`runtime._deliver_alert_to_phone` →
 `brain/notifications.py`: APNs companion push, HA notify only as fallback;
 `push=False` alerts skip it) and each open `GET /api/clients/events` SSE
-stream (replay via `Last-Event-ID`, 15 s keep-alives). `GET /api/alerts/recent` (status:read) returns the same in-memory history newest first for polling clients; the Hub's Needs attention card uses it; `POST /api/alerts/refresh` (the card's Refresh button, `refresh_alerts`) re-checks each alert live via `brain/alert_checks.py` and hides the fixed ones; `POST /api/alerts/clear` (`clear_alerts`, voice) hides everything raised so far. Repeats of one problem (`event_bus.condense_key`) are one row with a `repeats` count, share a push `collapse_id`, and are dropped outright within `ALERT_REPEAT_WINDOW_S`. History is in memory only and resets when jarvis-api restarts. New monitors should
+stream (replay via `Last-Event-ID`, 15 s keep-alives). `GET /api/alerts/recent` (status:read) returns the same in-memory history newest first for polling clients; the Hub's Needs attention card uses it; `POST /api/alerts/refresh` (the card's Refresh button, `refresh_alerts`) re-checks each alert live via `brain/alert_checks.py` and hides the fixed ones; `POST /api/alerts/clear` (`clear_alerts`, voice) hides everything raised so far. Repeats of one problem (`event_bus.condense_key`) are one row with a `repeats` count, share a push `collapse_id`, and suppress duplicate phone pushes within `ALERT_REPEAT_WINDOW_S` while retaining each occurrence in history for polling and replay. Already-live subscribers are not re-notified of the same active condition; its first observation after restart is delivered quietly to rebuild client state. A resolved problem recurring, or a severity escalation, can push immediately. Refresh never infers recovery from an informational message sharing a source: arr alerts require a healthy live stack; NAS alerts carry condition keys checked against fresh host telemetry. Legacy NAS alerts without keys remain until explicitly cleared or aged out. History is in memory only and resets when jarvis-api restarts. New monitors should
 call `raise_alert`, not `notifications.send`.
 
 Clients other than the iOS companion use their own scoped tokens

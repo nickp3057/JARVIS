@@ -368,6 +368,51 @@ final class ChatViewModel: ObservableObject {
         request(text)
     }
 
+    /// Live voice shares Chat's session, receipts, parsing and durable store.
+    /// Partials never enter this path; only an explicit orb release does.
+    func prepareVoiceConversation() async throws -> (UUID, String) {
+        guard !isAwaitingReply else { throw JarvisAPIError.malformedResponse("Let the current reply finish first.") }
+        let conversation = activeConversationID
+        if let session = activeConversation?.serverSessionID { return (conversation, session) }
+        let session = try await makeClient().createSession()
+        guard conversation == activeConversationID, !Task.isCancelled else { throw CancellationError() }
+        setServerSessionID(session)
+        return (conversation, session)
+    }
+
+    func beginVoiceReply(_ text: String, conversationID: UUID, requestID: String) -> UUID? {
+        guard conversationID == activeConversationID, !isAwaitingReply else { return nil }
+        lastSentText = text
+        append(ChatMessage(role: .user, text: text, requestID: requestID))
+        let response = UUID()
+        generation = response
+        isAwaitingReply = true
+        append(ChatMessage(id: response, role: .jarvis, text: "", requestID: requestID))
+        return response
+    }
+
+    func receiveVoiceChunk(_ chunk: String, responseID: UUID, conversationID: UUID) -> Bool {
+        guard generation == responseID, activeConversationID == conversationID else { return false }
+        appendChunk(chunk, to: responseID)
+        return true
+    }
+
+    func finishVoiceReply(responseID: UUID, conversationID: UUID, error: String? = nil) {
+        guard generation == responseID, activeConversationID == conversationID else { return }
+        if let error {
+            // Match Stop/Retry: don't leave a second partial assistant bubble
+            // beside the authoritative reply recovered with this request ID.
+            if messages.last?.id == responseID { messages.removeLast() }
+            append(ChatMessage(role: .error, text: error))
+        }
+        isAwaitingReply = false
+        generation = nil
+        persist()
+        // Includes authoritative receipt/message IDs and recovers a turn whose
+        // socket disappeared after its tools had already started.
+        refreshConnectionStatus()
+    }
+
     func retry() {
         guard canRetry, let text = lastSentText else { return }
         messages.removeLast()

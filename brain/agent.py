@@ -714,7 +714,7 @@ class JarvisAgent:
         if self.spoken_turn:
             dynamic += (
                 "\n\n# Spoken reply\n"
-                "This turn came through the room microphone and your reply is played on a speaker. "
+                "This turn came through voice input and your reply is played on a speaker. "
                 "Answer in one short sentence (two at most), no lists or markdown. If you only "
                 "carried out a home action and it worked, reply exactly \"Done.\""
             )

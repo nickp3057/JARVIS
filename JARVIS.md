@@ -36,6 +36,7 @@ The character never breaks. It calls Nick "sir", uses dry British wit, answers i
 Pearson-Stark-Jarvis/
 ├── app/
 │   ├── main.py              Entry point. GUI / text / voice / server modes
+│   ├── companion_voice.py   Live transcript WebSocket, release-to-commit, streamed text/PCM
 │   ├── client_tokens.py     Scoped per-client tokens (events:read, status:read, chat, settings:write, wake:write) + CLI (create/grant/list/revoke); hashes in memory/client_tokens.json
 │   └── server.py            Authenticated HTTP bridge for the iOS companion (+ /api/clients/events SSE)
 │
@@ -511,16 +512,18 @@ RMS envelope from ElevenLabs audio drives the orb in real time using a monotonic
   else the exact text) gives every push a default `collapse_id` so a repeat
   replaces the earlier notification on the phone, `/api/alerts/recent` shows
   one row per problem with `repeats` (the Hub shows "3×"), and the same
-  warning raised again within `ALERT_REPEAT_WINDOW_S` is dropped, persisted
-  so a jarvis-api restart doesn't resend everything.
+  warning raised again within `ALERT_REPEAT_WINDOW_S` stays visible but does not push again; suppression is persisted
+  so a jarvis-api restart does not resend every push. Already-live clients do
+  not receive repeated banners for the same active condition; history retains
+  occurrences for polling and replay.
 - `refresh_alerts` — the Hub's Needs attention Refresh button (↻,
   `POST /api/alerts/refresh`, admin token; replaced the Clear button
   2026-11-03): `brain/alert_checks.py` re-checks each alert against the live
   system and hides the fixed ones (Schwab linked again, the stalled/errored
   torrent finished, moving or gone, the offline device back, the iPad
-  charging or above 20%). Kinds without a live check count as fixed once the
-  same source has sent an info alert since ("recovered", "back online");
-  anything it can't judge, or whose check breaks, stays.
+  charging or above 20%). Arr incidents require healthy live stack checks; NAS
+  alerts carry condition keys checked against fresh host telemetry. Unrelated
+  recovery notes never clear warnings. Anything it cannot judge stays.
 - `clear_alerts` — empty the app's Needs attention list ("things need you")
   outright when Nick says it's all handled (`POST /api/alerts/clear`, admin
   token; voice only now). Cleared alerts drop out of `/api/alerts/recent`
@@ -763,7 +766,7 @@ ROOM_QUIET_HOURS=22-7       # night mode hours; empty turns night mode off
 ROOM_NIGHT_VOLUME=4         # 0-10 speaker level in quiet hours (voice at night, or the app's Settings > Night volume, override it)
 ROOM_VOLUME_CONTROL=Master  # ALSA mixer control for "volume 4" / "louder"
 LIGHT_RAINBOWS=             # light=select:option (or light=scene.x) pairs for the Rainbow button (defaults to Nick's strip + desk DIY scenes, the lamp's built-in Rainbow scene, and the fan ring's scene.fan_light_rainbow Tap-to-Run)
-ALERT_REPEAT_WINDOW_S=1800  # the same warning again within this long is dropped, even across restarts (memory/alert_repeats.json); 0 = off
+ALERT_REPEAT_WINDOW_S=1800  # suppress repeat pushes, retain visible alerts even across restarts (memory/alert_repeats.json); 0 = off
 RING_LIGHTS=light.nicks_fan # colour-only lights: the apps never send white (the fan's RGB ring)
 RESTING_SCENES=scene.normal,scene.peace,scene.goodnight  # running one means "no scene"
 NORMAL_LIGHT=light.bedroom_lights  # left on when a scene tile leaves its scene and HA has no Normal scene
@@ -853,6 +856,14 @@ CALENDAR_ALERT_LEAD_MIN=10  # warn this many minutes before a meeting
 ---
 
 ## Recently Shipped
+
+- **5.77 / build 220 (2026-11-03): phone hold-to-talk, live transcript and streamed voice.** Hold the Home orb for 0.3 s to capture; partial transcripts from the phone’s native speech recognizer reach HQ over authenticated `WS /api/voice/live`. Release finalizes the last word and commits exactly one request through the current Chat session and runtime receipt path; sliding away, changing conversations/tabs during capture, backgrounding or interruption cancels without sending. The phone shows HQ’s transcript acknowledgement, streamed answer text, and starts playing 22.05 kHz mono PCM as it arrives. Core’s `speech/remote_voice.py` uses the existing ElevenLabs voice via HTTP streaming, with isolated temporary-file Piper fallback; it never plays on the room speaker. Existing Chat drafts survive, history/retries share request IDs, and disconnect after commit stops delivery while Core finishes persistence. Triple-tap Barn Door remains. Phone speech/microphone permissions are required; first-time permission prompts may require holding again. Core runs on the Optiplex, not the NAS. Validation: 961 Python tests (12 skipped), 38 iOS simulator tests, and 74 scoped tests on the Optiplex passed; live Core smoke verified transcript acknowledgement, cancel-without-history, PCM speech, persisted history and same-ID recovery. Core is deployed and restarted. The live smoke received text at 1.61 s and audio at 2.64 s; the temporary test session was deleted. Signed 5.77 (220) installed on Nick’s iPhone 17 Pro; the on-device hold/microphone interaction still needs his hands-on check.
+
+- **5.76 / build 219 (2026-11-03): quieter Chat chrome and orb taps.** The phone Home orb no longer starts a briefing on one tap; triple-tap still toggles Barn Door. Chat uses a transparent navigation bar and composer surroundings, and only shows the connection row when it needs attention or a reply is in progress. The phone tab controller keeps its full height during keyboard presentation and hides the tab bar while typing, leaving keyboard avoidance to the selected page’s composer. Dismissing the keyboard restores the tab row. All 35 iOS simulator tests passed, including real keyboard focus and tab restoration; Chat renders inspected. Signed 5.76 (219) installed and reopened on Nick’s iPhone and iPad.
+
+- **5.75 / build 218 (2026-11-03): orb sizing and consistency.** Home’s hero orb grows from 170 to 190 pt (the accessibility layout retains 130 pt). The shared classic reactor caps arc weight and tick depth at the 190 pt phone reference; larger Room orbs keep fine rings and use an ultra-light central waveform instead of gaining heavier lines as the panel expands. Existing visual snapshot test passed and phone navigation render inspected; signed 5.75 (218) installed on Nick’s iPhone 17 Pro and iPad Air.
+
+- **5.74 / build 217 (2026-11-03): phone swipe and alert review fixes.** Phone tabs now use persistent native hosting controllers and an interactive UIKit transition: adjacent pages move together at finger speed, release velocity decides completion, and cancellation restores the original page. The native tab bar stays in place; left-edge back gestures, horizontal controls, and Reduce Motion retain their own behavior. iPad/Mac keep their tab shell; idle timers no longer restart on every drag sample. Repeat alerts remain visible while duplicate pushes are suppressed, including after restart; resolved recurrences and severity escalations can push immediately. Refresh checks live arr health and keyed NAS conditions, never unrelated recovery notes. Unknown or missing telemetry keeps the warning. Simulator regression tests cover swipe completion, cancellation, page identity, and Reduce Motion. Validation: 951 Python tests (12 skipped), 34 iOS simulator tests passed; navigation snapshot inspected. Signed build installed on Nick’s iPhone 17 Pro; Core changes were subsequently deployed with 5.77.
 
 - **Scenes force their lights off (2026-11-01, Core)** — Goodnight left the
   desk lights on: HA's `scene.turn_on` skips a light whose state already
@@ -1378,7 +1389,7 @@ CALENDAR_ALERT_LEAD_MIN=10  # warn this many minutes before a meeting
   reactor, next up / to-dos, a Focus-style scene picker (`SceneFocusMenu`)
   and a one-line portfolio strip. Three quick taps on the reactor (iPad
   Room, phone Home) engage Barn Door Protocol, three more stand it down
-  (`POST /api/protocols/barn-door`); one tap on the phone still briefs.
+  (`POST /api/protocols/barn-door`); the phone’s one-tap briefing was removed in 5.76.
   `JarvisCoreMark` now computes its angles from a `TimelineView` clock (the
   `repeatForever` animations stacked and sped up or jumped). A long press
   that opens the light sheet no longer also toggles the light
@@ -1655,7 +1666,7 @@ CALENDAR_ALERT_LEAD_MIN=10  # warn this many minutes before a meeting
   icon is now the blue reactor wheel.
 
 - **Home as JARVIS, fully themed colours (1.89 / build 91)** — Home opens on
-  a large reactor (tap it for a briefing) with a time-of-day greeting ("Good
+  a large reactor (one-tap briefing removed in 5.76) with a time-of-day greeting ("Good
   evening, sir.") and two live chips: systems and free space. Each chip
   slides to Media, scrolls to the Services or Media drive card, and outlines
   it briefly. The briefing card and metric tiles are gone, and Services now
@@ -2178,10 +2189,6 @@ in value order:
   every stored message for the session from SQLite on each `/chat` turn and
   then trims to 40. Negligible today; switch to a `LIMIT` query (keeping the
   current message-count trim semantics) if sessions grow long.
-- **No message-level cache breakpoint** — tools and persona are cached, but
-  each extra round of a tool loop re-sends the full history uncached. A
-  breakpoint on the last message would help multi-tool turns. This is a
-  Claude-integration change, so it was flagged, not made (2026-09-22 audit).
 - **96 tool schemas on every call** (~9k tokens, cached). Routing to a tool
   subset per intent would cut latency further but changes behaviour.
 - **Cache-invalidation footnote** — persona `.env` changes (humor, address)
@@ -2214,6 +2221,29 @@ in value order:
 - **Double-clap wake** — alternative to voice wake word (from reference script)
 
 ---
+
+### Phone live voice transport
+
+`app/companion_voice.py` implements a single hold/turn per authenticated
+WebSocket (`/api/voice/live`, companion admin token in the Authorization header,
+never in the URL). The `chat.voice_live` capability advertises it. Start with an
+existing `session_id` and unique `request_id`; `partial` messages carry the
+current transcript and receive ephemeral `transcript` acknowledgements. Only
+`commit` with the final text enters the runtime, using `spoken=True` in that
+session, the same confirmation gates, and request receipts. Empty, oversized,
+unknown-session and malformed captures fail without tools. Capture is capped
+at 120 s; two voice workers and bounded outgoing/sentence queues protect Core.
+
+Replies interleave JSON `text` events and binary PCM (signed 16-bit little
+endian, mono, 22050 Hz); `audio_error` preserves the text reply, and `done` ends
+reception. The phone waits for scheduled audio to drain before showing Done.
+No raw microphone audio or recording file is uploaded in this version. Keys
+for ElevenLabs remain on Core; the existing `ELEVENLABS_*` settings and local
+Piper voice are reused. `websockets` is an explicit server dependency. The
+speech stream strips tool-status/round markers and pipelines sentences while
+model generation continues. A committed turn survives transport cancellation;
+check Chat/history or retry its original request ID instead of executing it
+again with a fresh ID.
 
 ## Running
 

@@ -23,6 +23,7 @@ struct RootView: View {
     @ObservedObject private var wakeRinging = WakeRinging.shared
     /// The iPad as the room camera: runs the lens while Nick's phone watches.
     @StateObject private var camera = RoomCameraController()
+    @StateObject private var phoneVoice = PushToTalkController()
     /// The phone's camera viewer is presented here, above `.id(palette)`, so a
     /// theme flip (Barn Door engaging) doesn't tear down the live feed.
     @ObservedObject private var cameraViewer = RoomCameraPresenter.shared
@@ -66,6 +67,14 @@ struct RootView: View {
             // (that was the dim dip mid-change). Only there while it runs.
             JarvisBackdrop()
         }
+        if !Self.isPad && !Self.isMac {
+            PhoneTabs(selection: $selection, pages: phonePages, reduceMotion: reduceMotion)
+                // UIKit owns safe areas and keyboard avoidance inside the
+                // selected page; the tab shell must not shrink with it.
+                .ignoresSafeArea()
+                .id(shownPalette)
+                .transition(.opacity)
+        } else {
         TabView(selection: $selection) {
             if Self.isMac {
                 HubView(model: hub, onAsk: ask, onNavigate: navigate, onSend: sendNow, focus: .desk)
@@ -120,6 +129,7 @@ struct RootView: View {
         // device) crossfades the old colours into the new instead of cutting.
         .transition(.opacity)
         }
+        }
         .onChange(of: palette) { _, new in
             fading = !reduceMotion
             withAnimation(reduceMotion ? nil : .easeInOut(duration: 1.4)) {
@@ -129,6 +139,11 @@ struct RootView: View {
             }
         }
         .tint(JarvisTheme.reactor)
+        .overlay(alignment: .bottom) {
+            if !Self.isPad && !Self.isMac && phoneVoice.showing {
+                PushToTalkPanel(controller: phoneVoice)
+            }
+        }
         .simultaneousGesture(DragGesture(minimumDistance: 30).onChanged(track).onEnded(swipe))
         .simultaneousGesture(TapGesture().onEnded { touches &+= 1 })
         .task(id: "\(selection)-\(touches)-\(autoReturn)") {
@@ -140,6 +155,8 @@ struct RootView: View {
         .sensoryFeedback(.selection, trigger: selection)
         .focusedSceneValue(\.rootTab, $selection)
         .onAppear(perform: sizeMacWindow)
+        .onAppear { phoneVoice.configure(settings: settings, chat: chat) }
+        .onChange(of: chat.conversationID) { _, id in phoneVoice.conversationChanged(id) }
         .fullScreenCover(isPresented: $wakeRinging.showing) { WakeRingingView().environmentObject(settings) }
         // While the iPad's lens is on, its reactors draw the green orb.
         .environment(\.cameraWatching, camera.watching)
@@ -147,6 +164,7 @@ struct RootView: View {
         .task { camera.activate(settings: settings) }
         .onChange(of: scenePhase) { _, phase in
             if phase == .active { camera.activate(settings: settings) } else { camera.deactivate() }
+            if phase != .active { phoneVoice.cancel() }
         }
         .task(id: scenePhase) {
             // Follow the shared theme while the app is open (a pick on the TV,
@@ -172,7 +190,16 @@ struct RootView: View {
         .onChange(of: settings.studyAlertsEnabled) { Task { await hub.updateNotificationPreferences() } }
         .onChange(of: selection) { _, tab in
             if tab == .chat { chat.refreshConnectionStatus() }
+            if tab != .home && ["connecting", "listening", "finalizing"].contains(phoneVoice.phase) { phoneVoice.cancel() }
         }
+    }
+
+    private var phonePages: [AnyView] {
+        [AnyView(HubView(model: hub, onAsk: ask, focus: .media).environmentObject(settings)),
+         AnyView(HubView(model: hub, onAsk: ask, onNavigate: navigate, focus: .hub).environmentObject(settings)),
+         AnyView(HubView(model: hub, onAsk: ask, onNavigate: navigate, focus: .home, phoneVoice: phoneVoice).environmentObject(settings)),
+         AnyView(ChatView(model: chat).environmentObject(settings)),
+         AnyView(SettingsView(embedded: true, studyBrief: hub.studyBrief.value).environmentObject(settings))]
     }
 
     /// Mac: keep the window big enough for the Room tab's two columns.
@@ -193,7 +220,7 @@ struct RootView: View {
     /// The page follows the finger (rubber-banded at the first/last tab) only
     /// while the drag is clearly horizontal, so vertical scrolling is untouched.
     private func track(_ drag: DragGesture.Value) {
-        touches &+= 1
+        guard Self.isPad || Self.isMac else { return }
         guard !reduceMotion, drag.startLocation.x > 24, !swipeBlocked else {
             if swipeOffset != 0 { withAnimation(.spring(duration: 0.25)) { swipeOffset = 0 } }
             return
@@ -211,6 +238,8 @@ struct RootView: View {
     /// not start at the left edge (that's the system back gesture inside
     /// pushed screens).
     private func swipe(_ drag: DragGesture.Value) {
+        touches &+= 1
+        guard Self.isPad || Self.isMac else { return }
         let dx = drag.translation.width, dy = drag.translation.height
         guard !swipeBlocked, drag.startLocation.x > 24, abs(dx) > 60, abs(dx) > 2.5 * abs(dy),
               let next = neighbour(towards: dx) else {
@@ -229,7 +258,7 @@ struct RootView: View {
         guard target != selection, let from = Self.tabs.firstIndex(of: selection),
               let to = Self.tabs.firstIndex(of: target) else { return }
         selection = target
-        guard !reduceMotion else { return }
+        guard (Self.isPad || Self.isMac), !reduceMotion else { return }
         swipeOffset = to > from ? 140 : -140
         withAnimation(.spring(duration: 0.35, bounce: 0.12)) { swipeOffset = 0 }
     }

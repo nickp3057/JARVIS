@@ -27,6 +27,7 @@ google-auth-httplib2>=0.2.0
 # iOS companion API
 fastapi>=0.115.0
 uvicorn>=0.30.0
+websockets>=12.0  # live companion voice transport (uvicorn's WebSocket backend)
 # APNs push to the companion (HTTP/2 for httpx; the JWT is signed with the
 # already-present cryptography package)
 h2>=4.1,<5

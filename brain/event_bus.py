@@ -65,9 +65,9 @@ _history: deque[Alert] = deque(maxlen=_HISTORY)
 _last_sent: dict[str, float] = {}
 _subscribers: dict[str, Subscriber] = {}
 # The same warning raised again within ALERT_REPEAT_WINDOW_S (30 min) is
-# dropped, even across a jarvis-api restart (monitors that remember what they
-# already sent in memory re-raised everything on every deploy: Nick saw the
-# same error twice with different times). Persisted here; tests repoint it.
+# delivered quietly, even across a jarvis-api restart (monitors that remember what they
+# already sent in memory re-raised everything on every deploy). Only the
+# duplicate phone push is suppressed; tests repoint this persisted state.
 _REPEATS_FILE = Path(__file__).resolve().parents[1] / "memory" / "alert_repeats.json"
 _repeats: dict[str, float] | None = None
 # Alerts up to this id were cleared by Nick ("clear the needs-you list"):
@@ -166,7 +166,11 @@ def _save_repeats(snapshot: dict[str, float]) -> None:
 def publish(kind: str, title: str, message: str, *, source: str, severity: str = "warning",
             push: bool = True, dedupe_key: str | None = None, cooldown_s: float = 0.0,
             context: dict[str, Any] | None = None, **grouping: Any) -> Alert | None:
-    """Publish an alert to every subscriber; None if deduplicated."""
+    """Publish an alert; explicit publisher cooldowns may return None.
+
+    The global repeat window suppresses phone pushes only. History and live
+    clients must still see a problem, including after a process restart.
+    """
     global _next_id
     severity = severity if severity in SEVERITIES else "warning"
     now = time.time()
@@ -175,6 +179,7 @@ def publish(kind: str, title: str, message: str, *, source: str, severity: str =
         grouping.setdefault("collapse_id", f"a-{key}")
         grouping.setdefault("thread_id", kind)
     snapshot = None
+    quiet_repeat = False
     with _lock:
         if dedupe_key and cooldown_s > 0 and now - _last_sent.get(dedupe_key, -1e18) < cooldown_s:
             return None
@@ -183,10 +188,20 @@ def publish(kind: str, title: str, message: str, *, source: str, severity: str =
         window = _repeat_window()
         if severity != "info" and window > 0:
             repeats = _load_repeats()
-            if now - repeats.get(key, -1e18) < window:
-                log.info("Alert repeat dropped [%s] %s", kind, title)
-                return None
-            repeats[key] = now
+            matching = [a for a in _history
+                        if condense_key(a.kind, a.title, a.message, a.context) == key]
+            active = [a for a in matching if not is_cleared(a)]
+            recurrence = bool(matching) and not active
+            escalated = bool(active) and SEVERITIES.index(severity) > max(
+                SEVERITIES.index(a.severity) for a in active)
+            if now - repeats.get(key, -1e18) < window and not recurrence and not escalated:
+                log.info("Alert repeat kept quietly [%s] %s", kind, title)
+                push = False
+                # Already-live clients have this condition. Do not show the
+                # TV banner again; retain history for polling/reconnection.
+                quiet_repeat = bool(active)
+            else:
+                repeats[key] = now
             for old in [k for k, t in repeats.items() if now - t >= window]:
                 repeats.pop(old)
             snapshot = dict(repeats)
@@ -194,7 +209,7 @@ def publish(kind: str, title: str, message: str, *, source: str, severity: str =
                       {k: v for k, v in grouping.items() if v}, dict(context or {}))
         _next_id += 1
         _history.append(alert)
-        subscribers = list(_subscribers.items())
+        subscribers = [] if quiet_repeat else list(_subscribers.items())
     if snapshot is not None:
         _save_repeats(snapshot)
     log.info("Alert %s [%s/%s] %s", alert.id, kind, severity, title)

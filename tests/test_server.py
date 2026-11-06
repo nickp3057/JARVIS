@@ -43,7 +43,7 @@ class ServerTests(unittest.TestCase):
         server._runtime = FakeRuntime()
         self.token_patch = patch.dict(os.environ, {"JARVIS_API_TOKEN": "test-token"})
         self.token_patch.start()
-        self.client = TestClient(server.app)
+        self.client = TestClient(server.app, base_url="http://localhost")
         self.headers = {"Authorization": "Bearer test-token"}
 
     def tearDown(self) -> None:

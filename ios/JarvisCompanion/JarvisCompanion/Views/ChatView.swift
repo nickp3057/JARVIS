@@ -29,7 +29,9 @@ struct ChatView: View {
     var body: some View {
         NavigationStack {
             VStack(spacing: 0) {
-                connectionBanner
+                if model.connectionState != .online || model.isAwaitingReply {
+                    connectionBanner
+                }
                 if let error = model.historyError {
                     Label(error, systemImage: "arrow.triangle.2.circlepath")
                         .font(.caption).foregroundStyle(JarvisTheme.amber)
@@ -49,6 +51,7 @@ struct ChatView: View {
             .background { JarvisBackdrop() }
             .navigationTitle(model.messages.isEmpty ? "JARVIS" : model.activeTitle)
             .navigationBarTitleDisplayMode(.inline)
+            .toolbarBackground(.hidden, for: .navigationBar)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     Button("History", systemImage: "clock.arrow.circlepath") {
@@ -179,8 +182,6 @@ struct ChatView: View {
             .foregroundStyle(connectionColor)
             .padding(.horizontal, 16)
             .padding(.vertical, 9)
-            .background(JarvisTheme.panel.opacity(0.74))
-            .overlay(alignment: .bottom) { Rectangle().fill(JarvisTheme.border).frame(height: 0.5) }
         }
         .buttonStyle(.plain)
     }
@@ -462,7 +463,6 @@ struct ChatView: View {
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
         .frame(maxWidth: .infinity)
-        .background(.bar)
     }
 
     private func scrollToBottom(_ proxy: ScrollViewProxy) {

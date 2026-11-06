@@ -11,7 +11,7 @@ import os
 import uuid
 from contextlib import asynccontextmanager
 
-from fastapi import Depends, FastAPI, Header, HTTPException, Request, Response, status
+from fastapi import Depends, FastAPI, Header, HTTPException, Request, Response, WebSocket, status
 from fastapi.responses import HTMLResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
@@ -124,6 +124,7 @@ _COMPANION_CAPABILITIES: dict[str, object] = {
         "server_history": True,
         "debug_reports": True,
         "incident_reports": True,
+        "voice_live": True,
     },
     "dashboard": {
         "now": True,
@@ -203,6 +204,17 @@ class ChatRequest(BaseModel):
 class ChatResponse(BaseModel):
     reply: str
     session_id: str
+
+
+@app.websocket("/api/voice/live")
+async def companion_voice(socket: WebSocket) -> None:
+    try:
+        authorize(socket.headers.get("authorization"))
+    except HTTPException:
+        await socket.close(code=1008)
+        return
+    from app.companion_voice import serve
+    await serve(socket, runtime)
 
 
 class RenameRequest(BaseModel):

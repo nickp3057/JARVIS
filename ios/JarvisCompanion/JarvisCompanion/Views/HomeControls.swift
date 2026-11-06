@@ -53,13 +53,10 @@ struct SceneTile: View {
 
 
 /// Three quick taps on the reactor: Barn Door Protocol (three more stand it
-/// down). A single tap still does `onSingleTap` (the phone's briefing), just
-/// after a short wait to be sure it isn't the start of three.
+/// down). A single tap has no action.
 struct BarnDoorTaps: ViewModifier {
     @EnvironmentObject private var settings: AppSettings
-    var onSingleTap: (() -> Void)?
     @State private var taps: [Date] = []
-    @State private var single: Task<Void, Never>?
     @State private var fired = 0
 
     func body(content: Content) -> some View {
@@ -74,17 +71,9 @@ struct BarnDoorTaps: ViewModifier {
     private func tap() {
         let now = Date()
         taps = taps.filter { now.timeIntervalSince($0) < 0.9 } + [now]
-        single?.cancel()
         if taps.count >= 3 {
             taps = []
             trigger()
-        } else if taps.count == 1, let onSingleTap {
-            single = Task { @MainActor in
-                try? await Task.sleep(for: .milliseconds(450))
-                guard !Task.isCancelled, taps.count == 1 else { return }
-                taps = []
-                onSingleTap()
-            }
         }
     }
 
@@ -99,8 +88,8 @@ struct BarnDoorTaps: ViewModifier {
 }
 
 extension View {
-    func barnDoorTaps(onSingleTap: (() -> Void)? = nil) -> some View {
-        modifier(BarnDoorTaps(onSingleTap: onSingleTap))
+    func barnDoorTaps() -> some View {
+        modifier(BarnDoorTaps())
     }
 }
 

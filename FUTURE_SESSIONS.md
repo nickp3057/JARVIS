@@ -142,6 +142,56 @@ of each group.
 - iPad: background the app on the Room tab and come back; scenes and the
   lit tile should refresh (server log shows `/api/home/scenes` again).
 
+### Phone live voice (2026-11-03, 5.77 / build 220)
+
+Nick chose live phone transcription to HQ over raw microphone uploads. Hold the
+phone Home orb to speak, release to commit once; HQ receives partial text live
+and streams its existing voice and reply text back. Core remains on the
+Optiplex. Native cancellation, session/request identity, streamed PCM playback
+and text-only fallback are implemented. No NAS access changes. Keep the phone’s
+single tap inert and triple-tap Barn Door. Core deployed and restarted after 74 host regressions passed. Full local Python
+suite: 961 tests, 12 skipped; iOS simulator: 38 passed. Live WebSocket smoke
+verified partial acknowledgement, cancelled capture with no saved turn, real
+streamed PCM (57,344 bytes), completed history, and same-ID recovery. First text
+1.61 s, first audio 2.64 s in that test; temporary conversation removed.
+Core backup: `/tmp/jarvis-live-voice-backup-20261103-175221` on the Optiplex.
+Original memory/profile changes and untracked `app/api.py` were preserved.
+Backend patch includes the earlier alert review fixes; no NAS changes.
+Signed 5.77 (220) installed on Nick’s iPhone 17 Pro. On-device hold/microphone
+interaction still needs Nick’s check; iPad stays on 5.76.
+
+### Chat chrome and orb taps (2026-11-03, 5.76 / build 219)
+
+Nick asked to remove the phone orb’s one-tap briefing and the bars appearing
+around Chat. One tap now does nothing; triple-tap Barn Door remains. Chat’s
+header/composer surroundings are transparent and the online connection strip
+is hidden while idle. Phone tabs stay full height and hide during keyboard
+presentation instead of rising into the typing area. Hold-to-talk was subsequently implemented in 5.77 (see above).
+All 35 iOS simulator tests passed; Chat and keyboard renders inspected. Signed
+5.76 (219) installed and reopened on Nick’s iPhone and iPad.
+
+### Orb polish (2026-11-03, 5.75 / build 218)
+
+Nick liked the phone swipe update. Home’s orb is now slightly larger (190 pt,
+was 170; accessibility layout stays 130). Room uses the same classic reactor
+with ring strokes/tick depth capped at the phone reference and a lighter
+waveform at larger sizes, keeping the iPad’s responsive size without heavy lines.
+Signed 5.75 (218) installed on both Nick’s iPhone 17 Pro and iPad Air; the
+existing visual snapshot test passed and the phone navigation render was checked.
+
+### Phone swipe and alert review (2026-11-03, 5.74 / build 217)
+
+Local fixes: native interactive phone tab slides replace the half-speed offset
+and fixed-distance tab swap; idle tasks no longer restart every drag sample.
+Repeat suppression quiets duplicate pushes while keeping alerts visible after
+restart; resolved recurrences/escalations push again. Refresh checks actual arr
+health and keyed NAS telemetry, never a same-source recovery note. Legacy NAS
+warnings lacking condition keys stay until cleared or aged out. Validation: 951 Python tests (12 skipped), 34 iOS simulator tests passed;
+rendered navigation layout inspected. Signed 5.74 (217) installed on Nick’s
+iPhone 17 Pro via devicectl. Core changes were subsequently deployed with 5.77;
+iPad was not updated. Check phone feel, keyboard/back gestures and cancelled
+drags on device.
+
 ### Lamp, alerts, Schwab (2026-11-03, iOS 5.72, Core c1b6ecb..051688f): check
 
 All pushed and installed on the iPhone and iPad; Core needs `git pull` and a
@@ -158,7 +208,7 @@ restart (Nick runs it). Tests pass (945); none of this was tried live.
   context, so offline-device and download-error ones from then stay until a
   restart empties the bus.
 - [ ] Repeat alerts: one push per problem (`collapse_id`), one Hub row with
-  "3×", repeats within `ALERT_REPEAT_WINDOW_S` dropped. Watch that a real
+  "3×", repeat pushes within `ALERT_REPEAT_WINDOW_S` suppressed (5.74 retains visible history). Watch that a real
   second failure isn't swallowed.
 - [ ] Schwab revoked the refresh token an hour after Nick's 10:55 login (cause
   unknown; one Core process, no second login). Now it counts as logged out
@@ -670,9 +720,9 @@ or a much newer CPU), bigger Whisper models, or running cameras/vision
 
 ### Companion apps
 
-- [ ] **Speak replies in JARVIS's voice on the phone**: the app's mic is
-  dictation only today; replies are text. Core would synthesize with
-  ElevenLabs and the app plays the audio (opt-in, per reply or always).
+- [x] **Phone hold-to-talk with JARVIS’s voice** (5.77): live transcript to
+  Core, release-to-commit, streamed speech back through the phone. Ordinary
+  typed Chat remains text; optional read-aloud for typed replies is separate.
 - [ ] **JARVIS TV: JARVIS is the TV's home screen** (asked 2026-10-27).
   Nick's TCL TV has had Google TV stripped back to Plex and YouTube. Instead
   of a JARVIS app on it, JARVIS *is* what the TV boots into: an Android TV

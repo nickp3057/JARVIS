@@ -65,12 +65,38 @@ class BusTests(unittest.TestCase):
             "schwab_login", "Schwab needs you", "Log in."))
         self.assertEqual(first.grouping["thread_id"], "schwab_login")
         event_bus._repeats = None  # a restart: reload from the file
-        self.assertIsNone(event_bus.publish("schwab_login", "Schwab needs you", "Log in.", source="s"))
+        self.assertFalse(event_bus.publish("schwab_login", "Schwab needs you", "Log in.", source="s").push)
         self.assertIsNotNone(event_bus.publish("schwab_login", "Schwab needs you", "Other.", source="s"))
         self.assertIsNotNone(event_bus.publish("x", "Back online", "m", source="s", severity="info"))
         self.assertIsNotNone(event_bus.publish("x", "Back online", "m", source="s", severity="info"))
         with patch.dict(os.environ, {"ALERT_REPEAT_WINDOW_S": "0"}):
             self.assertIsNotNone(event_bus.publish("schwab_login", "Schwab needs you", "Log in.", source="s"))
+
+    def test_repeat_survives_restart_in_history_without_duplicate_push(self) -> None:
+        stream = Mock()
+        event_bus.subscribe("stream", stream)
+        first = event_bus.publish("device_offline", "Lamp offline", "Down", source="home")
+        self.assertTrue(first.push)
+        repeated = event_bus.publish("device_offline", "Lamp offline", "Down", source="home")
+        self.assertFalse(repeated.push)
+        self.assertEqual(stream.call_count, 1)  # no repeat TV banner
+        event_bus._history.clear()  # process restart: history is in memory
+        event_bus._repeats = None  # repeat suppression survives on disk
+        again = event_bus.publish("device_offline", "Lamp offline", "Down", source="home")
+        self.assertFalse(again.push)
+        self.assertEqual(event_bus.since(), [again])
+        self.assertEqual(stream.call_count, 2)  # first sight after restart is live
+
+    def test_recurrence_after_resolution_and_escalation_push(self) -> None:
+        first = event_bus.publish("nas_host", "Disk", "Bad", source="nas-host")
+        event_bus.resolve([first.id])
+        again = event_bus.publish("nas_host", "Disk", "Bad", source="nas-host")
+        self.assertTrue(again.push)
+        critical = event_bus.publish("nas_host", "Disk", "Bad", source="nas-host", severity="critical")
+        self.assertTrue(critical.push)
+        repeated = event_bus.publish("nas_host", "Disk", "Bad", source="nas-host", severity="critical")
+        self.assertFalse(repeated.push)
+        self.assertEqual(len(event_bus.since()), 4)
 
     def test_explicit_collapse_id_wins(self) -> None:
         alert = event_bus.publish("x", "t", "m", source="s", collapse_id="wake-up")

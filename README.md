@@ -2,7 +2,7 @@
 
 A personal AI assistant modelled on Tony Stark's JARVIS (with a bit of TARS from *Interstellar*). It listens for "Hey JARVIS", answers in a dry British voice, and controls the house: lights, scenes, the TV, music, the media server, alarms, reminders and more.
 
-JARVIS runs as one Python runtime ("JARVIS Core") with several front ends: a desktop window with an animated orb, a headless always-listening voice loop, an authenticated HTTP API for the iOS/iPad companion app, and a custom home screen for the living-room Google TV.
+JARVIS runs as one Python runtime ("JARVIS Core") with several front ends: a desktop window with an animated orb, a headless always-listening voice loop, an authenticated HTTP API for the iOS/iPad companion app, and a custom home screen for the Google TV in my room.
 
 ## Features
 

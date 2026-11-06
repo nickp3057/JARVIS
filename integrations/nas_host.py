@@ -37,6 +37,7 @@ class HostAlert(NamedTuple):
     message: str
     severity: str  # warning | critical | info
     push: bool
+    condition_keys: tuple[str, ...] = ()
 
 
 def monitor_enabled() -> bool:
@@ -233,7 +234,8 @@ class HostWatch:
         if new:
             severity = 'critical' if any(sev == 'critical' for _, sev, _ in new) else 'warning'
             title = f'NAS: {new[0][2]}' if len(new) == 1 else f'NAS: {len(new)} problems'
-            alerts.append(HostAlert(title[:120], '; '.join(d for _, _, d in new) + '.', severity, True))
+            alerts.append(HostAlert(title[:120], '; '.join(d for _, _, d in new) + '.', severity, True,
+                                    tuple(k for k, _, _ in new)))
         if recovered:
             alerts.append(HostAlert('NAS: recovered', 'Cleared: ' + '; '.join(recovered) + '.', 'info', False))
         return alerts

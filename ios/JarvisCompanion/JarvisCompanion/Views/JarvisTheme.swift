@@ -316,6 +316,9 @@ struct JarvisCoreMark: View {
 
     private func mark(seconds: Double) -> some View {
         let dial = Double.pi * size * 0.92
+        // The Room orb can fill a large iPad panel. Keep the phone's fine
+        // strokes instead of making its rings heavier as the canvas grows.
+        let strokeSize = min(size, 190)
         return ZStack {
             Circle().fill(RadialGradient(colors: [JarvisTheme.reactor.opacity(active ? 0.30 : 0.22), .clear],
                                          center: .center, startRadius: 4, endRadius: size / 2))
@@ -326,12 +329,12 @@ struct JarvisCoreMark: View {
                 // HUD dial: sixty ticks drifting slowly the other way.
                 Circle()
                     .stroke(JarvisTheme.reactor.opacity(0.28),
-                            style: StrokeStyle(lineWidth: size * 0.025, dash: [1, dial / 60 - 1]))
+                            style: StrokeStyle(lineWidth: strokeSize * 0.025, dash: [1, dial / 60 - 1]))
                     .padding(size * 0.04)
                     .rotationEffect(.degrees(-turn(seconds, every: 40)))
             }
             Circle().trim(from: 0.05, to: 0.82)
-                .stroke(JarvisTheme.reactor.opacity(0.6), style: StrokeStyle(lineWidth: max(1.5, size / 56), lineCap: .round))
+                .stroke(JarvisTheme.reactor.opacity(0.6), style: StrokeStyle(lineWidth: max(1.5, strokeSize / 56), lineCap: .round))
                 .padding(size * 0.13)
                 .rotationEffect(.degrees(-60 + turn(seconds, every: 16)))
             Circle().trim(from: 0.12, to: 0.92)
@@ -339,7 +342,7 @@ struct JarvisCoreMark: View {
                 .padding(size * 0.21)
                 .rotationEffect(.degrees(90 - turn(seconds, every: 10)))
             Image(systemName: "waveform")
-                .font(.system(size: size * 0.25, weight: .light))
+                .font(.system(size: size * 0.25, weight: size > 190 ? .ultraLight : .light))
                 .foregroundStyle(JarvisTheme.reactor)
         }
         .compositingGroup()

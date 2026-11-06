@@ -12,6 +12,7 @@ struct HubView: View {
     var onNavigate: ((HubFocus) -> Void)? = nil
     /// Desk's ask bar: send straight to Chat (RootView switches tabs).
     var onSend: ((String) -> Void)? = nil
+    var phoneVoice: PushToTalkController? = nil
     @State private var deskWidth: CGFloat = 0
     @State private var deskQuestion = ""
     @StateObject private var holds = HoldSuppressor()
@@ -47,12 +48,13 @@ struct HubView: View {
 
     init(model: HubViewModel, onAsk: ((String) -> Void)? = nil,
          onNavigate: ((HubFocus) -> Void)? = nil, onSend: ((String) -> Void)? = nil,
-         focus: HubFocus = .home) {
+         focus: HubFocus = .home, phoneVoice: PushToTalkController? = nil) {
         self.model = model
         self.onAsk = onAsk
         self.onNavigate = onNavigate
         self.onSend = onSend
         self.focus = focus
+        self.phoneVoice = phoneVoice
     }
 
     private var columns: [GridItem] {
@@ -213,16 +215,10 @@ struct HubView: View {
         }
     }
 
-    /// The reactor is the centrepiece; tapping it starts a briefing.
+    /// The reactor is the centrepiece; three quick taps toggle Barn Door.
     private var hero: some View {
         VStack(spacing: 16) {
-            // One tap: a briefing. Three quick taps: Barn Door Protocol.
-            JarvisCoreMark(size: typeSize.isAccessibilitySize ? 130 : 170)
-                .barnDoorTaps(onSingleTap: onAsk.map { ask in
-                    { ask("Give me a briefing on my day and anything that needs my attention.") }
-                })
-                .accessibilityLabel("Brief me")
-                .accessibilityHint("Starts a briefing with JARVIS. Triple-tap for Barn Door Protocol.")
+            heroReactor
                 .padding(.top, 6)
 
             VStack(spacing: 6) {
@@ -243,6 +239,17 @@ struct HubView: View {
         }
         .frame(maxWidth: .infinity)
         .padding(.bottom, 8)
+    }
+
+    @ViewBuilder private var heroReactor: some View {
+        if let phoneVoice {
+            PushToTalkOrb(controller: phoneVoice, size: typeSize.isAccessibilitySize ? 130 : 190)
+        } else {
+            JarvisCoreMark(size: typeSize.isAccessibilitySize ? 130 : 190)
+                .barnDoorTaps()
+                .accessibilityLabel("JARVIS")
+                .accessibilityHint("Triple-tap for Barn Door Protocol.")
+        }
     }
 
     static func greeting(at date: Date, calendar: Calendar = .current) -> String {
@@ -408,7 +415,7 @@ struct HubView: View {
         linksCard
     }
 
-    /// The reactor (tap for a briefing), greeting, live clock, the hero chips
+    /// The reactor, greeting, live clock, the hero chips
     /// and an ask bar that goes straight to Chat.
     private var deskHeader: some View {
         HStack(alignment: .center, spacing: 22) {

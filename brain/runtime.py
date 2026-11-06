@@ -427,7 +427,8 @@ class JarvisRuntime:
                 alerts = []
             for alert in alerts:
                 self.raise_alert("nas_host", alert.title, alert.message, source="nas-host",
-                                 severity=alert.severity, push=alert.push)
+                                 severity=alert.severity, push=alert.push,
+                                 context={"condition_keys": list(alert.condition_keys)} if alert.condition_keys else None)
             if self._stop_monitors.wait(nas_stack.seconds("NAS_HOST_MONITOR_INTERVAL_S", 300, 60)):
                 break
 
@@ -503,13 +504,17 @@ class JarvisRuntime:
             )
         return reply
 
-    def respond_streaming(self, user_input: str) -> Iterator[str]:
+    def respond_streaming(self, user_input: str, *, spoken: bool = False) -> Iterator[str]:
         """Streaming twin of respond() that yields reply fragments for TTS."""
         task_id = self.start_task("Reasoning", user_input.strip())
         try:
             with self._turn_lock:
-                for chunk in self.agent.respond_streaming(user_input):
-                    yield chunk
+                self.agent.spoken_turn = spoken
+                try:
+                    for chunk in self.agent.respond_streaming(user_input):
+                        yield chunk
+                finally:
+                    self.agent.spoken_turn = False
         except Exception:
             self.finish_task(task_id, state="failed", detail="Conversation failed")
             raise
@@ -539,7 +544,8 @@ class JarvisRuntime:
             finally:
                 request_context.reset(token)
 
-    def respond_streaming_in_session(self, session_id: str, user_input: str, request_id: str | None = None) -> Iterator[str]:
+    def respond_streaming_in_session(self, session_id: str, user_input: str, request_id: str | None = None,
+                                    *, spoken: bool = False) -> Iterator[str]:
         """Consume on one worker thread: the lock and request context are thread-bound."""
         with self._turn_lock:
             if not session_exists(session_id):
@@ -552,7 +558,7 @@ class JarvisRuntime:
             token = request_context.set(request_id)
             try:
                 self.agent.switch_session(session_id)
-                yield from self.respond_streaming(user_input)
+                yield from self.respond_streaming(user_input, **({"spoken": True} if spoken else {}))
             finally:
                 request_context.reset(token)
 

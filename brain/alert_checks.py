@@ -7,9 +7,8 @@ a Clear button (2026-11-03): "if it still needs me it'll stay but if it
 doesn't then it disappears".
 
 Each check answers True (still a problem), False (fixed) or None (can't
-tell, so it stays). Kinds without a live check count as fixed when the same
-source has since sent an info alert (the arr stack's and the NAS's
-"recovered" notes, a device's "back online").
+tell, so it stays). Informational updates never prove that unrelated
+conditions from the same source recovered.
 """
 from __future__ import annotations
 
@@ -89,17 +88,72 @@ def _battery(alert: event_bus.Alert, live: _Live) -> bool | None:
     return level < LOW_BATTERY and not charging
 
 
+def _arr(alert: event_bus.Alert, live: _Live) -> bool | None:
+    from integrations import nas_stack
+    if not hasattr(live, "_arr_snapshot"):
+        live._arr_snapshot = nas_stack.poll_health()
+    snapshot = live._arr_snapshot
+    # A recovery summary may still contain other failures. Only a complete,
+    # healthy live snapshot can retire legacy incident alerts without keys.
+    return bool(snapshot["issues"]) or snapshot.get("dht_nodes") in (None, 0)
+
+
+def _nas(alert: event_bus.Alert, live: _Live) -> bool | None:
+    from integrations import nas_host, nas_stack
+    keys = alert.context.get("condition_keys")
+    if not isinstance(keys, list) or not keys or any(str(k).startswith(nas_host._EVENTS) for k in keys):
+        return None  # legacy or one-off event; never guess from a recovery note
+    if not hasattr(live, "_nas_conditions"):
+        parsed = nas_host.from_status(nas_stack.watchdog_status())
+        live._nas_conditions = None
+        live._nas_health = None
+        if parsed is not None:
+            health, observed = parsed
+            current = nas_host.conditions(health, observed)
+            if "host-health-stale" not in current:
+                live._nas_conditions = current
+                live._nas_health = health
+    current = live._nas_conditions
+    if current is None:
+        return None
+    if any(k in current for k in keys):
+        return True
+    # Missing telemetry isn't proof of recovery (a failed SMART probe, for
+    # example, omits smart_passed entirely).
+    health = live._nas_health
+    for key in keys:
+        prefix, _, name = str(key).partition(":")
+        section, field, metric = {
+            "smart": ("disks", "device", "smart_passed"),
+            "disk-temp": ("disks", "device", "temp_c"),
+            "sectors": ("disks", "device", "reallocated"),
+            "raid": ("raid", "name", "degraded"),
+            "volume": ("volumes", "path", "used_pct"),
+            "container": ("containers", "name", "state"),
+        }.get(prefix, ("", "", ""))
+        if section:
+            records = health.get(section)
+            if not isinstance(records, list) or not any(
+                isinstance(r, dict) and r.get(field) == name and r.get(metric) is not None for r in records
+            ):
+                return None
+        elif key == "cpu-temp":
+            if health.get("cpu_temp_c") is None:
+                return None
+        elif key != "host-health-stale":
+            return None
+    return False
+
+
 CHECKS: dict[str, Callable[[event_bus.Alert, _Live], bool | None]] = {
     "schwab_login": _schwab,
     "download_stalled": _torrent,
     "download_error": _torrent,
     "device_offline": _device,
     "device_battery": _battery,
+    "arr_stack": _arr,
+    "nas_host": _nas,
 }
-
-
-def _recovered_since(alert: event_bus.Alert, history: list[event_bus.Alert]) -> bool:
-    return any(a.id > alert.id and a.source == alert.source and a.severity == "info" for a in history)
 
 
 def needs_attention(hours: float = 24) -> list[event_bus.Alert]:
@@ -110,7 +164,6 @@ def needs_attention(hours: float = 24) -> list[event_bus.Alert]:
 
 def refresh(hours: float = 24) -> dict[str, int]:
     """Re-check the Needs attention list; hide what's fixed. {resolved, remaining}."""
-    history = event_bus.since(0, limit=200)
     live, fixed, remaining = _Live(), [], 0
     for alert in needs_attention(hours):
         check = CHECKS.get(alert.kind)
@@ -119,8 +172,6 @@ def refresh(hours: float = 24) -> dict[str, int]:
         except Exception:  # noqa: BLE001 - a broken check keeps the alert, never hides it
             log.warning("Alert check for %s failed", alert.kind, exc_info=True)
             still = None
-        if still is None and _recovered_since(alert, history):
-            still = False
         if still is False:
             fixed.append(alert.id)
         else:
