@@ -472,7 +472,7 @@ def _core_client() -> Any:
 
 
 def _core_model() -> str:
-    return model_select.resolve(os.getenv("MEMORY_CORE_MODEL", "") or "auto:sonnet", "claude-sonnet-4-5")
+    return model_select.resolve(os.getenv("MEMORY_CORE_MODEL", "") or "auto:sonnet", "claude-sonnet-5-5")
 
 
 def refresh_core_profile(client: Any = None) -> bool:

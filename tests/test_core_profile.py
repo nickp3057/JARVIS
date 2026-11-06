@@ -34,7 +34,7 @@ class CoreProfileTests(unittest.TestCase):
         knowledge_vault.import_note("From Claude", "## People\nNick's sister is Kendra, born April 15, 2008.")
         self.assertTrue(knowledge_vault.core_profile_stale())
         client = self._client("## People\n- Sister: Kendra (b. Apr 15 2008)")
-        with patch.object(memory_extractor, "_core_model", return_value="claude-sonnet-4-5"):
+        with patch.object(memory_extractor, "_core_model", return_value="claude-sonnet-5-5"):
             self.assertTrue(memory_extractor.refresh_core_profile(client))
         sent = client.messages.create.call_args.kwargs["messages"][0]["content"]
         self.assertIn("Kendra", sent)
