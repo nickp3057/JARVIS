@@ -103,3 +103,40 @@ class DefaultProfileTests(unittest.TestCase):
             self.assertEqual(servarr_common.default_quality("sonarr"), "TV")
         with patch.dict(os.environ, {"RADARR_DEFAULT_QUALITY": "Favorite 4K"}):
             self.assertEqual(servarr_common.default_quality("radarr"), "Favorite 4K")
+
+
+class ShowRequestTests(unittest.TestCase):
+    """Media-tab show adds grab season 1 and search for it (not 'future')."""
+
+    SILO = {"title": "Silo", "year": 2023, "tvdbId": 403245, "seasons": []}
+
+    def setUp(self) -> None:
+        media_selections.clear_for_tests()
+        confirm_gate.clear_for_tests()
+        env = patch.dict(os.environ, {"SONARR_URL": "http://nas:8989", "SONARR_API_KEY": "k",
+                                      "SONARR_MONITOR_STRATEGY": "future"})
+        env.start()
+        self.addCleanup(env.stop)
+        from integrations import sonarr
+        patches = [
+            patch.object(sonarr, "_lookup", return_value=(True, [self.SILO])),
+            patch.object(sonarr, "_language_profile_id", return_value=None),
+            patch.object(sonarr.servarr, "resolve_quality", return_value=(2, "TV")),
+            patch.object(sonarr.servarr, "resolve_root_folder", return_value=("/tv", "/tv")),
+        ]
+        for p in patches:
+            p.start()
+            self.addCleanup(p.stop)
+        self.call = patch.object(sonarr.servarr, "call", return_value=servarr.Result(True, {"id": 24}, "ok")).start()
+        self.addCleanup(patch.stopall)
+
+    def test_show_add_monitors_first_season_and_searches(self) -> None:
+        from integrations import media_requests
+        media_requests.search("Silo", "show")
+        proposal = media_requests.request("show", 403245)
+        self.assertIn("season 1", proposal["description"])
+        done = media_requests.confirm(proposal["code"])
+        self.assertEqual(done["status"], "added", done)
+        self.assertIn("season 1", done["message"])
+        body = self.call.call_args.kwargs["json"]
+        self.assertEqual(body["addOptions"], {"searchForMissingEpisodes": True, "monitor": "firstSeason"})

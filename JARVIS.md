@@ -2064,7 +2064,10 @@ CALENDAR_ALERT_LEAD_MIN=10  # warn this many minutes before a meeting
   search → request → confirm for the planned Media tab:
   `GET /api/media/search`, `POST /api/media/requests` (opens a confirm-gate
   proposal, writes nothing), `POST /api/media/requests/confirm {code}`. Uses
-  the same receipts and `add_movie`/`add_series` as chat.
+  the same receipts and `add_movie`/`add_series` as chat. Shows added this
+  way always monitor and search **season 1 only** (`SHOW_MONITOR =
+  "firstSeason"`), ignoring `SONARR_MONITOR_STRATEGY`, whose `future`
+  default monitors only unaired episodes and so downloads nothing.
 - **Reminders & to-dos** (`brain/reminders.py`) — timed reminders ("remind me at
   3pm") and open to-dos, persisted, spoken aloud when due. Tools: add_reminder /
   list_reminders / complete_reminder / delete_reminder.

@@ -46,6 +46,8 @@ _MONITOR_ALIASES: dict[str, str] = {
     "do not monitor": "none",
 }
 
+_MONITOR_PHRASES = {"future": "future episodes", "firstSeason": "season 1", "all": "every episode"}
+
 _VALID_MONITOR = {
     "future", "all", "missing", "existing", "firstSeason", "lastSeason",
     "latestSeason", "pilot", "recent", "none",
@@ -229,7 +231,7 @@ def add_series(
         media_selections.consume(_SERVICE, session_id)
 
         year = series.get("year", "")
-        monitor_phrase = "future episodes" if monitor_strategy == "future" else f"'{monitor_strategy}'"
+        monitor_phrase = _MONITOR_PHRASES.get(monitor_strategy, f"'{monitor_strategy}'")
         return (
             f"Added {series.get('title', 'the show')}{f' ({year})' if year else ''} to Sonarr "
             f"on the {profile_detail} profile, monitoring {monitor_phrase}. Search is underway, sir."

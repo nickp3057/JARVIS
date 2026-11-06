@@ -25,6 +25,10 @@ _KINDS = {
     "show": ("sonarr", sonarr, "tvdbId"),
 }
 _MAX_RESULTS = 10
+# Shows added from the Media tab grab season 1 now (and nothing else), so
+# the tap actually downloads something. Sonarr's ``future`` default would
+# monitor only unaired episodes and the add-time search would find nothing.
+SHOW_MONITOR = "firstSeason"
 
 
 def _poster(item: dict[str, Any]) -> str | None:
@@ -85,9 +89,12 @@ def request(kind: str, media_id: int, quality: str | None = None) -> dict[str, A
     def run() -> str:
         if service == "radarr":
             return radarr.add_movie(media_id, quality=quality, confirmed=True, session_id=SESSION)
-        return sonarr.add_series(media_id, quality=quality, confirmed=True, session_id=SESSION)
+        return sonarr.add_series(
+            media_id, quality=quality, monitor=SHOW_MONITOR, confirmed=True, session_id=SESSION
+        )
 
-    confirm_gate.propose(SESSION, f"add {label} to {service.title()} at {profile}", run)
+    scope = " (season 1)" if service == "sonarr" else ""
+    confirm_gate.propose(SESSION, f"add {label}{scope} to {service.title()} at {profile}", run)
     return {
         "status": "needs_confirmation",
         "code": confirm_gate.pending_code(SESSION),
