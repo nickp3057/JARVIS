@@ -818,12 +818,15 @@ class KnowledgeImport(BaseModel):
 @app.post("/api/knowledge/import")
 def knowledge_import(request: KnowledgeImport, _: None = Depends(authorize)) -> dict[str, object]:
     """Paste-in memory: saves the text as a note under Jarvis Memory/Imported
-    (knowledge_vault.import_note), searched section by section each turn."""
+    (knowledge_vault.import_note), searched section by section each turn, and
+    rebuilds the always-injected core profile from it in the background."""
     from brain import knowledge_vault
     try:
         path = knowledge_vault.import_note(request.title, request.text)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+    from brain import memory_extractor
+    memory_extractor.refresh_core_profile_async()  # boil it down into what he always knows
     return {"path": path}
 
 

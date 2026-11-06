@@ -440,6 +440,29 @@ def describe_contradiction_candidates(category: str, content: str) -> str:
     return "\n".join(lines)
 
 
+def _core_profile_block(*, refresh: bool) -> str:
+    """The core profile distilled from imports (``Jarvis Memory/Core
+    Profile.md``), shown every turn. On a real turn, an import newer than it
+    starts a background rebuild; this turn uses the old one."""
+    try:
+        from brain import knowledge_vault
+
+        if refresh and knowledge_vault.core_profile_stale():
+            from brain import memory_extractor
+
+            memory_extractor.refresh_core_profile_async()
+        core = knowledge_vault.read_core_profile()
+    except Exception as exc:  # noqa: BLE001
+        log.warning("Could not read the core profile: %s", exc)
+        return ""
+    if not core:
+        return ""
+    # Its own "## " headings would read as fact categories; nest them.
+    core = re.sub(r"^## ", "### ", core, flags=re.MULTILINE)
+    return ("## Core profile (always true unless a remembered fact below says otherwise)\n"
+            f"{core}")
+
+
 def render_memory_block(query: str = "") -> str:
     """Return a human-readable text block for injection into the system prompt.
 
@@ -522,6 +545,9 @@ def render_memory_block(query: str = "") -> str:
         lines.append("")
 
     block = "\n".join(lines).strip()
+    core = _core_profile_block(refresh=bool(query))
+    if core:
+        block = f"{core}\n\n{block}" if block else core
     if truncated:
         block += (
             f"\n\n(Showing the {max_facts} most recent of {total} "

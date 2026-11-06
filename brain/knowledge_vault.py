@@ -20,6 +20,7 @@ log = get_logger(__name__)
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 _DEFAULT_VAULT = _PROJECT_ROOT / "memory" / "obsidian"
 _PROFILE_NOTE = Path("Jarvis Memory") / "Profile.md"
+_CORE_NOTE = Path("Jarvis Memory") / "Core Profile.md"
 _WORD_RE = re.compile(r"[a-z0-9][a-z0-9_'’-]*", re.IGNORECASE)
 _STOP_WORDS = {
     "a", "an", "and", "are", "as", "at", "be", "but", "by", "do", "for",
@@ -142,8 +143,8 @@ def search_vault(query: str, *, max_results: int | None = None, max_chars: int |
     per_excerpt = max(200, char_limit // result_limit)
     results: list[dict[str, Any]] = []
     for path, relative in _markdown_files():
-        if relative == _PROFILE_NOTE:
-            continue  # Structured profile facts are already rendered separately.
+        if relative in (_PROFILE_NOTE, _CORE_NOTE):
+            continue  # Profile facts and the core profile are injected every turn already.
         try:
             text = path.read_text(encoding="utf-8")
             title_tokens = set(_tokens(relative.stem))
@@ -505,3 +506,71 @@ def import_note(title: str, text: str) -> str:
     temporary.write_text(body, encoding="utf-8")
     temporary.replace(target)
     return target.relative_to(vault_path()).as_posix()
+
+
+# --- Core profile: the always-known summary distilled from imports ----------
+# ``memory_extractor.refresh_core_profile`` writes it; ``memory.render_memory_block``
+# injects it every turn. It's a plain note, so Nick can read or edit it.
+
+_CORE_SOURCE_CHARS = 120_000
+
+
+def core_profile_path() -> Path:
+    return vault_path() / _CORE_NOTE
+
+
+def read_core_profile() -> str:
+    """The core profile's body (frontmatter stripped), or ""."""
+    try:
+        text = core_profile_path().read_text(encoding="utf-8")
+    except (OSError, UnicodeError):
+        return ""
+    if text.startswith("---\n"):
+        end = text.find("\n---\n", 4)
+        if end != -1:
+            text = text[end + 5:]
+    return text.strip()
+
+
+def write_core_profile(body: str) -> None:
+    target = core_profile_path()
+    target.parent.mkdir(parents=True, exist_ok=True)
+    stamp = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    temporary = target.with_suffix(".md.tmp")
+    temporary.write_text(f"---\ndistilled: {stamp}\n---\n\n{body.strip()}\n", encoding="utf-8")
+    temporary.replace(target)
+
+
+def imported_notes() -> list[tuple[str, float, str]]:
+    """Every note under the import folder: (name, modified time, text),
+    oldest first, together capped at ``_CORE_SOURCE_CHARS``."""
+    folder = _vault_folder("OBSIDIAN_IMPORT_FOLDER", "Jarvis Memory/Imported")
+    notes: list[tuple[str, float, str]] = []
+    if not folder.is_dir():
+        return notes
+    for path in sorted(folder.glob("*.md")):
+        try:
+            notes.append((path.stem, path.stat().st_mtime, path.read_text(encoding="utf-8")))
+        except (OSError, UnicodeError):
+            continue
+    notes.sort(key=lambda note: note[1])
+    kept, used = [], 0
+    for name, mtime, text in reversed(notes):  # newest imports win the budget
+        if used >= _CORE_SOURCE_CHARS:
+            break
+        text = text[: _CORE_SOURCE_CHARS - used]
+        used += len(text)
+        kept.append((name, mtime, text))
+    return list(reversed(kept))
+
+
+def core_profile_stale() -> bool:
+    """True when an import is newer than the core profile (or it's missing)."""
+    notes = imported_notes()
+    if not notes:
+        return False
+    try:
+        built = core_profile_path().stat().st_mtime
+    except OSError:
+        return True
+    return max(mtime for _, mtime, _ in notes) > built

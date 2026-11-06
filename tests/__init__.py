@@ -7,8 +7,9 @@ tool would otherwise write Nick's live file. Tests that need the file patch
 import tempfile
 from pathlib import Path
 
-from brain import event_bus, tool_health
+from brain import event_bus, memory_extractor, tool_health
 
 _TMP = tempfile.mkdtemp(prefix="jarvis-tests-")
 tool_health._FILE = Path(_TMP) / "tool_health.json"
 event_bus._REPEATS_FILE = Path(_TMP) / "alert_repeats.json"  # and off memory/alert_repeats.json
+memory_extractor._core_client = lambda: None  # an import never reaches the real API to distil the core profile

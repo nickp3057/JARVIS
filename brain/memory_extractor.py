@@ -423,3 +423,103 @@ def stop() -> None:
 
 def pending() -> int:
     return _queue.unfinished_tasks
+
+
+# --- Core profile: distil imports into what JARVIS always knows ---------------
+# An import ("everything Claude knows about me") is too long to send every
+# turn, so it's only searched. This boils it down to a short list of the
+# things a close assistant just knows (people, birthdays, school, work, home,
+# car, main projects, strong likes and dislikes), saved as the vault note
+# ``Jarvis Memory/Core Profile.md`` and injected every turn by
+# ``memory.render_memory_block``. It runs in the background after each import,
+# and on the first turn after an import it missed (e.g. Core was restarted).
+
+_CORE_MAX_CHARS = 3500
+_core_lock = threading.Lock()
+_core_running = threading.Event()
+
+_CORE_SYSTEM_PROMPT = f"""You maintain the core profile of Nick (Nickolas \
+Pearson) for JARVIS, his personal AI assistant. JARVIS sees this profile on \
+every single message, so it must hold only what a close, long-time assistant \
+would simply know without looking anything up, and it must stay short.
+
+From the imported notes, write Markdown with these "## " sections, skipping \
+any with nothing worth keeping: Identity, People, School, Work and money, \
+Home and routine, Car and gear, Projects, Likes and dislikes, How to talk to him.
+
+Rules:
+- Terse bullets, one fact each. Keep names, relationships, birthdays, dates, \
+  places, schedules and anything Nick would be annoyed to repeat.
+- Leave out trivia, one-off events, long technical detail (paths, ports, \
+  configs), and anything marked unsure.
+- Where notes disagree, the newer import wins. Keep "(as of ...)" dates on \
+  facts that go stale.
+- Never include passwords, account or card numbers, or other secrets.
+- Hard limit: {_CORE_MAX_CHARS} characters. No intro or closing text."""
+
+
+def _core_client() -> Any:
+    key = (os.getenv("ANTHROPIC_API_KEY", "") or "").strip()
+    if not key:
+        return None
+    try:
+        from anthropic import Anthropic  # type: ignore
+
+        return Anthropic(api_key=key)
+    except Exception as exc:  # noqa: BLE001
+        log.warning("Core profile model client unavailable: %s", exc)
+        return None
+
+
+def _core_model() -> str:
+    return model_select.resolve(os.getenv("MEMORY_CORE_MODEL", "") or "auto:sonnet", "claude-sonnet-4-5")
+
+
+def refresh_core_profile(client: Any = None) -> bool:
+    """Rebuild the core profile from every import now. True if it was written."""
+    from brain import knowledge_vault
+
+    notes = knowledge_vault.imported_notes()
+    if not notes:
+        return False
+    client = client if client is not None else _core_client()
+    if client is None:
+        return False
+    with _core_lock:
+        sources = "\n\n".join(f'<import name="{name}">\n{text.strip()}\n</import>' for name, _, text in notes)
+        model = _core_model()
+        try:
+            response = client.messages.create(
+                model=model,
+                max_tokens=2000,
+                system=_CORE_SYSTEM_PROMPT,
+                messages=[{"role": "user", "content": f"Imported notes, oldest first:\n\n{sources}"}],
+                **model_select.request_kwargs(model),
+            )
+        except Exception as exc:  # noqa: BLE001
+            log.warning("Core profile distillation failed: %s", exc)
+            return False
+        body = "".join(getattr(block, "text", "") for block in getattr(response, "content", []) or []
+                       if getattr(block, "type", None) == "text").strip()
+        if not body:
+            return False
+        knowledge_vault.write_core_profile(body[: _CORE_MAX_CHARS + 500])
+    _notify("Memory updated", "Core profile rebuilt from your imports")
+    log.info("Core profile rebuilt from %d import(s), %d chars", len(notes), len(body))
+    return True
+
+
+def refresh_core_profile_async() -> bool:
+    """Rebuild in the background (one at a time). False if one is already running."""
+    if _core_running.is_set():
+        return False
+    _core_running.set()
+
+    def run() -> None:
+        try:
+            refresh_core_profile()
+        finally:
+            _core_running.clear()
+
+    threading.Thread(target=run, name="jarvis-core-profile", daemon=True).start()
+    return True
