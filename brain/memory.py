@@ -441,15 +441,14 @@ def describe_contradiction_candidates(category: str, content: str) -> str:
 
 
 def _core_profile_block(*, refresh: bool) -> str:
-    """The core profile distilled from imports (``Jarvis Memory/Core
-    Profile.md``), shown every turn. On a real turn, an import newer than it
-    starts a background rebuild; this turn uses the old one."""
+    """The core profile (``Jarvis Memory/Core Profile.md``, imports and
+    profile facts merged), shown every turn. On a real turn, a newer import
+    (or facts learned since a day-old profile) starts a background rebuild;
+    this turn uses the old one."""
     try:
-        from brain import knowledge_vault
+        from brain import knowledge_vault, memory_extractor
 
-        if refresh and knowledge_vault.core_profile_stale():
-            from brain import memory_extractor
-
+        if refresh and memory_extractor.core_profile_due():
             memory_extractor.refresh_core_profile_async()
         core = knowledge_vault.read_core_profile()
     except Exception as exc:  # noqa: BLE001
@@ -459,7 +458,8 @@ def _core_profile_block(*, refresh: bool) -> str:
         return ""
     # Its own "## " headings would read as fact categories; nest them.
     core = re.sub(r"^## ", "### ", core, flags=re.MULTILINE)
-    return ("## Core profile (always true unless a remembered fact below says otherwise)\n"
+    return ("## Core profile (who Nick is, merged from everything known; facts below "
+            "add detail, and what he tells you now wins)\n"
             f"{core}")
 
 

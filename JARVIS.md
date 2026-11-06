@@ -701,7 +701,8 @@ TV_HOST=                    # the TV's IP, so direct calls to it show as TV on t
 OBSIDIAN_NOTES_FOLDER=Jarvis Memory/Notes      # vault-relative folder for titled captures
 MEMORY_AUTO_EXTRACT=true    # background post-turn fact extraction (ChatGPT-style memory)
 MEMORY_EXTRACT_MODEL=claude-haiku-4-5-20251001 # cheap model used for extraction
-MEMORY_CORE_MODEL=          # model that distils imports into the core profile (default auto:sonnet)
+MEMORY_CORE_MODEL=          # model that builds the core profile (default auto:sonnet)
+MEMORY_CORE_REFRESH_H=24    # rebuild the core profile for newly learned facts at most this often (imports rebuild at once)
 MEMORY_AUTO_CONFIDENCE=0.75 # facts at/above this write directly; below -> proposals
 MEMORY_EXTRACT_MIN_CHARS=12 # skip extraction for very short user turns ("yes")
 HABITS_MIN_TURNS=10         # turns logged before the habits digest is injected
@@ -905,16 +906,17 @@ CALENDAR_ALERT_LEAD_MIN=10  # warn this many minutes before a meeting
   200k chars) saves pasted text to `Jarvis Memory/Imported/<title>.md`
   (`OBSIDIAN_IMPORT_FOLDER`); the Memory tab and the Room menu have an
   Import memory sheet. **Core profile (2026-11-05):** an import is only searched,
-  so each one also kicks off `memory_extractor.refresh_core_profile`
-  (background, `MEMORY_CORE_MODEL`, default newest Sonnet), which boils every
-  note under Imported down to ≤3,500 chars of what a close assistant just
-  knows (people, birthdays, school, work, home, car, projects, likes) and
-  saves it as `Jarvis Memory/Core Profile.md`. `memory.render_memory_block`
-  puts it at the top of the memory section every turn (remembered facts win
-  on conflict); it's left out of vault search. A turn that finds an import
-  newer than it rebuilds it in the background, so a missed rebuild heals
-  itself. It's a plain note: edit it and the edit stands until the next
-  import.
+  and profile facts go stale one sentence at a time, so
+  `memory_extractor.refresh_core_profile` (background, `MEMORY_CORE_MODEL`,
+  default newest Sonnet) merges every note under Imported with the dated
+  profile facts, newest winning, into ≤4,000 chars of what a close assistant
+  just knows (people, birthdays, school, work, home, car, projects, likes),
+  saved as `Jarvis Memory/Core Profile.md` (cut at a line if it runs long).
+  `memory.render_memory_block` puts it at the top of the memory section every
+  turn; it's left out of vault search. It rebuilds right after an import, and
+  after facts learned in conversation at most every `MEMORY_CORE_REFRESH_H`
+  hours (24; ~2-3¢ a rebuild), started by the next turn that finds it due. It's
+  a plain note: an edit stands until the next rebuild.
 
 - **Calmer plasma, red under JARVIS, Memory map, Link map (2026-11-01, iOS
   5.55 / build 198, TV 9.2)** — `PlasmaBackdrop`'s speed bursts are half

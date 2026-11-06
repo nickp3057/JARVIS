@@ -17,7 +17,12 @@ class CoreProfileTests(unittest.TestCase):
         self.vault = Path(tmp.name)
         patch.dict(os.environ, {"OBSIDIAN_VAULT_PATH": str(self.vault),
                                 "OBSIDIAN_INDEX_FOLDERS": "Jarvis Memory"}).start()
-        patch.object(memory, "list_facts", return_value=[]).start()
+        self.facts: list[dict] = []
+        patch.object(memory, "list_facts", side_effect=lambda: self.facts).start()
+        patch.object(memory_extractor, "list_facts", side_effect=lambda: self.facts).start()
+        self.facts_file = self.vault / "profile.json"
+        self.facts_file.write_text("{}")
+        patch.object(memory, "_MEMORY_FILE", self.facts_file).start()
         self.addCleanup(patch.stopall)
 
     def _client(self, text: str) -> MagicMock:
@@ -55,11 +60,42 @@ class CoreProfileTests(unittest.TestCase):
         old = time.time() - 60
         os.utime(knowledge_vault.core_profile_path(), (old, old))
         self.assertTrue(knowledge_vault.core_profile_stale())
+        os.utime(self.facts_file, (old - 60, old - 60))
         with patch.object(memory_extractor, "refresh_core_profile_async") as rebuild:
             self.assertIn("Drives a Tesla", memory.render_memory_block("hi"))
             rebuild.assert_called_once()
             memory.render_memory_block()  # the UI's no-query view never triggers a rebuild
             rebuild.assert_called_once()
+
+    def test_profile_facts_are_merged_in_with_dates(self) -> None:
+        self.facts = [{"id": "a", "category": "work", "content": "Shift Lead at Chick-fil-A.",
+                       "added_at": "2026-09-01T00:00:00+00:00"}]
+        client = self._client("## Work and money\n- Assistant Director, Chick-fil-A")
+        self.assertTrue(memory_extractor.refresh_core_profile(client))  # facts alone are enough
+        sent = client.messages.create.call_args.kwargs["messages"][0]["content"]
+        self.assertIn("(2026-09-01) [work] Shift Lead", sent)
+        self.assertIn("newer date wins", client.messages.create.call_args.kwargs["system"])
+
+    def test_new_facts_rebuild_at_most_once_a_day(self) -> None:
+        knowledge_vault.write_core_profile("- Drives a Tesla")
+        now = time.time()
+        os.utime(self.facts_file, (now, now))  # learned something after the build...
+        hour_ago = now - 3600
+        os.utime(knowledge_vault.core_profile_path(), (hour_ago, hour_ago))
+        self.assertFalse(memory_extractor.core_profile_due())  # ...but it's only an hour old
+        day_ago = now - 25 * 3600
+        os.utime(knowledge_vault.core_profile_path(), (day_ago, day_ago))
+        self.assertTrue(memory_extractor.core_profile_due())
+        os.utime(self.facts_file, (day_ago - 60, day_ago - 60))
+        self.assertFalse(memory_extractor.core_profile_due())  # nothing new since
+
+    def test_overlong_profile_is_cut_at_a_line(self) -> None:
+        knowledge_vault.import_note("A", "x")
+        body = "\n".join(f"- fact number {i} " + "y" * 60 for i in range(200))
+        self.assertTrue(memory_extractor.refresh_core_profile(self._client(body)))
+        saved = knowledge_vault.read_core_profile()
+        self.assertLessEqual(len(saved), 6000)
+        self.assertTrue(saved.endswith("y"))  # a whole bullet, not half of one
 
     def test_failed_call_keeps_the_old_profile(self) -> None:
         knowledge_vault.import_note("A", "Nick drives a Tesla.")
