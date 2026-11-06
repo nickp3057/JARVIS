@@ -102,6 +102,7 @@ struct SettingsView: View {
                         }
                         .buttonStyle(.plain)
                     }
+                    NightVolumePanel()
                     SchwabPanel()
                     CockpitPanel("Study brief", symbol: "graduationcap") {
                         Toggle("Deliver on this phone", isOn: $settings.studyAlertsEnabled).tint(JarvisTheme.cyan)
@@ -311,5 +312,76 @@ struct SchwabPanel: View {
     private func load() async {
         guard settings.isConfigured else { return }
         portfolio = try? await JarvisAPIClient.make(from: settings).portfolio()
+    }
+}
+
+/// Night volume: the room speaker's quiet-hours level (0-10), editable at
+/// any hour. Core applies it at once only during quiet hours. In Settings
+/// (a panel) and the iPad Room's Menu › Room settings (`inForm`, a Form
+/// section, so it's reachable without leaving full screen). Hidden on an
+/// older Core that doesn't report `night_level`.
+struct NightVolumePanel: View {
+    var inForm = false
+    @EnvironmentObject private var settings: AppSettings
+    @State private var level: Int?
+    @State private var failure: String?
+    @State private var pending: Task<Void, Never>?
+
+    private var caption: String { failure ?? "JARVIS's speaker level during quiet hours (10 pm–7 am)." }
+
+    var body: some View {
+        Group {
+            if let shown = level {
+                if inForm {
+                    Section {
+                        stepper(shown)
+                    } header: {
+                        Text("JARVIS speaker")
+                    } footer: {
+                        Text(caption).foregroundStyle(failure == nil ? Color.secondary : JarvisTheme.amber)
+                    }
+                } else {
+                    CockpitPanel("Room speaker", symbol: "moon.zzz") {
+                        stepper(shown)
+                        Text(caption)
+                            .font(.caption).foregroundStyle(failure == nil ? Color.secondary : JarvisTheme.amber)
+                    }
+                }
+            }
+        }
+        .task { await load() }
+    }
+
+    private func stepper(_ shown: Int) -> some View {
+        Stepper(value: Binding(get: { shown }, set: { change($0) }), in: 0...10) {
+            HStack {
+                Label("Night volume", systemImage: "moon.zzz").font(inForm ? .body : .headline)
+                Spacer()
+                Text("\(shown)").font(.headline).monospacedDigit().foregroundStyle(JarvisTheme.cyan)
+            }
+        }
+        .accessibilityValue("\(shown) of 10")
+    }
+
+    private func load() async {
+        guard settings.isConfigured,
+              let volume = try? await JarvisAPIClient.make(from: settings).roomVolume() else { return }
+        level = volume.nightLevel
+    }
+
+    private func change(_ value: Int) {
+        level = value
+        pending?.cancel()
+        pending = Task {
+            try? await Task.sleep(for: .milliseconds(400))  // one request per burst of taps
+            guard !Task.isCancelled else { return }
+            do {
+                let volume = try await JarvisAPIClient.make(from: settings).setRoomNightVolume(value)
+                if let saved = volume.nightLevel { level = saved }
+                failure = nil
+            } catch {
+                failure = "Couldn't save the night volume"
+            }
+        }
     }
 }

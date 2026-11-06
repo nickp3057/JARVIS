@@ -193,6 +193,18 @@ class VolumeTests(unittest.TestCase):
         room_volume.prepare(datetime(2026, 1, 2, 8))
         self.assertEqual(self.sets, ["30%", "70%"])  # 69% remembered as level 7
 
+    def test_night_level_set_by_day_waits_for_night(self) -> None:
+        self.assertEqual(room_volume.night_level(), 3)
+        room_volume.set_night_level(5, datetime(2026, 1, 1, 15))
+        self.assertEqual(self.sets, [])  # daytime: stored, not applied
+        self.assertEqual(room_volume.night_level(), 5)
+        room_volume.prepare(datetime(2026, 1, 1, 23))
+        self.assertEqual(self.sets, ["50%"])
+
+    def test_night_level_set_at_night_applies_now(self) -> None:
+        room_volume.set_night_level(4, datetime(2026, 1, 1, 23))
+        self.assertEqual(self.sets, ["40%"])
+
     def test_voice_changes_stick_to_their_time_of_day(self) -> None:
         room_volume.set_level(2, datetime(2026, 1, 1, 23))
         room_volume.prepare(datetime(2026, 1, 2, 9))

@@ -1210,7 +1210,8 @@ class RoomVolumeRequest(BaseModel):
 
 def _room_volume_state() -> dict[str, object]:
     from speech import room_volume
-    return {"level": room_volume.level(), "night": room_volume.quiet_now()}
+    return {"level": room_volume.level(), "night": room_volume.quiet_now(),
+            "night_level": room_volume.night_level()}
 
 
 @app.get("/api/room/volume")
@@ -1227,6 +1228,17 @@ def room_volume_set(request: RoomVolumeRequest, _: None = Depends(authorize)) ->
     from speech import room_sounds, room_volume
     room_volume.set_level(request.level)
     room_sounds.play("chime")
+    return _room_volume_state()
+
+
+@app.post("/api/room/volume/night")
+def room_volume_night_set(request: RoomVolumeRequest, _: None = Depends(authorize)) -> dict[str, object]:
+    """Settings' Night volume stepper: the quiet-hours level, editable at any
+    hour. Applied (with a chime) only when it is night right now."""
+    from speech import room_sounds, room_volume
+    room_volume.set_night_level(request.level)
+    if room_volume.quiet_now():
+        room_sounds.play("chime")
     return _room_volume_state()
 
 

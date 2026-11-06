@@ -758,7 +758,7 @@ WAKE_BACKUP_DELAY_S=90      # wake-up: how long the TV gets to come on before th
 WAKE_BACKUP_RING_S=600      # wake-up: longest the backup ring goes on
 ROOM_ANNOUNCEMENTS=1        # speak runtime announcements (never in quiet hours)
 ROOM_QUIET_HOURS=22-7       # night mode hours; empty turns night mode off
-ROOM_NIGHT_VOLUME=3         # 0-10 speaker level in quiet hours (voice changes at night override)
+ROOM_NIGHT_VOLUME=4         # 0-10 speaker level in quiet hours (voice at night, or the app's Settings > Night volume, override it)
 ROOM_VOLUME_CONTROL=Master  # ALSA mixer control for "volume 4" / "louder"
 LIGHT_RAINBOWS=             # light=select:option (or light=scene.x) pairs for the Rainbow button (defaults to Nick's strip + desk DIY scenes, the lamp's built-in Rainbow scene, and the fan ring's scene.fan_light_rainbow Tap-to-Run)
 ALERT_REPEAT_WINDOW_S=1800  # the same warning again within this long is dropped, even across restarts (memory/alert_repeats.json); 0 = off
@@ -1289,7 +1289,11 @@ CALENDAR_ALERT_LEAD_MIN=10  # warn this many minutes before a meeting
   them). Barge-in: the wake word while JARVIS talks stops him and listens
   (`VOICE_BARGE_IN`). `speech/room_volume.py` is volume by `amixer` on the
   `AUDIO_OUTPUT_DEVICE` card plus night mode (`ROOM_QUIET_HOURS` 22-7 at
-  `ROOM_NIGHT_VOLUME` 3; the day level is remembered and restored).
+  `ROOM_NIGHT_VOLUME` 4; the day level is remembered and restored). The
+  companion's Settings has a Night volume stepper (`POST /api/room/volume/night`,
+  `GET /api/room/volume` reports `night_level`) that edits the night level at
+  any hour; it applies at once only inside quiet hours. On the iPad it's also
+  in the Room's Menu › Room settings, so it works without leaving full screen.
   Broadcasts: `POST /api/voice/announce {"text"}` (`chat` scope; 409 when the
   room voice is off) and the `announce_in_room` tool ("tell my room dinner's
   ready" from the phone).

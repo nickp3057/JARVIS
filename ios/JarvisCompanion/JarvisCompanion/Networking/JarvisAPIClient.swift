@@ -985,6 +985,12 @@ struct JarvisAPIClient {
         return try await postJSON(RoomVolume.self, path: "api/room/volume", body: Body(level: level))
     }
 
+    /// The quiet-hours level, editable at any hour (Settings' Night volume).
+    func setRoomNightVolume(_ level: Int) async throws -> RoomVolume {
+        struct Body: Encodable { let level: Int }
+        return try await postJSON(RoomVolume.self, path: "api/room/volume/night", body: Body(level: level))
+    }
+
     func homeScenes() async throws -> HomeScenes {
         try await getJSON(HomeScenes.self, path: "api/home/scenes")
     }

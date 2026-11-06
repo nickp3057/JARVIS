@@ -157,15 +157,20 @@ class FanAndVolumeTests(unittest.TestCase):
         from speech import room_sounds, room_volume
         with patch.object(room_volume, "set_level") as set_level, patch.object(room_sounds, "play") as play, \
                 patch.object(room_volume, "level", return_value=6), patch.object(room_volume, "quiet_now",
-                                                                                return_value=False):
+                                                                                return_value=False), \
+                patch.object(room_volume, "night_level", return_value=4), \
+                patch.object(room_volume, "set_night_level") as set_night:
             got = self.client.get("/api/room/volume", headers=self.headers)
             put = self.client.post("/api/room/volume", headers=self.headers, json={"level": 6})
             bad = self.client.post("/api/room/volume", headers=self.headers, json={"level": 11})
-        self.assertEqual(got.json(), {"level": 6, "night": False})
-        self.assertEqual(put.json(), {"level": 6, "night": False})
+            night = self.client.post("/api/room/volume/night", headers=self.headers, json={"level": 5})
+        self.assertEqual(got.json(), {"level": 6, "night": False, "night_level": 4})
+        self.assertEqual(put.json(), {"level": 6, "night": False, "night_level": 4})
         set_level.assert_called_once_with(6)
-        play.assert_called_once_with("chime")
+        play.assert_called_once_with("chime")  # the daytime night-level edit stays silent
         self.assertEqual(bad.status_code, 422)
+        self.assertEqual(night.status_code, 200)
+        set_night.assert_called_once_with(5)
 
 
 class EndpointTests(unittest.TestCase):

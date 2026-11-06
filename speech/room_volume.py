@@ -6,8 +6,8 @@ Levels are 0-10 like a smart speaker ("volume 4", "louder", "quieter"),
 (``Master``).
 
 Night mode: during ``ROOM_QUIET_HOURS`` (``22-7``; empty turns it off) the
-speaker uses the night level (``ROOM_NIGHT_VOLUME``, 3 until Nick changes it
-at night by voice); outside them, the day level. The day level is whatever
+speaker uses the night level (``ROOM_NIGHT_VOLUME``, 4 until Nick changes it
+at night by voice, or any time from the app's Settings via ``set_night_level``); outside them, the day level. The day level is whatever
 the speaker was at the first time night mode kicked in, until Nick sets one.
 Both live in ``memory/room_volume.json``. ``prepare()`` runs before the room
 voice makes any sound, so the switch happens at the next sound, not on a
@@ -98,9 +98,9 @@ def _save(data: dict[str, Any]) -> None:
 
 def _night_default() -> int:
     try:
-        return max(0, min(10, int(os.getenv("ROOM_NIGHT_VOLUME", "3"))))
+        return max(0, min(10, int(os.getenv("ROOM_NIGHT_VOLUME", "4"))))
     except ValueError:
-        return 3
+        return 4
 
 
 def level(now: datetime | None = None) -> int | None:
@@ -131,6 +131,26 @@ def prepare(now: datetime | None = None) -> None:
         _apply(int(target))
         data["applied"] = [mode, target]
         _save(data)
+
+
+def night_level() -> int:
+    """The level quiet hours use (stored, else ``ROOM_NIGHT_VOLUME``)."""
+    with _lock:
+        stored = _load().get("night")
+    return int(stored) if stored is not None else _night_default()
+
+
+def set_night_level(value: int, now: datetime | None = None) -> int:
+    """Set the night level from any hour (the app's Settings); applied now
+    only if it is night, otherwise at the next quiet-hours sound."""
+    value = max(0, min(10, int(value)))
+    if _mode(now) == "night":
+        return set_level(value, now)
+    with _lock:
+        data = _load()
+        data["night"] = value
+        _save(data)
+    return value
 
 
 def set_level(value: int, now: datetime | None = None) -> int:

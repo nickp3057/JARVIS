@@ -410,6 +410,13 @@ struct RoomVolume: Decodable, Equatable {
     let level: Int?
     /// Inside Core's quiet hours: the slider sets the night level.
     let night: Bool
+    /// The quiet-hours level (Settings' Night volume); nil on an older Core.
+    var nightLevel: Int? = nil
+
+    enum CodingKeys: String, CodingKey {
+        case level, night
+        case nightLevel = "night_level"
+    }
 }
 
 struct LightDetails: Decodable, Equatable {

@@ -968,6 +968,7 @@ private struct RoomSettingsView: View {
                     }
                     Toggle("Back to Room after 3 min on another tab", isOn: $autoReturn)
                 }
+                NightVolumePanel(inForm: true)
                 Section {
                     ThemePicker()
                 } header: {
