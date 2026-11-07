@@ -194,6 +194,44 @@ SETTINGS_SCHEMA: dict[str, dict[str, Any]] = {
         "description": "Price decrease percentage that triggers an alert.",
     },
 
+    # --- Email triage subagent ---
+    "EMAIL_TRIAGE_ENABLED": {
+        "type": "bool",
+        "description": "Whether the email subagent sorts new Gmail automatically (once Gmail is linked).",
+    },
+    "EMAIL_TRIAGE_INTERVAL_S": {
+        "type": "float",
+        "min": 120.0,
+        "max": 86400.0,
+        "description": "Seconds between automatic inbox sorting passes.",
+    },
+    "EMAIL_TRIAGE_DRY_RUN": {
+        "type": "bool",
+        "description": "Decide and log what the email sorter would do without moving or trashing anything.",
+    },
+    "EMAIL_TRIAGE_MODEL": {
+        "type": "string",
+        "description": "Model for the email subagent: a model id or auto:haiku / auto:sonnet.",
+    },
+    "EMAIL_MISSIONARY_PARENT": {
+        "type": "string",
+        "description": "Parent Gmail label whose sub-labels are the missionary folders (e.g. Missionaries).",
+    },
+    "EMAIL_MISSIONARY_LABELS": {
+        "type": "string",
+        "description": "Extra comma-separated Gmail label names that are missionary folders.",
+    },
+    "EMAIL_NEVER_TRASH": {
+        "type": "string",
+        "description": "Comma-separated addresses or domains the email sorter must never trash.",
+    },
+    "EMAIL_UNSUB_THRESHOLD": {
+        "type": "int",
+        "min": 1,
+        "max": 100,
+        "description": "Trashes within EMAIL_UNSUB_WINDOW_DAYS that put a sender on the unsubscribe list.",
+    },
+
     # --- Companion media storage ---
     "MEDIA_STORAGE_PATH": {
         "type": "string",

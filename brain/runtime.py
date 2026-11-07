@@ -162,6 +162,7 @@ class JarvisRuntime:
         self._home_flap_muted: dict[str, float] = {}
         self._schwab_monitor_started = False
         self._price_monitor_failed = False
+        self._email_monitor_started = False
         self._home_snapshot = HomeSnapshot(
             online=False,
             updated_at=None,
@@ -180,6 +181,8 @@ class JarvisRuntime:
         memory_extractor.add_listener(self._on_memory_change)
         from brain import arr_stack
         arr_stack.set_recovery_notifier(self._report_arr_recovery)
+        from brain import subagents
+        subagents.attach(self)  # background subagent jobs show in the task lane
         from brain import self_repair
         self_repair.set_notifier(lambda title, detail, severity: self.raise_alert(
             "repair", title, detail, source="self-repair", severity=severity))
@@ -260,6 +263,11 @@ class JarvisRuntime:
         if _monitor_on("PRICE_WATCH_MONITOR_ENABLED") and not self._price_monitor_started:
             self._price_monitor_started = True
             threading.Thread(target=self._price_monitor_loop, daemon=True).start()
+
+        from integrations import gmail
+        if _monitor_on("EMAIL_TRIAGE_ENABLED") and gmail.is_configured() and not self._email_monitor_started:
+            self._email_monitor_started = True
+            threading.Thread(target=self._email_triage_loop, daemon=True).start()
 
         from integrations import nas_stack
         if nas_stack.enabled("ARR_STACK_MONITOR_ENABLED") and self._arr_monitor_thread is None:
@@ -1176,6 +1184,25 @@ class JarvisRuntime:
                     source="price-watch",
                     title="Price alert",
                 )
+            if self._stop_monitors.wait(interval):
+                break
+
+    def _email_triage_loop(self) -> None:
+        """Sort new Gmail every EMAIL_TRIAGE_INTERVAL_S once Gmail is linked.
+
+        Idle (one file check per pass) until ``integrations.gmail --auth``
+        saves a token. Passes run as quiet subagent jobs: task lane and inbox
+        event, no spoken announcement."""
+        from brain import email_triage, subagents
+        from integrations import gmail
+
+        if self._stop_monitors.wait(60):  # let startup settle first
+            return
+        while not self._stop_monitors.is_set():
+            if gmail.is_linked() and _monitor_on("EMAIL_TRIAGE_ENABLED"):
+                # The job's finish_task records the summary in the inbox.
+                subagents.run_job("email_triage", "Sorting your inbox", email_triage.triage)
+            interval = max(120.0, float(os.getenv("EMAIL_TRIAGE_INTERVAL_S", "900") or 900))
             if self._stop_monitors.wait(interval):
                 break
 

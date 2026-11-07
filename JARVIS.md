@@ -60,6 +60,8 @@ Pearson-Stark-Jarvis/
 │   ├── briefing.py          Spoken situational briefing (time, weather, agenda, timers)
 │   ├── personality.py       System prompt builder (humor%, address, tool descriptions)
 │   ├── price_watch.py       Guarded public-page price checks + durable targets
+│   ├── subagents.py         Background subagents: focused tool loop + one-at-a-time jobs in the task lane
+│   ├── email_triage.py      Email subagent: trash noise, file missionary mail, keep the rest, unsubscribe list
 │   ├── reminders.py         Persistent reminders & to-dos (timed + open list)
 │   ├── router.py            Top-level request dispatcher
 │   ├── runtime.py           JarvisRuntime — wraps agent + status snapshot
@@ -82,6 +84,7 @@ Pearson-Stark-Jarvis/
 ├── integrations/
 │   ├── home_assistant.py    HA REST API: control_device / list_entities
 │   ├── google_calendar.py   Read-only Google Calendar: agenda / next event / alerts
+│   ├── gmail.py             Gmail (gmail.modify): list, label/file, trash/untrash; own token, --auth CLI
 │   ├── qbittorrent.py       Live torrent progress, speed, ETA + completion monitor
 │   ├── servarr_common.py    Shared Radarr/Sonarr HTTP client + quality/root-folder
 │   │                        resolver + NL quality-phrase fuzzy matching
@@ -396,6 +399,23 @@ RMS envelope from ElevenLabs audio drives the orb in real time using a monotonic
 - `watch_price(url, label?, target_price?)` — monitor structured price metadata
   on an exact public product URL; private/local destinations are rejected
 - `list_price_watches` / `check_prices` / `remove_price_watch(id)`
+
+### Email (background subagent) *(new)*
+The email sorter is JARVIS's first subagent (`brain/subagents.py`,
+`brain/email_triage.py`). Once Gmail is linked it sorts new inbox mail every
+`EMAIL_TRIAGE_INTERVAL_S` (15 min): annoying mail to the Trash (30-day,
+restorable), missionary mail into that missionary's folder (Gmail labels under
+`EMAIL_MISSIONARY_PARENT`, default `Missionaries/<name>`), everything even
+slightly important left in the inbox. Starred mail and `EMAIL_NEVER_TRASH`
+senders are never trashed; a sender filed to the same folder twice is filed
+without asking the model again. Senders trashed `EMAIL_UNSUB_THRESHOLD` times
+in `EMAIL_UNSUB_WINDOW_DAYS` go on the unsubscribe list (vault note
+`Jarvis Memory/Email Unsubscribe List.md`). All tools are locked to Nick's voice.
+- `sort_inbox(days?)` — start a sorting pass now in the background (announces when done)
+- `email_triage_report(hours?)` — what was kept, filed and trashed
+- `email_unsubscribe_list` / `email_unsubscribed(sender)` — the list, and striking a sender off it
+- `restore_email(query, days?)` — untrash by sender/subject and never trash that sender again
+- `background_agents` — running and recent subagent jobs
 
 ### Household maintenance
 - `log_maintenance(name|task_id, note?, completed_on?)` — "I rotated the
@@ -813,6 +833,23 @@ GOOGLE_CALENDAR_ID=all      # every calendar on the account (default), or comma-
 CALENDAR_MONITOR_ENABLED=true
 CALENDAR_MONITOR_INTERVAL_S=120
 CALENDAR_ALERT_LEAD_MIN=10  # warn this many minutes before a meeting
+
+# Gmail + email triage subagent (optional; uses GOOGLE_CREDENTIALS_FILE)
+GMAIL_TOKEN_FILE=           # defaults to memory/gmail_token.json (separate from the calendar token)
+EMAIL_TRIAGE_ENABLED=true   # sort automatically once Gmail is linked
+EMAIL_TRIAGE_INTERVAL_S=900 # seconds between passes (min 120)
+EMAIL_TRIAGE_DRY_RUN=false  # true: decide and log only, move nothing
+EMAIL_TRIAGE_MODEL=         # model id or auto:<family>; default auto:haiku
+EMAIL_TRIAGE_LOOKBACK_DAYS=3 # how far back an automatic pass looks
+EMAIL_TRIAGE_MAX_PER_PASS=60 # messages per automatic pass (sort_inbox(days>7) allows 500)
+EMAIL_TRIAGE_BATCH=25       # messages per subagent run
+EMAIL_TRIAGE_MAX_ROUNDS=8   # tool-loop rounds per batch
+EMAIL_MISSIONARY_PARENT=Missionaries # sub-labels of this label are missionary folders
+EMAIL_MISSIONARY_LABELS=    # extra comma-separated label names that are missionary folders
+EMAIL_NEVER_TRASH=          # comma-separated addresses or domains never to trash
+EMAIL_UNSUB_THRESHOLD=3     # trashes in the window that flag a sender for unsubscribing
+EMAIL_UNSUB_WINDOW_DAYS=30
+EMAIL_UNSUB_NOTE=           # vault-relative note path; default Jarvis Memory/Email Unsubscribe List.md
 ```
 
 ## Google Calendar setup (one time)
@@ -834,6 +871,22 @@ CALENDAR_ALERT_LEAD_MIN=10  # warn this many minutes before a meeting
    `GOOGLE_OAUTH_HEADLESS=true` forces headless behaviour on any host.
 
 ---
+
+## Gmail setup (one time)
+
+1. In the same Google Cloud project as Calendar, enable the **Gmail API**.
+   On the OAuth consent screen add the `gmail.modify` scope (and keep Nick as
+   a test user if the app is in testing mode).
+2. Link it explicitly (the running process never prompts):
+   - Mac: `.venv/bin/python -m integrations.gmail --auth` opens a browser.
+   - Optiplex: from the Mac `ssh -L 8765:localhost:8765 jarvis`, then
+     `cd ~/jarvis && .venv/bin/python -m integrations.gmail --auth` and open the
+     printed URL on the Mac.
+3. The token lands in `memory/gmail_token.json`; the monitor starts sorting
+   on its next pass, no restart needed (the monitor thread starts at launch
+   whenever `GOOGLE_CREDENTIALS_FILE` is set). Create the missionary folders
+   as Gmail labels nested under `Missionaries` first.
+4. Nervous? `EMAIL_TRIAGE_DRY_RUN=true` for a day and read `email_triage_report`.
 
 ## UI Layout
 
@@ -857,6 +910,8 @@ CALENDAR_ALERT_LEAD_MIN=10  # warn this many minutes before a meeting
 ---
 
 ## Recently Shipped
+
+- **5.89 / build 232 (2026-11-06): subagent backbone + email triage.** `brain/subagents.py` runs focused background tool loops (own prompt, own small tool set, own model, own context) as one-at-a-time jobs that show in the task lane and announce when a person asked. The first subagent, `brain/email_triage.py` over the new `integrations/gmail.py`, trashes annoying mail, files missionary letters into each missionary's label, keeps anything even slightly important, keeps a per-sender unsubscribe list in the vault, and can restore what it trashed (protecting that sender). Handlers validate every model choice (id in batch, folder exists, sender not protected); email text is fenced as untrusted data. New tools `sort_inbox`, `email_triage_report`, `email_unsubscribe_list`, `email_unsubscribed`, `restore_email`, `background_agents` (email tools voice-locked). Tests in `tests/test_subagents.py`, `tests/test_email_triage.py`. Gmail not linked yet; never run against a real inbox. Not deployed.
 
 - **5.88 / build 231 (2026-11-06): one download announcement per show, not per episode.** The download monitor used to say "Silo, season 1, episode 3 has finished downloading, sir" for every episode. Episodes now wait in `brain/download_batches.py` and are announced together once none of that show's torrents is still downloading ("4 episodes of Silo have finished downloading, sir."; a lone episode keeps its full name), or after `DOWNLOAD_BATCH_MAX_WAIT_S` (30 min) so a stuck one can't hold the rest. Movies and season packs are announced at once as before; `QBITTORRENT_ANNOUNCE_COMPLETIONS=false` still silences all of it. Server-only; tests in `tests/test_download_batches.py`. Not yet deployed.
 
@@ -2226,7 +2281,8 @@ in value order:
 - **Media operations phase two** — add Radarr/Sonarr manual search and retry
   operations; guarded torrent controls and read-only history/missing/upcoming
   views are shipped.
-- **Email awareness** — read unread email summaries
+- **Email awareness** — triage subagent shipped (5.89); still open: important-mail
+  summary in the morning briefing, voice reading/drafting replies (send behind the confirm gate)
 - **Ambient music control** — detect silence and auto-dim volume
 - **Double-clap wake** — alternative to voice wake word (from reference script)
 

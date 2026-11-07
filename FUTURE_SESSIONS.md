@@ -965,7 +965,16 @@ the monitor. Pair with the health dashboard so restarts are visible.
 
 ## Tier 3: nice to have
 
-- **Email awareness** (roadmap): unread summaries in the morning briefing.
+- **Email, after the triage subagent (shipped 5.89)**: Nick links Gmail
+  (`python -m integrations.gmail --auth`, JARVIS.md "Gmail setup"), makes the
+  `Missionaries/<name>` labels, and ideally runs a day with
+  `EMAIL_TRIAGE_DRY_RUN=true`. Then: kept-mail summary in the morning
+  briefing; "what did <person> say" / draft a reply by voice (send behind the
+  confirm gate); a weekly "inbox cleanup" routine.
+- **More subagents on `brain/subagents.py`**: research (web search to a vault
+  note), shopping (price_watch + comparison), scheduled routines Nick sets by
+  voice ("every Sunday, clean my inbox and tell me what's due"). Each gets
+  only its own tools and handler-side guards.
 - **Ambient music control** (roadmap): auto-dim on speech.
 - **Double-clap wake** (roadmap).
 - **Local model routing phase two** (roadmap): route more tool calls to the

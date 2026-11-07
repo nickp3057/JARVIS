@@ -174,6 +174,16 @@ Near-term responsibilities:
      a fresh session-bound receipt proving its ID appeared in the latest lookup.
    - Home Assistant automation changes follow a stricter draft/diff/approve/
      apply/verify workflow with optimistic concurrency and rollback records.
+   - Subagents (`brain/subagents.py`) carry long or bulky jobs off the
+     conversation: each is a fresh tool loop with its own short prompt, only
+     the tools its job needs, its own (usually cheaper) model and its own
+     context, run as a one-at-a-time job in the runtime task lane. The
+     conversation sees only the summary line. Subagent tool handlers validate
+     every choice themselves (the model picks, the handler permits), and
+     untrusted input (email text) is fenced as data, so a confused or
+     prompt-injected model can only pick among safe, reversible actions.
+     First user: email triage (`brain/email_triage.py`). New background jobs
+     that need the model belong here, not in a monitor's own ad hoc loop.
 
 5. Presence
    - GUI cockpit, orb state, voice pacing, interruption, proactive notices, and
@@ -373,6 +383,10 @@ runtime knows, the more JARVIS feels like one mind instead of several scripts.
   and is clamped to at least five minutes.
 - `PRICE_WATCH_DROP_PERCENT`: decrease threshold for a one-time transition alert,
   defaults to 5 percent.
+- `EMAIL_TRIAGE_ENABLED`: true/false, defaults to true; the thread starts when
+  `GOOGLE_CREDENTIALS_FILE` is set and idles until `integrations.gmail --auth`
+  has saved a token. Each pass runs the email subagent as a quiet job (task
+  lane + inbox event, no speech). `EMAIL_TRIAGE_INTERVAL_S` defaults to 900.
 
 ## Alert Bus
 

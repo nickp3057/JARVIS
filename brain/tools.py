@@ -811,6 +811,45 @@ def _tool_browser_act(args: dict[str, Any]) -> str:
                        bool(args.get("confirmed", False)))
 
 
+# --- Email triage (subagent) ---------------------------------------------------
+
+def _tool_sort_inbox(args: dict[str, Any]) -> str:
+    from brain import email_triage
+    from integrations import gmail
+    if not gmail.is_linked():
+        return "Gmail isn't linked yet, sir. Run python -m integrations.gmail --auth once and I'll take it from there."
+    days = args.get("days")
+    days = max(1, min(3650, int(days))) if days else None
+    if not email_triage.start_triage(days):
+        return "I'm already sorting your inbox, sir."
+    return "On it, sir. I'll sort your inbox in the background and tell you when it's done."
+
+
+def _tool_email_triage_report(args: dict[str, Any]) -> str:
+    from brain import email_triage
+    return email_triage.report(float(args.get("hours") or 24))
+
+
+def _tool_email_unsubscribe_list(_: dict[str, Any]) -> str:
+    from brain import email_triage
+    return email_triage.describe_unsubscribe_list()
+
+
+def _tool_email_unsubscribed(args: dict[str, Any]) -> str:
+    from brain import email_triage
+    return email_triage.mark_unsubscribed(str(args.get("sender", "")))
+
+
+def _tool_restore_email(args: dict[str, Any]) -> str:
+    from brain import email_triage
+    return email_triage.restore(str(args.get("query", "")), float(args.get("days") or 30))
+
+
+def _tool_background_agents(_: dict[str, Any]) -> str:
+    from brain import subagents
+    return subagents.describe_jobs()
+
+
 def _tool_list_price_watches(_: dict[str, Any]) -> str:
     from brain.price_watch import describe_price_watches
     return describe_price_watches()
@@ -2091,6 +2130,61 @@ _CUSTOM_TOOLS: list[dict[str, Any]] = [
             "required": ["watch_id"],
         },
     },
+    # --- Email triage (background subagent) ------------------------------
+    {
+        "name": "sort_inbox",
+        "description": (
+            "Start the email-sorting subagent in the background: trashes annoying mail, files "
+            "missionary letters into each missionary's Gmail folder, leaves anything important in "
+            "the inbox. It already runs on its own every 15 minutes; use this when Nick asks to "
+            "sort or clean his email now. 'days' widens the sweep (e.g. 30 for the last month)."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {"days": {"type": "integer", "minimum": 1, "maximum": 3650,
+                                    "description": "How far back to sort. Omit for recent mail."}},
+        },
+    },
+    {
+        "name": "email_triage_report",
+        "description": "What the email sorter did recently: what it kept for Nick, filed to missionary folders, and trashed.",
+        "input_schema": {
+            "type": "object",
+            "properties": {"hours": {"type": "number", "minimum": 1, "maximum": 720}},
+        },
+    },
+    {
+        "name": "email_unsubscribe_list",
+        "description": "Senders the email sorter keeps trashing, for Nick to unsubscribe from (also a note in his vault).",
+        "input_schema": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "email_unsubscribed",
+        "description": "Nick unsubscribed from a sender: strike it off the unsubscribe list.",
+        "input_schema": {
+            "type": "object",
+            "properties": {"sender": {"type": "string", "description": "Email address or sender name."}},
+            "required": ["sender"],
+        },
+    },
+    {
+        "name": "restore_email",
+        "description": (
+            "Undo the sorter: bring trashed email matching a sender or subject back to the inbox, "
+            "and never trash that sender again."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {"query": {"type": "string", "description": "Sender address, name, or subject words."},
+                           "days": {"type": "number", "minimum": 1, "maximum": 30}},
+            "required": ["query"],
+        },
+    },
+    {
+        "name": "background_agents",
+        "description": "Which background subagents (like the email sorter) are running or recently finished, and their results.",
+        "input_schema": {"type": "object", "properties": {}},
+    },
     # --- Household maintenance ------------------------------------------
     {
         "name": "log_maintenance",
@@ -2486,6 +2580,12 @@ _DISPATCH: dict[str, Callable[[dict[str, Any]], str]] = {
     "list_price_watches": _tool_list_price_watches,
     "check_prices": _tool_check_prices,
     "remove_price_watch": _tool_remove_price_watch,
+    "sort_inbox": _tool_sort_inbox,
+    "email_triage_report": _tool_email_triage_report,
+    "email_unsubscribe_list": _tool_email_unsubscribe_list,
+    "email_unsubscribed": _tool_email_unsubscribed,
+    "restore_email": _tool_restore_email,
+    "background_agents": _tool_background_agents,
     "log_maintenance": _tool_log_maintenance,
     "list_maintenance": _tool_list_maintenance,
     "add_maintenance_task": _tool_add_maintenance_task,

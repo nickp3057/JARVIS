@@ -54,6 +54,8 @@ LOCKED_TOOLS = frozenset({
     "apply_automation_draft", "rollback_automation_change",
     # the voiceprint
     "voice_id",
+    # Nick's email: reading what was sorted, trashing, restoring
+    "sort_inbox", "email_triage_report", "email_unsubscribe_list", "email_unsubscribed", "restore_email",
 })
 
 _current: contextvars.ContextVar[Speaker | None] = contextvars.ContextVar("jarvis_speaker", default=None)
