@@ -84,6 +84,14 @@ class AgentTests(unittest.TestCase):
         with voice_trust.speaking(GUEST):
             self.assertIn("NOT recognised as Nick", voice_trust.context_note())
 
+    def test_voiceprint_match_tells_the_model_it_is_nick(self) -> None:
+        # Regression 2026-11-06: "who's talking?" got a stale enrolment answer
+        # because a matched voice added nothing to the turn context.
+        with voice_trust.speaking(voice_trust.Speaker("nick", True, score=0.78, reason="voiceprint match")):
+            self.assertIn("recognised this voice as Nick (match 0.78)", voice_trust.context_note())
+        with voice_trust.speaking(voice_trust.Speaker("nick", True, reason="voice ID off")):
+            self.assertEqual(voice_trust.context_note(), "")
+
 
 class FakeExtractor:
     """Vectors from the clip's first sample, so tests choose who is talking."""

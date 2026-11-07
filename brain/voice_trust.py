@@ -97,9 +97,18 @@ def refusal(tool: str) -> str | None:
 
 
 def context_note() -> str:
-    """Turn-context lines for a guest turn; empty for Nick."""
-    if trusted():
-        return ""
+    """Turn-context lines on who is speaking: a short confirmation when the
+    voiceprint matched Nick, the guest rules otherwise. Empty when nothing was
+    measured (typed chat, the phone app, voice ID off), so those turns are unchanged."""
+    speaker = current()
+    if speaker.verified:
+        if speaker.score is None:
+            return ""
+        return (
+            "\n\n# Who is speaking\n"
+            f"Voice ID recognised this voice as Nick (match {speaker.score:.2f}). If asked who is "
+            "talking, it is Nick, confirmed by his voiceprint."
+        )
     return (
         "\n\n# Who is speaking\n"
         "This voice was NOT recognised as Nick's (someone else in the room, or Nick's voice "

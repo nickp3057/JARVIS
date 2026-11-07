@@ -370,6 +370,9 @@ install on the phone and iPad, then check:
 
 ### Voice ID, presence, motion (asked 2026-11-01)
 
+- [x] **Enrolled 2026-11-06** (5 samples; first checks scored 0.78 and 0.63 vs
+  threshold 0.55). Still to do from the item below: watch scores for a few days,
+  test his sister, tune `VOICE_ID_THRESHOLD`.
 - [ ] **Deploy and enrol voice ID** (backbone built 2026-11-01, JARVIS.md
   "Voice ID backbone"): on the Optiplex `pip install sherpa-onnx`, download
   the TitaNet model, `VOICE_ID=1`, restart, type "learn my voice" in the
