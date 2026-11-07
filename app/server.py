@@ -1011,6 +1011,15 @@ def voice_announce(request: AnnounceRequest, _: None = Depends(require_scope("ch
     return {"queued": True}
 
 
+@app.post("/api/voice/hush")
+def voice_hush(_: None = Depends(require_scope("chat"))) -> dict[str, object]:
+    """A tap on the iPad: end the room voice's current exchange (stop talking,
+    stop listening, drop a reply still being written) and wait for "Hey
+    JARVIS" again. ``hushed`` is False when it was idle already."""
+    from speech import room_voice
+    return {"hushed": room_voice.hush()}
+
+
 @app.get("/api/voice/state")
 def voice_state(_: None = _status_read) -> dict[str, object]:
     """What the room voice is doing (brain/voice_presence.py)."""

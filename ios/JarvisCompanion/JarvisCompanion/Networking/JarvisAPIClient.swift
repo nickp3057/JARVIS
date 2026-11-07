@@ -428,6 +428,14 @@ struct JarvisAPIClient {
         }
     }
 
+    /// A tap on the room conversation (`POST /api/voice/hush`): the room
+    /// voice stops talking and listening and waits for "Hey JARVIS" again.
+    @discardableResult
+    func hushVoice() async throws -> Bool {
+        struct Hushed: Decodable { let hushed: Bool }
+        return try await postEmpty(Hushed.self, path: "api/voice/hush").hushed
+    }
+
     /// Home Assistant changes (`GET /api/home/stream`, server-sent events):
     /// calls `onChange` with Core's change counter for each `home` event.
     /// `onChange(seq, theme)`: every pulse carries the shared theme too.

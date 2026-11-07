@@ -129,6 +129,19 @@ Nick's running to-do list for the project. When one ships, move it to
 `JARVIS.md` "Recently Shipped" and delete it here. Newest asks at the bottom
 of each group.
 
+### Tap to hush the room voice (2026-11-06, 5.87 / build 230): check
+
+- Deploy Core + install 5.87 on the iPad, then with friends over: say "Hey
+  JARVIS", let him start talking, tap the iPad. He should stop at once, the
+  words go away and he must not answer the room's chatter afterwards. Also
+  tap while "One moment…" shows: the answer should never be spoken.
+- Nick's real goal (asked 2026-11-06): **always listening, and he just
+  knows when Nick is talking to him.** Building blocks already here: voice
+  ID (`brain/speaker_id.py`, `VOICE_ID`) to ignore guests in follow-ups;
+  next would be addressee detection (a cheap classifier or Haiku call on the
+  follow-up transcript: "is this said to JARVIS?"), and closing the
+  follow-up window when more than one voice is heard.
+
 ### Room rainbows + iPad scenes (2026-11-04, 5.78 / build 221): check
 
 - Nick: make a Smart Life Tap-to-Run "Fan Light Rainbow" (fan light, Scene

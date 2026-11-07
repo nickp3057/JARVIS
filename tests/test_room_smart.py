@@ -396,6 +396,17 @@ class AnnounceEndpointTests(unittest.TestCase):
                                  409)
 
 
+class HushEndpointTests(unittest.TestCase):
+    def test_hush_reports_whether_anything_stopped(self) -> None:
+        client = TestClient(server.app)
+        with patch.dict(os.environ, {"JARVIS_API_TOKEN": "t"}):
+            with patch.object(room_voice, "hush", return_value=True) as hush:
+                self.assertEqual(client.post("/api/voice/hush", headers={"Authorization": "Bearer t"}).json(),
+                                 {"hushed": True})
+            hush.assert_called_once_with()
+            self.assertEqual(client.post("/api/voice/hush", headers={"Authorization": "Bearer x"}).status_code, 401)
+
+
 if __name__ == "__main__":
     unittest.main()
 

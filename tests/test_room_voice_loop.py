@@ -197,6 +197,50 @@ class HandleTests(unittest.TestCase):
         self.sounds.assert_called_once_with("error", wait=True)
 
 
+class HushTests(unittest.TestCase):
+    """A tap on the iPad ends the exchange: no reply spoken, no follow-up."""
+
+    def setUp(self) -> None:
+        voice_presence.reset_for_tests()
+        patch.object(room_sounds, "play").start()
+        self.speak = patch("speech.tts.speak").start()
+        self.stop_playback = patch("speech.tts.stop_playback").start()
+        self.addCleanup(patch.stopall)
+        self.audio = np.concatenate([LOUD] * 5)
+
+    def test_idle_hush_does_nothing(self) -> None:
+        voice = make_voice()
+        self.assertFalse(voice.hush())
+        self.stop_playback.assert_not_called()
+        self.assertFalse(voice._hushed.is_set())
+
+    def test_hush_while_thinking_drops_the_reply_and_follow_up(self) -> None:
+        runtime = Mock(last_used_tools=False)
+        voice = make_voice("what do you think about that", runtime)
+
+        def respond(text, spoken):  # noqa: ANN001
+            self.assertTrue(voice.hush())  # tapped while he was thinking
+            return "Quite something, sir. Shall I go on?"
+
+        runtime.respond.side_effect = respond
+        with patch.object(quick_commands, "run", return_value=None):
+            follow_up = voice._handle(self.audio)
+        self.assertFalse(follow_up)
+        self.speak.assert_not_called()
+        self.stop_playback.assert_called()
+        self.assertEqual(voice_presence.current()["phase"], "idle")
+
+    def test_hush_closes_a_listening_window(self) -> None:
+        voice_presence.update("listening")
+        voice = make_voice()
+        voice.hush()
+        self.assertIsNone(voice._capture(FakeStream([LOUD] * 10), None, start_timeout=1.0))
+
+    def test_module_hush_without_a_room_voice(self) -> None:
+        with patch.object(room_voice, "_voice", None):
+            self.assertFalse(room_voice.hush())
+
+
 class SwitchTests(unittest.TestCase):
     def test_enabled_and_start_need_room_voice_on(self) -> None:
         with patch.dict(os.environ, {"ROOM_VOICE": "0"}):

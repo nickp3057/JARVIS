@@ -34,6 +34,11 @@ Smart-speaker extras:
 - Night mode: ``speech/room_volume.py`` lowers the speaker in quiet hours.
 - ``announce(text)``: speak a broadcast from the phone or a chat
   (``POST /api/voice/announce``, the ``announce_in_room`` tool).
+- ``hush()``: tap the iPad while he's listening, thinking or talking and the
+  whole exchange ends (``POST /api/voice/hush``): playback stops, a capture or
+  follow-up window closes, a reply still being written is never spoken, and
+  he waits for "Hey JARVIS" again. For a room full of people talking, where
+  each overheard sentence kept the follow-up window open.
 
 The wake word works at the end too ("game time, Jarvis"): a little audio
 from before the wake word is kept and used when nothing follows it.
@@ -106,6 +111,7 @@ class RoomVoice:
         self.stream = None
         self.last_reply = ""
         self._barged = False
+        self._hushed = threading.Event()  # a screen tap ended this exchange (hush())
         self._broadcasts: deque[str] = deque(maxlen=10)
         self._ringing_since: float | None = None
         self._next_ring = 0.0
@@ -158,6 +164,7 @@ class RoomVoice:
             elif need_wake:
                 if not self._wait_for_wake(stream):
                     return
+                self._hushed.clear()  # a tap while idle mustn't cut off the next "Hey JARVIS"
                 preroll = stream.get_recent_audio(_seconds("VOICE_PREROLL_S", 2.0))
                 voice_presence.update("listening")
                 room_sounds.play("listen")
@@ -168,9 +175,24 @@ class RoomVoice:
             if audio is None:
                 voice_presence.update("idle")
                 need_wake = True
+                barged = False
                 continue
             need_wake = not self._handle(audio)
             barged, self._barged = self._barged, False
+            if self._hushed.is_set():  # tapped mid-exchange: no follow-up, no barge-in listen
+                voice_presence.update("idle")
+                need_wake, barged = True, False
+
+    def hush(self) -> bool:
+        """End the current exchange (a tap on the iPad). True if there was one."""
+        from speech.tts import stop_playback
+        busy = voice_presence.current()["phase"] != "idle"
+        if busy:
+            log.info("Room voice hushed from a screen")
+            self._hushed.set()
+            stop_playback()
+            voice_presence.update("idle", reply="")
+        return busy
 
     def _heard_wake(self, frame: np.ndarray) -> bool:
         """True only after the wake word scores over the threshold on
@@ -320,6 +342,8 @@ class RoomVoice:
         room_volume.prepare()
         self.last_reply = text
         stream = self.stream
+        if self._hushed.is_set():
+            return False
         if stream is None or os.getenv("VOICE_BARGE_IN", "1").strip().lower() in ("0", "off", "false", "no"):
             speak(text, cache=cache)
             return False
@@ -335,6 +359,10 @@ class RoomVoice:
         self.detector.reset()
         stream.drain()
         while not done.is_set() and not self.stop.is_set():
+            if self._hushed.is_set():  # synthesis may finish after the tap's stop: keep it quiet
+                stop_playback()
+                done.wait(0.1)
+                continue
             frame = stream.read(timeout=0.1)
             if frame is not None and self._heard_wake(frame):
                 log.info("Barge-in: stopped speaking")
@@ -381,7 +409,7 @@ class RoomVoice:
         captions = _LiveCaptions(self.live, before_wake)
         try:
             for _ in range(max_frames):
-                if self.stop.is_set():
+                if self.stop.is_set() or self._hushed.is_set():
                     return None
                 frame = stream.read(timeout=0.5)
                 if frame is None:
@@ -428,6 +456,8 @@ class RoomVoice:
         started = time.perf_counter()
         text = strip_wake_word(self.final.transcribe(audio)).strip()
         log.info("Room voice heard %r (%.0f ms)", text, (time.perf_counter() - started) * 1000)
+        if self._hushed.is_set():
+            return False
         voice_presence.update(transcript=text)
         if not text:
             voice_presence.update("idle")
@@ -499,6 +529,9 @@ class RoomVoice:
             log.exception("Room voice turn failed")
             self._finish("error", "Something went wrong, sir.")
             return False
+        if self._hushed.is_set():  # tapped while he was thinking: keep the answer to himself
+            log.info("Room voice reply dropped after a hush: %r", reply[:80])
+            return False
         if self.runtime.last_used_tools and reply.strip().lower().rstrip(".!") in _JINGLE_REPLIES:
             self._learn(text)
             self._finish("done", "")
@@ -526,6 +559,8 @@ class RoomVoice:
 
     def _say(self, text: str) -> None:
         from speech.tts import speak
+        if self._hushed.is_set():
+            return
         voice_presence.update("speaking", reply=text)
         room_volume.prepare()
         self.last_reply = text
@@ -623,6 +658,11 @@ def start(runtime) -> RoomVoice | None:  # noqa: ANN001
 def stop() -> None:
     if _voice is not None:
         _voice.stop.set()
+
+
+def hush() -> bool:
+    """End the room voice's current exchange; False when idle or not running."""
+    return _voice.hush() if _voice is not None else False
 
 
 def announce(text: str) -> bool:

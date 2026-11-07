@@ -24,6 +24,7 @@ final class VoicePresence: ObservableObject {
     private var task: Task<Void, Never>?
     private var window: UIWindow?
     private var hideTask: Task<Void, Never>?
+    private var settings: AppSettings?
 
     var active: Bool { state.phase != "idle" }
 
@@ -40,6 +41,7 @@ final class VoicePresence: ObservableObject {
     /// Connect while the app is in front (iPad only); reconnects on its own.
     func start(_ settings: AppSettings) {
         guard UIDevice.current.userInterfaceIdiom == .pad, task == nil, settings.isConfigured else { return }
+        self.settings = settings
         task = Task { [weak self] in
             var delay: Double = 1
             while !Task.isCancelled {
@@ -104,7 +106,23 @@ final class VoicePresence: ObservableObject {
         window?.isHidden = false
     }
 
-    /// Tap to put it away early (the voice carries on regardless).
+    /// A tap on the conversation: if he's still listening, thinking or
+    /// talking, Core ends the exchange (`POST /api/voice/hush`: he stops
+    /// mid-sentence, drops a reply still being written and waits for "Hey
+    /// JARVIS" again), so a room full of chatter can't keep him going.
+    /// Either way the words go away.
+    func hush() {
+        if active, let settings {
+            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+            Task {
+                // Best effort: an older Core without /api/voice/hush just keeps talking.
+                try? await JarvisAPIClient.make(from: settings).hushVoice()
+            }
+        }
+        dismiss()
+    }
+
+    /// Put the words away early (the voice carries on regardless).
     func dismiss() {
         hideTask?.cancel()
         hide()
@@ -152,7 +170,7 @@ struct VoiceOverlayView: View {
             .frame(maxWidth: 640)
         }
         .contentShape(Rectangle())
-        .onTapGesture { presence.dismiss() }
+        .onTapGesture { presence.hush() }
         .accessibilityElement(children: .combine)
         .accessibilityAddTraits(.updatesFrequently)
     }
@@ -173,8 +191,8 @@ struct VoiceOverlayView: View {
 
 /// The Room tab's conversation, in place of the lights and scenes: what Nick
 /// said, smaller, then JARVIS's answer big enough to read across the room.
-/// An announcement (nothing said to him first) is just its words. Tap to put
-/// it away early.
+/// An announcement (nothing said to him first) is just its words. Tap to
+/// stop him and put it away (`VoicePresence.hush`).
 struct RoomDialogue: View {
     @ObservedObject var presence: VoicePresence
 
@@ -212,9 +230,9 @@ struct RoomDialogue: View {
         .multilineTextAlignment(.leading)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .contentShape(Rectangle())
-        .onTapGesture { presence.dismiss() }
+        .onTapGesture { presence.hush() }
         .accessibilityElement(children: .combine)
         .accessibilityAddTraits(.updatesFrequently)
-        .accessibilityHint("Tap to put it away")
+        .accessibilityHint("Tap to stop JARVIS and put it away")
     }
 }
