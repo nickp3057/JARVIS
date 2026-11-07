@@ -1242,6 +1242,9 @@ class JarvisRuntime:
         ).strip().lower() in ("1", "true", "yes", "on")
         from integrations.media_doctor import no_progress_stall
 
+        from brain.download_batches import EpisodeBatcher
+
+        batcher = EpisodeBatcher()  # one line per show, not per episode
         previous: dict[str, dict[str, Any]] | None = None
         # Hashes already alerted as stalled; cleared when they move again, so
         # each stall alerts once instead of every poll.
@@ -1286,13 +1289,11 @@ class JarvisRuntime:
                     name = str(item.get("name", "Download"))
                     if old_progress < 1 <= progress:
                         if announce_completions:
-                            # Spoken: "Iron Man has finished downloading, sir", not the release name.
-                            from integrations.qbittorrent import friendly_name
-                            self.announce(
-                                f"{friendly_name(name)} has finished downloading, sir.",
-                                source="downloads",
-                                title="Download complete",
-                            )
+                            # Spoken: "Iron Man has finished downloading, sir", not the release name;
+                            # episodes wait to be announced together per show.
+                            line = batcher.completed(name)
+                            if line:
+                                self.announce(line, source="downloads", title="Download complete")
                         else:
                             self.record_event(
                                 kind="download",
@@ -1306,6 +1307,8 @@ class JarvisRuntime:
                         self.raise_alert("download_error", "Download error", name, source="downloads",
                                          context={"torrent_hash": str(torrent_hash).lower(),
                                                   "name": str(name)[:200]})
+                for line in batcher.flush(current.values()):
+                    self.announce(line, source="downloads", title="Download complete")
             now = time.time()
             for torrent_hash, item in current.items():
                 if float(item.get("progress", 0) or 0) >= 1:

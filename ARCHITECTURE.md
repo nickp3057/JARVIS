@@ -364,7 +364,7 @@ runtime knows, the more JARVIS feels like one mind instead of several scripts.
 - `QBITTORRENT_MONITOR_ENABLED`: true/false, defaults to true when qBittorrent
   credentials are configured.
 - `QBITTORRENT_MONITOR_INTERVAL_S`: download polling interval, defaults to 30.
-- `QBITTORRENT_ANNOUNCE_COMPLETIONS`: speak completed downloads, defaults true.
+- `QBITTORRENT_ANNOUNCE_COMPLETIONS`: speak completed downloads, defaults true. Single episodes are batched per show (`brain/download_batches.py`): one line once none of that show is still downloading, or after `DOWNLOAD_BATCH_MAX_WAIT_S` (1800).
 - `CALENDAR_MONITOR_ENABLED`: true/false, defaults to true when Calendar is configured.
 - `CALENDAR_MONITOR_INTERVAL_S`: calendar polling interval, defaults to 120 seconds.
 - `CALENDAR_ALERT_LEAD_MIN`: meeting warning lead time, defaults to 10 minutes.

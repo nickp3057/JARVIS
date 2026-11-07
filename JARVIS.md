@@ -653,6 +653,7 @@ QBITTORRENT_PASSWORD=
 QBITTORRENT_MONITOR_ENABLED=true
 QBITTORRENT_MONITOR_INTERVAL_S=30
 QBITTORRENT_ANNOUNCE_COMPLETIONS=true
+DOWNLOAD_BATCH_MAX_WAIT_S=1800  # episodes are announced once per show (brain/download_batches.py); a stuck one holds the rest at most this long
 
 # Tunable at runtime via JARVIS voice commands
 HUMOR_PERCENT=30           # 0-100
@@ -856,6 +857,8 @@ CALENDAR_ALERT_LEAD_MIN=10  # warn this many minutes before a meeting
 ---
 
 ## Recently Shipped
+
+- **5.88 / build 231 (2026-11-06): one download announcement per show, not per episode.** The download monitor used to say "Silo, season 1, episode 3 has finished downloading, sir" for every episode. Episodes now wait in `brain/download_batches.py` and are announced together once none of that show's torrents is still downloading ("4 episodes of Silo have finished downloading, sir."; a lone episode keeps its full name), or after `DOWNLOAD_BATCH_MAX_WAIT_S` (30 min) so a stuck one can't hold the rest. Movies and season packs are announced at once as before; `QBITTORRENT_ANNOUNCE_COMPLETIONS=false` still silences all of it. Server-only; tests in `tests/test_download_batches.py`. Not yet deployed.
 
 - **5.87 / build 230 (2026-11-06): tap the iPad to hush the room voice.** With people talking in the room, every overheard sentence kept the follow-up window open and JARVIS kept answering. Now a tap on the conversation (the Room tab's dialogue panel or the overlay on any other tab) while he's listening, thinking or speaking calls `POST /api/voice/hush` (`chat` scope; `{"hushed": false}` when he was idle): Core's room voice (`speech/room_voice.py` `hush()`) stops playback, closes the capture or follow-up window, never speaks a reply still being written (the turn still lands in history), skips the barge-in listen and waits for "Hey JARVIS" again. A tap while idle is ignored, so it can't eat the next wake. Light haptic on the tap. Validation: full Python suite plus new `HushTests`/`HushEndpointTests`; iOS builds for device. Not yet deployed or tried on hardware.
 
