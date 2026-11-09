@@ -762,10 +762,12 @@ struct JarvisAPIClient {
 
     /// Schwab's login page and the callback address to catch when Schwab
     /// redirects there (nothing listens at it; the app hands it to Core).
-    func schwabLogin() async throws -> (url: URL, callback: String) {
-        struct Envelope: Decodable { let url: URL; let callback: String }
+    /// `external`: the login lives on the Schwab hub (JARVIS borrows it), so the
+    /// page opens in Safari instead of the in-app web view.
+    func schwabLogin() async throws -> (url: URL, callback: String, external: Bool) {
+        struct Envelope: Decodable { let url: URL; let callback: String; let external: Bool? }
         let body = try await postJSON(Envelope.self, path: "api/schwab/login", body: EmptyBody())
-        return (body.url, body.callback)
+        return (body.url, body.callback, body.external ?? false)
     }
 
     func finishSchwabLogin(redirect: URL) async throws {

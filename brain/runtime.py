@@ -1136,7 +1136,9 @@ class JarvisRuntime:
                           "Schwab ended the login early; the portfolio is frozen." if schwab.login_revoked()
                           else "Schwab's weekly login ran out; the portfolio is frozen.")
                 self.raise_alert("schwab_login", "Schwab needs you",
-                                 detail + " Open JARVIS > Settings > Charles Schwab > Log in.",
+                                 detail + (" Log in on the Schwab hub (" + schwab.login_page()
+                                           + "); that one login covers Coopa Trada too." if schwab.borrowing()
+                                           else " Open JARVIS > Settings > Charles Schwab > Log in."),
                                  source="schwab", severity="warning")
             if schwab.linked():
                 try:

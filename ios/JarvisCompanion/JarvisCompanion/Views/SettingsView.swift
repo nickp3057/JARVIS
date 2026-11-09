@@ -276,16 +276,27 @@ struct SchwabPanel: View {
     @EnvironmentObject private var settings: AppSettings
     @State private var portfolio: Portfolio?
     @State private var loggingIn = false
+    @Environment(\.openURL) private var openURL
 
     var body: some View {
         CockpitPanel("Charles Schwab", symbol: "chart.line.uptrend.xyaxis") {
             Text(status).font(.subheadline.weight(.medium))
-            Text("Read-only. Schwab ends every login after 7 days; JARVIS reminds you the day before.")
+            Text(portfolio?.borrowed == true
+                 ? "Read-only. Uses your Schwab hub login, so one weekly login covers JARVIS and Coopa Trada."
+                 : "Read-only. Schwab ends every login after 7 days; JARVIS reminds you the day before.")
                 .font(.caption).foregroundStyle(.secondary)
             if portfolio?.configured == true {
-                Button { loggingIn = true } label: {
+                Button {
+                    // Borrowed: the login lives on the Schwab hub, so open it in Safari.
+                    if portfolio?.borrowed == true, let page = portfolio?.loginPage {
+                        openURL(page)
+                    } else {
+                        loggingIn = true
+                    }
+                } label: {
                     HStack {
-                        Text(portfolio?.linked == true ? "Log in again" : "Log in to Schwab")
+                        Text(portfolio?.borrowed == true ? "Log in on the Schwab hub"
+                             : portfolio?.linked == true ? "Log in again" : "Log in to Schwab")
                             .font(.subheadline.weight(.semibold))
                         Spacer()
                         Image(systemName: "arrow.up.right")

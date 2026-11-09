@@ -46,6 +46,8 @@ class SchwabTests(unittest.TestCase):
         env = patch.dict(os.environ, ENV)
         env.start()
         self.addCleanup(env.stop)
+        for key in ("SCHWAB_HUB_URL", "SCHWAB_HUB_SECRET", "SCHWAB_LOGIN_PAGE"):
+            os.environ.pop(key, None)  # these tests are JARVIS's own login
         schwab._pending_logins.clear()
         schwab.unlink()
 
@@ -230,6 +232,83 @@ class SchwabTests(unittest.TestCase):
         self.assertEqual(done.json(), {"linked": True})
         self.assertEqual(post.call_args.kwargs["data"]["code"], "C0.abc@")
         self.assertTrue(schwab.linked())
+
+
+
+HUB = {"SCHWAB_HUB_URL": "https://schwab.example/api/token", "SCHWAB_HUB_SECRET": "s" * 40}
+
+
+def lent(payload, status=200):
+    r = response(payload, status)
+    r.headers = {"Content-Type": "application/json"}
+    return r
+
+
+class BorrowedLoginTests(unittest.TestCase):
+    """One Schwab login for JARVIS and Coopa: JARVIS borrows the Schwab hub's token."""
+
+    def setUp(self) -> None:
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        p = patch.object(schwab, "_TOKEN_FILE", Path(tmp.name) / "schwab_token.json")
+        p.start()
+        self.addCleanup(p.stop)
+        env = patch.dict(os.environ, {**HUB, "JARVIS_API_TOKEN": "admin"})
+        env.start()
+        self.addCleanup(env.stop)
+        for key in ("SCHWAB_APP_KEY", "SCHWAB_APP_SECRET", "SCHWAB_CALLBACK_URL", "SCHWAB_LOGIN_PAGE"):
+            os.environ.pop(key, None)
+        schwab.unlink()
+        self.addCleanup(schwab.unlink)
+
+    def test_borrows_the_token_and_asks_again_only_when_it_runs_low(self) -> None:
+        now = time.time()
+        good = lent({"access_token": "t1", "expires_at": now + 1500, "login_expires_at": now + 5 * 86400})
+        with patch.object(schwab.requests, "get", return_value=good) as get:
+            self.assertTrue(schwab.configured() and schwab.borrowing())
+            self.assertEqual(schwab.access_token(), "t1")
+            self.assertTrue(schwab.linked())
+            self.assertIsNone(schwab.login_warning())
+            self.assertEqual(get.call_count, 1)
+            self.assertEqual(get.call_args.args[0], HUB["SCHWAB_HUB_URL"])
+            self.assertEqual(get.call_args.kwargs["headers"]["Authorization"], "Bearer " + "s" * 40)
+        schwab._borrowed["expires_at"] = now + 30
+        with patch.object(schwab.requests, "get", return_value=lent(
+                {"access_token": "t2", "expires_at": now + 1800, "login_expires_at": now + 5 * 86400})):
+            self.assertEqual(schwab.access_token(), "t2")
+
+    def test_coopa_logged_out_alerts_once_and_points_at_coopa(self) -> None:
+        with patch.object(schwab.requests, "get", return_value=lent(
+                {"error": "rejected", "login_required": True, "revoked": True}, 409)):
+            self.assertFalse(schwab.linked())
+            self.assertTrue(schwab.login_revoked())
+            self.assertEqual(schwab.login_warning(), "expired")
+            first = schwab.login_expires_at()
+            schwab._borrowed["checked_at"] -= 120  # a later retry, still logged out
+            self.assertEqual(schwab.login_expires_at(), first)  # same alert key: no repeat
+            with self.assertRaises(RuntimeError):
+                schwab.access_token()
+        self.assertEqual(schwab.login_url(), "https://schwab.example/")
+        self.assertIn("Schwab hub", schwab.describe())
+
+    def test_coopa_unreachable_keeps_the_known_expiry(self) -> None:
+        now = time.time()
+        with patch.object(schwab.requests, "get", return_value=lent(
+                {"access_token": "t1", "expires_at": now + 1500, "login_expires_at": now + 86400 * 3})):
+            schwab.access_token()
+        schwab._borrowed["expires_at"] = now
+        with patch.object(schwab.requests, "get", side_effect=schwab.requests.ConnectionError("down")):
+            self.assertTrue(schwab.linked())
+            self.assertEqual(schwab.login_expires_at(), now + 86400 * 3)
+            with self.assertRaises(RuntimeError):
+                schwab.access_token()
+
+    def test_app_login_opens_the_hub_in_safari(self) -> None:
+        client = TestClient(server.app)
+        self.addCleanup(client.close)
+        with patch.dict(os.environ, {"SCHWAB_LOGIN_PAGE": "https://schwab.example/"}):
+            body = client.post("/api/schwab/login", headers={"Authorization": "Bearer admin"}).json()
+        self.assertEqual(body, {"url": "https://schwab.example/", "callback": "", "external": True})
 
 
 if __name__ == "__main__":

@@ -612,7 +612,11 @@ def schwab_login(_: None = Depends(authorize)) -> dict[str, object]:
     to catch (the app hands that redirect to /api/schwab/finish)."""
     from integrations import schwab
     try:
-        return {"url": schwab.login_url(), "callback": os.getenv("SCHWAB_CALLBACK_URL", "").strip()}
+        if schwab.borrowing():
+            # The login lives on the Schwab hub: the app opens its page in Safari.
+            return {"url": schwab.login_url(), "callback": "", "external": True}
+        return {"url": schwab.login_url(), "callback": os.getenv("SCHWAB_CALLBACK_URL", "").strip(),
+                "external": False}
     except RuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 

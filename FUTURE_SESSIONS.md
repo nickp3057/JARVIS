@@ -223,8 +223,12 @@ restart (Nick runs it). Tests pass (945); none of this was tried live.
 - [ ] Repeat alerts: one push per problem (`collapse_id`), one Hub row with
   "3×", repeat pushes within `ALERT_REPEAT_WINDOW_S` suppressed (5.74 retains visible history). Watch that a real
   second failure isn't swallowed.
-- [ ] Schwab revoked the refresh token an hour after Nick's 10:55 login (cause
-  unknown; one Core process, no second login). Now it counts as logged out
+- [ ] Schwab revoked the refresh token an hour after Nick's 10:55 login. Cause
+  found 2026-11-08: Nick's Coopa Trada login (same Schwab user, other app)
+  revokes JARVIS's and vice versa. Fix built: the Schwab hub holds one login and
+  JARVIS and Coopa borrow it (JARVIS.md "Borrowed login"); go live per the
+  schwab-hub README. Stage 2 (later): JARVIS places orders through the hub with
+  a phone Approve tap and hub-enforced limits. Now it counts as logged out
   and alerts "ended the login early". If it keeps happening, check the app's
   status on developer.schwab.com.
 - [ ] qBittorrent 5 pause/resume (`/torrents/stop`/`start`) untested on the
@@ -598,6 +602,18 @@ Little things mentioned along the way, roughly smallest first:
   (needs HA linked to Google Home; not checked).
 - [ ] TV LED under the screen still flashing overnight? If so, close the SSE
   stream on screen-off (plan above).
+- [ ] "Let me know when X happens" (asked 2026-11-08, e.g. "tell me when the
+  AP college rankings are out"). Today JARVIS has no web-event watcher (only
+  `watch_price`), so at best he sets a timed `add_reminder` around the
+  expected drop. Two steps, smallest first:
+  1. Due reminders also push to the phone: `_record_reminder_event` in
+     `brain/runtime.py` only calls `record_event` (spoken + inbox), never
+     `raise_alert`, so reminders never reach the phone/TV.
+  2. General `watch_for` tool: a durable watch (query + "done when" condition
+     + check cadence + expiry) run as a scheduled `brain/subagents.py` job
+     with web_search; when the condition is met it `raise_alert`s the answer
+     ("AP poll's out, BYU is #12") and retires the watch. Back it with its own
+     module like `brain/price_watch.py`; cap checks/day for cost.
 - [ ] 1337x: `switch_indexer_mirror` stack fix, and incident reports quoting
   the real HTTP / Cloudflare code (separate chat prompt written 2026-10-28).
 - [ ] NAS: allow-listed, confirm-gated "update one container" action.

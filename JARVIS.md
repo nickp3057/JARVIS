@@ -318,6 +318,23 @@ RMS envelope from ElevenLabs audio drives the orb in real time using a monotonic
   come later without a new app. Its registered callback is
   `https://127.0.0.1:8182` (changing it on Schwab's site means days of
   re-approval, so Core follows the app, not the other way round).
+- **Borrowed login (2026-11-08, the intended setup):** Schwab keeps one live
+  login per Schwab user, so JARVIS and Nick's Coopa Trada bot revoked each
+  other (Coopa login 11-04 1:47 PM MT → JARVIS refresh refused 1:59 PM). The
+  **Schwab hub** (schwab.nickolaspearson.com, `~/Developer/projects/schwab-hub`,
+  its own service on the Lightsail box) holds Nick's one login. With
+  `SCHWAB_HUB_URL` + `SCHWAB_HUB_SECRET` set, Core keeps no Schwab login:
+  `integrations/schwab.py` borrows a 30-min access token from
+  `GET https://schwab.nickolaspearson.com/api/token` (only the access token
+  crosses, never the refresh token or app secret), re-asking when it has under
+  a minute left, or each minute while the hub is logged out. Live streaming is
+  unchanged (the streamer logs in with the borrowed token; reconnects get a
+  fresh one). Log in = the hub's page (`SCHWAB_LOGIN_PAGE`, default the hub's
+  `/`): the app's Log in buttons open it in Safari (`/api/schwab/login`
+  returns `external: true`), the alert and the spoken answer point there, and
+  nickolaspearson.com's home page links it. The SCHWAB_APP_* login below is
+  the fallback when the hub variables are empty. JARVIS sees the accounts Nick
+  ticks on Schwab's consent screen when logging in on the hub.
 - Login: the companion's Settings > Charles Schwab > Log in (or the Home
   card) gets `POST /api/schwab/login` (admin; returns the page and the
   callback) and opens Schwab in an in-app web view (`SchwabLoginView`). When
@@ -801,6 +818,9 @@ HOME_DASHBOARD_ENTITIES=    # comma-separated HA entity_ids for /api/home/entiti
 SCHWAB_APP_KEY=             # JARVIS's own Schwab developer app (developer.schwab.com); empty = Schwab off
 SCHWAB_APP_SECRET=
 SCHWAB_CALLBACK_URL=https://127.0.0.1:8182   # exactly what the Schwab app has registered
+SCHWAB_HUB_URL=             # borrow the Schwab hub's login instead: https://schwab.nickolaspearson.com/api/token
+SCHWAB_HUB_SECRET=          # the "jarvis" program secret from the hub page; both set = borrowing
+SCHWAB_LOGIN_PAGE=          # optional; default the hub's front page
 BARN_DOOR_LIGHTS=light.nick_strip_lights,light.strip_lights,light.desk_lights,light.desk_lights_2,light.lamp   # go red (default; the lamp too since 2026-11-03)
 BARN_DOOR_OFF=light.bedroom_lights,switch.avengers_tower_socket_1   # can't go red, so go dark (lights or switches)
 BARN_DOOR_EFFECTS=light.nick_strip_lights=Rainbow-A,light.desk_lights_2=Rainbow   # effects to return to when HA can't see the running one
@@ -911,6 +931,7 @@ EMAIL_UNSUB_NOTE=           # vault-relative note path; default Jarvis Memory/Em
 
 ## Recently Shipped
 
+- **5.91 / build 234 (2026-11-08): one Schwab login (the Schwab hub).** Schwab keeps one live login per Schwab user, so JARVIS's and Nick's Coopa Trada logins revoked each other (Coopa 11-04 1:47 PM MT → JARVIS refused 1:59 PM). The new Schwab hub (schwab.nickolaspearson.com, `schwab-hub` project on the Lightsail box) holds the one login; with `SCHWAB_HUB_URL`/`SCHWAB_HUB_SECRET` set, `integrations/schwab.py` borrows 30-minute access tokens from it (live streaming unchanged). The companion's Log in buttons open the hub in Safari (`/api/schwab/login` → `external: true`); alerts and the spoken answer point there. Tests in `tests/test_schwab.py` (`BorrowedLoginTests`). Deployed 2026-11-08.
 - **5.90 / build 233 (2026-11-06): JARVIS knows when voice ID recognised Nick.** Nick enrolled his voiceprint (5 samples); his next "who's talking to you right now?" scored 0.78 but got a stale "Voice ID is armed for enrolment" answer, because only guest turns told the model who was speaking. `voice_trust.context_note()` now adds a one-line "Voice ID recognised this voice as Nick (match 0.78)" to the turn context when a voiceprint matched; typed chat, the phone app and voice ID off add nothing, as before. Regression test in `tests/test_voice_trust.py`. Not deployed.
 
 - **5.89 / build 232 (2026-11-06): subagent backbone + email triage.** `brain/subagents.py` runs focused background tool loops (own prompt, own small tool set, own model, own context) as one-at-a-time jobs that show in the task lane and announce when a person asked. The first subagent, `brain/email_triage.py` over the new `integrations/gmail.py`, trashes annoying mail, files missionary letters into each missionary's label, keeps anything even slightly important, keeps a per-sender unsubscribe list in the vault, and can restore what it trashed (protecting that sender). Handlers validate every model choice (id in batch, folder exists, sender not protected); email text is fenced as untrusted data. New tools `sort_inbox`, `email_triage_report`, `email_unsubscribe_list`, `email_unsubscribed`, `restore_email`, `background_agents` (email tools voice-locked). Tests in `tests/test_subagents.py`, `tests/test_email_triage.py`. Gmail not linked yet; never run against a real inbox. Not deployed.

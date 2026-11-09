@@ -8,6 +8,7 @@ import WebKit
 struct SchwabLoginView: View {
     @EnvironmentObject private var settings: AppSettings
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.openURL) private var openURL
     var onLinked: () -> Void = {}
     @State private var start: (url: URL, callback: String)?
     @State private var status: String?
@@ -39,7 +40,14 @@ struct SchwabLoginView: View {
         failed = false
         status = "Opening Schwab…"
         do {
-            start = try await JarvisAPIClient.make(from: settings).schwabLogin()
+            let login = try await JarvisAPIClient.make(from: settings).schwabLogin()
+            if login.external {
+                // One Schwab login for JARVIS and Coopa Trada: it lives on the Schwab hub.
+                openURL(login.url)
+                dismiss()
+                return
+            }
+            start = (login.url, login.callback)
             status = nil
         } catch {
             fail("Couldn't reach JARVIS: \(error.localizedDescription)")

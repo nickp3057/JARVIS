@@ -734,10 +734,15 @@ struct Portfolio: Decodable, Equatable {
     var totalGain: Double?
     var totalGainPct: Double?
     var positions: [Position]?
+    /// The login lives on the Schwab hub and JARVIS borrows it (one Schwab
+    /// login for JARVIS and Coopa); log in on `loginPage` in Safari.
+    var borrowed: Bool?
+    var loginPage: URL?
 
     enum CodingKeys: String, CodingKey {
-        case configured, linked, streaming, error, value, cash, positions
+        case configured, linked, streaming, error, value, cash, positions, borrowed
         case loginExpiresAt = "login_expires_at"
+        case loginPage = "login_page"
         case todayChange = "today_change"
         case todayPct = "today_pct"
         case yesterdayChange = "yesterday_change"
