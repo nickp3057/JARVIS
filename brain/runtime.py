@@ -485,6 +485,13 @@ class JarvisRuntime:
         """Surface background memory writes in the event inbox."""
         self.record_event(kind="memory", source="memory", title=title, detail=detail)
 
+    def warm(self) -> None:
+        """A turn is about to arrive (the wake word fired): open the model's
+        connection now so the reply doesn't wait for a handshake."""
+        warm = getattr(self.agent, "warm_connection", None)
+        if callable(warm):
+            warm()
+
     def respond(self, user_input: str, *, spoken: bool = False) -> str:
         """Run one conversational turn through the best available brain.
         ``spoken``: the reply goes to a speaker (the room voice), so short."""

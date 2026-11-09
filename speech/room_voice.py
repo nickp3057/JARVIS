@@ -165,6 +165,7 @@ class RoomVoice:
                 if not self._wait_for_wake(stream):
                     return
                 self._hushed.clear()  # a tap while idle mustn't cut off the next "Hey JARVIS"
+                self._warm_connections()  # handshakes happen while Nick is still talking
                 preroll = stream.get_recent_audio(_seconds("VOICE_PREROLL_S", 2.0))
                 voice_presence.update("listening")
                 room_sounds.play("listen")
@@ -182,6 +183,17 @@ class RoomVoice:
             if self._hushed.is_set():  # tapped mid-exchange: no follow-up, no barge-in listen
                 voice_presence.update("idle")
                 need_wake, barged = True, False
+
+    def _warm_connections(self) -> None:
+        """Open the connections this exchange will need (transcript, model,
+        speech) in the background; each skips its ~90 ms handshake later."""
+        try:
+            from speech import stt, tts
+            stt.warm_cloud()
+            tts.warm_cloud()
+            self.runtime.warm()
+        except Exception:  # noqa: BLE001 - only a head start; never worth a missed command
+            log.debug("Connection warm-up failed", exc_info=True)
 
     def hush(self) -> bool:
         """End the current exchange (a tap on the iPad). True if there was one."""
@@ -454,15 +466,29 @@ class RoomVoice:
             voice_presence.update("idle")
             return speaker_id.enrolling()  # keep listening without the wake word until done
         started = time.perf_counter()
+        # Whose voice it is (40-80 ms of CPU) is worked out while the
+        # transcript is on its way back from the cloud, not after it.
+        verdict: list = []
+
+        def who() -> None:
+            try:
+                verdict.append(speaker_id.identify(audio))
+            except Exception:  # noqa: BLE001 - decided below: an unknown voice is a guest
+                log.exception("Voice ID failed")
+
+        identifying = threading.Thread(target=who, name="voice-id", daemon=True)
+        identifying.start()
         text = strip_wake_word(self.final.transcribe(audio)).strip()
         log.info("Room voice heard %r (%.0f ms)", text, (time.perf_counter() - started) * 1000)
+        identifying.join()
         if self._hushed.is_set():
             return False
         voice_presence.update(transcript=text)
         if not text:
             voice_presence.update("idle")
             return False
-        speaker = speaker_id.identify(audio)  # Nick, or a guest who can't use locked tools
+        # Nick, or a guest who can't use locked tools.
+        speaker = verdict[0] if verdict else voice_trust.guest("voice ID failed")
 
         if (self._alarming() or self._wake_ringing()) and _DISMISS.search(text.lower()):
             self._dismiss_alarms()

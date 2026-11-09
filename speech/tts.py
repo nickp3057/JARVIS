@@ -31,6 +31,7 @@ import requests
 from dotenv import load_dotenv
 
 from jarvis_logger import get_logger
+from speech import cloud_http
 
 load_dotenv()
 
@@ -70,38 +71,41 @@ def _wrap_pcm_as_wav(pcm_bytes: bytes, path: Path, sample_rate: int) -> None:
         wav.writeframes(pcm_bytes)
 
 
+def _elevenlabs_request(text: str) -> tuple[str, dict]:
+    """URL and ``requests`` keyword arguments for one line of speech."""
+    # Re-read speed from env on every call so update_setting changes take
+    # effect immediately without a restart.
+    current_speed = float(os.getenv("ELEVENLABS_SPEED", str(ELEVENLABS_SPEED)))
+    url = f"https://api.elevenlabs.io/v1/text-to-speech/{ELEVENLABS_VOICE_ID}"
+    return url, {
+        "headers": {
+            "xi-api-key": ELEVENLABS_API_KEY,
+            "Content-Type": "application/json",
+            "Accept": "audio/wav",
+        },
+        "params": {"output_format": _ELEVENLABS_OUTPUT_FORMAT},
+        "json": {
+            "text": text,
+            "model_id": ELEVENLABS_MODEL,
+            "voice_settings": {
+                "stability": 0.5,
+                "similarity_boost": 0.75,
+                "style": 0.0,
+                "use_speaker_boost": True,
+                "speed": max(0.7, min(1.2, current_speed)),
+            },
+        },
+        "timeout": _ELEVENLABS_TIMEOUT_SECONDS,
+    }
+
+
 def _synthesize_elevenlabs(text: str) -> bool:
     if not _elevenlabs_configured():
         return False
 
-    # Re-read speed from env on every call so update_setting changes take
-    # effect immediately without a restart.
-    current_speed = float(os.getenv("ELEVENLABS_SPEED", str(ELEVENLABS_SPEED)))
-
-    url = f"https://api.elevenlabs.io/v1/text-to-speech/{ELEVENLABS_VOICE_ID}"
-    headers = {
-        "xi-api-key": ELEVENLABS_API_KEY,
-        "Content-Type": "application/json",
-        "Accept": "audio/wav",
-    }
-    params = {"output_format": _ELEVENLABS_OUTPUT_FORMAT}
-    payload = {
-        "text": text,
-        "model_id": ELEVENLABS_MODEL,
-        "voice_settings": {
-            "stability": 0.5,
-            "similarity_boost": 0.75,
-            "style": 0.0,
-            "use_speaker_boost": True,
-            "speed": max(0.7, min(1.2, current_speed)),
-        },
-    }
-
+    url, request = _elevenlabs_request(text)
     try:
-        response = requests.post(
-            url, headers=headers, params=params, json=payload,
-            timeout=_ELEVENLABS_TIMEOUT_SECONDS,
-        )
+        response = cloud_http.post(url, **request)
     except requests.RequestException as exc:
         log.warning("ElevenLabs request failed: %s", exc)
         return False
@@ -117,6 +121,109 @@ def _synthesize_elevenlabs(text: str) -> bool:
         return False
 
     return True
+
+
+def warm_cloud() -> None:
+    """Open the ElevenLabs connection ahead of the reply (the wake word just
+    fired). No-op without ElevenLabs."""
+    if _elevenlabs_configured():
+        cloud_http.warm("https://api.elevenlabs.io/")
+
+
+# --- ElevenLabs, played while it downloads -----------------------------------
+# Waiting for the whole clip before starting aplay cost a median 0.58 s and
+# over a second for long lines (Optiplex log, 2026-11-09). On Linux the audio
+# goes straight into aplay as it arrives, so the first word plays as soon as
+# ElevenLabs sends it. ``TTS_STREAM_PLAYBACK=0`` goes back to whole clips.
+
+def _stream_playback_enabled() -> bool:
+    if os.getenv("TTS_STREAM_PLAYBACK", "1").strip().lower() in ("0", "off", "false", "no"):
+        return False
+    return sys.platform.startswith("linux") and _elevenlabs_configured() and shutil.which("aplay") is not None
+
+
+def _stream_elevenlabs(text: str, interrupt_event: threading.Event | None) -> bytes | None:
+    """Speak ``text`` through aplay while ElevenLabs is still sending it.
+
+    Returns the audio that was played: all of it normally, a part when
+    something stopped it (``interrupt_event``, ``stop_playback``, a dropped
+    download). None means nothing was heard and the caller should use the
+    whole-clip path, with its Piper fallback, instead."""
+    url, request = _elevenlabs_request(text)
+    started = time.perf_counter()
+    try:
+        response = cloud_http.post(f"{url}/stream", stream=True, **request)
+    except requests.RequestException as exc:
+        log.warning("ElevenLabs stream request failed: %s", exc)
+        return None
+    if response.status_code != 200:
+        log.warning("ElevenLabs stream returned %s: %s", response.status_code, response.text[:300])
+        response.close()
+        return None
+
+    try:
+        proc = subprocess.Popen(
+            ["aplay", "-q", *alsa_device_args(), "-t", "raw", "-f", "S16_LE",
+             "-r", str(_ELEVENLABS_SAMPLE_RATE), "-c", "1", "-"],
+            stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
+        )
+    except Exception:  # noqa: BLE001 - no aplay, bad device: the whole-clip path reports it
+        log.debug("Could not start aplay for streamed speech", exc_info=True)
+        response.close()
+        return None
+
+    global _current_player
+    with _player_lock:
+        _current_player = proc
+    pcm = bytearray()
+    complete = False
+    try:
+        try:
+            for chunk in response.iter_content(chunk_size=4096):
+                if not chunk:
+                    continue
+                if not pcm:
+                    log.debug("4. TTS first audio (ElevenLabs stream): %.0f ms",
+                              (time.perf_counter() - started) * 1000)
+                if (interrupt_event is not None and interrupt_event.is_set()) or proc.poll() is not None:
+                    break
+                proc.stdin.write(chunk)  # type: ignore[union-attr]
+                pcm += chunk
+            else:
+                complete = True
+        except requests.RequestException as exc:  # (an OSError too, so it's caught first)
+            log.warning("ElevenLabs stream dropped after %d bytes: %s", len(pcm), exc)
+        except OSError:
+            pass  # aplay went away mid-write: stop_playback, or it failed (checked below)
+        finally:
+            response.close()
+            try:
+                proc.stdin.close()  # type: ignore[union-attr]
+            except OSError:
+                pass
+        # The download is done; aplay still has the tail of the sentence to play.
+        while proc.poll() is None:
+            if interrupt_event is not None and interrupt_event.is_set():
+                proc.terminate()
+                proc.wait(timeout=2)
+                log.info("TTS interrupted by event.")
+                break
+            time.sleep(0.04)
+    finally:
+        with _player_lock:
+            if _current_player is proc:
+                _current_player = None
+    stopped = (proc.returncode or 0) < 0 or (interrupt_event is not None and interrupt_event.is_set())
+    if stopped:  # a hush or barge-in, even before the first sound: never say it again
+        return b""
+    if proc.returncode:  # aplay itself failed
+        stderr = proc.stderr.read().decode(errors="replace") if proc.stderr else ""
+        log.warning("Streamed playback failed (exit %s): %s", proc.returncode, stderr.strip())
+        return None
+    if not pcm:
+        return None
+    log.debug("Spoke via ElevenLabs stream (%s).", "complete" if complete else "cut short")
+    return bytes(pcm) if complete else b""
 
 
 # --- Piper (fallback) -------------------------------------------------------
@@ -308,13 +415,27 @@ def _said_before(text: str) -> bool:
         return counts[key] >= 2
 
 
+def _store_pcm_in_cache(pcm: bytes, path: Path) -> None:
+    """Keep a line that was streamed (there is no output file to copy)."""
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        _wrap_pcm_as_wav(pcm, path, _ELEVENLABS_SAMPLE_RATE)
+        _trim_cache(path.parent)
+    except OSError:
+        log.debug("TTS cache write failed", exc_info=True)
+
+
+def _trim_cache(folder: Path) -> None:
+    files = sorted(folder.glob("*.wav"), key=lambda f: f.stat().st_mtime)  # said.json isn't a wav
+    for old in files[:-_CACHE_MAX_FILES]:  # oldest go first
+        old.unlink(missing_ok=True)
+
+
 def _store_in_cache(path: Path) -> None:
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(_OUTPUT_FILE, path)
-        files = sorted(path.parent.glob("*.wav"), key=lambda f: f.stat().st_mtime)  # said.json isn't a wav
-        for old in files[:-_CACHE_MAX_FILES]:  # oldest go first
-            old.unlink(missing_ok=True)
+        _trim_cache(path.parent)
     except OSError:
         log.debug("TTS cache write failed", exc_info=True)
 
@@ -352,6 +473,13 @@ def speak(
     if cached is not None and cached.exists():
         _play_async_and_wait(cached, interrupt_event)  # no synthesis: starts at once
         return
+
+    if on_envelope is None and _stream_playback_enabled():
+        played = _stream_elevenlabs(text, interrupt_event)
+        if played is not None:
+            if cached is not None and played:  # only a whole line is worth keeping
+                _store_pcm_in_cache(played, cached)
+            return
 
     t0 = time.perf_counter()
     if _synthesize_elevenlabs(text):

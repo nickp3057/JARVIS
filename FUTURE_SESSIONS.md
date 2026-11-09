@@ -129,6 +129,35 @@ Nick's running to-do list for the project. When one ships, move it to
 `JARVIS.md` "Recently Shipped" and delete it here. Newest asks at the bottom
 of each group.
 
+### Speed pass (2026-11-09, 5.98 / build 241): check
+Full audit and fixes in JARVIS.md "Recently Shipped" (5.98). Tested and timed
+against the real services, but **not deployed and never played on the
+speaker**. After `git pull` + `sudo systemctl restart jarvis-api` and an app
+install:
+- [ ] Say "Hey JARVIS, what time is it?" and a longer question. Speech should
+  start noticeably sooner and sound the same (no click, no clipped first
+  word, no stutter). If anything is off: `TTS_STREAM_PLAYBACK=0` in the
+  Optiplex `.env` (read live, no restart) goes back to whole clips.
+- [ ] `grep "first audio" ~/jarvis/jarvis.log | tail` should show
+  `4. TTS first audio (ElevenLabs stream): ~150-250 ms` (was `TTS synthesis
+  ... 400-1000 ms`). A `Streamed playback failed` warning means aplay
+  refused the raw stream on that device; it will have fallen back.
+- [ ] Barge-in ("Hey JARVIS" while he talks) and a tap-to-hush still cut him
+  off at once, and he doesn't repeat the line afterwards.
+- [ ] A routine line said twice (e.g. "Sleep well, sir.") still replays
+  instantly the second time (streamed lines are cached from the PCM).
+- [ ] Voice ID still logs `Voice ID: Nick (score ...)` for Nick and locks
+  tools for a guest.
+- [ ] Room camera: open it on the phone; the iPad's green orb should appear
+  within about a second and go off within ~6 s of closing (or at once on
+  "kill the camera"). Then `journalctl -u jarvis-api --since "-20 min" |
+  grep -c camera/status` should be near 60, not 725.
+- [ ] Study alerts still arrive in the morning (the brief is now fetched on
+  change / every 10 min, not every 5 s).
+- Not done, by choice: `VOICE_SILENCE_END_MS` stays 1000 (750 cut Nick
+  off); the room voice still waits for the full one-sentence reply; the 134
+  tool schemas are untouched (JARVIS.md "Performance debt").
+
 ### Investing agents + Agents map (2026-11-09, 5.92 / build 235): check
 Plan agreed with Nick 2026-11-09 (JARVIS.md "Investing"). Suggestions only:
 **no real orders** until Nick says "go full crazy mode".

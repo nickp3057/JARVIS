@@ -1073,13 +1073,16 @@ async def home_stream(request: Request, _: None = _status_read) -> StreamingResp
     Barn Door reaches it at once instead of on its 5 s theme poll. ``look``
     changes with any theme pick or Experimenting switch, so the phone and
     iPad refetch /api/theme at once (their 10 s poll pauses while this
-    stream is up)."""
+    stream is up). ``camera`` is whether the iPad's lens is wanted
+    (brain/camera.py): the iPad follows it here instead of asking
+    /api/camera/status every 1.5 s, and starts or stops within a beat."""
     await asyncio.to_thread(runtime)  # the HA live feed runs on the runtime
-    from brain import theme
+    from brain import camera, theme
 
     def pulse() -> dict[str, object]:
         shared = theme.current()
-        return {"seq": status_hub.home_seq(), "theme": shared["theme"], "look": shared["revision"]}
+        return {"seq": status_hub.home_seq(), "theme": shared["theme"], "look": shared["revision"],
+                "camera": camera.wanted()}
 
     async def events():
         state = pulse()

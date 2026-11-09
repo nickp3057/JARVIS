@@ -162,6 +162,7 @@ struct RootView: View {
         .environment(\.cameraWatching, camera.watching)
         .fullScreenCover(isPresented: $cameraViewer.showing) { RoomCameraView().environmentObject(settings) }
         .task { camera.activate(settings: settings) }
+        .onChange(of: hub.cameraWanted, initial: true) { _, wanted in camera.follow(wanted) }
         .onChange(of: scenePhase) { _, phase in
             if phase == .active { camera.activate(settings: settings) } else { camera.deactivate() }
             if phase != .active { phoneVoice.cancel() }

@@ -2,10 +2,14 @@ import AVFoundation
 import SwiftUI
 import UIKit
 
-/// The iPad as the room's camera. It polls Core every ~1.5 s: while Core says
-/// the lens is `wanted` (Nick's phone is watching and there's no kill
-/// lockout) it runs the front camera and uploads a downscaled JPEG a few
-/// times a second; otherwise the session is off and nothing is captured.
+/// The iPad as the room's camera. While Core says the lens is `wanted`
+/// (Nick's phone is watching and there's no kill lockout) it runs the front
+/// camera and uploads a downscaled JPEG a few times a second; otherwise the
+/// session is off and nothing is captured. Core pushes `wanted` on the home
+/// stream (`follow`), so the lens starts and stops within a beat; the poll
+/// behind it is every 20 s while the stream is up and the lens is off, and
+/// every ~1.5 s (as it always was) while capturing, with the stream down, or
+/// against a Core that doesn't push it.
 /// Frames never touch disk. While capturing, `watching` is true and the app
 /// draws its reactor as the green JARVIS orb (`CameraWatchOrb`) so the room
 /// can see it's on.
@@ -26,6 +30,25 @@ final class RoomCameraController: NSObject, ObservableObject {
     private var authorized = false
     /// Last battery reading sent to Core (it only changes in 5% steps).
     private var reportedBattery: (Float, Bool)?
+    /// What Core's home stream last said about the lens; nil = not telling us.
+    private var pushed: Bool?
+
+    /// Seconds until the next status check: slow only while the stream is
+    /// reporting and the lens is off, so a stop is never left to a slow poll.
+    static func pollSeconds(pushed: Bool?, running: Bool) -> Double {
+        pushed == false && !running ? 20 : 1.5
+    }
+
+    /// The home stream's word on the lens (`HubViewModel.cameraWanted`).
+    /// A change is checked with Core at once rather than trusted blindly:
+    /// `tick` asks /api/camera/status, which stays the only thing that
+    /// starts or stops the capture.
+    func follow(_ wanted: Bool?) {
+        guard wanted != pushed else { return }
+        pushed = wanted
+        guard poll != nil, wanted != nil else { return }
+        Task { [weak self] in await self?.tick() }
+    }
 
     /// Start following Core's camera status (iPad only; the phone never
     /// captures). Safe to call repeatedly.
@@ -35,7 +58,8 @@ final class RoomCameraController: NSObject, ObservableObject {
         poll = Task { [weak self] in
             while !Task.isCancelled {
                 await self?.tick()
-                try? await Task.sleep(for: .seconds(1.5))
+                let wait = Self.pollSeconds(pushed: self?.pushed, running: self?.running ?? false)
+                try? await Task.sleep(for: .seconds(wait))
             }
         }
     }

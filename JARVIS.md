@@ -103,6 +103,7 @@ Pearson-Stark-Jarvis/
 │   ├── chime.py             Activation chime playback
 │   ├── stt.py               faster-whisper Transcriber
 │   ├── tts.py               ElevenLabs TTS with RMS envelope computation
+│   ├── cloud_http.py        one kept-alive HTTPS session for the speech clouds (STT + TTS), warmed by the wake word
 │   ├── voice_loop.py        Headless voice loop (--voice mode)
 │   └── wake.py              openWakeWord WakeDetector
 │
@@ -769,6 +770,7 @@ HUMOR_PERCENT=30           # 0-100
 ADDRESS=sir                # how JARVIS addresses Nick
 ELEVENLABS_SPEED=1.155     # TTS speed; clamped to 0.7–1.2 in speech/tts.py (code default 1.05)
 ELEVENLABS_MODEL_ID=eleven_flash_v2_5
+TTS_STREAM_PLAYBACK=1       # Linux: ElevenLabs audio plays through aplay as it downloads (first word ~0.2 s sooner on short lines, ~0.75 s on long ones); 0 = wait for the whole clip as before
 DEFAULT_LOCATION=Herriman, Utah
 ANTHROPIC_MODEL=auto        # empty/auto = newest Haiku (Models API, checked daily); auto:sonnet; or a full id to pin
 ANTHROPIC_MODEL_FAMILY=haiku   # family `auto` follows
@@ -1013,6 +1015,14 @@ EMAIL_UNSUB_NOTE=           # vault-relative note path; default Jarvis Memory/Em
 
 ## Recently Shipped
 
+- **5.98 / build 241 (2026-11-09): speed pass (measured on the Optiplex, then fixed).** A full audit of the live system: tests, imports, every read endpoint, the log's 432 model rounds, per-thread CPU, the voice path and the apps' request mix. What it found, with the numbers:
+  - **Already fast, left alone.** Every read endpoint answers in 2–9 ms warm (worst cold: `/api/status/media` 407 ms, then cached). Prompt caching works: 214 of 274 first rounds read the ~28k-token prefix from cache; the 60 cold ones were all idle gaps over the 1 h TTL or deploys that changed the tool list. Model first token: median 1.22 s on round 1, 0.89 s on later rounds (the API, not us). Per-turn context building is under 10 ms (vault recall 6 ms). The "hot" thread (15% of a core) is the wake word: 3.3 ms per 80 ms frame at full clock, 10 ms because the CPU idles at 800 MHz between frames (`powersave` governor); inherent to always-on listening.
+  - **Speech starts sooner.** `speak()` waited for the whole ElevenLabs clip before starting aplay (median 0.58 s, 0.9–1.1 s for long lines). On Linux it now streams the PCM into `aplay -t raw` as it arrives (`_stream_elevenlabs`; `TTS_STREAM_PLAYBACK=0` reverts). Measured from the Optiplex with Nick's voice: first audio at 172 ms instead of 409 ms for "The fan is off, sir.", 187 ms instead of 945 ms for a 12 s alert. A hush, barge-in or `stop_playback` still stops it at once and is never re-spoken; a failed request or a dead aplay before any sound falls back to the whole-clip path (and Piper). Cached lines still replay from `memory/tts_cache/`; a streamed line is cached only when it played in full. The GUI's audio-reactive orb (`on_envelope`) keeps the whole-clip path.
+  - **No handshake per call.** STT and TTS each opened a new HTTPS connection (about 90 ms of DNS + TCP + TLS to api.elevenlabs.io). Both now share one kept-alive session (`speech/cloud_http.py`; a stale pooled connection is retried once). The Anthropic SDK dropped idle connections after 5 s, so every turn re-handshook; the agent's client now keeps them 120 s (`brain/agent.py` `_kept_alive`; measured 252 ms → 166 ms for a request after 8 s idle). The wake word warms all three connections in the background while Nick is still talking (`RoomVoice._warm_connections` → `stt.warm_cloud`, `tts.warm_cloud`, `runtime.warm()`).
+  - **Voice ID in parallel.** The speaker check (41–82 ms of CPU) ran after the transcript came back; it now runs while the cloud transcribes. If it crashes the speaker is a guest, never Nick.
+  - **The iPad stopped hammering Core.** One iPad made 1,433 requests in 20 minutes: `/api/camera/status` every 1.5 s (725) and the 12 KB `/api/study/brief` with every 5 s `now` tick (229). Now `/api/home/stream` events carry `camera` (is the lens wanted), the iPad follows that (`HubViewModel.cameraWanted` → `RoomCameraController.follow`) and polls status every 20 s behind it while the lens is off (still 1.5 s while capturing, with the stream down, or against an older Core), so the lens also starts within a beat instead of up to 1.5 s later. The brief is fetched when the countdown list changes, on a full refresh, after a failure, or every 10 minutes. Expected: about 1,430 → 500 requests per 20 minutes from the wall iPad.
+  - Net for a spoken model turn (after Nick stops talking): roughly 0.5 s sooner to first word on a short reply, about 1 s on a long one. `VOICE_SILENCE_END_MS` (1 s, the largest fixed wait) was left alone: 750 cut Nick off.
+  - Validation: Python suite 1051 tests (18 new: `tests/test_voice_speed.py`, `StreamedPlaybackTests`); iOS 40 tests in the simulator. The streamed request and both keep-alives were timed against the real services from the Optiplex, and the new `speak` path ran there against ALSA's silent `null` device (real aplay, a bad device falls back), but nothing was played on the speaker and nothing is deployed: see FUTURE_SESSIONS.md "Speed pass".
 - **5.97 / build 240 (2026-11-09): Agents on the iPhone.** The phone has no Memory tab (Memory is a Settings panel there), so the Agents map gets its own Settings panel, "Who works for JARVIS". Installed on iPhone and iPad.
 - **5.96 / build 239 (2026-11-09): Agents map labels and auto-discovery.** Each agent is a `subagent` (own tools, works in steps) or a `helper` (one AI call): solid vs. dashed ring, separate list sections, explained in the detail card. Unknown subagent jobs/specs appear on the map by themselves the first time they run, and a test fails until every subagent in the code has a proper roster entry. Not deployed.
 - **5.95 / build 238 (2026-11-09): holdings Schwab's API misses.** Nick's app showed SPCX $51.87 and $0.26 cash in account 1058 while the Trader API still reported $50.25 cash, no SPCX and no order or trade in 10 days. New tool `record_holding(symbol, value_now, cash_used)` (voice-locked): `investing.main_account()` adds the holding at live prices and takes its cost out of cash, and the entry drops out by itself once the API lists the symbol. Not deployed.
@@ -2334,7 +2344,7 @@ EMAIL_UNSUB_NOTE=           # vault-relative note path; default Jarvis Memory/Em
 
 ## What's Not Done Yet (Roadmap)
 
-### Performance debt (from the September 2026 efficiency audit)
+### Performance debt (September 2026 audit, re-measured 2026-11-09)
 
 Shipped from that audit: prompt caching, the Now Playing worker thread, and
 once-per-path SQLite schema checks (see Recently Shipped). Still open, roughly
@@ -2365,8 +2375,28 @@ in value order:
   every stored message for the session from SQLite on each `/chat` turn and
   then trims to 40. Negligible today; switch to a `LIMIT` query (keeping the
   current message-count trim semantics) if sessions grow long.
-- **96 tool schemas on every call** (~9k tokens, cached). Routing to a tool
-  subset per intent would cut latency further but changes behaviour.
+- **134 tool schemas on every call** (measured 2026-11-09: the stable prefix,
+  tools plus persona, is ~28k tokens, read from cache on 78% of turns).
+  Cached reads are cheap and first-token time is already ~1.2 s, so this is
+  a cost-of-a-cold-start issue (a 1 h cache write of 28k tokens after every
+  idle hour or deploy), not a latency one. Routing to a tool subset per
+  intent would shrink it but changes behaviour.
+- **Per-turn context is ~4.5k tokens** (2026-11-09): the core profile
+  (~1.1k), profile facts (~1.1k), recalled notes (0–0.7k) and the last tool
+  results (up to 6,000 characters) are written to the cache fresh every
+  turn. The core profile changes at most daily and could move into the
+  cached system block. Worth cents a week today; revisit if usage grows.
+- **The room voice waits for the whole reply** (`runtime.respond`, not the
+  streaming path) before speaking. Replies are one sentence, so streaming
+  model text into speech would gain only ~0.1–0.3 s and complicates the
+  "Done." jingle check; the larger fixed wait is the 1 s end-of-speech
+  silence (`VOICE_SILENCE_END_MS`; 750 cut Nick off). Smarter endpointing
+  (end early when the live caption is a complete command) is the next real
+  win for voice latency.
+- **Server stream loops poll in-memory state** (`/api/voice/stream` every
+  80 ms, `/api/home/stream` 150 ms, `/api/traffic/stream` 100 ms per
+  client): about 3% of one core at 800 MHz with three screens attached.
+  Fine; event-driven wakeups would only matter with many more clients.
 - **Cache-invalidation footnote** — persona `.env` changes (humor, address)
   and toggling `WEB_SEARCH_ENABLED` invalidate the cached prompt prefix for
   one full-price request each. Harmless, just worth knowing; keep the

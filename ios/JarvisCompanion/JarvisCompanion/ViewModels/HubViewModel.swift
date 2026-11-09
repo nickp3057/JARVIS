@@ -87,6 +87,10 @@ final class HubViewModel: ObservableObject {
     /// Core's home stream is connected: lights, switches, scenes and the
     /// theme arrive as they change, so nothing needs to poll for them.
     @Published private(set) var homeStreamLive = false
+    /// Whether Core wants the iPad's lens on, as the home stream last said;
+    /// nil while the stream is down or Core is too old to say, and then
+    /// `RoomCameraController` asks for itself every 1.5 s as before.
+    @Published private(set) var cameraWanted: Bool?
     /// Visible views that show more than the room (Hub, Media, Home, Desk):
     /// torrents, services, repairs, alerts, portfolio. Room alone needs none.
     private var detailViews = 0
@@ -122,6 +126,7 @@ final class HubViewModel: ObservableObject {
     func refreshAll() async {
         guard settings.isConfigured else { return }
         resetConnectionIfNeeded()
+        briefSyncedAt = nil  // a full refresh (launch, pull down) re-reads the brief too
         async let a: Void = refreshServices()
         async let b: Void = refreshTorrents()
         async let c: Void = refreshMedia()
@@ -160,7 +165,14 @@ final class HubViewModel: ObservableObject {
                 snapshotDefaults.set(data, forKey: nowSnapshotKey)
             }
             if value.calendarError.isEmpty, value.supportsAcademicEvents {
-                await syncStudyBrief(fallbackEvents: value.academicEvents)
+                let countdown = Self.briefSignature(value.academicEvents)
+                if briefDue(for: countdown) {
+                    await syncStudyBrief(fallbackEvents: value.academicEvents)
+                    if studyBrief.loadError == nil, studyBrief.serverError.isEmpty {
+                        briefSyncedAt = Date()
+                        briefSyncedFor = countdown
+                    }
+                }
             }
         } catch {
             guard !Task.isCancelled, identity == settings.connectionIdentity else { return }
@@ -171,6 +183,24 @@ final class HubViewModel: ObservableObject {
 
     func refreshServices() async {
         await load(\.services) { try await $0.servicesStatus().services }
+    }
+
+    /// When the brief was last pulled, and for which countdown list. The
+    /// brief (12 KB) only changes when the calendar or the day does, so it
+    /// is fetched then, on a retry after a failure, or every ten minutes:
+    /// not with each 5 s `now` tick, as it was (17,000 downloads a day from
+    /// the wall iPad alone).
+    private var briefSyncedAt: Date?
+    private var briefSyncedFor = ""
+    static let briefRefreshInterval: TimeInterval = 600
+
+    static func briefSignature(_ events: [AcademicEvent]) -> String {
+        events.map { "\($0.id)|\($0.title)|\($0.startAt ?? 0)|\($0.daysLeft)" }.joined(separator: ";")
+    }
+
+    private func briefDue(for countdown: String) -> Bool {
+        guard let last = briefSyncedAt, countdown == briefSyncedFor else { return true }
+        return Date().timeIntervalSince(last) >= Self.briefRefreshInterval
     }
 
     /// Pull the composed briefs from JARVIS Core and hand them to the
@@ -213,6 +243,7 @@ final class HubViewModel: ObservableObject {
             await academicNotifications.sync(briefs: [], enabled: false)
         } else {
             _ = await academicNotifications.requestPermission()
+            briefSyncedAt = nil  // the switch just changed: plan again now
             await refreshNow()
         }
     }
@@ -223,6 +254,7 @@ final class HubViewModel: ObservableObject {
         now = Section(); services = Section(); torrents = Section(); media = Section()
         storage = Section(); entities = Section(); links = Section(); studyBrief = Section()
         alerts = Section(); repairs = Section(); maintenance = Section(); portfolio = Section()
+        briefSyncedAt = nil
         nowSnapshotIsStale = false
         if let data = snapshotDefaults.data(forKey: nowSnapshotKey),
            let cached = try? JSONDecoder().decode(NowStatus.self, from: data) {
@@ -597,8 +629,11 @@ final class HubViewModel: ObservableObject {
             while !Task.isCancelled {
                 guard let client = try? self?.client() else { return }
                 self?.lastHomeSeq = nil  // a reconnect's first event may hide a missed change
-                try? await client.streamHome { [weak self] seq, theme, look in self?.homeChanged(seq, theme: theme, look: look) }
+                try? await client.streamHome { [weak self] seq, theme, look, camera in
+                    self?.homeChanged(seq, theme: theme, look: look, camera: camera)
+                }
                 self?.homeStreamLive = false
+                self?.cameraWanted = nil
                 guard !Task.isCancelled else { return }
                 await self?.refreshEntities()
                 try? await Task.sleep(for: .seconds(3))
@@ -612,8 +647,9 @@ final class HubViewModel: ObservableObject {
     private var lastTheme: String?
     private var lastLook: Double?
 
-    private func homeChanged(_ seq: Int, theme: String?, look: Double?) {
+    private func homeChanged(_ seq: Int, theme: String?, look: Double?, camera: Bool?) {
         homeStreamLive = true
+        if cameraWanted != camera { cameraWanted = camera }
         let newTheme = theme.map { $0 != JarvisPalette.current.rawValue && $0 != lastTheme } ?? false
         // An Experimenting switch flipped elsewhere moves `look` without changing the theme.
         let newLook = look != nil && lastLook != nil && look != lastLook
@@ -659,6 +695,7 @@ final class HubViewModel: ObservableObject {
         homeStreamTask?.cancel()
         homeStreamTask = nil
         homeStreamLive = false
+        cameraWanted = nil
         nowSnapshotIsStale = now.value != nil
     }
 

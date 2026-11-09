@@ -507,6 +507,51 @@ final class CompanionTests: XCTestCase {
         XCTAssertTrue(SettingsView.scheduleSummary(hub.studyBrief.value!).hasSuffix("· 21-day warning"))
     }
 
+    func testStudyBriefIsFetchedWhenTheCountdownChangesNotEveryTick() async {
+        let scheduler = RecordingStudyScheduler()
+        let client = JarvisAPIClient(baseURL: URL(string: "http://localhost:8000")!, token: "test", session: session)
+        let hub = HubViewModel(settings: settings, clientFactory: { client }, snapshotDefaults: defaults,
+                               academicNotifications: scheduler)
+        var briefFetches = 0
+        var daysLeft = 2
+        var briefFails = false
+        MockProtocol.handler = { request in
+            if request.url!.path.hasSuffix("/api/study/brief") {
+                briefFetches += 1
+                if briefFails { return (500, "{\"detail\":\"boom\"}", 0) }
+                return (200, """
+                    {"enabled":true,"hour":7,"window_days":21,"error":"","briefs":[]}
+                    """, 0)
+            }
+            return (200, """
+                {"generated_at":1000,"timers":[],"reminders":[],"next_event":null,"calendar_error":"",
+                 "academic_events":[{"id":"1","title":"Biology quiz","start_at":1789682400,"all_day":true,
+                                     "location":"","days_left":\(daysLeft)}]}
+                """, 0)
+        }
+        await hub.refreshNow()
+        await hub.refreshNow()
+        await hub.refreshNow()
+        XCTAssertEqual(briefFetches, 1)  // the 5 s tick no longer re-downloads it
+        daysLeft = 1  // midnight passed (or the calendar changed)
+        await hub.refreshNow()
+        XCTAssertEqual(briefFetches, 2)
+        await hub.refreshAll()  // launch or a pull down
+        XCTAssertEqual(briefFetches, 3)
+        briefFails = true
+        daysLeft = 0
+        await hub.refreshNow()
+        await hub.refreshNow()
+        XCTAssertEqual(briefFetches, 5)  // a failed fetch is retried on the next tick
+    }
+
+    func testRoomCameraPollsSlowlyOnlyWhileCoreReportsTheLensOff() {
+        XCTAssertEqual(RoomCameraController.pollSeconds(pushed: false, running: false), 20)
+        XCTAssertEqual(RoomCameraController.pollSeconds(pushed: nil, running: false), 1.5)  // stream down, older Core
+        XCTAssertEqual(RoomCameraController.pollSeconds(pushed: true, running: false), 1.5)
+        XCTAssertEqual(RoomCameraController.pollSeconds(pushed: false, running: true), 1.5)  // must stop promptly
+    }
+
     func testStudyBriefCalendarOutageInPayloadKeepsQueue() async {
         let scheduler = RecordingStudyScheduler()
         let client = JarvisAPIClient(baseURL: URL(string: "http://localhost:8000")!, token: "test", session: session)

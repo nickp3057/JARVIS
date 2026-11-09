@@ -26,6 +26,7 @@ import re
 from concurrent.futures import ThreadPoolExecutor
 import copy
 from pathlib import Path
+import threading
 from threading import RLock
 import time
 from typing import Any, Iterator
@@ -296,10 +297,28 @@ def _get_client() -> Any | None:
         )
         return None
     try:
-        return Anthropic(api_key=_api_key())
+        return Anthropic(api_key=_api_key(), **_kept_alive())
     except Exception as exc:  # noqa: BLE001
         log.warning("Anthropic client init failed: %s - agent disabled.", exc)
         return None
+
+
+# The SDK drops an idle connection after 5 s, so every turn began with a new
+# TLS handshake (about 90 ms from the Optiplex, measured 2026-11-09). Kept for
+# two minutes, a conversation's later turns and a turn warmed by the wake
+# word (JarvisAgent.warm_connection) reuse the open one.
+_KEEPALIVE_S = 120.0
+
+
+def _kept_alive() -> dict[str, Any]:
+    try:
+        import httpx
+        from anthropic import DefaultHttpxClient
+        return {"http_client": DefaultHttpxClient(limits=httpx.Limits(
+            max_connections=1000, max_keepalive_connections=100, keepalive_expiry=_KEEPALIVE_S))}
+    except Exception:  # noqa: BLE001 - an older SDK: its own default client still works
+        log.debug("Could not build a kept-alive HTTP client; using the SDK default", exc_info=True)
+        return {}
 
 
 class JarvisAgent:
@@ -348,6 +367,21 @@ class JarvisAgent:
         if local_model_configured():
             return "Local model (fallback)"
         return "Keyword router (fallback)"
+
+    def warm_connection(self) -> None:
+        """Open the API connection in the background (the wake word just
+        fired, a turn is seconds away). Free: lists one model. Never raises."""
+        client = self._client
+        if client is None:
+            return
+
+        def run() -> None:
+            try:
+                client.with_options(timeout=4.0, max_retries=0).models.list(limit=1)
+            except Exception:  # noqa: BLE001 - the turn itself will connect
+                log.debug("Could not warm the API connection", exc_info=True)
+
+        threading.Thread(target=run, name="brain-warm", daemon=True).start()
 
     def respond(self, user_input: str) -> str:
         """Run one turn of conversation. Returns Jarvis's spoken reply."""

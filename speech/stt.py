@@ -68,6 +68,18 @@ def cloud_provider() -> str:
     return provider if key and os.getenv(key, "").strip() else ""
 
 
+_CLOUD_HOSTS = {"elevenlabs": "https://api.elevenlabs.io/", "openai": "https://api.openai.com/"}
+
+
+def warm_cloud() -> None:
+    """Open the connection to the cloud transcriber now (the wake word just
+    fired), so the transcript doesn't wait for a handshake. No-op when local."""
+    provider = cloud_provider()
+    if provider:
+        from speech import cloud_http
+        cloud_http.warm(_CLOUD_HOSTS[provider])
+
+
 def _wav_bytes(audio_f32: np.ndarray) -> bytes:
     pcm = (np.clip(audio_f32, -1.0, 1.0) * 32767).astype(np.int16)
     buffer = io.BytesIO()
@@ -81,14 +93,14 @@ def _wav_bytes(audio_f32: np.ndarray) -> bytes:
 
 def cloud_transcribe(audio_f32: np.ndarray, provider: str, prompt: str | None = None) -> str | None:
     """Text from the cloud provider, or None on any failure (caller falls back)."""
-    import requests
+    from speech import cloud_http  # kept-alive: no TLS handshake per utterance
 
     model = os.getenv("STT_MODEL", "").strip() or _CLOUD_DEFAULT_MODELS[provider]
     timeout = float(os.getenv("STT_TIMEOUT_S", "6"))
     files = {"file": ("command.wav", _wav_bytes(audio_f32), "audio/wav")}
     try:
         if provider == "elevenlabs":
-            response = requests.post(
+            response = cloud_http.post(
                 "https://api.elevenlabs.io/v1/speech-to-text",
                 headers={"xi-api-key": os.getenv("ELEVENLABS_API_KEY", "").strip()},
                 data={"model_id": model, "language_code": "en", "tag_audio_events": "false"},
@@ -98,7 +110,7 @@ def cloud_transcribe(audio_f32: np.ndarray, provider: str, prompt: str | None = 
             data = {"model": model, "language": "en"}
             if prompt:
                 data["prompt"] = prompt  # the room's words, as for local Whisper
-            response = requests.post(
+            response = cloud_http.post(
                 "https://api.openai.com/v1/audio/transcriptions",
                 headers={"Authorization": f"Bearer {os.getenv('OPENAI_API_KEY', '').strip()}"},
                 data=data, files=files, timeout=timeout,
