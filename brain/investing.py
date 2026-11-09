@@ -890,8 +890,12 @@ def describe() -> str:
         lines.append("Suggested weights awaiting your OK: " + ", ".join(f"{k} {v:g}%" for k, v in s["weights"].items())
                      + ". Why: " + s["reasons"])
     if account is not None:
+        lines.append(f"Schwab shares {len(schwab.accounts_by_number())} account(s) with JARVIS; "
+                     "anything held elsewhere is invisible to the agents.")
         lines.append(render_account(account, targets or (state["suggested"] or {}).get("weights", {}),
                                     "Target" if targets else "Suggested target"))
+        if "Orders still going through" not in lines[-1]:
+            lines.append("Schwab shows no open orders.")
     pending = [p for p in state["proposals"] if p["status"] == "pending"]
     lines.append("Waiting for you: " + (" | ".join(_describe_proposal(p) for p in pending) if pending else "nothing."))
     if state["playground"]:

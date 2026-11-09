@@ -2076,7 +2076,11 @@ _CUSTOM_TOOLS: list[dict[str, Any]] = [
         "description": (
             "The investing agent: Nick's main-account target weights and how far each holding is from "
             "its target, where new cash would go, trade proposals waiting for his OK (ids like P3), "
-            "suggested weights awaiting approval, and the playground account's score vs. plain VOO."
+            "suggested weights awaiting approval, and the playground account's score vs. plain VOO. "
+            "If Nick says something Schwab disagrees with (\"that cash is already in SpaceX\"), don't "
+            "just agree: call this, tell him exactly what Schwab shows (accounts, cash, positions, open "
+            "orders) and the likely reasons (another account not shared on the Schwab hub, an order "
+            "that didn't go through), and only record his note once he confirms."
         ),
         "input_schema": {"type": "object", "properties": {}},
     },
