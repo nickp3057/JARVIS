@@ -756,6 +756,31 @@ def _tool_portfolio_summary(_: dict[str, Any]) -> str:
     return schwab.describe()
 
 
+def _tool_investing_run(args: dict[str, Any]) -> str:
+    from brain import investing
+    job = str(args.get("job", "")).strip()
+    if job not in {"suggest", "review", "playground"}:
+        return "Tool error: job must be suggest, review or playground."
+    if not investing.start(job):
+        return "That one's already running, sir."
+    return "On it, sir. I'll report back when it's done."
+
+
+def _tool_investing_status(_: dict[str, Any]) -> str:
+    from brain import investing
+    return investing.describe()
+
+
+def _tool_decide_investment(args: dict[str, Any]) -> str:
+    from brain import investing
+    return investing.decide(str(args.get("id", "")), bool(args.get("approve")))
+
+
+def _tool_set_portfolio_targets(args: dict[str, Any]) -> str:
+    from brain import investing
+    return investing.set_targets(args.get("weights"), bool(args.get("accept_suggested")))
+
+
 def _tool_get_wake_up(_: dict[str, Any]) -> str:
     from brain.wake_alarm import describe
     return describe()
@@ -2038,9 +2063,57 @@ _CUSTOM_TOOLS: list[dict[str, Any]] = [
         "name": "portfolio_summary",
         "description": (
             "Nick's Charles Schwab portfolio, live: total value, today's and yesterday's change, "
-            "cash, biggest movers. Read-only: JARVIS can't trade, and says so if asked to."
+            "cash, biggest movers. JARVIS doesn't place orders yet (the investing agent only proposes); "
+            "for targets, proposals or the playground use investing_status."
         ),
         "input_schema": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "investing_status",
+        "description": (
+            "The investing agent: Nick's main-account target weights and how far each holding is from "
+            "its target, where new cash would go, trade proposals waiting for his OK (ids like P3), "
+            "suggested weights awaiting approval, and the playground account's score vs. plain VOO."
+        ),
+        "input_schema": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "investing_run",
+        "description": (
+            "Start an investing subagent now, in the background (they also run on their own: weights "
+            "once, the review every market day, the playground weekly). 'suggest' = work out starting "
+            "target weights; 'review' = daily look at the main account and propose trades; "
+            "'playground' = the agent's own just-for-fun account session."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {"job": {"type": "string", "enum": ["suggest", "review", "playground"]}},
+            "required": ["job"],
+        },
+    },
+    {
+        "name": "set_portfolio_targets",
+        "description": (
+            "Set the main account's target weights (percent per symbol, adding to 100; CASH allowed). "
+            "accept_suggested=true takes the agent's suggested weights as they are; otherwise pass "
+            "'weights'. Only when Nick says so."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "accept_suggested": {"type": "boolean"},
+                "weights": {"type": "object", "additionalProperties": {"type": "number"}},
+            },
+        },
+    },
+    {
+        "name": "decide_investment",
+        "description": "Nick approves or declines one investing proposal by id (e.g. P3).",
+        "input_schema": {
+            "type": "object",
+            "properties": {"id": {"type": "string"}, "approve": {"type": "boolean"}},
+            "required": ["id", "approve"],
+        },
     },
     {
         "name": "announce_in_room",
@@ -2571,6 +2644,10 @@ _DISPATCH: dict[str, Callable[[dict[str, Any]], str]] = {
     "get_wake_up": _tool_get_wake_up,
     "skip_wake_up": _tool_skip_wake_up,
     "portfolio_summary": _tool_portfolio_summary,
+    "investing_status": _tool_investing_status,
+    "investing_run": _tool_investing_run,
+    "set_portfolio_targets": _tool_set_portfolio_targets,
+    "decide_investment": _tool_decide_investment,
     "tv_power": _tool_tv_power,
     "kill_camera": _tool_kill_camera,
     "barn_door_protocol": _tool_barn_door_protocol,

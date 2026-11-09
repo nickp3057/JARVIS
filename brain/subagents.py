@@ -57,6 +57,9 @@ class SubagentSpec:
     fallback_model: str = "claude-haiku-5-5"
     max_rounds: int = 12
     max_tokens: int = 2048
+    # Anthropic-run tools (``web_search``): Anthropic executes them, so they
+    # need no handler. Opt-in per spec; the email sorter must not browse.
+    web_search_uses: int = 0
 
     def model(self) -> str:
         raw = os.getenv(self.model_setting, "") if self.model_setting else ""
@@ -109,6 +112,12 @@ def run(spec: SubagentSpec, task: str, *, client: Any = None) -> SubagentResult:
     handlers = {tool.name: tool for tool in spec.tools}
     tool_specs = [tool.spec() for tool in spec.tools]
     model = spec.model()
+    if spec.web_search_uses > 0:
+        from brain.tools import _web_search_server_tool
+
+        server = _web_search_server_tool(model)
+        server["max_uses"] = spec.web_search_uses
+        tool_specs.append(server)
     messages: list[dict[str, Any]] = [{"role": "user", "content": task}]
     calls: list[tuple[str, dict[str, Any]]] = []
     for round_no in range(1, spec.max_rounds + 1):
@@ -129,6 +138,8 @@ def run(spec: SubagentSpec, task: str, *, client: Any = None) -> SubagentResult:
         blocks = list(_get(response, "content", []) or [])
         messages.append({"role": "assistant", "content": [_block_dict(b) for b in blocks]})
         uses = [b for b in blocks if _get(b, "type") == "tool_use"]
+        if not uses and _get(response, "stop_reason") == "pause_turn":
+            continue  # a long server-side search paused; resending resumes it
         if not uses:
             text = "".join(_get(b, "text", "") or "" for b in blocks if _get(b, "type") == "text").strip()
             return SubagentResult(True, text, round_no, calls)
@@ -170,6 +181,7 @@ class Job:
 _runtime: Any = None
 _jobs: dict[str, Job] = {}
 _history: list[Job] = []
+_by_name: dict[str, list[Job]] = {}  # the last few runs of each job, for the Agents map
 _lock = threading.Lock()
 
 
@@ -213,6 +225,9 @@ def run_job(name: str, title: str, work: Callable[[], str], *, announce: bool = 
         job.state, job.summary, job.finished_at = state, summary, time.time()
         _history.insert(0, job)
         del _history[20:]
+        runs = _by_name.setdefault(name, [])
+        runs.insert(0, job)
+        del runs[5:]
     if runtime is not None:
         try:
             if task_id is not None:
@@ -231,6 +246,15 @@ def start(name: str, title: str, work: Callable[[], str], *, announce: bool = Tr
     threading.Thread(target=run_job, args=(name, title, work), kwargs={"announce": announce},
                      name=f"jarvis-subagent-{name}", daemon=True).start()
     return True
+
+
+def jobs_snapshot() -> list[dict[str, Any]]:
+    """Running jobs, then each job name's last few runs, newest first."""
+    with _lock:
+        jobs = [j for j in _jobs.values() if j.state == "running"]
+        jobs += sorted((j for runs in _by_name.values() for j in runs), key=lambda j: -j.finished_at)
+    return [{"name": j.name, "title": j.title, "state": j.state, "started_at": j.started_at,
+             "finished_at": j.finished_at, "summary": j.summary} for j in jobs]
 
 
 def describe_jobs() -> str:
@@ -253,4 +277,5 @@ def reset_for_tests() -> None:
     with _lock:
         _jobs.clear()
         _history.clear()
+        _by_name.clear()
     _runtime = None

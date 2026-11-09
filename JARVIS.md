@@ -62,6 +62,8 @@ Pearson-Stark-Jarvis/
 │   ├── price_watch.py       Guarded public-page price checks + durable targets
 │   ├── subagents.py         Background subagents: focused tool loop + one-at-a-time jobs in the task lane
 │   ├── email_triage.py      Email subagent: trash noise, file missionary mail, keep the rest, unsubscribe list
+│   ├── investing.py         Investing subagents: target weights, daily advisor, crash watch, paper playground (no real orders yet)
+│   ├── agent_roster.py      Who works for JARVIS: the agents behind GET /api/agents and the companion's Agents map
 │   ├── reminders.py         Persistent reminders & to-dos (timed + open list)
 │   ├── router.py            Top-level request dispatcher
 │   ├── runtime.py           JarvisRuntime — wraps agent + status snapshot
@@ -312,7 +314,11 @@ RMS envelope from ElevenLabs audio drives the orb in real time using a monotonic
 ### Charles Schwab *(new, read-only)*
 - `portfolio_summary` — live value, today's and yesterday's change, overall
   gain/loss (`total_gain`/`total_gain_pct`: unrealized, live value of what's
-  held vs. Schwab's average price paid), cash, biggest movers (`integrations/schwab.py`). JARVIS can't trade.
+  held vs. Schwab's average price paid), cash, biggest movers (`integrations/schwab.py`).
+  JARVIS places no orders; the investing agents (below) only propose.
+- `integrations/schwab.py` also keeps each account apart (`accounts_by_number()`,
+  by last four digits) and looks up any symbol (`quotes`, `price_history`) for
+  the investing agents.
 - JARVIS's own Schwab developer app (not the one for Nick's coworker), with
   "Accounts and Trading Production" + "Market Data Production" so trading can
   come later without a new app. Its registered callback is
@@ -433,6 +439,57 @@ in `EMAIL_UNSUB_WINDOW_DAYS` go on the unsubscribe list (vault note
 - `email_unsubscribe_list` / `email_unsubscribed(sender)` — the list, and striking a sender off it
 - `restore_email(query, days?)` — untrash by sender/subject and never trash that sender again
 - `background_agents` — running and recent subagent jobs
+
+### Investing (background subagents) *(new 2026-11-09, suggestions only)*
+Nick's plan, designed with him 2026-11-09 (`brain/investing.py`). **No real
+orders are placed yet**: Nick said "I don't want him to make any trades for
+right now" and will say when to go. Everything below proposes, records and
+pushes; placing orders is stage 2 (through the Schwab hub, FUTURE_SESSIONS.md).
+- **Main account** = `INVESTING_MAIN_ACCOUNT` (last 4 digits), or the only
+  account while there is one. Target weights per symbol (percent of the
+  account, `CASH` allowed). New cash goes to whatever is furthest below target
+  (`cash_plan`); a holding more than `INVESTING_BAND_PCT` (5) points over
+  target gets a trim. Proposals (ids `P1`, `P2`…) wait for Nick and expire
+  after 3 days; approving one records it (he places it in the Schwab app for
+  now). Approving a target change updates the targets.
+- **Suggest weights**: the first time Schwab's accounts are in and there are no
+  targets, the agent studies the holdings and suggests starting weights
+  (alert "Portfolio weights to approve"); Nick says "approve the weights" or
+  gives his own.
+- **Portfolio advisor**: each market day after `INVESTING_REVIEW_HOUR_ET`
+  (10.5 = 10:30 ET) it reviews the main account (holdings, drift, price
+  history, web search for news) and proposes up to 4 trades or target changes,
+  tax-aware (steer cash first, sell only past the band or for a reason). New
+  companies are allowed as proposals only.
+- **Crash watch**: a holding down `INVESTING_DROP_PCT` (8) % today (market
+  hours, checked every 5 min, once per symbol per day) gets a focused check.
+  Nick's rule: company-specific bad news (not the whole market) lets the agent
+  sell up to `INVESTING_EMERGENCY_SELL_PCT` (25) % without asking. With orders
+  off, that sale becomes an `emergency` proposal plus a warning push.
+- **Playground**: the agent's own account, `PLAYGROUND_MONTHLY` ($5) a month,
+  no rules except cash-only. Until Nick opens the real account it trades
+  **paper money** at live Schwab prices, once a week (`PLAYGROUND_WEEKDAY`,
+  0 = Monday), keeps a journal, and is scored against plain VOO bought with the
+  same deposits.
+- Model `INVESTING_MODEL` (default `auto:sonnet`), `INVESTING_WEB_SEARCHES`
+  per run, `INVESTING_MAX_ROUNDS`. Subagents can now opt into Anthropic's
+  `web_search` (`SubagentSpec.web_search_uses`; `pause_turn` resumes).
+  State in `memory/investing.json`. All tools are locked to Nick's voice.
+- `investing_status` — targets, drift, cash plan, proposals waiting, playground score
+- `investing_run(job)` — `suggest` / `review` / `playground` now, in the background
+- `set_portfolio_targets(weights | accept_suggested)` — Nick sets or approves the weights
+- `decide_investment(id, approve)` — approve or decline a proposal
+
+### Agents map (companion) *(new 2026-11-09)*
+`GET /api/agents` (`status:read`, `brain/agent_roster.py`): JARVIS as the head
+and every agent that works for him (memory keeper, study coach, email sorter,
+portfolio advisor, crash watch, playground trader) with on/off and why, what
+it's doing now, what's waiting for Nick, and its last 5 runs (per-job history
+in `subagents.jobs_snapshot()`). The companion's **Agents** view
+(`Views/AgentMap.swift`) draws them around JARVIS's orb; a working agent's link
+carries a moving dot, an off one is dimmed and dashed; tap for details. Opened
+from the iPad Room menu and the phone's Memory tab toolbar, next to Link map.
+New subagents must be added to `_AGENTS` in `brain/agent_roster.py`.
 
 ### Household maintenance
 - `log_maintenance(name|task_id, note?, completed_on?)` — "I rotated the
@@ -821,6 +878,16 @@ SCHWAB_CALLBACK_URL=https://127.0.0.1:8182   # exactly what the Schwab app has r
 SCHWAB_HUB_URL=             # borrow the Schwab hub's login instead: https://schwab.nickolaspearson.com/api/token
 SCHWAB_HUB_SECRET=          # the "jarvis" program secret from the hub page; both set = borrowing
 SCHWAB_LOGIN_PAGE=          # optional; default the hub's front page
+INVESTING_ENABLED=true      # the investing subagents (brain/investing.py); proposals only, no orders
+INVESTING_MAIN_ACCOUNT=     # last 4 digits of the main Schwab account (needed once there are several)
+INVESTING_MODEL=auto:sonnet # model for the investing agents
+INVESTING_REVIEW_HOUR_ET=10.5   # daily review (and weekly playground) after this ET hour, market days
+INVESTING_BAND_PCT=5        # trim a holding more than this many points over its target
+INVESTING_DROP_PCT=8        # a one-day drop this big triggers the crash check
+INVESTING_EMERGENCY_SELL_PCT=25 # most of a position the crash rule may sell without asking
+INVESTING_WEB_SEARCHES=     # web searches per run (defaults 3-8 by job)
+PLAYGROUND_MONTHLY=5        # the playground's monthly deposit (paper until the real account)
+PLAYGROUND_WEEKDAY=0        # playground session day, 0 = Monday
 BARN_DOOR_LIGHTS=light.nick_strip_lights,light.strip_lights,light.desk_lights,light.desk_lights_2,light.lamp   # go red (default; the lamp too since 2026-11-03)
 BARN_DOOR_OFF=light.bedroom_lights,switch.avengers_tower_socket_1   # can't go red, so go dark (lights or switches)
 BARN_DOOR_EFFECTS=light.nick_strip_lights=Rainbow-A,light.desk_lights_2=Rainbow   # effects to return to when HA can't see the running one
@@ -931,6 +998,7 @@ EMAIL_UNSUB_NOTE=           # vault-relative note path; default Jarvis Memory/Em
 
 ## Recently Shipped
 
+- **5.92 / build 235 (2026-11-09): investing agents (suggestions only) + Agents map.** `brain/investing.py`: target weights for Nick's main Schwab account, a once-off "suggest starting weights" run, a daily portfolio advisor that proposes trades for his OK, a crash watch for 8% one-day drops (his emergency rule; proposes, since orders are off) and a weekly paper-money playground scored against VOO. Subagents can use web search. `integrations/schwab.py` gains per-account holdings, `quotes`, `price_history`. New tools `investing_status`, `investing_run`, `set_portfolio_targets`, `decide_investment` (voice-locked, with `portfolio_summary`). `GET /api/agents` + the companion's Agents view (iPad Room menu, phone Memory tab): JARVIS in the middle, his agents around him. Tests in `tests/test_investing.py`, `tests/test_agent_roster.py`. Not deployed.
 - **5.91 / build 234 (2026-11-08): one Schwab login (the Schwab hub).** Schwab keeps one live login per Schwab user, so JARVIS's and Nick's Coopa Trada logins revoked each other (Coopa 11-04 1:47 PM MT → JARVIS refused 1:59 PM). The new Schwab hub (schwab.nickolaspearson.com, `schwab-hub` project on the Lightsail box) holds the one login; with `SCHWAB_HUB_URL`/`SCHWAB_HUB_SECRET` set, `integrations/schwab.py` borrows 30-minute access tokens from it (live streaming unchanged). The companion's Log in buttons open the hub in Safari (`/api/schwab/login` → `external: true`); alerts and the spoken answer point there. Tests in `tests/test_schwab.py` (`BorrowedLoginTests`). Deployed 2026-11-08.
 - **5.90 / build 233 (2026-11-06): JARVIS knows when voice ID recognised Nick.** Nick enrolled his voiceprint (5 samples); his next "who's talking to you right now?" scored 0.78 but got a stale "Voice ID is armed for enrolment" answer, because only guest turns told the model who was speaking. `voice_trust.context_note()` now adds a one-line "Voice ID recognised this voice as Nick (match 0.78)" to the turn context when a voiceprint matched; typed chat, the phone app and voice ID off add nothing, as before. Regression test in `tests/test_voice_trust.py`. Not deployed.
 

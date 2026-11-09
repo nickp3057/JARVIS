@@ -259,6 +259,7 @@ class JarvisRuntime:
             self._schwab_monitor_started = True
             threading.Thread(target=self._schwab_monitor_loop, daemon=True).start()
             threading.Thread(target=schwab.stream_forever, args=(self._stop_monitors,), daemon=True).start()
+            threading.Thread(target=self._investing_loop, daemon=True, name="investing").start()
 
         if _monitor_on("PRICE_WATCH_MONITOR_ENABLED") and not self._price_monitor_started:
             self._price_monitor_started = True
@@ -1158,6 +1159,48 @@ class JarvisRuntime:
             schwab.linked_event.wait(interval)
             schwab.linked_event.clear()
             if self._stop_monitors.is_set():
+                break
+
+    def _investing_loop(self) -> None:
+        """The investing subagents (brain/investing.py), checked every 5
+        minutes: starting weights once, a big one-day drop as it happens,
+        the main-account review each market day, the playground weekly.
+        Proposals only; nothing here places an order."""
+        from brain import investing, subagents
+
+        if self._stop_monitors.wait(120):  # let Schwab's first fetch land
+            return
+        while not self._stop_monitors.is_set():
+            try:
+                account = investing.main_account() if investing.enabled() else None
+                for kind, arg in investing.due_jobs(account=account):
+                    if kind == "suggest":
+                        job = subagents.run_job("investing_suggest", "Working out your portfolio weights",
+                                                investing.suggest_targets_job)
+                        if job and job.state == "done":
+                            self.raise_alert("investing", "Portfolio weights to approve", job.summary,
+                                             source="investing", severity="info", dedupe_key="investing-suggest")
+                    elif kind == "emergency":
+                        symbol, pct = arg
+                        investing.mark_drop_checked(symbol)
+                        job = subagents.run_job(f"investing_drop_{symbol}", f"Checking {symbol}'s drop",
+                                                lambda s=symbol, p=pct: investing.emergency_job(s, p))
+                        if job:
+                            self.raise_alert("investing", f"{symbol} down {abs(pct):.0f}% today", job.summary,
+                                             source="investing", severity="warning")
+                    elif kind == "review":
+                        before = {p["id"] for p in investing.pending_proposals()}
+                        job = subagents.run_job("investing_review", "Reviewing your portfolio", investing.review_job)
+                        fresh = [p for p in investing.pending_proposals() if p["id"] not in before]
+                        if job and fresh:
+                            self.raise_alert("investing", f"{len(fresh)} portfolio idea{'s' if len(fresh) > 1 else ''}",
+                                             job.summary, source="investing", severity="info")
+                    elif kind == "playground":
+                        subagents.run_job("investing_playground", "Playground trading session",
+                                          investing.playground_job)
+            except Exception:  # noqa: BLE001
+                log.exception("Investing monitor failed")
+            if self._stop_monitors.wait(300):
                 break
 
     def _price_monitor_loop(self) -> None:

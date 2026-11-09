@@ -35,6 +35,7 @@ struct KnowledgeView: View {
     @State private var loaded = false
     @State private var showingMap = false
     @State private var showingLinks = false
+    @State private var showingAgents = false
     @State private var showingImport = false
 
     private var sections: [(String, [KnowledgeNote])] {
@@ -72,6 +73,7 @@ struct KnowledgeView: View {
                 ToolbarItemGroup(placement: .primaryAction) {
                     Button { showingMap = true } label: { Label("Memory map", systemImage: "point.3.connected.trianglepath.dotted") }
                     Button { showingLinks = true } label: { Label("Link map", systemImage: "dot.radiowaves.left.and.right") }
+                    Button { showingAgents = true } label: { Label("Agents", systemImage: "person.3.sequence") }
                     Button { showingImport = true } label: { Label("Import memory", systemImage: "square.and.arrow.down") }
                 }
             }
@@ -92,6 +94,7 @@ struct KnowledgeView: View {
             MemoryMapView { path in selection = path }
         }
         .fullScreenCover(isPresented: $showingLinks) { LinkMapView() }
+        .fullScreenCover(isPresented: $showingAgents) { AgentMapView() }
         .sheet(isPresented: $showingImport) {
             ImportMemoryView { path in
                 Task {

@@ -760,6 +760,11 @@ struct JarvisAPIClient {
         try await getJSON(Portfolio.self, path: "api/portfolio")
     }
 
+    /// JARVIS and the agents working for him (Core's brain/agent_roster.py).
+    func agents() async throws -> AgentRoster {
+        try await getJSON(AgentRoster.self, path: "api/agents")
+    }
+
     /// Schwab's login page and the callback address to catch when Schwab
     /// redirects there (nothing listens at it; the app hands it to Core).
     /// `external`: the login lives on the Schwab hub (JARVIS borrows it), so the

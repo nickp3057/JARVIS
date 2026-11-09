@@ -15,7 +15,9 @@ Live: holdings and cash come from the accounts endpoint every
 ``SCHWAB_POLL_SECONDS`` (30); prices for every stock/ETF held come over
 Schwab's streamer (LEVELONE_EQUITIES, a websocket) the moment they change,
 so the value and today's change move tick by tick. Yesterday's change uses
-daily candles for today's holdings, once a day. Nothing here can trade.
+daily candles for today's holdings, once a day. ``quotes`` / ``price_history``
+look up any symbol for the investing agent (brain/investing.py). Nothing here
+can trade.
 
 Borrowed login (the normal setup since 2026-11-08): Schwab keeps one live
 login per Schwab user, so JARVIS and Nick's Coopa Trada bot logging in
@@ -62,6 +64,7 @@ _state: dict[str, Any] = {
     "accounts_at": 0.0,
     "prices": {},           # symbol -> (live last price, received_at)
     "yesterday": None,      # {"date": "YYYY-MM-DD", "change": float}
+    "by_account": {},       # last 4 digits -> parsed holdings of that account alone
     "streaming": False,
     "error": "",
 }
@@ -317,9 +320,50 @@ def _parse_accounts(raw: list[dict[str, Any]]) -> dict[str, Any]:
 
 
 def refresh_accounts() -> None:
-    parsed = _parse_accounts(_get("/trader/v1/accounts", {"fields": "positions"}))
+    raw = _get("/trader/v1/accounts", {"fields": "positions"})
+    parsed = _parse_accounts(raw)
+    # Each account on its own too, by the last four digits of its number, so
+    # the investing agent can see the main account apart from the JARVIS
+    # playground and Coopa Trada accounts (brain/investing.py).
+    by_account = {str(e.get("securitiesAccount", {}).get("accountNumber", ""))[-4:] or str(i): _parse_accounts([e])
+                  for i, e in enumerate(raw)}
     with _lock:
-        _state.update(accounts=parsed, accounts_at=time.time(), error="")
+        _state.update(accounts=parsed, by_account=by_account, accounts_at=time.time(), error="")
+
+
+def accounts_by_number() -> dict[str, dict[str, Any]]:
+    """Last four digits -> {"cash", "value", "positions"} as last fetched."""
+    with _lock:
+        return {k: {"cash": v["cash"], "value": v["value"],
+                    "positions": {s: dict(p) for s, p in v["positions"].items()}}
+                for k, v in (_state.get("by_account") or {}).items()}
+
+
+def quotes(symbols: list[str]) -> dict[str, dict[str, Any]]:
+    """Live quotes for any symbols: {symbol: {"last", "change_pct", "high52", "low52"}}."""
+    clean = sorted({s.strip().upper() for s in symbols if s and s.strip()})
+    if not clean:
+        return {}
+    data = _get("/marketdata/v1/quotes", {"symbols": ",".join(clean), "fields": "quote"})
+    out: dict[str, dict[str, Any]] = {}
+    for symbol, body in (data or {}).items():
+        quote = (body or {}).get("quote") or {}
+        last = quote.get("lastPrice") or quote.get("mark") or quote.get("closePrice")
+        if last:
+            out[symbol] = {"last": float(last), "change_pct": quote.get("netPercentChange"),
+                           "high52": quote.get("52WeekHigh"), "low52": quote.get("52WeekLow")}
+    return out
+
+
+def price_history(symbol: str, months: int = 6) -> list[tuple[str, float]]:
+    """Daily closes, oldest first: [("YYYY-MM-DD", close)]."""
+    months = max(1, min(int(months), 60))
+    period_type, period = ("year", max(1, months // 12)) if months > 6 else ("month", months)
+    candles = _get("/marketdata/v1/pricehistory", {
+        "symbol": symbol.strip().upper(), "periodType": period_type, "period": period,
+        "frequencyType": "daily", "frequency": 1}).get("candles", [])
+    return [(datetime.fromtimestamp(c["datetime"] / 1000, _MARKET_TZ).date().isoformat(), float(c["close"]))
+            for c in candles if c.get("close")]
 
 
 def streamed_symbols() -> list[str]:

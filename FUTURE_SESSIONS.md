@@ -129,6 +129,32 @@ Nick's running to-do list for the project. When one ships, move it to
 `JARVIS.md` "Recently Shipped" and delete it here. Newest asks at the bottom
 of each group.
 
+### Investing agents + Agents map (2026-11-09, 5.92 / build 235): check
+Plan agreed with Nick 2026-11-09 (JARVIS.md "Investing"). Suggestions only:
+**no real orders** until Nick says "go full crazy mode".
+- [ ] Deploy, then within ~2 min the "suggest weights" job should run and push
+  "Portfolio weights to approve". Read it; Nick approves ("approve the
+  weights") or edits. His live account 2026-11-09: VOO $83, NVDA $62, TSLA
+  $26, AAPL $20, INTC $12, $50 cash (total $253, -11.7% overall). He named
+  Amazon and SpaceX as holdings but neither shows in the Schwab API: ask
+  whether they're in another account, unticked on the hub's consent screen,
+  or not bought yet.
+- [ ] The $50 cash is uninvested: the first review should propose where it goes.
+- [ ] Confirm `quotes`/`price_history` work live (the `/marketdata/v1/quotes`
+  parsing was written from the docs, untested).
+- [ ] Web search inside a subagent is new (`web_search_uses`, `pause_turn`):
+  watch the first review's log for a 400 on the tool spec.
+- [ ] Cost check after a week: Anthropic console spend for the Sonnet runs.
+- [ ] Agents view on iPad (Room menu > Agents) and phone (Memory tab toolbar).
+- Next, when Nick says go: (1) he opens the playground account and a separate
+  Coopa account, splits the $25 transfer $20 main / $5 playground, and sets
+  `INVESTING_MAIN_ACCOUNT`; (2) stage 2 orders through the Schwab hub with
+  hub-enforced limits (cash only, per-trade/day caps, kill switch, main account
+  orders only after Nick's Approve tap, playground automatic); (3) approve and
+  decline buttons for proposals in the companion (push actions like WAKE_UP);
+  (4) the playground's real account replaces the paper book (carry the
+  journal and scorecard over).
+
 ### Tap to hush the room voice (2026-11-06, 5.87 / build 230): check
 
 - Deploy Core + install 5.87 on the iPad, then with friends over: say "Hey

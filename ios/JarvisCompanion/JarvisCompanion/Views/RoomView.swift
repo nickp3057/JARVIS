@@ -78,7 +78,7 @@ struct RoomView: View {
     @State private var openNote: String?
 
     enum RoomCover: String, Identifiable {
-        case memoryMap, linkMap
+        case memoryMap, linkMap, agentMap
         var id: String { rawValue }
     }
     @AppStorage(RoomView.favoritesKey) private var favoriteScenes = RoomView.defaultFavorites
@@ -458,6 +458,7 @@ struct RoomView: View {
                 Divider()
                 Button { roomCover = .memoryMap } label: { Label("Memory map", systemImage: "point.3.connected.trianglepath.dotted") }
                 Button { roomCover = .linkMap } label: { Label("Link map", systemImage: "dot.radiowaves.left.and.right") }
+                Button { roomCover = .agentMap } label: { Label("Agents", systemImage: "person.3.sequence") }
                 Button { showingImport = true } label: { Label("Import memory", systemImage: "square.and.arrow.down") }
             } label: {
                 Label("Menu", systemImage: "line.3.horizontal")
@@ -1059,6 +1060,7 @@ private struct RoomMemoryCovers: ViewModifier {
                     // After the map has finished closing: a sheet can't open mid-dismiss.
                     MemoryMapView { path in DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { openNote = path } }
                 case .linkMap: LinkMapView()
+                case .agentMap: AgentMapView()
                 }
             }
             .sheet(isPresented: $showingImport) { ImportMemoryView() }

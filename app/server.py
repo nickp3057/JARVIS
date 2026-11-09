@@ -606,6 +606,13 @@ def portfolio(_: None = _status_read) -> dict[str, object]:
     return schwab.snapshot()
 
 
+@app.get("/api/agents")
+def agents(_: None = _status_read) -> dict[str, object]:
+    """JARVIS and the agents that work for him, for the companion's Agents map."""
+    from brain import agent_roster
+    return agent_roster.roster()
+
+
 @app.post("/api/schwab/login")
 def schwab_login(_: None = Depends(authorize)) -> dict[str, object]:
     """Schwab's login page for the app's web view, and the callback address
