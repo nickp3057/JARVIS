@@ -759,8 +759,11 @@ def _tool_portfolio_summary(_: dict[str, Any]) -> str:
 def _tool_investing_run(args: dict[str, Any]) -> str:
     from brain import investing
     job = str(args.get("job", "")).strip()
+    note = investing.add_note(str(args.get("note", "") or ""))
+    if job == "note_only":
+        return f"Noted for the investing agents, sir: {note}" if note else "Tool error: no note given."
     if job not in {"suggest", "review", "playground"}:
-        return "Tool error: job must be suggest, review or playground."
+        return "Tool error: job must be suggest, review, playground or note_only."
     if not investing.start(job):
         return "That one's already running, sir."
     return "On it, sir. I'll report back when it's done."
@@ -2083,11 +2086,14 @@ _CUSTOM_TOOLS: list[dict[str, Any]] = [
             "Start an investing subagent now, in the background (they also run on their own: weights "
             "once, the review every market day, the playground weekly). 'suggest' = work out starting "
             "target weights; 'review' = daily look at the main account and propose trades; "
-            "'playground' = the agent's own just-for-fun account session."
+            "'playground' = the agent's own just-for-fun account session. Put any correction or "
+            "fact Nick gives (\"I don't own Amazon\", \"SpaceX is ticker X, $50 order pending\") in "
+            "'note': every investing agent trusts his notes from then on."
         ),
         "input_schema": {
             "type": "object",
-            "properties": {"job": {"type": "string", "enum": ["suggest", "review", "playground"]}},
+            "properties": {"job": {"type": "string", "enum": ["suggest", "review", "playground", "note_only"]},
+                           "note": {"type": "string", "description": "Nick's correction or fact, in his words."}},
             "required": ["job"],
         },
     },

@@ -355,6 +355,29 @@ def quotes(symbols: list[str]) -> dict[str, dict[str, Any]]:
     return out
 
 
+_DONE_ORDERS = {"FILLED", "CANCELED", "REJECTED", "EXPIRED", "REPLACED"}
+
+
+def open_orders(days: int = 7) -> list[dict[str, Any]]:
+    """Orders entered in the last ``days`` that haven't filled or died, every
+    account: [{"symbol", "side", "quantity", "status", "entered"}]."""
+    from datetime import timedelta, timezone
+
+    now = datetime.now(timezone.utc)
+    fmt = lambda d: d.strftime("%Y-%m-%dT%H:%M:%S.000Z")  # noqa: E731
+    orders = _get("/trader/v1/orders", {"fromEnteredTime": fmt(now - timedelta(days=days)),
+                                       "toEnteredTime": fmt(now), "maxResults": 50}) or []
+    out = []
+    for o in orders:
+        if o.get("status") in _DONE_ORDERS:
+            continue
+        leg = (o.get("orderLegCollection") or [{}])[0]
+        out.append({"symbol": leg.get("instrument", {}).get("symbol", "?"),
+                    "side": str(leg.get("instruction", "")).lower(), "quantity": o.get("quantity"),
+                    "status": o.get("status", ""), "entered": str(o.get("enteredTime", ""))[:10]})
+    return out
+
+
 def price_history(symbol: str, months: int = 6) -> list[tuple[str, float]]:
     """Daily closes, oldest first: [("YYYY-MM-DD", close)]."""
     months = max(1, min(int(months), 60))
@@ -433,7 +456,6 @@ def stream_forever(stop: threading.Event) -> None:
             request_id = 1
             with _lock:
                 _state["streaming"] = True
-            backoff = 15.0
             while not stop.is_set():
                 symbols = streamed_symbols()
                 if symbols != subscribed:
@@ -448,6 +470,10 @@ def stream_forever(stop: threading.Event) -> None:
                 for response in message.get("response", []):
                     if response.get("content", {}).get("code", 0) not in (0, None):
                         raise RuntimeError(f"Schwab streamer: {response['content']}")
+                if message.get("data"):
+                    # Only real quotes prove the login took; resetting on connect
+                    # retried a refused login every 16 s (2026-11-09).
+                    backoff = 15.0
                 _apply_quotes(message)
         except Exception as exc:  # noqa: BLE001 - reconnect whatever broke
             log.warning("Schwab streamer dropped: %s", exc)

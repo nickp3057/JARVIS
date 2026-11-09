@@ -475,6 +475,11 @@ pushes; placing orders is stage 2 (through the Schwab hub, FUTURE_SESSIONS.md).
   per run, `INVESTING_MAX_ROUNDS`. Subagents can now opt into Anthropic's
   `web_search` (`SubagentSpec.web_search_uses`; `pause_turn` resumes).
   State in `memory/investing.json`. All tools are locked to Nick's voice.
+- Every agent sees **Nick's notes** (corrections like "I don't own Amazon",
+  `investing_run(note=…)`, or `job=note_only` to just record one) and any
+  **open Schwab orders** (`schwab.open_orders()`, so pending buys aren't treated
+  as idle cash). Bumping `_SUGGEST_VERSION` re-runs the weight suggestion
+  while none are approved (v2, 2026-11-09: v1 added Amazon and dropped SpaceX).
 - `investing_status` — targets, drift, cash plan, proposals waiting, playground score
 - `investing_run(job)` — `suggest` / `review` / `playground` now, in the background
 - `set_portfolio_targets(weights | accept_suggested)` — Nick sets or approves the weights
@@ -998,6 +1003,7 @@ EMAIL_UNSUB_NOTE=           # vault-relative note path; default Jarvis Memory/Em
 
 ## Recently Shipped
 
+- **5.93 / build 236 (2026-11-09): investing fixes from the first live run.** The first weight suggestion added Amazon (Nick doesn't own it) and dropped SpaceX as "not tradeable" (it is; Nick bought $50 on 11-08). Agents now get Nick's notes and open Schwab orders, the prompt carries his facts, and the suggestion re-runs once (v2). Schwab streamer: the retry delay only resets after real quotes arrive, so a refused login backs off to 5 min instead of retrying every 16 s (seen after the 12:40 restart). Not deployed.
 - **5.92 / build 235 (2026-11-09): investing agents (suggestions only) + Agents map.** `brain/investing.py`: target weights for Nick's main Schwab account, a once-off "suggest starting weights" run, a daily portfolio advisor that proposes trades for his OK, a crash watch for 8% one-day drops (his emergency rule; proposes, since orders are off) and a weekly paper-money playground scored against VOO. Subagents can use web search. `integrations/schwab.py` gains per-account holdings, `quotes`, `price_history`. New tools `investing_status`, `investing_run`, `set_portfolio_targets`, `decide_investment` (voice-locked, with `portfolio_summary`). `GET /api/agents` + the companion's Agents view (iPad Room menu, phone Memory tab): JARVIS in the middle, his agents around him. Tests in `tests/test_investing.py`, `tests/test_agent_roster.py`. Not deployed.
 - **5.91 / build 234 (2026-11-08): one Schwab login (the Schwab hub).** Schwab keeps one live login per Schwab user, so JARVIS's and Nick's Coopa Trada logins revoked each other (Coopa 11-04 1:47 PM MT → JARVIS refused 1:59 PM). The new Schwab hub (schwab.nickolaspearson.com, `schwab-hub` project on the Lightsail box) holds the one login; with `SCHWAB_HUB_URL`/`SCHWAB_HUB_SECRET` set, `integrations/schwab.py` borrows 30-minute access tokens from it (live streaming unchanged). The companion's Log in buttons open the hub in Safari (`/api/schwab/login` → `external: true`); alerts and the spoken answer point there. Tests in `tests/test_schwab.py` (`BorrowedLoginTests`). Deployed 2026-11-08.
 - **5.90 / build 233 (2026-11-06): JARVIS knows when voice ID recognised Nick.** Nick enrolled his voiceprint (5 samples); his next "who's talking to you right now?" scored 0.78 but got a stale "Voice ID is armed for enrolment" answer, because only guest turns told the model who was speaking. `voice_trust.context_note()` now adds a one-line "Voice ID recognised this voice as Nick (match 0.78)" to the turn context when a voiceprint matched; typed chat, the phone app and voice ID off add nothing, as before. Regression test in `tests/test_voice_trust.py`. Not deployed.

@@ -49,6 +49,9 @@ _STATE_FILE = Path(__file__).resolve().parent.parent / "memory" / "investing.jso
 _ET = ZoneInfo("America/New_York")
 _SYMBOL = re.compile(r"^[A-Z][A-Z0-9.\-/]{0,9}$")
 _PROPOSAL_TTL_S = 3 * 86400
+# Bump to make the agent suggest starting weights again (while none are approved):
+# 2 = 2026-11-09, the first suggestion added Amazon and dropped SpaceX.
+_SUGGEST_VERSION = 2
 _lock = threading.RLock()
 
 
@@ -94,6 +97,7 @@ def _empty() -> dict[str, Any]:
         "runs": {},               # job kind -> last ET date it ran ("suggest", "review", "playground")
         "drop_checked": {},       # symbol -> ET date its drop was checked
         "playground": None,       # paper account, see _new_playground
+        "notes": [],              # facts from Nick the agents must trust: {"at", "note"}
     }
 
 
@@ -226,6 +230,20 @@ def render_account(account: dict[str, Any], targets: dict[str, float], label: st
         gain = (f", {100 * (p['value'] - p['cost']) / p['cost']:+.1f}% vs. what was paid" if p.get("cost") else "")
         target = f", {label.lower()} {targets[s]:.1f}%" if s in targets else ", no target"
         lines.append(f"- {s}: ${p['value']:,.2f} = {alloc.get(s, 0):.1f}%{target}; today {drops.get(s, 0):+.1f}%{gain}.")
+    try:
+        from integrations import schwab
+
+        pending = schwab.open_orders()
+    except Exception as exc:  # noqa: BLE001
+        log.info("Open orders unavailable: %s", exc)
+        pending = []
+    if pending:
+        lines.append("Orders still going through (count their cash as spent): " + "; ".join(
+            f"{o['side']} {o['quantity']} {o['symbol']} ({o['status'].lower()}, {o['entered']})" for o in pending))
+    notes = _load().get("notes") or []
+    if notes:
+        lines.append("Facts from Nick (trust these over your own research):\n" + "\n".join(
+            f"- {time.strftime('%Y-%m-%d', time.localtime(n['at']))}: {n['note']}" for n in notes[-15:]))
     if targets:
         plan = cash_plan(targets, account)
         if plan:
@@ -497,9 +515,11 @@ news), and call suggest_targets ONCE with starting target weights (percent of th
 whole account, adding to 100; CASH may have a small weight or none).
 
 Nick's stated wishes: he likes owning a broad index (VOO) plus a few companies he \
-believes in (NVIDIA, Intel, Apple, Amazon, SpaceX). Keep VOO as the core so one \
-company can't sink him; keep single companies to sensible sizes; include a stock \
-he named but doesn't hold yet only if it's tradeable. Monthly deposits are small \
+believes in (NVIDIA, Intel, Apple, SpaceX). He does NOT own Amazon. SpaceX is \
+publicly traded now (Nick, 2026-11-09) and he bought about $50 of it on 11-08 \
+(it may still be settling, so cash may already be spent on it): find its real \
+ticker by searching, check it with quotes, and give it a weight. Keep VOO as the \
+core so one company can't sink him; keep single companies to sensible sizes. Monthly deposits are small \
 ($20-25), so new money will do most of the rebalancing; avoid targets that force \
 big sales of what he holds today. In reasons, give one short line per holding."""
 
@@ -510,7 +530,7 @@ def suggest_targets_job(client: Any = None) -> str:
         return problem
     with _lock:
         state = _load()
-        state["runs"]["suggest"] = _today()
+        state["runs"]["suggest"] = state["runs"][f"suggest@{_SUGGEST_VERSION}"] = _today()
         _save(state)
     got: dict[str, Any] = {}
 
@@ -532,7 +552,7 @@ def suggest_targets_job(client: Any = None) -> str:
         return "I couldn't settle on starting weights this time, sir." + (f" ({result.error})" if result.error else "")
     with _lock:
         state = _load()
-        state["suggested"] = {**got, "at": time.time()}
+        state["suggested"] = {**got, "at": time.time(), "v": _SUGGEST_VERSION}
         _save(state)
     weights = ", ".join(f"{s} {w:g}%" for s, w in got["weights"].items())
     return (f"Suggested starting weights for your main account, sir: {weights}. "
@@ -808,7 +828,8 @@ def due_jobs(now: datetime | None = None, state: dict[str, Any] | None = None,
     jobs: list[tuple[str, Any]] = []
     if account is None:
         return jobs
-    if not state["targets"] and not state["suggested"] and runs.get("suggest") != today:
+    stale = (state["suggested"] or {}).get("v", 1) < _SUGGEST_VERSION
+    if not state["targets"] and (not state["suggested"] or stale) and runs.get(f"suggest@{_SUGGEST_VERSION}") != today:
         jobs.append(("suggest", None))
     market = now.weekday() < 5 and (9, 30) <= (now.hour, now.minute) < (16, 0)
     if market:
@@ -829,6 +850,18 @@ def mark_drop_checked(symbol: str) -> None:
         state["drop_checked"] = {s: d for s, d in state["drop_checked"].items() if d == _today()}
         state["drop_checked"][symbol] = _today()
         _save(state)
+
+
+def add_note(note: str) -> str:
+    """A fact or correction from Nick that every investing agent sees from now on."""
+    note = " ".join(str(note or "").split())[:500]
+    if not note:
+        return ""
+    with _lock:
+        state = _load()
+        state["notes"] = (state["notes"] + [{"at": time.time(), "note": note}])[-30:]
+        _save(state)
+    return note
 
 
 def start(kind: str, *, announce: bool = True) -> bool:

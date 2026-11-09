@@ -37,6 +37,7 @@ class InvestingTestCase(unittest.TestCase):
             patch.object(investing, "_STATE_FILE", Path(self.tmp.name) / "investing.json"),
             patch.object(schwab, "accounts_by_number", side_effect=lambda: {"1234": self.account}),
             patch.object(schwab, "configured", return_value=True),
+            patch.object(schwab, "open_orders", return_value=[]),
         ]
         self.account = {k: (dict(v) if isinstance(v, dict) else v) for k, v in NICK.items()}
         for p in self.patches:
@@ -231,3 +232,24 @@ class SubagentServerToolTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class NotesAndOrdersTests(InvestingTestCase):
+    def test_notes_and_open_orders_reach_the_agent(self):
+        investing.add_note("I don't own Amazon.")
+        with patch.object(schwab, "open_orders", return_value=[
+                {"symbol": "SPCX", "side": "buy", "quantity": 0.35, "status": "QUEUED", "entered": "2026-11-08"}]):
+            text = investing.render_account({**NICK, "account": "1234", "note": ""}, {})
+        self.assertIn("I don't own Amazon.", text)
+        self.assertIn("buy 0.35 SPCX (queued", text)
+
+    def test_an_old_suggestion_is_redone_once(self):
+        state = investing._load()
+        state["suggested"] = {"weights": {"VOO": 100}, "reasons": "", "at": 0}  # v1
+        now = datetime(2026, 11, 9, 20, 0, tzinfo=ET)
+        self.assertEqual(investing.due_jobs(now, state, NICK), [("suggest", None)])
+        state["runs"]["suggest@2"] = "2026-11-09"
+        self.assertEqual(investing.due_jobs(now, state, NICK), [])
+        state["suggested"]["v"] = 2
+        state["runs"] = {}
+        self.assertEqual(investing.due_jobs(now, state, NICK), [])
