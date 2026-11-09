@@ -304,13 +304,13 @@
 				CODE_SIGN_ENTITLEMENTS = JarvisCompanion.entitlements;
 				"CODE_SIGN_ENTITLEMENTS[sdk=macosx*]" = "JarvisCompanion-Mac.entitlements";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 241;
+				CURRENT_PROJECT_VERSION = 242;
 				DERIVE_MACCATALYST_PRODUCT_BUNDLE_IDENTIFIER = NO;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = Jarvis;
 				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
-				INFOPLIST_KEY_NSCameraUsageDescription = "The iPad shows your room on your phone when you open the room camera, and a green JARVIS orb while it is on.";
+				INFOPLIST_KEY_NSCameraUsageDescription = "Photograph products for your shopping list. On the iPad, the camera shows your room on your phone when you open the room camera, with a green JARVIS orb while it is on.";
 				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "JARVIS checks whether your home servers answer directly, so service links open on your home network instead of over Tailscale.";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "JARVIS uses the microphone while you dictate or hold the orb to speak.";
 				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "JARVIS transcribes your speech for dictation and live hold-to-talk with HQ.";
@@ -324,7 +324,7 @@
 					"@executable_path/Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
-				MARKETING_VERSION = 5.98;
+				MARKETING_VERSION = 6.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.nickolaspearson.JarvisCompanion;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SUPPORTS_MACCATALYST = YES;
@@ -343,13 +343,13 @@
 				CODE_SIGN_ENTITLEMENTS = JarvisCompanion.entitlements;
 				"CODE_SIGN_ENTITLEMENTS[sdk=macosx*]" = "JarvisCompanion-Mac.entitlements";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 241;
+				CURRENT_PROJECT_VERSION = 242;
 				DERIVE_MACCATALYST_PRODUCT_BUNDLE_IDENTIFIER = NO;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = Jarvis;
 				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
-				INFOPLIST_KEY_NSCameraUsageDescription = "The iPad shows your room on your phone when you open the room camera, and a green JARVIS orb while it is on.";
+				INFOPLIST_KEY_NSCameraUsageDescription = "Photograph products for your shopping list. On the iPad, the camera shows your room on your phone when you open the room camera, with a green JARVIS orb while it is on.";
 				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "JARVIS checks whether your home servers answer directly, so service links open on your home network instead of over Tailscale.";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "JARVIS uses the microphone while you dictate or hold the orb to speak.";
 				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "JARVIS transcribes your speech for dictation and live hold-to-talk with HQ.";
@@ -363,7 +363,7 @@
 					"@executable_path/Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
-				MARKETING_VERSION = 5.98;
+				MARKETING_VERSION = 6.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.nickolaspearson.JarvisCompanion;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SUPPORTS_MACCATALYST = YES;

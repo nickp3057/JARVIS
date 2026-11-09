@@ -14,7 +14,7 @@ final class PhoneTabsTests: XCTestCase {
     }
 
     func testNativeInteractiveCompletionAndCancellationPreservePages() async throws {
-        var selected = RootView.RootTab.home
+        var selected = RootView.RootTab.media
         let tabs = PhoneTabs(selection: Binding(get: { selected }, set: { selected = $0 }),
                              pages: (0..<5).map { AnyView(Text("Page \($0)")) }, reduceMotion: false)
         let coordinator = tabs.makeCoordinator()
@@ -111,5 +111,13 @@ final class PhoneTabsTests: XCTestCase {
         coordinator.handlePan(state: .ended, translation: 160, velocity: 0, width: 390)
         XCTAssertEqual(selected, .chat)
         XCTAssertEqual(controller.selectedIndex, 3)
+    }
+}
+
+extension PhoneTabsTests {
+    /// Home opens first; the tab order is the swipe order.
+    func testHomeLeadsThePhoneTabs() {
+        XCTAssertEqual(PhoneTabs.tabs, [.home, .hub, .media, .chat, .settings])
+        XCTAssertEqual(RootView.RootTab.hub.title, "Control")
     }
 }

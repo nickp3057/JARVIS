@@ -828,6 +828,96 @@ struct JarvisAPIClient {
         _ = try await sendJSON(SharedTheme.self, path: "api/theme", method: "PUT", body: Body(experiments: experiments))
     }
 
+    // MARK: - Shopping list
+
+    private struct ShoppingEnvelope: Decodable { let item: ShoppingItem }
+
+    func shopping() async throws -> ShoppingOverview {
+        try await getJSON(ShoppingOverview.self, path: "api/shopping")
+    }
+
+    func createShoppingItem(_ draft: ShoppingItemDraft) async throws -> ShoppingItem {
+        try await postJSON(ShoppingEnvelope.self, path: "api/shopping/items", body: draft).item
+    }
+
+    func updateShoppingItem(id: Int, _ draft: ShoppingItemDraft) async throws -> ShoppingItem {
+        try await sendJSON(ShoppingEnvelope.self, path: "api/shopping/items/\(id)", method: "PUT", body: draft).item
+    }
+
+    func deleteShoppingItem(id: Int) async throws {
+        try await delete(path: "api/shopping/items/\(id)")
+    }
+
+    func listShoppingItem(id: Int, quantity: Int? = nil) async throws -> ShoppingItem {
+        struct Body: Encodable { let quantity: Int? }
+        return try await postJSON(ShoppingEnvelope.self, path: "api/shopping/items/\(id)/list",
+                                  body: Body(quantity: quantity)).item
+    }
+
+    func unlistShoppingItem(id: Int) async throws -> ShoppingItem {
+        try await sendNoBody(ShoppingEnvelope.self, path: "api/shopping/items/\(id)/list", method: "DELETE").item
+    }
+
+    func boughtShoppingItem(id: Int) async throws -> ShoppingItem {
+        try await sendNoBody(ShoppingEnvelope.self, path: "api/shopping/items/\(id)/bought", method: "POST").item
+    }
+
+    func undoBoughtShoppingItem(id: Int) async throws -> ShoppingItem {
+        try await sendNoBody(ShoppingEnvelope.self, path: "api/shopping/items/\(id)/bought", method: "DELETE").item
+    }
+
+    func putShoppingPhoto(id: Int, jpeg: Data) async throws -> ShoppingItem {
+        var r = request(path: "api/shopping/items/\(id)/photo", method: "PUT")
+        r.setValue("image/jpeg", forHTTPHeaderField: "Content-Type")
+        r.timeoutInterval = 60
+        let data: Data
+        let response: URLResponse
+        do {
+            (data, response) = try await session.upload(for: r, from: jpeg)
+        } catch let error as URLError {
+            throw JarvisAPIError.transport(error)
+        }
+        _ = try validate(response, data: data)
+        guard let decoded = try? JSONDecoder().decode(ShoppingEnvelope.self, from: data) else {
+            throw JarvisAPIError.malformedResponse(String(data: data, encoding: .utf8))
+        }
+        return decoded.item
+    }
+
+    func clearShoppingPhoto(id: Int) async throws -> ShoppingItem {
+        try await sendNoBody(ShoppingEnvelope.self, path: "api/shopping/items/\(id)/photo", method: "DELETE").item
+    }
+
+    /// A product photo; nil when it has none (404). `version` busts caches.
+    func shoppingPhoto(id: Int, version: Int) async throws -> Data? {
+        var r = request(path: "api/shopping/items/\(id)/photo")
+        if let url = r.url, var components = URLComponents(url: url, resolvingAgainstBaseURL: false) {
+            components.queryItems = [URLQueryItem(name: "v", value: String(version))]
+            r.url = components.url
+        }
+        r.setValue("image/jpeg", forHTTPHeaderField: "Accept")
+        let (data, response) = try await session.data(for: r)
+        if (response as? HTTPURLResponse)?.statusCode == 404 { return nil }
+        _ = try validate(response, data: data)
+        return data
+    }
+
+    private func sendNoBody<T: Decodable>(_ type: T.Type, path: String, method: String) async throws -> T {
+        let r = request(path: path, method: method)
+        let data: Data
+        let response: URLResponse
+        do {
+            (data, response) = try await session.data(for: r)
+        } catch let error as URLError {
+            throw JarvisAPIError.transport(error)
+        }
+        _ = try validate(response, data: data)
+        guard let decoded = try? JSONDecoder().decode(type, from: data) else {
+            throw JarvisAPIError.malformedResponse(String(data: data, encoding: .utf8))
+        }
+        return decoded
+    }
+
     // MARK: - Maintenance
 
     private struct MaintenanceEnvelope: Decodable { let task: MaintenanceTask }

@@ -5,6 +5,26 @@ off, JARVIS sounds scattered because a whole tool turn lands in one bubble,
 replies didn't stream, and media adds sometimes fail. He leans toward a
 hub-first app with chat as one tab.
 
+## Phone reorganization + Lists (6.0 / build 242, 2026-11-09, branch `phone-reorg`)
+
+Nick asked for a full reorg modelled on clean apps, with maintenance, to-dos
+and a new photo shopping list kept separate (and no dedicated checklist tab).
+
+- Tabs: Home · Control (was Hub) · Media · Chat · Settings; Home first.
+- Home: reactor, Lists row (To do / Shopping / Maintenance tiles → pushed
+  lists), next-up strip, scenes, portfolio. To-dos no longer include due
+  chores; maintenance has its own sectioned list.
+- Shopping: `brain/shopping.py` catalog + `on_list`; suggestions while
+  typing, photos per item, tick off with Undo, Saved items grid, JARVIS tools.
+- Control: attention and repairs first, camera/TV remote as a two-up row,
+  switches, Now (without reminders).
+- Settings: native grouped list with drill-down pages.
+- Verified: Python suite and 44 simulator tests pass; Home rendered in the
+  simulator against a stub Core (counts and next-up strip load). Not yet
+  checked on device: list screens, photo capture, the iPad/Mac layouts.
+- Open questions for Nick: keep Settings as a tab or move it behind a gear on
+  Home; group the shopping list by store (current) or by aisle/category.
+
 ## Phone live voice (5.77 / build 220, 2026-11-03)
 
 Hold the Home orb for 0.3 s; release to send. Slide away or leave the tab during

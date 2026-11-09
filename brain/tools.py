@@ -955,6 +955,64 @@ def _tool_remove_maintenance_task(args: dict[str, Any]) -> str:
     return f"Removed {task['name']} and its history, sir."
 
 
+# --- Shopping list (brain/shopping.py) --------------------------------------
+
+def _tool_add_to_shopping_list(args: dict[str, Any]) -> str:
+    from brain import shopping
+    name = str(args.get("item") or "").strip()
+    if not name:
+        return "What should I add, sir?"
+    quantity = args.get("quantity")
+    saved = shopping.find_item(name)
+    if saved is None:
+        matches = shopping.suggest(name, limit=4)
+        if len(matches) > 1 and not args.get("new_item"):
+            options = "; ".join(m["name"] + (f" ({m['note']})" if m["note"] else "") for m in matches)
+            return (f"Several saved items match {name!r}: {options}. Ask Nick which, then call again "
+                    "with that exact name, or with new_item=true to save a new one.")
+    if saved is not None:
+        item = shopping.add_to_list(int(saved["id"]), int(quantity) if quantity else None)
+        return f"{item['name']} is on the shopping list, sir." if item else "That item has vanished, sir."
+    try:
+        item = shopping.create_item(name, str(args.get("note") or ""), str(args.get("store") or ""),
+                                    True, int(quantity or 1))
+    except ValueError as exc:
+        return f"I couldn't add that, sir: {exc}"
+    return f"Added {item['name']} to the shopping list, sir."
+
+
+def _tool_shopping_list(_: dict[str, Any]) -> str:
+    from brain import shopping
+    return shopping.describe_list()
+
+
+def _shopping_on_list(name: str) -> dict[str, Any] | None:
+    from brain import shopping
+    on_list = [i for i in shopping.current_list() if shopping._score(i, name) > 0]
+    on_list.sort(key=lambda i: -shopping._score(i, name))
+    return on_list[0] if on_list else None
+
+
+def _tool_mark_shopping_bought(args: dict[str, Any]) -> str:
+    from brain import shopping
+    names = [str(n) for n in (args.get("items") or []) if str(n).strip()]
+    done, missing = [], []
+    for name in names:
+        item = _shopping_on_list(name)
+        if item is None:
+            missing.append(name)
+            continue
+        if args.get("not_bought"):
+            shopping.remove_from_list(int(item["id"]))
+        else:
+            shopping.mark_bought(int(item["id"]))
+        done.append(item["name"])
+    reply = f"Ticked off {', '.join(done)}, sir." if done else "Nothing ticked off, sir."
+    if missing:
+        reply += f" Not on the list: {', '.join(missing)}."
+    return reply
+
+
 # --- Anthropic tool schemas -------------------------------------------------
 
 def _tool_voice_shortcuts(args: dict[str, Any]) -> str:
@@ -2291,6 +2349,45 @@ _CUSTOM_TOOLS: list[dict[str, Any]] = [
         "description": "Which background subagents (like the email sorter) are running or recently finished, and their results.",
         "input_schema": {"type": "object", "properties": {}},
     },
+    # --- Shopping list ---------------------------------------------------
+    {
+        "name": "add_to_shopping_list",
+        "description": (
+            "Put something on Nick's shopping list. Saved items are matched by name (\"face lotion\" "
+            "finds his saved CeraVe lotion); anything new is saved for next time."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "item": {"type": "string", "description": "What to buy, as Nick said it."},
+                "quantity": {"type": "integer", "minimum": 1, "maximum": 99},
+                "note": {"type": "string", "description": "Brand/size detail, only for a new item."},
+                "store": {"type": "string", "description": "Where he buys it (e.g. Walmart), only for a new item."},
+                "new_item": {"type": "boolean", "description": "Save as a new item even though saved items match."},
+            },
+            "required": ["item"],
+        },
+    },
+    {
+        "name": "shopping_list",
+        "description": "Read out what's on Nick's shopping list, grouped by store.",
+        "input_schema": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "mark_shopping_bought",
+        "description": (
+            "Tick items off the shopping list (\"I got the eggs and milk\"). They stay saved for next "
+            "time. not_bought=true just removes them without counting a purchase."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "items": {"type": "array", "items": {"type": "string"}},
+                "not_bought": {"type": "boolean"},
+            },
+            "required": ["items"],
+        },
+    },
     # --- Household maintenance ------------------------------------------
     {
         "name": "log_maintenance",
@@ -2697,6 +2794,9 @@ _DISPATCH: dict[str, Callable[[dict[str, Any]], str]] = {
     "email_unsubscribed": _tool_email_unsubscribed,
     "restore_email": _tool_restore_email,
     "background_agents": _tool_background_agents,
+    "add_to_shopping_list": _tool_add_to_shopping_list,
+    "shopping_list": _tool_shopping_list,
+    "mark_shopping_bought": _tool_mark_shopping_bought,
     "log_maintenance": _tool_log_maintenance,
     "list_maintenance": _tool_list_maintenance,
     "add_maintenance_task": _tool_add_maintenance_task,

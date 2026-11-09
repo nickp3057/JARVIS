@@ -26,15 +26,54 @@ enum MaintenanceRoute: Hashable {
     case task(Int)
 }
 
-/// Every task, pushed from the Hub's Maintenance card. Swipe right to log one done.
+/// Every task, pushed from Home's Maintenance tile: due, coming up, and
+/// plain logs. Swipe right to log one done.
 struct MaintenanceListView: View {
     @ObservedObject var model: HubViewModel
     @State private var editing = false
     @State private var completing: MaintenanceTask?
 
     var body: some View {
+        let tasks = model.maintenance.value ?? []
+        let due = tasks.filter(\.needsAttention)
+        let upcoming = tasks.filter { !$0.needsAttention && $0.status != "log" }
+        let logs = tasks.filter { $0.status == "log" }
         List {
-            if let tasks = model.maintenance.value {
+            section("Due", due)
+            section("Coming up", upcoming)
+            section("Log", logs)
+        }
+        .listStyle(.insetGrouped)
+        .scrollContentBackground(.hidden)
+        .background { JarvisBackdrop() }
+        .overlay {
+            if tasks.isEmpty, model.maintenance.value != nil {
+                ContentUnavailableView {
+                    Label("Nothing tracked", systemImage: "wrench.and.screwdriver")
+                } description: {
+                    Text("Add a chore you repeat, like rotating the mattress, and JARVIS counts down to the next time.")
+                } actions: {
+                    Button("Add task") { editing = true }.buttonStyle(.borderedProminent)
+                }
+            }
+        }
+        .navigationTitle("Maintenance")
+        .toolbar(.visible, for: .navigationBar)
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button("Add task", systemImage: "plus") { editing = true }
+            }
+        }
+        .sheet(isPresented: $editing) { MaintenanceEditor(model: model, task: nil) }
+        .sheet(item: $completing) { MaintenanceCompleteSheet(model: model, task: $0) }
+        .refreshable { await model.refreshMaintenance() }
+        .task { await model.refreshMaintenance() }
+    }
+
+    @ViewBuilder
+    private func section(_ title: String, _ tasks: [MaintenanceTask]) -> some View {
+        if !tasks.isEmpty {
+            Section(title) {
                 ForEach(tasks) { task in
                     NavigationLink(value: MaintenanceRoute.task(task.id)) { MaintenanceRow(task: task) }
                         .swipeActions(edge: .leading) {
@@ -44,17 +83,6 @@ struct MaintenanceListView: View {
                 }
             }
         }
-        .scrollContentBackground(.hidden)
-        .background { JarvisBackdrop() }
-        .navigationTitle("Maintenance")
-        .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
-                Button("Add task", systemImage: "plus") { editing = true }
-            }
-        }
-        .sheet(isPresented: $editing) { MaintenanceEditor(model: model, task: nil) }
-        .sheet(item: $completing) { MaintenanceCompleteSheet(model: model, task: $0) }
-        .refreshable { await model.refreshMaintenance() }
     }
 }
 
@@ -156,6 +184,7 @@ struct MaintenanceDetailView: View {
         .background { JarvisBackdrop() }
         .navigationTitle(task?.name ?? "Maintenance")
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar(.visible, for: .navigationBar)
         .toolbar {
             if task != nil {
                 ToolbarItem(placement: .topBarTrailing) {

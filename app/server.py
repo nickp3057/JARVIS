@@ -138,6 +138,7 @@ _COMPANION_CAPABILITIES: dict[str, object] = {
         "service_links": True,
         "maintenance": True,
         "todos": True,
+        "shopping": True,
         "glance": True,
         "wake_schedule": True,
         "portfolio": True,
@@ -568,6 +569,120 @@ def todo_done(todo_id: str, _: None = Depends(authorize)) -> Response:
         raise HTTPException(status_code=404, detail="Unknown to-do")
     status_hub.invalidate("now")
     return Response(status_code=204)
+
+
+# --- Shopping list (saved items with photos; brain/shopping.py) ------------
+
+
+class ShoppingItemRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=120)
+    note: str = Field(default="", max_length=300)
+    store: str = Field(default="", max_length=60)
+    quantity: int = Field(default=1, ge=1, le=99)
+    on_list: bool = True
+
+
+class ShoppingListRequest(BaseModel):
+    quantity: int | None = Field(default=None, ge=1, le=99)
+
+
+def _shopping_item(item: dict[str, object] | None) -> dict[str, object]:
+    if item is None:
+        raise HTTPException(status_code=404, detail="Unknown shopping item")
+    return {"item": item}
+
+
+@app.get("/api/shopping")
+def shopping_overview(_: None = Depends(authorize)) -> dict[str, object]:
+    """The list (what to buy) and the catalog (everything ever saved)."""
+    from brain import shopping
+    return {"list": shopping.current_list(), "catalog": shopping.catalog()}
+
+
+@app.get("/api/shopping/suggest")
+def shopping_suggest(q: str = "", _: None = Depends(authorize)) -> dict[str, object]:
+    from brain import shopping
+    return {"items": shopping.suggest(q[:120])}
+
+
+@app.post("/api/shopping/items")
+def shopping_create(request: ShoppingItemRequest, _: None = Depends(authorize)) -> dict[str, object]:
+    from brain import shopping
+    try:
+        return {"item": shopping.create_item(request.name, request.note, request.store,
+                                             request.on_list, request.quantity)}
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@app.put("/api/shopping/items/{item_id}")
+def shopping_update(item_id: int, request: ShoppingItemRequest, _: None = Depends(authorize)) -> dict[str, object]:
+    from brain import shopping
+    try:
+        return _shopping_item(shopping.update_item(item_id, request.model_dump(exclude={"on_list"})))
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@app.delete("/api/shopping/items/{item_id}")
+def shopping_delete(item_id: int, _: None = Depends(authorize)) -> Response:
+    from brain import shopping
+    if not shopping.delete_item(item_id):
+        raise HTTPException(status_code=404, detail="Unknown shopping item")
+    return Response(status_code=204)
+
+
+@app.post("/api/shopping/items/{item_id}/list")
+def shopping_add_to_list(item_id: int, request: ShoppingListRequest | None = None,
+                         _: None = Depends(authorize)) -> dict[str, object]:
+    from brain import shopping
+    return _shopping_item(shopping.add_to_list(item_id, request.quantity if request else None))
+
+
+@app.delete("/api/shopping/items/{item_id}/list")
+def shopping_remove_from_list(item_id: int, _: None = Depends(authorize)) -> dict[str, object]:
+    from brain import shopping
+    return _shopping_item(shopping.remove_from_list(item_id))
+
+
+@app.post("/api/shopping/items/{item_id}/bought")
+def shopping_bought(item_id: int, _: None = Depends(authorize)) -> dict[str, object]:
+    from brain import shopping
+    return _shopping_item(shopping.mark_bought(item_id))
+
+
+@app.delete("/api/shopping/items/{item_id}/bought")
+def shopping_undo_bought(item_id: int, _: None = Depends(authorize)) -> dict[str, object]:
+    from brain import shopping
+    return _shopping_item(shopping.undo_bought(item_id))
+
+
+@app.put("/api/shopping/items/{item_id}/photo")
+async def shopping_put_photo(item_id: int, request: Request, _: None = Depends(authorize)) -> dict[str, object]:
+    """A product photo as a raw JPEG body (the app shrinks it first)."""
+    from brain import shopping
+    data = await request.body()
+    try:
+        return _shopping_item(shopping.set_photo(item_id, data))
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@app.delete("/api/shopping/items/{item_id}/photo")
+def shopping_clear_photo(item_id: int, _: None = Depends(authorize)) -> dict[str, object]:
+    from brain import shopping
+    return _shopping_item(shopping.clear_photo(item_id))
+
+
+@app.get("/api/shopping/items/{item_id}/photo")
+def shopping_get_photo(item_id: int, _: None = Depends(authorize)) -> Response:
+    from brain import shopping
+    path = shopping.photo_path(item_id)
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail="No photo")
+    # The app adds ?v=<photo_version>, so a replaced photo is a new URL.
+    return Response(content=path.read_bytes(), media_type="image/jpeg",
+                    headers={"Cache-Control": "private, max-age=604800"})
 
 
 # --- Wake-up schedule (music on the TV; brain/wake_alarm.py) ---------------

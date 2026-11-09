@@ -97,7 +97,7 @@ struct RootView: View {
 
             HubView(model: hub, onAsk: ask, onNavigate: navigate, focus: .hub)
                 .swipePage(swipeOffset)
-                .tabItem { Label("Hub", systemImage: "square.grid.2x2") }
+                .tabItem { Label("Control", systemImage: "switch.2") }
                 .tag(RootTab.hub)
 
             if !Self.isMac {
@@ -121,7 +121,7 @@ struct RootView: View {
 
             SettingsView(embedded: true, studyBrief: hub.studyBrief.value)
                 .swipePage(swipeOffset)
-                .tabItem { Label("Settings", systemImage: "slider.horizontal.3") }
+                .tabItem { Label("Settings", systemImage: "gearshape") }
                 .tag(RootTab.settings)
         }
         .id(shownPalette)
@@ -196,9 +196,10 @@ struct RootView: View {
     }
 
     private var phonePages: [AnyView] {
-        [AnyView(HubView(model: hub, onAsk: ask, focus: .media).environmentObject(settings)),
+        // Same order as `PhoneTabs.tabs`.
+        [AnyView(HubView(model: hub, onAsk: ask, onNavigate: navigate, focus: .home, phoneVoice: phoneVoice).environmentObject(settings)),
          AnyView(HubView(model: hub, onAsk: ask, onNavigate: navigate, focus: .hub).environmentObject(settings)),
-         AnyView(HubView(model: hub, onAsk: ask, onNavigate: navigate, focus: .home, phoneVoice: phoneVoice).environmentObject(settings)),
+         AnyView(HubView(model: hub, onAsk: ask, focus: .media).environmentObject(settings)),
          AnyView(ChatView(model: chat).environmentObject(settings)),
          AnyView(SettingsView(embedded: true, studyBrief: hub.studyBrief.value).environmentObject(settings))]
     }
@@ -299,7 +300,7 @@ extension RootView.RootTab {
         case .room: return "Room"
         case .desk: return "Desk"
         case .media: return "Media"
-        case .hub: return "Hub"
+        case .hub: return "Control"
         case .home: return "Home"
         case .chat: return "Chat"
         case .knowledge: return "Memory"

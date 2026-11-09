@@ -57,6 +57,7 @@ Pearson-Stark-Jarvis/
 │   ├── knowledge_vault.py   Authorized Obsidian search, profile mirror, capture + journal
 │   ├── local_model.py       Optional OpenAI-compatible conversational fallback
 │   ├── maintenance.py       Recurring chores: countdowns + completion log (SQLite)
+│   ├── shopping.py          Shopping list over a saved-item catalog with photos (SQLite)
 │   ├── briefing.py          Spoken situational briefing (time, weather, agenda, timers)
 │   ├── personality.py       System prompt builder (humor%, address, tool descriptions)
 │   ├── price_watch.py       Guarded public-page price checks + durable targets
@@ -119,6 +120,8 @@ Pearson-Stark-Jarvis/
 ├── memory/
 │   ├── history.db           SQLite conversation history (auto-created)
 │   ├── maintenance.db       Maintenance tasks + log (auto-created, seeded once)
+│   ├── shopping.db          Saved shopping items; on_list = on the list now
+│   ├── shopping_photos/     <item id>.jpg product photos from the companion
 │   ├── profile.json         Long-term memory facts (auto-created)
 │   ├── habits.json          Bounded per-turn usage log for habit learning
 │   ├── memory_proposals.json Low-confidence facts awaiting approval
@@ -506,6 +509,16 @@ subagent job or spec that runs without an `_AGENTS` entry still appears
 Core lists, so no app update is needed. Give new subagents a proper `_AGENTS`
 entry in `brain/agent_roster.py` (name, kind, icon, description, schedule);
 `tests/test_agent_roster.py` fails until every subagent name in the code has one.
+
+### Shopping list
+- `add_to_shopping_list(item, quantity?, note?, store?, new_item?)` — matches
+  saved items by name ("face lotion" → the saved CeraVe one); several matches
+  → asks which; anything new is saved for next time
+- `shopping_list` — what's on it, grouped by store
+- `mark_shopping_bought(items[], not_bought?)` — tick off (kept in the catalog)
+- Companion API: `GET /api/shopping` (list + catalog), `GET /api/shopping/suggest?q=`,
+  `POST/PUT/DELETE /api/shopping/items[/{id}]`, `POST|DELETE …/{id}/list`,
+  `POST|DELETE …/{id}/bought` (DELETE = undo), `PUT|GET|DELETE …/{id}/photo` (raw JPEG)
 
 ### Household maintenance
 - `log_maintenance(name|task_id, note?, completed_on?)` — "I rotated the
@@ -1582,6 +1595,23 @@ EMAIL_UNSUB_NOTE=           # vault-relative note path; default Jarvis Memory/Em
   Quick add has a quality-profile picker (`GET /api/media/profiles`,
   default Standard for movies, TV for shows). Barn Door now turns the TV on
   (`BARN_DOOR_TV`) and turns the fan light off instead of red.
+- **Phone reorganization + Lists (iOS 6.0 / build 242, branch `phone-reorg`)** —
+  phone tabs are now Home · Control · Media · Chat · Settings (Home first and
+  default; "Hub" renamed Control on every device). Home: reactor, a **Lists**
+  row of three separate tiles (To do = open reminders only; Shopping; 
+  Maintenance = due count), a one-line next-up strip (next assessment, else
+  next event → Control), scenes, portfolio. Lists push in Home's stack
+  (`ListRoute`, `MaintenanceRoute`); long-press a tile to jump into adding.
+  Shopping (`ShoppingViews.swift`): type to see saved items with photos and
+  tap to list one, Return lists an exact match or saves a new item, the
+  editor takes a photo (camera or library, shrunk to 1200 px JPEG), note,
+  store and quantity; ticking off removes it with an Undo; Saved items is a
+  searchable photo grid. Control: needs-attention, repairs, camera + TV
+  remote side by side, switches, then Now (reminders dropped from Now; they
+  live in To do). Maintenance list is sectioned Due / Coming up / Log.
+  Settings is an inset-grouped list (Core row → Connection; Appearance;
+  Routine: wake-up, study brief, night volume; JARVIS: agents, memory;
+  Accounts: Schwab; About) with each old panel on its own page.
 - **Desk on the Mac (iOS 5.6 / build 149)** — on the Mac, Room and Home are
   replaced by **Desk** (the default tab): a header with the reactor (tap
   for a briefing), greeting, live clock, the system/storage/attention chips

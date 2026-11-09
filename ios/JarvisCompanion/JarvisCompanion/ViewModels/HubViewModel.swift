@@ -33,6 +33,8 @@ final class HubViewModel: ObservableObject {
     @Published var alerts = Section<[JarvisAlert]>()
     /// Recurring chores, soonest due first (server-sorted).
     @Published var maintenance = Section<[MaintenanceTask]>()
+    /// The shopping list and every saved item (with photos).
+    @Published var shopping = Section<ShoppingOverview>()
     /// Schwab, read-only. Polled every tick: Core streams prices, so it moves.
     @Published var portfolio = Section<Portfolio>()
     @Published var scenes = Section<HomeScenes>()
@@ -140,7 +142,8 @@ final class HubViewModel: ObservableObject {
         async let k: Void = refreshPortfolio()
         async let l: Void = refreshScenes()
         async let m: Void = refreshGlance()
-        _ = await (a, b, c, d, e, f, g, h, i, j, k, l, m)
+        async let n: Void = refreshShopping()
+        _ = await (a, b, c, d, e, f, g, h, i, j, k, l, m, n)
     }
 
     func refreshGlance() async {
@@ -428,6 +431,117 @@ final class HubViewModel: ObservableObject {
         }
     }
 
+    // MARK: - Shopping list
+
+    /// An older Core without /api/shopping leaves this nil (the tile hides).
+    func refreshShopping() async {
+        await load(\.shopping) { try await $0.shopping() }
+    }
+
+    /// Replace one item in both the list and the catalog, in place.
+    private func applyShopping(_ item: ShoppingItem) {
+        guard var overview = shopping.value else { return }
+        if let i = overview.catalog.firstIndex(where: { $0.id == item.id }) { overview.catalog[i] = item }
+        else { overview.catalog.insert(item, at: 0) }
+        if item.onList {
+            if let i = overview.list.firstIndex(where: { $0.id == item.id }) { overview.list[i] = item }
+            else { overview.list.append(item) }
+        } else {
+            overview.list.removeAll { $0.id == item.id }
+        }
+        shopping.value = overview
+    }
+
+    private func shoppingAction(_ optimistic: ShoppingItem? = nil,
+                                _ work: (JarvisAPIClient) async throws -> ShoppingItem?) async -> ShoppingItem? {
+        let before = shopping.value
+        if let optimistic { applyShopping(optimistic) }
+        do {
+            let item = try await work(client())
+            if let item { applyShopping(item) }
+            return item
+        } catch {
+            if optimistic != nil { shopping.value = before }
+            actionError = error.localizedDescription
+            return nil
+        }
+    }
+
+    /// A saved item onto the list (tapped from the suggestions).
+    @discardableResult
+    func listShopping(_ item: ShoppingItem, quantity: Int? = nil) async -> ShoppingItem? {
+        var shown = item
+        shown.onList = true
+        if let quantity { shown.quantity = quantity }
+        return await shoppingAction(shown) { try await $0.listShoppingItem(id: item.id, quantity: quantity) }
+    }
+
+    /// Ticked off: gone from the list at once, kept in the catalog.
+    @discardableResult
+    func boughtShopping(_ item: ShoppingItem) async -> ShoppingItem? {
+        var shown = item
+        shown.onList = false
+        shown.timesBought += 1
+        return await shoppingAction(shown) { try await $0.boughtShoppingItem(id: item.id) }
+    }
+
+    @discardableResult
+    func undoBoughtShopping(_ item: ShoppingItem) async -> ShoppingItem? {
+        var shown = item
+        shown.onList = true
+        return await shoppingAction(shown) { try await $0.undoBoughtShoppingItem(id: item.id) }
+    }
+
+    /// Off the list without counting a purchase.
+    @discardableResult
+    func unlistShopping(_ item: ShoppingItem) async -> ShoppingItem? {
+        var shown = item
+        shown.onList = false
+        return await shoppingAction(shown) { try await $0.unlistShoppingItem(id: item.id) }
+    }
+
+    /// New item (and its photo), or an edit of a saved one. Returns the
+    /// saved item, or nil (with `actionError` set) so the editor stays open.
+    func saveShopping(_ draft: ShoppingItemDraft, editing item: ShoppingItem?, photo: ShoppingPhotoChange) async -> ShoppingItem? {
+        let saved = await shoppingAction { client in
+            var saved: ShoppingItem
+            if let item { saved = try await client.updateShoppingItem(id: item.id, draft) }
+            else { saved = try await client.createShoppingItem(draft) }
+            switch photo {
+            case .keep: break
+            case .remove: saved = try await client.clearShoppingPhoto(id: saved.id)
+            case .replace(let jpeg): saved = try await client.putShoppingPhoto(id: saved.id, jpeg: jpeg)
+            }
+            return saved
+        }
+        if let saved, let item, saved.onList != draft.onList {
+            return draft.onList ? await listShopping(saved) : await unlistShopping(saved)
+        }
+        return saved
+    }
+
+    @discardableResult
+    func deleteShopping(_ item: ShoppingItem) async -> Bool {
+        let before = shopping.value
+        if var overview = shopping.value {
+            overview.list.removeAll { $0.id == item.id }
+            overview.catalog.removeAll { $0.id == item.id }
+            shopping.value = overview
+        }
+        do {
+            try await client().deleteShoppingItem(id: item.id)
+            return true
+        } catch {
+            shopping.value = before
+            actionError = error.localizedDescription
+            return false
+        }
+    }
+
+    func shoppingPhoto(_ item: ShoppingItem) async -> Data? {
+        try? await client().shoppingPhoto(id: item.id, version: item.photoVersion)
+    }
+
     // MARK: - Maintenance
 
     /// An older Core without /api/maintenance just never shows the card.
@@ -612,7 +726,8 @@ final class HubViewModel: ObservableObject {
                     async let storage: Void = self.refreshStorage()
                     async let maintenance: Void = self.refreshMaintenance()
                     async let glance: Void = self.refreshGlance()
-                    _ = await (storage, maintenance, glance)
+                    async let shopping: Void = self.refreshShopping()
+                    _ = await (storage, maintenance, glance, shopping)
                 }
             }
         }

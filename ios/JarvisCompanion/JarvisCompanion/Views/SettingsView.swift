@@ -21,159 +21,72 @@ struct SettingsView: View {
 
     var body: some View {
         NavigationStack {
-            ScrollView {
-                VStack(spacing: 20) {
-                    CockpitHeader(eyebrow: "Personal command center", title: "Make it yours.",
-                                  subtitle: "Your connection. Your daily rhythm.")
-                    CockpitPanel("Connection", symbol: "network") {
-                        Text("JARVIS Core").font(.headline)
-                        TextField("Server address", text: $settings.baseURLString)
-                            .keyboardType(.URL).textContentType(.URL)
-                            .textInputAutocapitalization(.never).autocorrectionDisabled()
-                            .padding(13).background(.black.opacity(0.2), in: .rect(cornerRadius: 12))
-                            .accessibilityLabel("Server address")
-                        HStack {
-                            Group {
-                                if revealToken { TextField("API token", text: $settings.apiToken) }
-                                else { SecureField("API token", text: $settings.apiToken) }
-                            }
-                            .textContentType(.password).textInputAutocapitalization(.never).autocorrectionDisabled()
-                            Button { revealToken.toggle() } label: {
-                                Image(systemName: revealToken ? "eye.slash" : "eye").frame(width: 44, height: 44)
-                            }
-                            .accessibilityLabel(revealToken ? "Hide token" : "Show token")
+            List {
+                Section {
+                    NavigationLink { page("Connection") { connectionPanel } } label: { coreRow }
+                }
+                Section("Appearance") {
+                    NavigationLink { page("Theme") {
+                        CockpitPanel("Theme", symbol: "paintpalette") {
+                            ThemePicker()
+                            Text("Your TV and iPad follow this too.").font(.caption).foregroundStyle(.secondary)
                         }
-                        .padding(.leading, 13).background(.black.opacity(0.2), in: .rect(cornerRadius: 12))
-                        Text("Your token is stored securely in Keychain. Use your home network or Tailscale address.")
-                            .font(.caption).foregroundStyle(.secondary)
-                        if let error = settings.tokenStorageError {
-                            Label(error, systemImage: "exclamationmark.triangle").foregroundStyle(JarvisTheme.amber)
-                        }
-                        Button(action: testConnection) {
-                            HStack {
-                                if testing { ProgressView().tint(JarvisTheme.background) }
-                                Text(testing ? "Connecting…" : "Test connection").font(.subheadline.weight(.semibold))
-                                Spacer()
-                                Image(systemName: "arrow.up.right")
-                            }
-                            .padding(14).foregroundStyle(JarvisTheme.background)
-                            .background(JarvisTheme.cyan, in: .rect(cornerRadius: 12))
-                        }
-                        .disabled(testing || !settings.isConfigured)
-                        .opacity(settings.isConfigured ? 1 : 0.45)
-                        if let connectionResult {
-                            Label(connectionResult, systemImage: connectionSucceeded ? "checkmark.circle.fill" : "wifi.exclamationmark")
-                                .font(.footnote).foregroundStyle(connectionSucceeded ? JarvisTheme.success : JarvisTheme.amber)
-                        }
+                    } } label: {
+                        row("Theme", symbol: "paintpalette", tint: .purple, value: JarvisPalette.current.name)
                     }
-                    if !RootView.isPad {
-                        CockpitPanel("Agents", symbol: "person.3.sequence") {
-                            Button { showingAgents = true } label: {
-                                HStack {
-                                    Text("Who works for JARVIS").foregroundStyle(.primary)
-                                    Spacer()
-                                    Image(systemName: "chevron.right").foregroundStyle(.secondary)
-                                }
-                                .contentShape(Rectangle())
-                            }
-                            .buttonStyle(.plain)
-                            Text("JARVIS and his subagents and helpers: what each does, what it's doing now, what's waiting for you.")
-                                .font(.footnote).foregroundStyle(.secondary)
-                        }
-                        CockpitPanel("Memory", symbol: "brain") {
-                            Button { showingKnowledge = true } label: {
-                                HStack {
-                                    Text("What JARVIS knows about you").foregroundStyle(.primary)
-                                    Spacer()
-                                    Image(systemName: "chevron.right").foregroundStyle(.secondary)
-                                }
-                                .contentShape(Rectangle())
-                            }
-                            .buttonStyle(.plain)
-                            Text("His profile memory, journal and notes from the Obsidian vault, read-only.")
-                                .font(.footnote).foregroundStyle(.secondary)
-                        }
+                }
+                Section("Routine") {
+                    NavigationLink { WakeScheduleView() } label: {
+                        row("Wake-up", symbol: "alarm", tint: .orange)
                     }
-                    CockpitPanel("Theme", symbol: "paintpalette") {
-                        ThemePicker()
-                        Text("Your TV follows this too.").font(.caption).foregroundStyle(.secondary)
+                    NavigationLink { page("Study brief") { studyPanel } } label: {
+                        row("Study brief", symbol: "graduationcap", tint: .blue,
+                            value: settings.studyAlertsEnabled ? "On" : "Off")
                     }
-                    CockpitPanel("Wake-up", symbol: "alarm") {
-                        NavigationLink {
-                            WakeScheduleView()
-                        } label: {
-                            HStack {
-                                VStack(alignment: .leading, spacing: 3) {
-                                    Text("Wake-up schedule").font(.headline).foregroundStyle(.primary)
-                                    Text("Music on the TV, a different time each day.")
-                                        .font(.caption).foregroundStyle(.secondary)
-                                }
-                                Spacer()
-                                Image(systemName: "chevron.right").font(.footnote.weight(.semibold))
-                                    .foregroundStyle(.secondary)
-                            }
-                            .contentShape(Rectangle())
+                    NavigationLink { page("Night volume") { NightVolumePanel() } } label: {
+                        row("Night volume", symbol: "moon", tint: .indigo)
+                    }
+                }
+                if !RootView.isPad {
+                    Section {
+                        Button { showingAgents = true } label: {
+                            row("Agents", symbol: "person.3.sequence", tint: .teal, chevron: true)
                         }
-                        .buttonStyle(.plain)
-                    }
-                    NightVolumePanel()
-                    SchwabPanel()
-                    CockpitPanel("Study brief", symbol: "graduationcap") {
-                        Toggle("Deliver on this phone", isOn: $settings.studyAlertsEnabled).tint(JarvisTheme.cyan)
-                        if settings.studyAlertsEnabled {
-                            if let brief = studyBrief {
-                                Text(Self.scheduleSummary(brief)).font(.subheadline.weight(.medium))
-                                if !brief.error.isEmpty {
-                                    Text(brief.error).font(.caption).foregroundStyle(JarvisTheme.amber)
-                                } else if let next = brief.briefs.first {
-                                    Text("Next: \(next.fireDate.formatted(date: .abbreviated, time: .shortened))")
-                                        .font(.caption.monospacedDigit()).foregroundStyle(JarvisTheme.cyan)
-                                    Text(next.body).font(.caption).foregroundStyle(.secondary).lineLimit(4)
-                                } else {
-                                    Text(brief.enabled ? "Nothing on your calendar inside the warning window yet."
-                                                       : "JARVIS has the brief switched off.")
-                                        .font(.caption).foregroundStyle(.secondary)
-                                }
-                            } else {
-                                Text("Schedule arrives from JARVIS Core once the Hub loads.")
-                                    .font(.caption).foregroundStyle(.secondary)
-                            }
-                            Text("JARVIS writes this brief and owns its schedule. To change the hour, warning window, keywords, or tone, just tell him: “move my study brief to 7” or “be blunter in the morning brief.”")
-                                .font(.footnote).foregroundStyle(.secondary)
-                            Label(push.status, systemImage: "bell.badge")
-                                .font(.caption).foregroundStyle(.secondary)
-                            HStack {
-                                Text(notificationStatus).font(.caption).foregroundStyle(.secondary)
-                                Spacer()
-                                if permissionUndetermined {
-                                    Button("Allow notifications") { Task { await requestPermissionNow() } }
-                                        .font(.caption.weight(.semibold)).foregroundStyle(JarvisTheme.cyan)
-                                } else {
-                                    Button("Permissions") {
-                                        if let url = URL(string: UIApplication.openNotificationSettingsURLString) { openURL(url) }
-                                    }.font(.caption.weight(.medium))
-                                }
-                            }
+                        Button { showingKnowledge = true } label: {
+                            row("Memory", symbol: "brain", tint: .pink, chevron: true)
                         }
+                    } header: {
+                        Text("JARVIS")
+                    } footer: {
+                        Text("Who works for JARVIS, and what he knows about you.")
                     }
+                }
+                Section("Accounts") {
+                    NavigationLink { page("Charles Schwab") { SchwabPanel() } } label: {
+                        row("Charles Schwab", symbol: "chart.line.uptrend.xyaxis", tint: .green)
+                    }
+                }
+                Section {
                     HStack(spacing: 10) {
-                        JarvisCoreMark(size: 36, animated: false)
-                        VStack(alignment: .leading, spacing: 3) {
-                            Text("JARVIS Companion").font(.caption.weight(.semibold))
+                        JarvisCoreMark(size: 30, animated: false)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("JARVIS Companion").font(.subheadline.weight(.semibold))
                             Text("Version \(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "—")")
                                 .font(.caption).foregroundStyle(.secondary)
                         }
                         Spacer()
                         Image(systemName: "lock.shield").foregroundStyle(JarvisTheme.cyan)
-                    }.padding(8)
+                    }
+                    .accessibilityElement(children: .combine)
                 }
-                .frame(maxWidth: 680).padding(20).frame(maxWidth: .infinity)
             }
+            .listStyle(.insetGrouped)
+            .scrollContentBackground(.hidden)
             .scrollDismissesKeyboard(.interactively)
             .sheet(isPresented: $showingKnowledge) { KnowledgeView() }
             .fullScreenCover(isPresented: $showingAgents) { AgentMapView() }
             .background { JarvisBackdrop() }
-            .navigationTitle("Settings").navigationBarTitleDisplayMode(.inline)
+            .navigationTitle("Settings")
             .toolbar {
                 if !embedded {
                     ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } }
@@ -184,6 +97,135 @@ struct SettingsView: View {
                 if phase == .active { Task { await refreshPermission() } }
             }
             .onChange(of: settings.connectionIdentity) { connectionResult = nil }
+        }
+    }
+
+    /// The top row: which Core this phone talks to, like the Apple ID row.
+    private var coreRow: some View {
+        HStack(spacing: 14) {
+            JarvisCoreMark(size: 46, animated: false)
+            VStack(alignment: .leading, spacing: 3) {
+                Text("JARVIS Core").font(.headline)
+                Text(settings.isConfigured ? settings.baseURLString : "Not connected yet")
+                    .font(.caption).foregroundStyle(.secondary).lineLimit(1)
+            }
+        }
+        .padding(.vertical, 4)
+    }
+
+    /// A Settings-app row: a white glyph on a coloured rounded square.
+    private func row(_ title: String, symbol: String, tint: Color, value: String? = nil,
+                     chevron: Bool = false) -> some View {
+        HStack(spacing: 12) {
+            Image(systemName: symbol)
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(.white)
+                .frame(width: 29, height: 29)
+                .background(tint.gradient, in: .rect(cornerRadius: 7))
+            Text(title).foregroundStyle(.primary)
+            Spacer()
+            if let value { Text(value).foregroundStyle(.secondary) }
+            if chevron {
+                Image(systemName: "chevron.right").font(.footnote.weight(.semibold)).foregroundStyle(.tertiary)
+            }
+        }
+        .contentShape(Rectangle())
+    }
+
+    /// One settings page: the old panel, on the app's backdrop.
+    private func page<Content: View>(_ title: String, @ViewBuilder _ content: () -> Content) -> some View {
+        ScrollView {
+            VStack(spacing: 20) { content() }
+                .frame(maxWidth: 680).padding(20).frame(maxWidth: .infinity)
+        }
+        .scrollDismissesKeyboard(.interactively)
+        .background { JarvisBackdrop() }
+        .navigationTitle(title)
+        .navigationBarTitleDisplayMode(.inline)
+    }
+
+    private var connectionPanel: some View {
+        CockpitPanel("Connection", symbol: "network") {
+            Text("JARVIS Core").font(.headline)
+            TextField("Server address", text: $settings.baseURLString)
+                .keyboardType(.URL).textContentType(.URL)
+                .textInputAutocapitalization(.never).autocorrectionDisabled()
+                .padding(13).background(.black.opacity(0.2), in: .rect(cornerRadius: 12))
+                .accessibilityLabel("Server address")
+            HStack {
+                Group {
+                    if revealToken { TextField("API token", text: $settings.apiToken) }
+                    else { SecureField("API token", text: $settings.apiToken) }
+                }
+                .textContentType(.password).textInputAutocapitalization(.never).autocorrectionDisabled()
+                Button { revealToken.toggle() } label: {
+                    Image(systemName: revealToken ? "eye.slash" : "eye").frame(width: 44, height: 44)
+                }
+                .accessibilityLabel(revealToken ? "Hide token" : "Show token")
+            }
+            .padding(.leading, 13).background(.black.opacity(0.2), in: .rect(cornerRadius: 12))
+            Text("Your token is stored securely in Keychain. Use your home network or Tailscale address.")
+                .font(.caption).foregroundStyle(.secondary)
+            if let error = settings.tokenStorageError {
+                Label(error, systemImage: "exclamationmark.triangle").foregroundStyle(JarvisTheme.amber)
+            }
+            Button(action: testConnection) {
+                HStack {
+                    if testing { ProgressView().tint(JarvisTheme.background) }
+                    Text(testing ? "Connecting…" : "Test connection").font(.subheadline.weight(.semibold))
+                    Spacer()
+                    Image(systemName: "arrow.up.right")
+                }
+                .padding(14).foregroundStyle(JarvisTheme.background)
+                .background(JarvisTheme.cyan, in: .rect(cornerRadius: 12))
+            }
+            .disabled(testing || !settings.isConfigured)
+            .opacity(settings.isConfigured ? 1 : 0.45)
+            if let connectionResult {
+                Label(connectionResult, systemImage: connectionSucceeded ? "checkmark.circle.fill" : "wifi.exclamationmark")
+                    .font(.footnote).foregroundStyle(connectionSucceeded ? JarvisTheme.success : JarvisTheme.amber)
+            }
+        }
+    }
+
+    @ViewBuilder private var studyPanel: some View {
+        CockpitPanel("Study brief", symbol: "graduationcap") {
+            Toggle("Deliver on this phone", isOn: $settings.studyAlertsEnabled).tint(JarvisTheme.cyan)
+            if settings.studyAlertsEnabled {
+                if let brief = studyBrief {
+                    Text(Self.scheduleSummary(brief)).font(.subheadline.weight(.medium))
+                    if !brief.error.isEmpty {
+                        Text(brief.error).font(.caption).foregroundStyle(JarvisTheme.amber)
+                    } else if let next = brief.briefs.first {
+                        Text("Next: \(next.fireDate.formatted(date: .abbreviated, time: .shortened))")
+                            .font(.caption.monospacedDigit()).foregroundStyle(JarvisTheme.cyan)
+                        Text(next.body).font(.caption).foregroundStyle(.secondary).lineLimit(4)
+                    } else {
+                        Text(brief.enabled ? "Nothing on your calendar inside the warning window yet."
+                                           : "JARVIS has the brief switched off.")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                } else {
+                    Text("Schedule arrives from JARVIS Core once the Hub loads.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                Text("JARVIS writes this brief and owns its schedule. To change the hour, warning window, keywords, or tone, just tell him: “move my study brief to 7” or “be blunter in the morning brief.”")
+                    .font(.footnote).foregroundStyle(.secondary)
+                Label(push.status, systemImage: "bell.badge")
+                    .font(.caption).foregroundStyle(.secondary)
+                HStack {
+                    Text(notificationStatus).font(.caption).foregroundStyle(.secondary)
+                    Spacer()
+                    if permissionUndetermined {
+                        Button("Allow notifications") { Task { await requestPermissionNow() } }
+                            .font(.caption.weight(.semibold)).foregroundStyle(JarvisTheme.cyan)
+                    } else {
+                        Button("Permissions") {
+                            if let url = URL(string: UIApplication.openNotificationSettingsURLString) { openURL(url) }
+                        }.font(.caption.weight(.medium))
+                    }
+                }
+            }
         }
     }
 

@@ -24,7 +24,6 @@ struct HubView: View {
     @State private var diagnosisTarget: DiagnosisTarget?
     /// The Media card just jumped to, outlined briefly so the eye lands on it.
     @State private var highlightedCard: String?
-    @State private var todoSheet: TodoSheet.Mode?
 
     struct DiagnosisTarget: Identifiable {
         let title: String
@@ -71,10 +70,11 @@ struct HubView: View {
                         LazyVStack(spacing: 16) {
                             switch focus {
                             case .home:
-                                // A glance, no scrolling: the reactor, next up
-                                // and to-dos, the scene picker, the portfolio line.
+                                // A glance, no scrolling: the reactor, the three
+                                // lists, what's next, scenes, the portfolio line.
                                 hero
-                                homeTiles
+                                listsRow
+                                nextUpStrip
                                 if let scenes = model.scenes.value, !scenes.scenes.isEmpty {
                                     SceneFocusMenu(model: model, scenes: scenes)
                                 }
@@ -82,13 +82,12 @@ struct HubView: View {
                                     portfolioStrip(portfolio)
                                 }
                             case .hub:
-                                roomCameraButton
-                                tvRemoteButton
+                                // What needs you first, then the controls, then the day.
                                 if !attentionAlerts.isEmpty { needsAttentionCard }
                                 if !visibleRepairs.isEmpty { repairsCard }
-                                nowCard
-                                if model.maintenance.value != nil { maintenanceCard }
+                                controlShortcuts
                                 quickActionsCard
+                                nowCard
                             case .media:
                                 requestMediaButton
                                 storageCard.highlight(highlightedCard == "storage").id("storage")
@@ -112,12 +111,19 @@ struct HubView: View {
             .refreshable { await model.refreshAll() }
             .scrollBounceBehavior(.basedOnSize)  // Home fits the screen: it doesn't scroll at all
             .background { JarvisBackdrop() }
-            .navigationTitle(focus == .media ? "Media" : focus == .hub ? "Hub" : focus == .desk ? "Desk" : "Home")
+            .navigationTitle(focus == .media ? "Media" : focus == .hub ? "Control" : focus == .desk ? "Desk" : "Home")
             .toolbar(focus == .home || focus == .desk ? .hidden : .automatic, for: .navigationBar)
             .navigationDestination(for: MaintenanceRoute.self) { route in
                 switch route {
                 case .all: MaintenanceListView(model: model)
                 case .task(let id): MaintenanceDetailView(model: model, taskID: id)
+                }
+            }
+            .navigationDestination(for: ListRoute.self) { route in
+                switch route {
+                case .todo(let adding): TodoListView(model: model, startAdding: adding)
+                case .shopping(let adding): ShoppingListView(model: model, startAdding: adding)
+                case .savedItems: ShoppingSavedItemsView(model: model)
                 }
             }
             .sheet(isPresented: $showingSettings) { SettingsView() }
@@ -126,7 +132,6 @@ struct HubView: View {
             .sheet(isPresented: $schwabLoggingIn) {
                 SchwabLoginView { Task { await model.refreshPortfolio() } }
             }
-            .sheet(item: $todoSheet) { TodoSheet(model: model, startAdding: $0 == .add) }
             .sheet(item: $diagnosisTarget) { target in
                 MediaDiagnosisView(title: target.title, kind: target.kind,
                                    makeClient: { try JarvisAPIClient.make(from: settings) })
@@ -289,34 +294,29 @@ struct HubView: View {
         }
     }
 
-    /// The room camera: the iPad becomes a sentry view on the phone. Opening
-    /// it is the only way the lens turns on; closing it turns the lens off.
-    private var roomCameraButton: some View {
-        Button { RoomCameraPresenter.shared.showing = true } label: {
-            HStack(spacing: 12) {
-                Image(systemName: "video.fill").font(.title3).foregroundStyle(JarvisTheme.cyan)
-                Text("Room camera").font(.headline)
-                Spacer()
-                Image(systemName: "chevron.right").font(.footnote.weight(.semibold)).foregroundStyle(.secondary)
-            }
-            .padding(16)
-            .jarvisSurface(in: .rect(cornerRadius: 20))
-            .overlay(RoundedRectangle(cornerRadius: 20).strokeBorder(JarvisTheme.border))
-            .contentShape(Rectangle())
+    /// Control's shortcuts, side by side: the room camera (the iPad becomes a
+    /// sentry view; opening it is the only way the lens turns on) and the TV
+    /// remote.
+    private var controlShortcuts: some View {
+        HStack(spacing: 12) {
+            shortcutTile("Room camera", symbol: "video.fill") { RoomCameraPresenter.shared.showing = true }
+            shortcutTile("TV remote", symbol: "av.remote") { showingRemote = true }
         }
-        .buttonStyle(CockpitButtonStyle())
+        .fixedSize(horizontal: false, vertical: true)
     }
 
-    /// Top of the Hub tab: the TV remote, one tap away.
-    private var tvRemoteButton: some View {
-        Button { showingRemote = true } label: {
-            HStack(spacing: 12) {
-                Image(systemName: "av.remote").font(.title3).foregroundStyle(JarvisTheme.cyan)
-                Text("TV remote").font(.headline)
-                Spacer()
-                Image(systemName: "chevron.right").font(.footnote.weight(.semibold)).foregroundStyle(.secondary)
+    private func shortcutTile(_ title: String, symbol: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            VStack(alignment: .leading, spacing: 10) {
+                Image(systemName: symbol)
+                    .font(.title3)
+                    .foregroundStyle(JarvisTheme.cyan)
+                    .frame(width: 40, height: 40)
+                    .background(JarvisTheme.cyan.opacity(0.12), in: .circle)
+                Text(title).font(.subheadline.weight(.semibold)).foregroundStyle(.primary)
             }
-            .padding(16)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(14)
             .jarvisSurface(in: .rect(cornerRadius: 20))
             .overlay(RoundedRectangle(cornerRadius: 20).strokeBorder(JarvisTheme.border))
             .contentShape(Rectangle())
@@ -392,9 +392,8 @@ struct HubView: View {
     @ViewBuilder private var deskToday: some View {
         deskWeatherCard
         deskAgendaCard
-        homeTiles
+        listsRow
         nowCard
-        if model.maintenance.value != nil { maintenanceCard }
     }
 
     @ViewBuilder private var deskHouse: some View {
@@ -402,7 +401,7 @@ struct HubView: View {
         if !visibleRepairs.isEmpty { repairsCard }
         if let scenes = model.scenes.value, !scenes.scenes.isEmpty { scenesCard(scenes) }
         quickActionsCard
-        tvRemoteButton
+        controlShortcuts
         if let portfolio = model.portfolio.value, portfolio.configured { portfolioTile(portfolio) }
     }
 
@@ -574,68 +573,121 @@ struct HubView: View {
 
     /// Next up and the to-do count, side by side (stacked at accessibility
     /// sizes).
-    private var homeTiles: some View {
+    // MARK: - Home: lists
+
+    /// To do, Shopping and Maintenance: three separate lists, one tap each.
+    /// Long-press a tile to jump straight into adding.
+    private var listsRow: some View {
+        let todos = TodoListView.open(model).count
+        let shopping = model.shopping.value?.list.count
+        let tasks = model.maintenance.value ?? []
+        let due = tasks.filter(\.needsAttention).count
         let layout = typeSize.isAccessibilitySize
-            ? AnyLayout(VStackLayout(spacing: 12))
-            : AnyLayout(HStackLayout(alignment: .top, spacing: 12))
+            ? AnyLayout(VStackLayout(spacing: 10))
+            : AnyLayout(HStackLayout(alignment: .top, spacing: 10))
         return layout {
-            nextUpTile
-            todoTile
+            listTile("To do", symbol: "checklist", count: model.now.value == nil ? nil : todos,
+                     detail: todos == 0 ? "All clear" : "open",
+                     tint: TodoListView.open(model).contains(where: \.isDue) ? JarvisTheme.amber : JarvisTheme.cyan,
+                     route: .todo(adding: false), addRoute: .todo(adding: true), addLabel: "Add a to-do")
+            listTile("Shopping", symbol: "cart", count: shopping,
+                     detail: shopping == 0 ? "Nothing needed" : "to buy",
+                     tint: JarvisTheme.cyan,
+                     route: .shopping(adding: false), addRoute: .shopping(adding: true), addLabel: "Add to shopping")
+            NavigationLink(value: MaintenanceRoute.all) {
+                listTileBody("Maintenance", symbol: "wrench.and.screwdriver",
+                             count: model.maintenance.value == nil ? nil : due,
+                             detail: due == 0 ? "Nothing due" : "due",
+                             tint: tasks.contains(where: \.isOverdue) ? JarvisTheme.critical
+                                 : due > 0 ? JarvisTheme.amber : JarvisTheme.cyan)
+            }
+            .buttonStyle(CockpitButtonStyle())
+            .accessibilityLabel("Maintenance, \(due) due")
         }
         .fixedSize(horizontal: false, vertical: true)
+        .animation(.snappy, value: [todos, shopping ?? -1, due])
     }
 
-    private var nextUpTile: some View {
-        let events = nextAssessments
-        return VStack(alignment: .leading, spacing: 6) {
-            tileHeading("Next up", symbol: "graduationcap")
-            if let first = events.first {
-                Text(first.title)
-                    .font(.subheadline.weight(.semibold))
-                    .lineLimit(2)
-                Text(Self.sentenceCase(Self.academicCountdown(first.daysLeft))
-                     + (events.count > 1 ? " · +\(events.count - 1) more" : ""))
-                    .font(.caption.weight(.semibold).monospacedDigit())
-                    .foregroundStyle(first.daysLeft <= 1 ? JarvisTheme.amber : .secondary)
-            } else {
-                Text(model.now.value == nil ? "…" : "Nothing due")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-            }
-            Spacer(minLength: 0)
-        }
-        .homeTile()
-        .accessibilityElement(children: .combine)
-    }
-
-    private var todoTile: some View {
-        let count = TodoSheet.items(model).count
-        return Button { todoSheet = .list } label: {
-            VStack(alignment: .leading, spacing: 2) {
-                tileHeading("To do", symbol: "checklist")
-                Text("\(count)")
-                    .font(.system(size: 34, weight: .semibold, design: .rounded).monospacedDigit())
-                    .foregroundStyle(count == 0 ? .secondary : .primary)
-                    .contentTransition(.numericText())
-                Spacer(minLength: 0)
-            }
-            .homeTile()
+    private func listTile(_ title: String, symbol: String, count: Int?, detail: String, tint: Color,
+                          route: ListRoute, addRoute: ListRoute, addLabel: String) -> some View {
+        NavigationLink(value: route) {
+            listTileBody(title, symbol: symbol, count: count, detail: detail, tint: tint)
         }
         .buttonStyle(CockpitButtonStyle())
-        .accessibilityLabel("To do, \(count)")
-        .overlay(alignment: .topTrailing) {
-            Button { todoSheet = .add } label: {
-                Image(systemName: "plus")
-                    .font(.footnote.weight(.bold))
-                    .foregroundStyle(JarvisTheme.cyan)
-                    .frame(width: 30, height: 30)
-                    .background(JarvisTheme.cyan.opacity(0.14), in: .circle)
-                    .frame(width: 44, height: 44)
-            }
-            .padding(4)
-            .accessibilityLabel("Add a to-do")
+        .accessibilityLabel("\(title), \(count ?? 0) \(detail)")
+        .contextMenu {
+            NavigationLink(value: addRoute) { Label(addLabel, systemImage: "plus") }
         }
-        .animation(.snappy, value: count)
+    }
+
+    private func listTileBody(_ title: String, symbol: String, count: Int?, detail: String, tint: Color) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Image(systemName: symbol)
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(tint)
+                .frame(width: 32, height: 32)
+                .background(tint.opacity(0.13), in: .circle)
+            Text(count.map(String.init) ?? "–")
+                .font(.system(size: 28, weight: .semibold, design: .rounded).monospacedDigit())
+                .foregroundStyle(count == 0 ? .secondary : .primary)
+                .contentTransition(.numericText())
+            VStack(alignment: .leading, spacing: 1) {
+                Text(title).font(.subheadline.weight(.semibold)).foregroundStyle(.primary)
+                    .lineLimit(1).minimumScaleFactor(0.75)
+                Text(count == 0 ? detail : count == nil ? " " : detail)
+                    .font(.caption).foregroundStyle(.secondary).lineLimit(1)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(12)
+        .jarvisSurface(in: .rect(cornerRadius: 20))
+        .overlay(RoundedRectangle(cornerRadius: 20).strokeBorder(JarvisTheme.border))
+        .contentShape(Rectangle())
+    }
+
+    /// One line under the lists: the next assessment, or else the next
+    /// calendar event. Tap for the full day on Control.
+    @ViewBuilder private var nextUpStrip: some View {
+        let events = nextAssessments
+        let event = model.now.value?.nextEvent
+        if events.first != nil || event != nil {
+            Button { onNavigate?(.hub) } label: {
+                HStack(spacing: 12) {
+                    Image(systemName: events.first != nil ? "graduationcap" : "calendar")
+                        .foregroundStyle(JarvisTheme.cyan)
+                        .frame(width: 24)
+                    if let first = events.first {
+                        Text(first.title).font(.subheadline.weight(.semibold)).lineLimit(1)
+                        Spacer(minLength: 8)
+                        Text(Self.sentenceCase(Self.academicCountdown(first.daysLeft))
+                             + (events.count > 1 ? " · +\(events.count - 1)" : ""))
+                            .font(.caption.weight(.semibold).monospacedDigit())
+                            .foregroundStyle(first.daysLeft <= 1 ? JarvisTheme.amber : .secondary)
+                    } else if let event {
+                        Text(event.title).font(.subheadline.weight(.semibold)).lineLimit(1)
+                        Spacer(minLength: 8)
+                        Group {
+                            if event.allDay { Text("All day") }
+                            else if let start = event.startAt {
+                                Text(Date(timeIntervalSince1970: start), format: .dateTime.weekday(.abbreviated).hour().minute())
+                            }
+                        }
+                        .font(.caption.weight(.semibold).monospacedDigit())
+                        .foregroundStyle(.secondary)
+                    }
+                    Image(systemName: "chevron.right").font(.caption.weight(.semibold)).foregroundStyle(.tertiary)
+                }
+                .foregroundStyle(.primary)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 12)
+                .jarvisSurface(in: .rect(cornerRadius: 16))
+                .overlay(RoundedRectangle(cornerRadius: 16).strokeBorder(JarvisTheme.border))
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(CockpitButtonStyle())
+            .disabled(onNavigate == nil)
+            .accessibilityElement(children: .combine)
+        }
     }
 
     // MARK: - Home: Schwab portfolio (read-only, live)
@@ -800,7 +852,7 @@ struct HubView: View {
                             .font(.caption).foregroundStyle(.secondary)
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .padding(.vertical, 8)
-                        if !assessments.isEmpty || !snapshot.timers.isEmpty || !snapshot.reminders.isEmpty { divider }
+                        if !assessments.isEmpty || !snapshot.timers.isEmpty { divider }
                     }
 
                     if !assessments.isEmpty {
@@ -817,7 +869,7 @@ struct HubView: View {
                             }
                             if index < assessments.count - 1 { divider }
                         }
-                        if !snapshot.timers.isEmpty || !snapshot.reminders.isEmpty { divider }
+                        if !snapshot.timers.isEmpty { divider }
                     }
 
                     ForEach(Array(snapshot.timers.enumerated()), id: \.element.id) { index, timer in
@@ -837,27 +889,11 @@ struct HubView: View {
                                 }
                             }
                         }
-                        if index < snapshot.timers.count - 1 || !snapshot.reminders.isEmpty { divider }
-                    }
-
-                    ForEach(Array(snapshot.reminders.enumerated()), id: \.element.id) { index, reminder in
-                        nowRow(symbol: reminder.isDue ? "exclamationmark.circle.fill" : "checklist",
-                               tint: reminder.isDue ? JarvisTheme.amber : JarvisTheme.success) {
-                            VStack(alignment: .leading, spacing: 3) {
-                                Text(reminder.text).font(.subheadline.weight(.medium)).lineLimit(2)
-                                if let dueAt = reminder.dueAt {
-                                    Text(Date(timeIntervalSince1970: dueAt), format: .dateTime.weekday(.abbreviated).hour().minute())
-                                        .font(.caption).foregroundStyle(reminder.isDue ? JarvisTheme.amber : .secondary)
-                                } else {
-                                    Text("Open reminder").font(.caption).foregroundStyle(.secondary)
-                                }
-                            }
-                        }
-                        if index < snapshot.reminders.count - 1 { divider }
+                        if index < snapshot.timers.count - 1 { divider }
                     }
 
                     if snapshot.nextEvent == nil && assessments.isEmpty
-                        && snapshot.timers.isEmpty && snapshot.reminders.isEmpty && snapshot.calendarError.isEmpty {
+                        && snapshot.timers.isEmpty && snapshot.calendarError.isEmpty {
                         quietState("Nothing needs your attention.", symbol: "checkmark.circle")
                     }
                 }
@@ -884,40 +920,6 @@ struct HubView: View {
             }
         }
         .padding(.top, 9)
-    }
-
-    /// One line: how many are due and what's next. Tap in to manage.
-    private var maintenanceCard: some View {
-        let tasks = model.maintenance.value ?? []
-        let attention = tasks.filter(\.needsAttention).count
-        return NavigationLink(value: MaintenanceRoute.all) {
-            CockpitPanel("Maintenance", symbol: "hammer", trailing: {
-                if attention > 0 {
-                    StatusPill(text: "\(attention) due", color: tasks.contains(where: \.isOverdue) ? JarvisTheme.critical : JarvisTheme.amber)
-                }
-                Image(systemName: "chevron.right")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.tertiary)
-            }) {
-                if let error = model.maintenance.failureText {
-                    errorRow(error)
-                } else if let next = tasks.first {
-                    HStack {
-                        Text("Next: \(next.name)").lineLimit(1)
-                        Spacer()
-                        Text(next.countdown)
-                            .font(.footnote.monospacedDigit().weight(.semibold))
-                            .foregroundStyle(next.tint)
-                    }
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-                } else {
-                    Text("Nothing tracked yet.").font(.footnote).foregroundStyle(.secondary)
-                }
-            }
-            .foregroundStyle(.primary)
-        }
-        .buttonStyle(CockpitButtonStyle())
     }
 
     private func nowRow<Content: View>(
