@@ -36,5 +36,42 @@ class RosterTests(unittest.TestCase):
         self.assertIn("Gmail", email["note"])
 
 
+    def test_kinds(self):
+        kinds = {a["id"]: a["kind"] for a in agent_roster.roster()["agents"]}
+        self.assertEqual(kinds["memory"], "helper")
+        self.assertEqual(kinds["study"], "helper")
+        self.assertEqual(kinds["email"], "subagent")
+        self.assertEqual(kinds["crash"], "subagent")
+
+    def test_a_new_subagent_shows_up_by_itself(self):
+        subagents.run_job("weather_watch", "Watching the storm", lambda: "Storm passed.")
+        spec = subagents.SubagentSpec(name="gift_finder", system="s", tools=[], default_model="claude-test")
+        subagents.run(spec, "go", client=None)  # no key: still noticed
+        agents = {a["id"]: a for a in agent_roster.roster()["agents"]}
+        self.assertEqual(agents["new:weather_watch"]["name"], "Watching the storm")
+        self.assertEqual(agents["new:weather_watch"]["recent"][0]["summary"], "Storm passed.")
+        self.assertEqual(agents["new:gift_finder"]["kind"], "subagent")
+
+    def test_every_subagent_in_the_code_has_a_map_entry(self):
+        """Adding a subagent? Give it an _AGENTS entry in brain/agent_roster.py."""
+        import re
+        from pathlib import Path
+
+        root = Path(__file__).resolve().parents[1]
+        names = set()
+        for path in list((root / "brain").glob("*.py")) + list((root / "integrations").glob("*.py")):
+            text = path.read_text(encoding="utf-8")
+            names |= set(re.findall(r'(?:run_job|subagents\.start|_spec)\(\s*f?"([a-z_]+)', text))
+            names |= set(re.findall(r'SubagentSpec\(\s*name="([a-z_]+)"', text))
+        names |= {"investing_" + k for k in ("suggest", "review", "playground")}  # investing.start(kind)
+        known = "|".join(a["jobs"] for a in agent_roster._AGENTS if a["jobs"])
+        patterns = known.split("|")
+        # f"investing_{kind}" leaves the prefix "investing_": covered if a known name starts with it.
+        missing = sorted(n for n in names if not agent_roster._matches(n, known)
+                         and not (n.endswith("_") and any(p.startswith(n) for p in patterns)))
+        self.assertEqual(missing, [], "add these to _AGENTS in brain/agent_roster.py")
+        self.assertIn("email_triage", names)
+
+
 if __name__ == "__main__":
     unittest.main()

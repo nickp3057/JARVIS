@@ -495,7 +495,16 @@ in `subagents.jobs_snapshot()`). The companion's **Agents** view
 (`Views/AgentMap.swift`) draws them around JARVIS's orb; a working agent's link
 carries a moving dot, an off one is dimmed and dashed; tap for details. Opened
 from the iPad Room menu and the phone's Memory tab toolbar, next to Link map.
-New subagents must be added to `_AGENTS` in `brain/agent_roster.py`.
+Each agent has a `kind`: **subagent** (`brain/subagents.py`: own instructions
+and tools, works in steps: email sorter, portfolio advisor, crash watch,
+playground trader) or **helper** (one model call, no tools: memory keeper,
+study coach). The map shows subagents with a solid ring and helpers with a
+smaller dashed one, in separate list sections. **The map is fluid**: any
+subagent job or spec that runs without an `_AGENTS` entry still appears
+(`new:<name>`, sparkles icon, named after its job), and the app draws whatever
+Core lists, so no app update is needed. Give new subagents a proper `_AGENTS`
+entry in `brain/agent_roster.py` (name, kind, icon, description, schedule);
+`tests/test_agent_roster.py` fails until every subagent name in the code has one.
 
 ### Household maintenance
 - `log_maintenance(name|task_id, note?, completed_on?)` — "I rotated the
@@ -1004,6 +1013,7 @@ EMAIL_UNSUB_NOTE=           # vault-relative note path; default Jarvis Memory/Em
 
 ## Recently Shipped
 
+- **5.96 / build 239 (2026-11-09): Agents map labels and auto-discovery.** Each agent is a `subagent` (own tools, works in steps) or a `helper` (one AI call): solid vs. dashed ring, separate list sections, explained in the detail card. Unknown subagent jobs/specs appear on the map by themselves the first time they run, and a test fails until every subagent in the code has a proper roster entry. Not deployed.
 - **5.95 / build 238 (2026-11-09): holdings Schwab's API misses.** Nick's app showed SPCX $51.87 and $0.26 cash in account 1058 while the Trader API still reported $50.25 cash, no SPCX and no order or trade in 10 days. New tool `record_holding(symbol, value_now, cash_used)` (voice-locked): `investing.main_account()` adds the holding at live prices and takes its cost out of cash, and the entry drops out by itself once the API lists the symbol. Not deployed.
 - **5.94 / build 237 (2026-11-09): JARVIS stops agreeing with Schwab-contradicting claims.** Nick said his $50 cash was already in SpaceX and JARVIS agreed ("the $50.25 is sitting in SPCX"), but Schwab showed one account (...1058), $50.25 cash available, no SPCX, no orders or trades in 10 days. `investing_status` now says how many accounts Schwab shares and whether any orders are open, and its tool description tells the model to report what Schwab shows and the likely reasons instead of agreeing. Not deployed.
 - **5.93 / build 236 (2026-11-09): investing fixes from the first live run.** The first weight suggestion added Amazon (Nick doesn't own it) and dropped SpaceX as "not tradeable" (it is; Nick bought $50 on 11-08). Agents now get Nick's notes and open Schwab orders, the prompt carries his facts, and the suggestion re-runs once (v2). Schwab streamer: the retry delay only resets after real quotes arrive, so a refused login backs off to 5 min instead of retrying every 16 s (seen after the 12:40 restart). Not deployed.

@@ -106,6 +106,8 @@ def _get(block: Any, key: str, default: Any = None) -> Any:
 
 def run(spec: SubagentSpec, task: str, *, client: Any = None) -> SubagentResult:
     """Run one subagent to completion: model -> tools -> model ... -> text."""
+    with _lock:
+        _specs_seen[spec.name] = time.time()  # so a brand-new subagent shows on the Agents map
     client = client if client is not None else _client()
     if client is None:
         return SubagentResult(False, "", 0, error="No Anthropic API key, so no subagents.")
@@ -182,6 +184,7 @@ _runtime: Any = None
 _jobs: dict[str, Job] = {}
 _history: list[Job] = []
 _by_name: dict[str, list[Job]] = {}  # the last few runs of each job, for the Agents map
+_specs_seen: dict[str, float] = {}  # subagent spec name -> last run, for the Agents map
 _lock = threading.Lock()
 
 
@@ -257,6 +260,11 @@ def jobs_snapshot() -> list[dict[str, Any]]:
              "finished_at": j.finished_at, "summary": j.summary} for j in jobs]
 
 
+def specs_seen() -> dict[str, float]:
+    with _lock:
+        return dict(_specs_seen)
+
+
 def describe_jobs() -> str:
     with _lock:
         running = [j for j in _jobs.values() if j.state == "running"]
@@ -278,4 +286,5 @@ def reset_for_tests() -> None:
         _jobs.clear()
         _history.clear()
         _by_name.clear()
+        _specs_seen.clear()
     _runtime = None

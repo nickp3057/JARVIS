@@ -15,20 +15,41 @@ struct AgentRoster: Decodable {
         let needsYou: Int
         let task: String?
         let recent: [Run]
+        /// "subagent" (own tools, several steps) or "helper" (one quick AI call).
+        let kind: String
+
+        var isHelper: Bool { kind == "helper" }
 
         enum CodingKeys: String, CodingKey {
-            case id, name, role, symbol, schedule, state, note, task, recent
+            case id, name, role, symbol, schedule, state, note, task, recent, kind
             case needsYou = "needs_you"
+        }
+
+        init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            id = try c.decode(String.self, forKey: .id)
+            name = try c.decode(String.self, forKey: .name)
+            role = try c.decode(String.self, forKey: .role)
+            symbol = try c.decode(String.self, forKey: .symbol)
+            schedule = try c.decode(String.self, forKey: .schedule)
+            state = try c.decode(String.self, forKey: .state)
+            note = try c.decode(String.self, forKey: .note)
+            needsYou = try c.decode(Int.self, forKey: .needsYou)
+            task = try c.decodeIfPresent(String.self, forKey: .task)
+            recent = try c.decode([Run].self, forKey: .recent)
+            kind = try c.decodeIfPresent(String.self, forKey: .kind) ?? "subagent"
         }
     }
     let head: Head
     let agents: [Agent]
 }
 
-/// JARVIS in the middle, the agents he hands work to around him. A link
-/// carries a moving dot while that agent is working; an agent that's off is
-/// dimmed with a dashed link. Tap one to read what it does and what it last
-/// did. Refreshes every few seconds while open.
+/// JARVIS in the middle, the agents he hands work to around him. Subagents
+/// (own tools, several steps) have a solid ring; helpers (one quick AI call)
+/// a smaller dashed one. A link carries a moving dot while that agent is
+/// working; an agent that's off is dimmed with a dashed link. Tap one to read
+/// what it does and what it last did. Draws whatever Core lists, so a new
+/// agent appears without an app update. Refreshes every few seconds.
 struct AgentMapView: View {
     @EnvironmentObject private var settings: AppSettings
     @Environment(\.dismiss) private var dismiss
@@ -76,7 +97,10 @@ struct AgentMapView: View {
         .task { await poll() }
     }
 
-    private var agents: [AgentRoster.Agent] { roster?.agents ?? [] }
+    private var agents: [AgentRoster.Agent] {
+        let all = roster?.agents ?? []
+        return all.filter { !$0.isHelper } + all.filter(\.isHelper)
+    }
     private var workingCount: Int { agents.filter { $0.state == "running" }.count }
 
     private var headline: String {
@@ -145,16 +169,18 @@ struct AgentMapView: View {
         let running = agent.state == "running"
         let off = agent.state == "off"
         let chosen = selected == agent.id
+        let ring = JarvisTheme.cyan.opacity(off ? 0.2 : running || chosen ? 0.95 : 0.45)
+        let side: CGFloat = agent.isHelper ? 44 : 56
         return VStack(spacing: 6) {
             ZStack(alignment: .topTrailing) {
                 ZStack {
-                    Circle().fill(JarvisTheme.cyan.opacity(off ? 0.04 : running || chosen ? 0.30 : 0.12))
-                    Circle().strokeBorder(JarvisTheme.cyan.opacity(off ? 0.2 : running || chosen ? 0.95 : 0.45), lineWidth: 1.5)
+                    Circle().fill(JarvisTheme.cyan.opacity(off ? 0.04 : running || chosen ? 0.30 : agent.isHelper ? 0.06 : 0.12))
+                    Circle().strokeBorder(ring, style: StrokeStyle(lineWidth: 1.5, dash: agent.isHelper ? [3, 3] : []))
                     Image(systemName: agent.symbol)
-                        .font(.system(size: 21, weight: .medium))
+                        .font(.system(size: agent.isHelper ? 17 : 21, weight: .medium))
                         .foregroundStyle(off ? Color.secondary : running ? .white : JarvisTheme.cyan)
                 }
-                .frame(width: 56, height: 56)
+                .frame(width: side, height: side)
                 if agent.needsYou > 0 {
                     Text("\(agent.needsYou)")
                         .font(.caption2.weight(.bold))
@@ -166,9 +192,12 @@ struct AgentMapView: View {
                 }
             }
             Text(agent.name).font(.caption.weight(.semibold)).foregroundStyle(off ? .tertiary : .secondary).fixedSize()
+            Text(agent.isHelper ? "helper" : "subagent")
+                .font(.system(size: 9, weight: .semibold)).textCase(.uppercase).tracking(1)
+                .foregroundStyle(.tertiary)
         }
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(agent.name), \(running ? "working" : off ? "off" : "idle")")
+        .accessibilityLabel("\(agent.name), \(agent.isHelper ? "helper" : "subagent"), \(running ? "working" : off ? "off" : "idle")")
     }
 
     // MARK: Detail card
@@ -188,19 +217,27 @@ struct AgentMapView: View {
                     Spacer()
                     Text("Tap an agent").font(.caption).foregroundStyle(.secondary)
                 }
-                ForEach(agents) { agent in
-                    HStack(spacing: 8) {
-                        Image(systemName: agent.symbol).frame(width: 20).foregroundStyle(JarvisTheme.cyan)
-                        Text(agent.name).font(.footnote.weight(.semibold))
-                        Text(status(agent)).font(.footnote).foregroundStyle(.secondary).lineLimit(1)
-                        Spacer(minLength: 0)
-                    }
-                }
+                section("Subagents · own tools, work in steps", agents.filter { !$0.isHelper })
+                section("Helpers · one quick AI call", agents.filter(\.isHelper))
             }
         }
         .frame(maxWidth: .infinity, minHeight: 150, alignment: .topLeading)
         .padding(16)
         .jarvisSurface(in: .rect(cornerRadius: 20))
+    }
+
+    @ViewBuilder private func section(_ title: String, _ list: [AgentRoster.Agent]) -> some View {
+        if !list.isEmpty {
+            Text(title).font(.caption2.weight(.semibold)).textCase(.uppercase).foregroundStyle(.tertiary).padding(.top, 4)
+            ForEach(list) { agent in
+                HStack(spacing: 8) {
+                    Image(systemName: agent.symbol).frame(width: 20).foregroundStyle(JarvisTheme.cyan)
+                    Text(agent.name).font(.footnote.weight(.semibold))
+                    Text(status(agent)).font(.footnote).foregroundStyle(.secondary).lineLimit(1)
+                    Spacer(minLength: 0)
+                }
+            }
+        }
     }
 
     private func status(_ agent: AgentRoster.Agent) -> String {
@@ -222,6 +259,8 @@ struct AgentMapView: View {
                     .foregroundStyle(.secondary)
                     .accessibilityLabel("Close")
             }
+            Text(agent.isHelper ? "Helper: one quick AI call, no tools." : "Subagent: its own tools, works through steps on its own.")
+                .font(.caption.weight(.semibold)).foregroundStyle(.secondary)
             Text(agent.role).font(.subheadline)
             Text("\(agent.schedule) · \(agent.task ?? agent.state.capitalized)").font(.caption).foregroundStyle(.secondary)
             if !agent.note.isEmpty { Text(agent.note).font(.caption).foregroundStyle(.secondary) }

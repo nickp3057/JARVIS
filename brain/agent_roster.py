@@ -1,13 +1,21 @@
 """Who works for JARVIS: the agent roster behind the companion's Agents map.
 
 JARVIS (the conversation agent, ``brain/agent.py``) is the head. Everything
-else that thinks with the model outside a conversation turn reports to him:
-the memory keeper, the study coach, and the subagents (``brain/subagents.py``)
-such as the email sorter and the investing agents. ``roster()`` describes
-each one: what it does, when it runs, whether it's on, and what it last did
-(from the subagent job history), for ``GET /api/agents``.
+else that thinks with the model outside a conversation turn reports to him,
+in two kinds (``kind``):
 
-When you add a subagent, add it to ``_AGENTS`` so it appears on the map.
+- ``subagent``: a real agent (``brain/subagents.py``): its own instructions
+  and tools, several steps on its own (email sorter, investing agents);
+- ``helper``: a single model call with no tools (memory keeper, study coach).
+
+``roster()`` describes each one: what it does, when it runs, whether it's on,
+and what it last did (from the subagent job history), for ``GET /api/agents``.
+
+The map is fluid: a subagent job or spec name that matches nothing in
+``_AGENTS`` still appears (as a plain "subagent" named after its job), so a new
+agent shows up the first time it runs. Give it a proper ``_AGENTS`` entry for a
+name, icon and description; ``tests/test_agent_roster.py`` fails until every
+subagent name in the code is covered.
 """
 
 from __future__ import annotations
@@ -48,27 +56,27 @@ def _investing_needs() -> int:
     return len(investing.pending_proposals())
 
 
-# id, name, role, SF Symbol, schedule, job-name prefix, state() -> (on, note), needs_you() -> count
+# id, kind, name, role, SF Symbol, schedule, job/spec-name prefixes ("a|b"), state() -> (on, note), needs_you() -> count
 _AGENTS: list[dict[str, Any]] = [
-    {"id": "memory", "name": "Memory keeper", "symbol": "brain.head.profile",
+    {"id": "memory", "kind": "helper", "name": "Memory keeper", "symbol": "brain.head.profile",
      "role": "After every conversation, saves anything worth remembering about you.",
      "schedule": "After every conversation", "jobs": "",
      "state": lambda: (_on("MEMORY_AUTO_EXTRACT"), "" if _on("MEMORY_AUTO_EXTRACT") else "Switched off.")},
-    {"id": "study", "name": "Study coach", "symbol": "graduationcap",
+    {"id": "study", "kind": "helper", "name": "Study coach", "symbol": "graduationcap",
      "role": "Writes the daily countdown to your quizzes and exams.",
      "schedule": "Daily", "jobs": "",
      "state": lambda: (_on("STUDY_BRIEF_ENABLED"), "" if _on("STUDY_BRIEF_ENABLED") else "Switched off.")},
-    {"id": "email", "name": "Email sorter", "symbol": "envelope.badge",
+    {"id": "email", "kind": "subagent", "name": "Email sorter", "symbol": "envelope.badge",
      "role": "Trashes junk, files missionary letters, keeps anything important.",
      "schedule": "Every 15 minutes", "jobs": "email_triage", "state": _email_state},
-    {"id": "advisor", "name": "Portfolio advisor", "symbol": "chart.pie",
+    {"id": "advisor", "kind": "subagent", "name": "Portfolio advisor", "symbol": "chart.pie",
      "role": "Keeps your main Schwab account on its target weights and proposes trades for your OK.",
      "schedule": "Each market day, 10:30 AM ET", "jobs": "investing_review|investing_suggest",
      "state": _investing_state, "needs": _investing_needs},
-    {"id": "crash", "name": "Crash watch", "symbol": "exclamationmark.triangle",
+    {"id": "crash", "kind": "subagent", "name": "Crash watch", "symbol": "exclamationmark.triangle",
      "role": "Checks any holding that drops 8% in a day: market dip or real bad news?",
-     "schedule": "Market hours, every 5 minutes", "jobs": "investing_drop_", "state": _investing_state},
-    {"id": "playground", "name": "Playground trader", "symbol": "dice",
+     "schedule": "Market hours, every 5 minutes", "jobs": "investing_drop_|investing_emergency", "state": _investing_state},
+    {"id": "playground", "kind": "subagent", "name": "Playground trader", "symbol": "dice",
      "role": "Trades its own small account however it likes; scored against plain VOO.",
      "schedule": "Mondays, 10:30 AM ET", "jobs": "investing_playground", "state": _investing_state},
 ]
@@ -78,12 +86,28 @@ def _matches(job_name: str, pattern: str) -> bool:
     return bool(pattern) and any(job_name.startswith(p) for p in pattern.split("|"))
 
 
+def _discovered(jobs: list[dict[str, Any]], specs: dict[str, float]) -> list[dict[str, Any]]:
+    """Subagents that ran but have no ``_AGENTS`` entry yet: one per job/spec name."""
+    known = "|".join(a["jobs"] for a in _AGENTS if a["jobs"])
+    names: dict[str, str] = {}
+    for job in jobs:
+        if not _matches(job["name"], known):
+            names.setdefault(job["name"], job["title"])
+    for name in specs:
+        if not _matches(name, known):
+            names.setdefault(name, name.replace("_", " ").capitalize())
+    return [{"id": f"new:{name}", "kind": "subagent", "name": title[:28], "symbol": "sparkles",
+             "role": "A new background agent JARVIS has started using (not described yet).",
+             "schedule": "As needed", "jobs": name, "state": lambda: (True, "")}
+            for name, title in sorted(names.items())]
+
+
 def roster() -> dict[str, Any]:
     from brain import model_select, subagents
 
     jobs = subagents.jobs_snapshot()
     agents = []
-    for spec in _AGENTS:
+    for spec in _AGENTS + _discovered(jobs, subagents.specs_seen()):
         try:
             on, note = spec["state"]()
         except Exception as exc:  # noqa: BLE001 - one broken check never hides the map
@@ -97,7 +121,8 @@ def roster() -> dict[str, Any]:
         except Exception:  # noqa: BLE001
             waiting = 0
         agents.append({
-            "id": spec["id"], "name": spec["name"], "role": spec["role"], "symbol": spec["symbol"],
+            "id": spec["id"], "kind": spec["kind"], "name": spec["name"], "role": spec["role"],
+            "symbol": spec["symbol"],
             "schedule": spec["schedule"], "boss": "jarvis",
             "state": "running" if running else ("idle" if on else "off"),
             "note": note, "needs_you": waiting,
