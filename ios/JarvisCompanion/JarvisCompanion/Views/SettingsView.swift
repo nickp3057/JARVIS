@@ -16,6 +16,7 @@ struct SettingsView: View {
     @State private var notificationStatus = "Checking permission…"
     @State private var permissionUndetermined = false
     @State private var showingKnowledge = false
+    @State private var showingAgents = false
     @ObservedObject private var push = PushRegistrar.shared
 
     var body: some View {
@@ -66,6 +67,19 @@ struct SettingsView: View {
                         }
                     }
                     if !RootView.isPad {
+                        CockpitPanel("Agents", symbol: "person.3.sequence") {
+                            Button { showingAgents = true } label: {
+                                HStack {
+                                    Text("Who works for JARVIS").foregroundStyle(.primary)
+                                    Spacer()
+                                    Image(systemName: "chevron.right").foregroundStyle(.secondary)
+                                }
+                                .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                            Text("JARVIS and his subagents and helpers: what each does, what it's doing now, what's waiting for you.")
+                                .font(.footnote).foregroundStyle(.secondary)
+                        }
                         CockpitPanel("Memory", symbol: "brain") {
                             Button { showingKnowledge = true } label: {
                                 HStack {
@@ -157,6 +171,7 @@ struct SettingsView: View {
             }
             .scrollDismissesKeyboard(.interactively)
             .sheet(isPresented: $showingKnowledge) { KnowledgeView() }
+            .fullScreenCover(isPresented: $showingAgents) { AgentMapView() }
             .background { JarvisBackdrop() }
             .navigationTitle("Settings").navigationBarTitleDisplayMode(.inline)
             .toolbar {

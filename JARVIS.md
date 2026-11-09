@@ -494,7 +494,7 @@ it's doing now, what's waiting for Nick, and its last 5 runs (per-job history
 in `subagents.jobs_snapshot()`). The companion's **Agents** view
 (`Views/AgentMap.swift`) draws them around JARVIS's orb; a working agent's link
 carries a moving dot, an off one is dimmed and dashed; tap for details. Opened
-from the iPad Room menu and the phone's Memory tab toolbar, next to Link map.
+from the iPad Room menu (and the iPad Memory tab toolbar, next to Link map) and, on the iPhone, Settings > Agents (the phone has no Memory tab; its Memory is a Settings panel too).
 Each agent has a `kind`: **subagent** (`brain/subagents.py`: own instructions
 and tools, works in steps: email sorter, portfolio advisor, crash watch,
 playground trader) or **helper** (one model call, no tools: memory keeper,
@@ -1013,6 +1013,7 @@ EMAIL_UNSUB_NOTE=           # vault-relative note path; default Jarvis Memory/Em
 
 ## Recently Shipped
 
+- **5.97 / build 240 (2026-11-09): Agents on the iPhone.** The phone has no Memory tab (Memory is a Settings panel there), so the Agents map gets its own Settings panel, "Who works for JARVIS". Installed on iPhone and iPad.
 - **5.96 / build 239 (2026-11-09): Agents map labels and auto-discovery.** Each agent is a `subagent` (own tools, works in steps) or a `helper` (one AI call): solid vs. dashed ring, separate list sections, explained in the detail card. Unknown subagent jobs/specs appear on the map by themselves the first time they run, and a test fails until every subagent in the code has a proper roster entry. Not deployed.
 - **5.95 / build 238 (2026-11-09): holdings Schwab's API misses.** Nick's app showed SPCX $51.87 and $0.26 cash in account 1058 while the Trader API still reported $50.25 cash, no SPCX and no order or trade in 10 days. New tool `record_holding(symbol, value_now, cash_used)` (voice-locked): `investing.main_account()` adds the holding at live prices and takes its cost out of cash, and the entry drops out by itself once the API lists the symbol. Not deployed.
 - **5.94 / build 237 (2026-11-09): JARVIS stops agreeing with Schwab-contradicting claims.** Nick said his $50 cash was already in SpaceX and JARVIS agreed ("the $50.25 is sitting in SPCX"), but Schwab showed one account (...1058), $50.25 cash available, no SPCX, no orders or trades in 10 days. `investing_status` now says how many accounts Schwab shares and whether any orders are open, and its tool description tells the model to report what Schwab shows and the likely reasons instead of agreeing. Not deployed.
