@@ -98,6 +98,7 @@ def _empty() -> dict[str, Any]:
         "drop_checked": {},       # symbol -> ET date its drop was checked
         "playground": None,       # paper account, see _new_playground
         "notes": [],              # facts from Nick the agents must trust: {"at", "note"}
+        "manual": {},             # holdings Schwab's API misses: symbol -> {"qty", "cash_used", "at"}
     }
 
 
@@ -140,14 +141,60 @@ def main_account() -> dict[str, Any] | None:
         return None
     wanted = os.getenv("INVESTING_MAIN_ACCOUNT", "").strip()[-4:]
     if wanted and wanted in accounts:
-        return {**accounts[wanted], "account": wanted, "note": ""}
-    if len(accounts) == 1:
+        found = {**accounts[wanted], "account": wanted, "note": ""}
+    elif len(accounts) == 1:
         (number, acct), = accounts.items()
-        return {**acct, "account": number, "note": ""}
-    # Several accounts and no INVESTING_MAIN_ACCOUNT: pick the biggest, and say so.
-    number = max(accounts, key=lambda k: accounts[k]["value"])
-    return {**accounts[number], "account": number,
-            "note": f"Several Schwab accounts and no INVESTING_MAIN_ACCOUNT set; using ...{number}, the largest."}
+        found = {**acct, "account": number, "note": ""}
+    else:
+        # Several accounts and no INVESTING_MAIN_ACCOUNT: pick the biggest, and say so.
+        number = max(accounts, key=lambda k: accounts[k]["value"])
+        found = {**accounts[number], "account": number,
+                 "note": f"Several Schwab accounts and no INVESTING_MAIN_ACCOUNT set; using ...{number}, the largest."}
+    return _with_manual(found)
+
+
+def _with_manual(account: dict[str, Any]) -> dict[str, Any]:
+    """Fold in holdings Nick reported that Schwab's API doesn't show (2026-11-09:
+    his SPCX buy showed in the Schwab app but not the API). Each one drops out by
+    itself once the API lists that symbol."""
+    with _lock:
+        state = _load()
+        manual = state.get("manual") or {}
+        stale = [s for s in manual if s in account["positions"]]
+        for symbol in stale:
+            manual.pop(symbol)
+        if stale:
+            _save(state)
+    if not manual:
+        return account
+    account = {**account, "positions": dict(account["positions"])}
+    for symbol, held in manual.items():
+        price = _quote_one(symbol) or held.get("price", 0)
+        value = held["qty"] * price
+        account["positions"][symbol] = {"symbol": symbol, "type": "EQUITY", "quantity": held["qty"],
+                                        "value": value, "day_change": 0.0, "cost": held["cash_used"]}
+        account["cash"] = max(0.0, account["cash"] - held["cash_used"])
+        account["value"] += value - held["cash_used"]
+    account["note"] = (account["note"] + " " if account["note"] else "") + (
+        "Reported by Nick, not yet in Schwab's API: " + ", ".join(manual) + ".")
+    return account
+
+
+def record_holding(symbol: str, value_now: float, cash_used: float) -> str:
+    """Nick says he holds ``symbol`` worth ``value_now`` that cost ``cash_used``."""
+    symbol = symbol.strip().upper()
+    if not _SYMBOL.match(symbol) or value_now <= 0 or cash_used < 0:
+        return "Need a ticker, what it's worth now and what it cost, sir."
+    price = _quote_one(symbol)
+    if not price:
+        return f"I can't get a live price for {symbol}, sir, so I can't track it."
+    with _lock:
+        state = _load()
+        state["manual"][symbol] = {"qty": value_now / price, "cash_used": round(cash_used, 2),
+                                   "price": price, "at": time.time()}
+        _save(state)
+    return (f"Noted, sir: about {value_now / price:.4f} shares of {symbol} (${value_now:,.2f} now), paid for with "
+            f"${cash_used:,.2f} of the cash Schwab still reports. I'll drop this once Schwab's API shows it.")
 
 
 def allocation(account: dict[str, Any]) -> dict[str, float]:

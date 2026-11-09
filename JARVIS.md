@@ -484,6 +484,7 @@ pushes; placing orders is stage 2 (through the Schwab hub, FUTURE_SESSIONS.md).
 - `investing_run(job)` — `suggest` / `review` / `playground` now, in the background
 - `set_portfolio_targets(weights | accept_suggested)` — Nick sets or approves the weights
 - `decide_investment(id, approve)` — approve or decline a proposal
+- `record_holding(symbol, value_now, cash_used)` — a holding Nick's app shows but Schwab's API doesn't yet (state `manual`, auto-cleared when the API catches up)
 
 ### Agents map (companion) *(new 2026-11-09)*
 `GET /api/agents` (`status:read`, `brain/agent_roster.py`): JARVIS as the head
@@ -1003,6 +1004,7 @@ EMAIL_UNSUB_NOTE=           # vault-relative note path; default Jarvis Memory/Em
 
 ## Recently Shipped
 
+- **5.95 / build 238 (2026-11-09): holdings Schwab's API misses.** Nick's app showed SPCX $51.87 and $0.26 cash in account 1058 while the Trader API still reported $50.25 cash, no SPCX and no order or trade in 10 days. New tool `record_holding(symbol, value_now, cash_used)` (voice-locked): `investing.main_account()` adds the holding at live prices and takes its cost out of cash, and the entry drops out by itself once the API lists the symbol. Not deployed.
 - **5.94 / build 237 (2026-11-09): JARVIS stops agreeing with Schwab-contradicting claims.** Nick said his $50 cash was already in SpaceX and JARVIS agreed ("the $50.25 is sitting in SPCX"), but Schwab showed one account (...1058), $50.25 cash available, no SPCX, no orders or trades in 10 days. `investing_status` now says how many accounts Schwab shares and whether any orders are open, and its tool description tells the model to report what Schwab shows and the likely reasons instead of agreeing. Not deployed.
 - **5.93 / build 236 (2026-11-09): investing fixes from the first live run.** The first weight suggestion added Amazon (Nick doesn't own it) and dropped SpaceX as "not tradeable" (it is; Nick bought $50 on 11-08). Agents now get Nick's notes and open Schwab orders, the prompt carries his facts, and the suggestion re-runs once (v2). Schwab streamer: the retry delay only resets after real quotes arrive, so a refused login backs off to 5 min instead of retrying every 16 s (seen after the 12:40 restart). Not deployed.
 - **5.92 / build 235 (2026-11-09): investing agents (suggestions only) + Agents map.** `brain/investing.py`: target weights for Nick's main Schwab account, a once-off "suggest starting weights" run, a daily portfolio advisor that proposes trades for his OK, a crash watch for 8% one-day drops (his emergency rule; proposes, since orders are off) and a weekly paper-money playground scored against VOO. Subagents can use web search. `integrations/schwab.py` gains per-account holdings, `quotes`, `price_history`. New tools `investing_status`, `investing_run`, `set_portfolio_targets`, `decide_investment` (voice-locked, with `portfolio_summary`). `GET /api/agents` + the companion's Agents view (iPad Room menu, phone Memory tab): JARVIS in the middle, his agents around him. Tests in `tests/test_investing.py`, `tests/test_agent_roster.py`. Not deployed.

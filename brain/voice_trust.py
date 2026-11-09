@@ -57,7 +57,7 @@ LOCKED_TOOLS = frozenset({
     # Nick's email: reading what was sorted, trashing, restoring
     "sort_inbox", "email_triage_report", "email_unsubscribe_list", "email_unsubscribed", "restore_email",
     # Nick's money: holdings, targets, approving trades
-    "portfolio_summary", "investing_status", "investing_run", "set_portfolio_targets", "decide_investment",
+    "portfolio_summary", "investing_status", "investing_run", "set_portfolio_targets", "decide_investment", "record_holding",
 })
 
 _current: contextvars.ContextVar[Speaker | None] = contextvars.ContextVar("jarvis_speaker", default=None)

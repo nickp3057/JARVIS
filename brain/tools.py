@@ -774,6 +774,15 @@ def _tool_investing_status(_: dict[str, Any]) -> str:
     return investing.describe()
 
 
+def _tool_record_holding(args: dict[str, Any]) -> str:
+    from brain import investing
+    try:
+        return investing.record_holding(str(args.get("symbol", "")), float(args.get("value_now") or 0),
+                                        float(args.get("cash_used") or 0))
+    except (TypeError, ValueError):
+        return "Tool error: value_now and cash_used must be numbers."
+
+
 def _tool_decide_investment(args: dict[str, Any]) -> str:
     from brain import investing
     return investing.decide(str(args.get("id", "")), bool(args.get("approve")))
@@ -2117,6 +2126,20 @@ _CUSTOM_TOOLS: list[dict[str, Any]] = [
         },
     },
     {
+        "name": "record_holding",
+        "description": (
+            "Nick holds something Schwab's API doesn't show yet (his app shows it, investing_status "
+            "doesn't). Record it so the investing agents count it and stop treating that cash as "
+            "spendable. value_now = what it's worth in his app; cash_used = what he paid."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {"symbol": {"type": "string"}, "value_now": {"type": "number"},
+                           "cash_used": {"type": "number"}},
+            "required": ["symbol", "value_now", "cash_used"],
+        },
+    },
+    {
         "name": "decide_investment",
         "description": "Nick approves or declines one investing proposal by id (e.g. P3).",
         "input_schema": {
@@ -2658,6 +2681,7 @@ _DISPATCH: dict[str, Callable[[dict[str, Any]], str]] = {
     "investing_run": _tool_investing_run,
     "set_portfolio_targets": _tool_set_portfolio_targets,
     "decide_investment": _tool_decide_investment,
+    "record_holding": _tool_record_holding,
     "tv_power": _tool_tv_power,
     "kill_camera": _tool_kill_camera,
     "barn_door_protocol": _tool_barn_door_protocol,

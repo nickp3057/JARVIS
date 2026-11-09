@@ -253,3 +253,21 @@ class NotesAndOrdersTests(InvestingTestCase):
         state["suggested"]["v"] = 2
         state["runs"] = {}
         self.assertEqual(investing.due_jobs(now, state, NICK), [])
+
+
+class ManualHoldingTests(InvestingTestCase):
+    def test_reported_holding_counts_until_schwab_shows_it(self):
+        self.account["cash"] = 50.25  # what the API reported on 2026-11-09
+        with patch.object(schwab, "quotes", return_value={"SPCX": {"last": 140.0}}):
+            self.assertIn("Noted", investing.record_holding("spcx", 51.87, 50.0))
+            account = investing.main_account()
+        self.assertAlmostEqual(account["cash"], 0.25)
+        self.assertAlmostEqual(account["positions"]["SPCX"]["value"], 51.87, places=2)
+        self.assertIn("Reported by Nick", account["note"])
+        # Once the API lists it, the manual entry goes away.
+        self.account["positions"]["SPCX"] = {"symbol": "SPCX", "type": "EQUITY", "quantity": 0.37,
+                                             "value": 51.0, "day_change": 0, "cost": 50.0}
+        self.account["cash"] = 0.25
+        account = investing.main_account()
+        self.assertEqual(investing._load()["manual"], {})
+        self.assertAlmostEqual(account["cash"], 0.25)
