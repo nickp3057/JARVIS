@@ -785,7 +785,22 @@ def _tool_record_holding(args: dict[str, Any]) -> str:
 
 def _tool_decide_investment(args: dict[str, Any]) -> str:
     from brain import investing
-    return investing.decide(str(args.get("id", "")), bool(args.get("approve")))
+    return investing.decide(str(args.get("id", "")), bool(args.get("approve")),
+                            session_id=args.get("_jarvis_session_id"))
+
+
+def _tool_place_trade(args: dict[str, Any]) -> str:
+    from brain import investing, trading
+    session = args.get("_jarvis_session_id")
+    if str(args.get("id") or "").strip():
+        return investing.stage_order(str(args["id"]), session)
+    try:
+        dollars = float(args.get("dollars") or 0)
+    except (TypeError, ValueError):
+        return "Tool error: dollars must be a number."
+    if not args.get("symbol") or not args.get("side") or dollars <= 0:
+        return "Tool error: give a proposal id, or symbol + side + dollars."
+    return trading.stage(session, str(args["symbol"]), str(args["side"]).lower(), dollars)
 
 
 def _tool_set_portfolio_targets(args: dict[str, Any]) -> str:
@@ -2128,13 +2143,13 @@ _CUSTOM_TOOLS: list[dict[str, Any]] = [
         ),
         "input_schema": {"type": "object", "properties": {}},
     },
-    # --- Charles Schwab, read-only ---------------------------------------
+    # --- Charles Schwab ----------------------------------------------------
     {
         "name": "portfolio_summary",
         "description": (
             "Nick's Charles Schwab portfolio, live: total value, today's and yesterday's change, "
-            "cash, biggest movers. JARVIS doesn't place orders yet (the investing agent only proposes); "
-            "for targets, proposals or the playground use investing_status."
+            "cash, biggest movers. For targets, proposals, today's orders or the playground use "
+            "investing_status; to buy or sell, place_trade."
         ),
         "input_schema": {"type": "object", "properties": {}},
     },
@@ -2199,11 +2214,36 @@ _CUSTOM_TOOLS: list[dict[str, Any]] = [
     },
     {
         "name": "decide_investment",
-        "description": "Nick approves or declines one investing proposal by id (e.g. P3).",
+        "description": (
+            "Nick approves or declines one investing proposal by id (e.g. P3). Approving a buy/sell "
+            "also stages the real Schwab order, which still waits for his Approve button or "
+            "\"approve <code>\"; never say it's bought or sold until that reply says Schwab took it."
+        ),
         "input_schema": {
             "type": "object",
             "properties": {"id": {"type": "string"}, "approve": {"type": "boolean"}},
             "required": ["id", "approve"],
+        },
+    },
+    {
+        "name": "place_trade",
+        "description": (
+            "Stage a real Charles Schwab order in Nick's main account: an approved proposal by id "
+            "(\"place P3 and P4\": one call each), or a trade he asks for (symbol, side, dollars; "
+            "\"buy $20 of NVDA\"). Stocks and ETFs only, cash only, capped per order and per day. "
+            "It returns the exact order (shares, price, dollars) and an approval code; Nick approves "
+            "with the Approve button in chat, \"yes\" or \"approve <code>\". Nothing reaches Schwab "
+            "until then, and you cannot approve it for him. Turn vague amounts (\"buy a bunch\") "
+            "into a dollar figure by asking first."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "id": {"type": "string", "description": "An investing proposal id like P3."},
+                "symbol": {"type": "string"},
+                "side": {"type": "string", "enum": ["buy", "sell"]},
+                "dollars": {"type": "number", "description": "Dollar amount to buy or sell."},
+            },
         },
     },
     {
@@ -2778,6 +2818,7 @@ _DISPATCH: dict[str, Callable[[dict[str, Any]], str]] = {
     "investing_run": _tool_investing_run,
     "set_portfolio_targets": _tool_set_portfolio_targets,
     "decide_investment": _tool_decide_investment,
+    "place_trade": _tool_place_trade,
     "record_holding": _tool_record_holding,
     "tv_power": _tool_tv_power,
     "kill_camera": _tool_kill_camera,

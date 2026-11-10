@@ -158,6 +158,31 @@ install:
   off); the room voice still waits for the full one-sentence reply; the 134
   tool schemas are untouched (JARVIS.md "Performance debt").
 
+### Real Schwab trading + Approve/Deny buttons (2026-11-10, companion 6.6 / build 248): check
+Nick: "enable jarvis trading on my charles schwab" and "if jarvis needs
+approval, give me an approve or deny button". JARVIS.md "Trading" and
+"Approve / Deny buttons in chat". Built against fakes; no live order sent yet.
+- [ ] Deploy Core + install 6.6 on the iPhone and iPad. In chat: "place P3
+  and P4" (approved 2026-11-10: sell $27 SPCX, buy $27 VOO). Expect two cards
+  with the exact order; tap Approve on P3 first. Check the order in the
+  Schwab app and `memory/trades.json`.
+- [ ] **Fractional orders:** VOO is ~$600 a share, so P4's $27 is a
+  fractional market order. Whether Schwab's Trader API accepts fractional
+  quantity is unconfirmed; if it refuses, the reply quotes Schwab. Options
+  then: ask traderapi@schwab.com, or whole shares only (most of Nick's
+  ~$250 account can't be traded that way).
+- [ ] P4 needs P3's sale money: the buy counts open Schwab sell orders as
+  cash. If P3 fills before P4 is approved, check `cashAvailableForTrading`
+  includes the unsettled proceeds (cash account) so P4 isn't refused.
+- [ ] `account_hash` (`/trader/v1/accounts/accountNumbers`) and the order's
+  `Location` header id were written from Schwab's docs, untested live.
+- [ ] Is Nick's account cash or margin? `trade_cash` falls back to
+  `cashBalance` when there's no `cashAvailableForTrading`.
+- [ ] Buttons: every confirm-gate proposal (scenes, stack fixes, media
+  requests) now shows a card too. Tap Deny once to see "Denied: …".
+- Next: Approve/Deny on push notifications (WAKE_UP-style actions) for
+  proposals from the background agents, and the playground's real account.
+
 ### Investing agents + Agents map (2026-11-09, 5.92 / build 235): check
 Plan agreed with Nick 2026-11-09 (JARVIS.md "Investing"). Suggestions only:
 **no real orders** until Nick says "go full crazy mode".
@@ -705,7 +730,7 @@ or a much newer CPU), bigger Whisper models, or running cameras/vision
   (3 last), cash fields for Nick's account type, the in-app login
   catching the `https://127.0.0.1:8182` redirect. The `tailscale serve`
   route for `/api/schwab/callback` set up on 2026-10-27 is unused now.
-- [ ] **Schwab trading** (Nick wants it, 2026-10-27; parked until the rest
+- [x] **Schwab trading** (shipped 2026-11-10 as `brain/trading.py`, see JARVIS.md "Trading"; Nick wanted it 2026-10-27, parked until the rest
   feels solid: "too janky to let it take my money"): "if NVIDIA hits X,
   sell; at 170, buy". Place real limit/stop orders at Schwab (they run even
   if Core is down), not price-watching in JARVIS. Agreed guardrails: every

@@ -36,6 +36,10 @@ final class ChatViewModel: ObservableObject {
     @Published private(set) var toolStatus: String?
     private var statusBuffer = ""
     @Published private(set) var connectionState: ConnectionState = .unconfigured
+    /// What the current chat is waiting on Nick for (orders, fixes), shown as
+    /// Approve/Deny buttons under the last reply.
+    @Published private(set) var approvals: [PendingApproval] = []
+    private var approvalsCheck: Task<Void, Never>?
     @Published var draft = ""
     @Published var historyError: String?
 
@@ -132,6 +136,7 @@ final class ChatViewModel: ObservableObject {
             }
         }
         refreshConnectionStatus()
+        refreshApprovals()
     }
 
     func refreshConnectionStatus() {
@@ -261,6 +266,7 @@ final class ChatViewModel: ObservableObject {
         activeConversationID = conversation.id
         messages = []
         draft = ""
+        approvals = []
         persist()
     }
 
@@ -274,6 +280,7 @@ final class ChatViewModel: ObservableObject {
         draft = conversation.draft ?? ""
         recoverRetryState()
         persist()
+        refreshApprovals()
     }
 
     func renameConversation(_ id: UUID, to title: String) {
@@ -359,6 +366,32 @@ final class ChatViewModel: ObservableObject {
         }
     }
 
+    /// Fetch the open approvals for this chat (Core forgets them after 10 minutes).
+    func refreshApprovals() {
+        approvalsCheck?.cancel()
+        guard settings.isConfigured, let session = activeConversation?.serverSessionID else {
+            approvals = []
+            return
+        }
+        let conversation = activeConversationID
+        approvalsCheck = Task { [weak self] in
+            guard let self else { return }
+            let found = (try? await makeClient().approvals(sessionID: session)) ?? []
+            guard !Task.isCancelled, conversation == activeConversationID else { return }
+            approvals = found
+        }
+    }
+
+    /// An Approve or Deny tap: sent as Nick's own chat message, so Core's
+    /// human-only gate decides it exactly as if he'd typed it.
+    func decide(_ approval: PendingApproval, approve: Bool) {
+        guard !isAwaitingReply else { return }
+        approvals.removeAll { $0.code == approval.code }
+        let text = "\(approve ? "approve" : "deny") \(approval.code)"
+        append(ChatMessage(role: .user, text: text, requestID: UUID().uuidString))
+        request(text)
+    }
+
     func send() {
         let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty, !isAwaitingReply else { return }
@@ -411,6 +444,7 @@ final class ChatViewModel: ObservableObject {
         // Includes authoritative receipt/message IDs and recovers a turn whose
         // socket disappeared after its tools had already started.
         refreshConnectionStatus()
+        refreshApprovals()
     }
 
     func retry() {
@@ -552,6 +586,7 @@ final class ChatViewModel: ObservableObject {
             generation = nil
             inFlight = nil
             persist()
+            refreshApprovals()
         }
     }
 

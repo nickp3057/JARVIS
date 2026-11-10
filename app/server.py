@@ -523,6 +523,16 @@ def alert_report(alert_id: int, request: IncidentReportRequest, _: None = Depend
         raise HTTPException(status_code=500, detail=f"Could not build incident report: {exc}") from exc
 
 
+@app.get("/api/approvals")
+def approvals(session_id: str, _: None = Depends(authorize)) -> dict[str, object]:
+    """What this chat session is waiting on Nick for (orders, fixes, scenes),
+    for the Approve/Deny buttons under JARVIS's reply. A tap sends
+    "approve <code>" / "deny <code>" through /chat/stream, the same
+    human-only gate as typing it, so this route only lists."""
+    from brain import confirm_gate
+    return {"approvals": confirm_gate.pending(session_id)}
+
+
 @app.get("/api/repairs")
 def repairs(_: None = Depends(authorize)) -> dict[str, object]:
     """Pending and recent self-repair proposals for the Home tab's Repairs card."""

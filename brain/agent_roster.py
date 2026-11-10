@@ -47,7 +47,10 @@ def _investing_state() -> tuple[bool, str]:
         return False, "Switched off (INVESTING_ENABLED)."
     if not schwab.configured():
         return False, "Schwab isn't connected."
-    return True, "Suggestions only: no real orders yet."
+    from brain import trading
+    if trading.enabled():
+        return True, "Proposes trades; real orders only after Nick taps Approve."
+    return True, "Suggestions only: real orders are switched off (TRADING_ENABLED)."
 
 
 def _investing_needs() -> int:

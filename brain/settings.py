@@ -194,6 +194,24 @@ SETTINGS_SCHEMA: dict[str, dict[str, Any]] = {
         "description": "Price decrease percentage that triggers an alert.",
     },
 
+    # --- Real Schwab orders (brain/trading.py) ---
+    "TRADING_ENABLED": {
+        "type": "bool",
+        "description": "Kill switch for real Schwab orders. Off: JARVIS only proposes. Every order still needs Nick's Approve.",
+    },
+    "TRADING_MAX_ORDER_USD": {
+        "type": "float",
+        "min": 1,
+        "max": 1000,
+        "description": "Largest single Schwab order JARVIS may stage, in dollars.",
+    },
+    "TRADING_MAX_DAY_USD": {
+        "type": "float",
+        "min": 1,
+        "max": 5000,
+        "description": "Most money JARVIS's Schwab orders may move in one market day (buys and sells together).",
+    },
+
     # --- Email triage subagent ---
     "EMAIL_TRIAGE_ENABLED": {
         "type": "bool",

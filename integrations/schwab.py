@@ -1,4 +1,4 @@
-"""Charles Schwab, read-only: Nick's portfolio, live.
+"""Charles Schwab: Nick's portfolio, live, and orders he approves.
 
 JARVIS's own Schwab developer app (``SCHWAB_APP_KEY`` / ``SCHWAB_APP_SECRET``,
 callback ``SCHWAB_CALLBACK_URL``, registered as ``https://127.0.0.1:8182``).
@@ -16,8 +16,10 @@ Live: holdings and cash come from the accounts endpoint every
 Schwab's streamer (LEVELONE_EQUITIES, a websocket) the moment they change,
 so the value and today's change move tick by tick. Yesterday's change uses
 daily candles for today's holdings, once a day. ``quotes`` / ``price_history``
-look up any symbol for the investing agent (brain/investing.py). Nothing here
-can trade.
+look up any symbol for the investing agent (brain/investing.py).
+``place_order`` sends one order, but only ``brain/trading.py`` calls it: that
+module holds the rules (TRADING_ENABLED, caps, cash only, stocks/ETFs) and
+every order waits for Nick's Approve tap or "approve <code>".
 
 Borrowed login (the normal setup since 2026-11-08): Schwab keeps one live
 login per Schwab user, so JARVIS and Nick's Coopa Trada bot logging in
@@ -296,12 +298,16 @@ def _get(path: str, params: dict[str, Any] | None = None) -> Any:
 
 def _parse_accounts(raw: list[dict[str, Any]]) -> dict[str, Any]:
     """Every account rolled into one: cash, value and positions by symbol."""
-    cash = value = 0.0
+    cash = value = trade_cash = 0.0
     positions: dict[str, dict[str, Any]] = {}
     for entry in raw:
         account = entry.get("securitiesAccount", {})
         balances = account.get("currentBalances", {})
         cash += float(balances.get("cashBalance", 0) or 0) + float(balances.get("moneyMarketFund", 0) or 0)
+        # What a buy may spend without borrowing: a cash account's
+        # cashAvailableForTrading; a margin account's plain cash, never its
+        # buying power (brain/trading.py is cash-only).
+        trade_cash += float(balances.get("cashAvailableForTrading", balances.get("cashBalance", 0)) or 0)
         value += float(balances.get("liquidationValue", 0) or 0)
         for p in account.get("positions", []):
             instrument = p.get("instrument", {})
@@ -316,7 +322,7 @@ def _parse_accounts(raw: list[dict[str, Any]]) -> dict[str, Any]:
             held["value"] += float(p.get("marketValue", 0) or 0)
             held["day_change"] += float(p.get("currentDayProfitLoss", 0) or 0)
             held["cost"] += float(p.get("averagePrice", 0) or 0) * quantity
-    return {"cash": cash, "value": value, "positions": positions}
+    return {"cash": cash, "value": value, "positions": positions, "trade_cash": trade_cash}
 
 
 def refresh_accounts() -> None:
@@ -334,7 +340,7 @@ def refresh_accounts() -> None:
 def accounts_by_number() -> dict[str, dict[str, Any]]:
     """Last four digits -> {"cash", "value", "positions"} as last fetched."""
     with _lock:
-        return {k: {"cash": v["cash"], "value": v["value"],
+        return {k: {"cash": v["cash"], "value": v["value"], "trade_cash": v.get("trade_cash", v["cash"]),
                     "positions": {s: dict(p) for s, p in v["positions"].items()}}
                 for k, v in (_state.get("by_account") or {}).items()}
 
@@ -351,11 +357,41 @@ def quotes(symbols: list[str]) -> dict[str, dict[str, Any]]:
         last = quote.get("lastPrice") or quote.get("mark") or quote.get("closePrice")
         if last:
             out[symbol] = {"last": float(last), "change_pct": quote.get("netPercentChange"),
-                           "high52": quote.get("52WeekHigh"), "low52": quote.get("52WeekLow")}
+                           "high52": quote.get("52WeekHigh"), "low52": quote.get("52WeekLow"),
+                           # EQUITY covers stocks and ETFs; brain/trading.py trades nothing else.
+                           "type": (body or {}).get("assetMainType", "")}
     return out
 
 
 _DONE_ORDERS = {"FILLED", "CANCELED", "REJECTED", "EXPIRED", "REPLACED"}
+
+
+# --- Orders (brain/trading.py decides what and when; this only talks to Schwab) --
+
+def account_hash(last4: str) -> str:
+    """Schwab's order routes take the account's hash, not its number."""
+    for entry in _get("/trader/v1/accounts/accountNumbers") or []:
+        if str(entry.get("accountNumber", ""))[-4:] == last4:
+            return str(entry["hashValue"])
+    raise RuntimeError(f"Schwab has no account ending {last4}.")
+
+
+def place_order(last4: str, order: dict[str, Any]) -> str:
+    """Send one order; returns Schwab's order id (from the Location header)."""
+    resp = requests.post(f"{_API}/trader/v1/accounts/{account_hash(last4)}/orders", json=order, timeout=20,
+                         headers={"Authorization": f"Bearer {access_token()}", "Accept": "application/json"})
+    if resp.status_code not in (200, 201):
+        raise RuntimeError(f"Schwab refused the order: HTTP {resp.status_code} {resp.text[:300]}")
+    return resp.headers.get("Location", "").rstrip("/").rsplit("/", 1)[-1] or "?"
+
+
+def order_status(last4: str, order_id: str) -> dict[str, Any]:
+    """{"status", "filled", "price"} for one order."""
+    o = _get(f"/trader/v1/accounts/{account_hash(last4)}/orders/{order_id}")
+    activity = [e for a in o.get("orderActivityCollection") or [] for e in a.get("executionLegs") or []]
+    price = activity[-1].get("price") if activity else None
+    return {"status": o.get("status", ""), "filled": o.get("filledQuantity", 0), "price": price,
+            "why": o.get("statusDescription", "")}
 
 
 def open_orders(days: int = 7) -> list[dict[str, Any]]:

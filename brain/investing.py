@@ -17,11 +17,13 @@ Nick's plan (2026-11-09):
   margin, options or shorting); the agent researches anything it likes, keeps
   a journal and a scorecard against plain VOO bought with the same deposits.
 
-**Nothing here places a real order yet** (Nick, 2026-11-09: "I don't want him
-to make any trades for right now"). Main-account proposals and emergency
-sells are recorded and pushed to Nick; the playground trades a paper account
-at live Schwab prices until he opens the real one and says go. Placing
-orders is the Schwab hub's job (stage 2 in FUTURE_SESSIONS.md).
+**Real orders (2026-11-10, Nick: "enable jarvis trading"):** approving a
+buy/sell proposal stages the exact order through ``brain/trading.py``, which
+waits for Nick's Approve tap (or "approve <code>") before anything reaches
+Schwab; ``place_trade`` stages one for an already-approved proposal or a
+trade Nick asks for. Nothing here sends an order on its own: emergency
+sells stay proposals, and the playground still trades a paper account at
+live Schwab prices until Nick opens its real account.
 
 State: ``memory/investing.json``. Schwab data comes from
 ``integrations/schwab.py``; the main account is ``INVESTING_MAIN_ACCOUNT``
@@ -333,7 +335,39 @@ def _describe_proposal(p: dict[str, Any]) -> str:
     return f"{p['id']}: {verb} ${p['dollars']:,.2f} of {p['symbol']}{tag}. {p['reason']}"
 
 
-def decide(proposal_id: str, approve: bool) -> str:
+def find_proposal(proposal_id: str) -> dict[str, Any] | None:
+    with _lock:
+        state = _load()
+        _expire(state)
+        match = [p for p in state["proposals"] if p["id"].lower() == proposal_id.strip().lower()]
+        return dict(match[0]) if match else None
+
+
+def mark_ordered(proposal_id: str, order_id: str) -> None:
+    with _lock:
+        state = _load()
+        for p in state["proposals"]:
+            if p["id"] == proposal_id:
+                p.update(status="ordered", order_id=order_id, ordered_at=time.time())
+        _save(state)
+
+
+def stage_order(proposal_id: str, session_id: str | None) -> str:
+    """Stage the real Schwab order for an approved buy/sell proposal."""
+    from brain import trading
+    p = find_proposal(proposal_id)
+    if p is None:
+        return f"There's no proposal {proposal_id}, sir."
+    if p["kind"] == "target":
+        return f"{p['id']} changes a target, not a trade, sir; there's nothing to order."
+    if p["status"] == "ordered":
+        return f"{p['id']} was already sent to Schwab (order {p.get('order_id', '?')}), sir."
+    if p["status"] not in {"approved", "pending"}:
+        return f"{p['id']} is {p['status']}, sir, so I won't order it."
+    return trading.stage(session_id, p["symbol"], p["side"], float(p["dollars"]), proposal=p["id"])
+
+
+def decide(proposal_id: str, approve: bool, session_id: str | None = None) -> str:
     with _lock:
         state = _load()
         _expire(state)
@@ -354,11 +388,13 @@ def decide(proposal_id: str, approve: bool) -> str:
             p["status"] = "approved"
             _save(state)
             return f"Done, sir: {p['symbol']} now targets {p['target']:g}%. Targets total {sum(state['targets'].values()):g}%."
-        # No orders yet: approval is recorded so the order step can pick it up later.
         p["status"] = "approved"
         _save(state)
-        return (f"Approved {p['id']}, sir. I'm not placing orders yet, so do it in the Schwab app if you "
+    from brain import trading
+    if not trading.enabled():
+        return (f"Approved {p['id']}, sir. Real orders are switched off, so do it in the Schwab app if you "
                 f"want it now: {_describe_proposal(p)}")
+    return f"Approved {p['id']}. " + stage_order(p["id"], session_id)
 
 
 # --- Targets -----------------------------------------------------------------
@@ -760,11 +796,12 @@ def emergency_job(symbol: str, change_pct: float, client: Any = None) -> str:
     with _lock:
         state = _load()
         p = _add_proposal(state, kind="emergency", symbol=symbol, side="sell", dollars=dollars, reason=outcome["reason"])
-        # Orders aren't wired yet, so the emergency sale waits for Nick like any other.
+        # Every real order waits for Nick's Approve (brain/trading.py), so the
+        # emergency sale is a proposal like any other, pushed as a warning.
         _save(state)
     return (f"{symbol} fell {abs(change_pct):.1f}% on company news. Under your rule I'd sell "
-            f"{outcome['sell'] * 100:g}% (${dollars:,.2f}), but I'm not placing orders yet, so it's {p['id']} "
-            f"for you to approve. {outcome['reason']}")
+            f"{outcome['sell'] * 100:g}% (${dollars:,.2f}); it's {p['id']}, waiting for your approval before "
+            f"anything is sold. {outcome['reason']}")
 
 
 # --- Job: weekly playground session --------------------------------------------------
@@ -929,7 +966,12 @@ def describe() -> str:
     with _lock:
         state = _load()
         _expire(state)
-    lines = ["Trading: suggestions only, no real orders (you haven't said go)."]
+    from brain import trading
+    lines = [trading.describe()]
+    approved = [p for p in state["proposals"] if p["status"] == "approved" and p["kind"] != "target"]
+    if approved and trading.enabled():
+        lines.append("Approved but not yet sent to Schwab (place_trade stages them): "
+                     + " | ".join(_describe_proposal(p) for p in approved))
     account = main_account()
     targets = state["targets"]
     if state["suggested"] and not targets:

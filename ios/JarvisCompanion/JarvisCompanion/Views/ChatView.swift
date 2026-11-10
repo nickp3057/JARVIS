@@ -289,6 +289,14 @@ struct ChatView: View {
                         .id(message.id)
                     }
 
+                    if !model.isAwaitingReply {
+                        ForEach(model.approvals) { approval in
+                            ApprovalCard(approval: approval,
+                                         onApprove: { model.decide(approval, approve: true) },
+                                         onDeny: { model.decide(approval, approve: false) })
+                        }
+                    }
+
                     if model.isAwaitingReply, let status = model.toolStatus {
                         Label(status + "…", systemImage: "gearshape.2")
                             .font(.footnote)
@@ -337,6 +345,7 @@ struct ChatView: View {
             .defaultScrollAnchor(.bottom)
             .keepsBottomOnResize()
             .onChange(of: model.messages.count) { if followReply { scrollToBottom(proxy) } }
+            .onChange(of: model.approvals) { if followReply { scrollToBottom(proxy) } }
             .onChange(of: model.messages.last?.text) {
                 if followReply { proxy.scrollTo(bottomID, anchor: .bottom) }
             }
@@ -492,6 +501,46 @@ private extension View {
         } else {
             self
         }
+    }
+}
+
+/// Something JARVIS staged that needs Nick's yes: a Schwab order, a fix, a
+/// scene. Approve and Deny send "approve <code>" / "deny <code>" as his own
+/// message; nothing runs until Core's gate reads it.
+private struct ApprovalCard: View {
+    let approval: PendingApproval
+    let onApprove: () -> Void
+    let onDeny: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Label("Needs your approval", systemImage: "checkmark.shield")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(JarvisTheme.amber)
+            Text(approval.description.prefix(1).uppercased() + approval.description.dropFirst())
+                .font(.subheadline)
+                .foregroundStyle(.primary)
+                .fixedSize(horizontal: false, vertical: true)
+            HStack(spacing: 10) {
+                Button(action: onDeny) {
+                    Label("Deny", systemImage: "xmark").frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.bordered)
+                .tint(.secondary)
+                Button(action: onApprove) {
+                    Label("Approve", systemImage: "checkmark").frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(JarvisTheme.success)
+            }
+            .controlSize(.large)
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(JarvisTheme.panel, in: RoundedRectangle(cornerRadius: 18))
+        .overlay(RoundedRectangle(cornerRadius: 18).strokeBorder(JarvisTheme.amber.opacity(0.35)))
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Needs your approval: \(approval.description)")
     }
 }
 

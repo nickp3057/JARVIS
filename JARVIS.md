@@ -65,7 +65,8 @@ Pearson-Stark-Jarvis/
 │   ├── price_watch.py       Guarded public-page price checks + durable targets
 │   ├── subagents.py         Background subagents: focused tool loop + one-at-a-time jobs in the task lane
 │   ├── email_triage.py      Email subagent: trash noise, file missionary mail, keep the rest, unsubscribe list
-│   ├── investing.py         Investing subagents: target weights, daily advisor, crash watch, paper playground (no real orders yet)
+│   ├── investing.py         Investing subagents: target weights, daily advisor, crash watch, paper playground
+│   ├── trading.py           Real Schwab orders: sizes them, enforces caps/cash-only/stocks+ETFs, waits for Nick's Approve
 │   ├── agent_roster.py      Who works for JARVIS: the agents behind GET /api/agents and the companion's Agents map
 │   ├── reminders.py         Persistent reminders & to-dos (timed + open list)
 │   ├── router.py            Top-level request dispatcher
@@ -98,7 +99,7 @@ Pearson-Stark-Jarvis/
 │   ├── nas_host.py          NAS host-health snapshot (containers, RAID, SMART, volumes, temps): debounced alerts + incident-report lines
 │   ├── media_doctor.py      Traces one title request→arr→indexer→qBit→import→Plex; names the stalled stage; fixes via confirm_gate
 │   ├── plex.py              Minimal Plex client (title search + library rescan) for the media doctor
-│   ├── schwab.py            Charles Schwab, read-only: OAuth (7-day login), holdings every 30 s, live prices over the streamer
+│   ├── schwab.py            Charles Schwab: OAuth (7-day login), holdings every 30 s, live prices over the streamer, place_order (only brain/trading.py calls it)
 │   └── spotify.py           Spotipy wrapper: play/pause/skip/volume/transfer/now-playing
 │
 ├── speech/
@@ -319,11 +320,12 @@ RMS envelope from ElevenLabs audio drives the orb in real time using a monotonic
   OK, back, home, play/pause, volume, mute → `POST /api/tv/remote {key}`
   (admin) → `remote.send_command` (DPAD_*, BACK, HOME, MEDIA_*, VOLUME_*).
 
-### Charles Schwab *(new, read-only)*
+### Charles Schwab
 - `portfolio_summary` — live value, today's and yesterday's change, overall
   gain/loss (`total_gain`/`total_gain_pct`: unrealized, live value of what's
   held vs. Schwab's average price paid), cash, biggest movers (`integrations/schwab.py`).
-  JARVIS places no orders; the investing agents (below) only propose.
+  Real orders go through `place_trade` / `decide_investment` and always wait
+  for Nick's Approve (Trading, below).
 - `integrations/schwab.py` also keeps each account apart (`accounts_by_number()`,
   by last four digits) and looks up any symbol (`quotes`, `price_history`) for
   the investing agents.
@@ -448,18 +450,55 @@ in `EMAIL_UNSUB_WINDOW_DAYS` go on the unsubscribe list (vault note
 - `restore_email(query, days?)` — untrash by sender/subject and never trash that sender again
 - `background_agents` — running and recent subagent jobs
 
-### Investing (background subagents) *(new 2026-11-09, suggestions only)*
-Nick's plan, designed with him 2026-11-09 (`brain/investing.py`). **No real
-orders are placed yet**: Nick said "I don't want him to make any trades for
-right now" and will say when to go. Everything below proposes, records and
-pushes; placing orders is stage 2 (through the Schwab hub, FUTURE_SESSIONS.md).
+### Trading (real Schwab orders) *(new 2026-11-10)*
+Nick: "enable jarvis trading on my charles schwab" (`brain/trading.py`). The
+guardrails agreed 2026-10-27:
+- **Every order waits for Nick.** `place_trade(id | symbol, side, dollars)`
+  (or approving a buy/sell with `decide_investment`) prices the order live and
+  opens a `confirm_gate` proposal with the exact order: "sell 1 share of SPCX
+  at $25.77 or more (last $25.90), about $25.90, in account ...1234 for P3".
+  Nothing reaches Schwab until Nick taps **Approve** in the companion's chat,
+  says "yes" as his next message, or "approve <code>" within 10 minutes.
+  Always `propose`, never `act`.
+- **Caps:** `TRADING_MAX_ORDER_USD` (100) per order, `TRADING_MAX_DAY_USD`
+  (250) per ET day, buys and sells together; checked when staged and again
+  (with fresh account numbers) the moment Nick approves.
+- **Cash only, stocks/ETFs only.** A buy may spend `trade_cash`
+  (`cashAvailableForTrading`, never margin buying power) plus open Schwab sell
+  orders; a sell never exceeds what Schwab's API shows held (manual holdings
+  don't count). Anything whose quote isn't `EQUITY` is refused.
+- **Order shape:** a dollar amount worth at least one share becomes whole
+  shares (rounded down) as a DAY limit 0.5% past the last price; under one
+  share becomes a fractional market order, which Schwab's API may refuse
+  (unconfirmed), reported as is. Selling ~everything sells the exact quantity.
+- Placed orders go in `memory/trades.json`; the proposal becomes `ordered`
+  with its `order_id`. `investing_status` shows trading on/off, caps, today's
+  orders and approved-but-unsent proposals.
+- **Kill switch:** `TRADING_ENABLED=false` (default on). Also stops an order
+  already staged if Nick approves after it's switched off.
+- Core places orders with the token it borrows from the Schwab hub. The hub
+  README planned a hub `/api/orders` with hub-side limits, but a borrowed
+  token can already trade, so limits there would add nothing; Core enforces them.
+
+### Approve / Deny buttons in chat *(new 2026-11-10, companion 6.6)*
+Anything staged through `brain/confirm_gate.py` (orders, stack fixes,
+scenes, media requests) shows under JARVIS's reply as a card with
+**Approve** and **Deny**. The app reads `GET /api/approvals?session_id=`
+(admin) after each turn and when a chat opens; a tap sends `approve <code>`
+or `deny <code>` as Nick's own chat message, so the gate decides it exactly
+as if he typed it (no new approval path, recorded in history, no model call).
+`deny <code>` (also decline/reject/cancel <code>) drops just that proposal.
+
+### Investing (background subagents) *(new 2026-11-09)*
+Nick's plan, designed with him 2026-11-09 (`brain/investing.py`). The agents
+propose, record and push; since 2026-11-10 an approved buy/sell becomes a real
+order that still waits for Nick's Approve (Trading, above).
 - **Main account** = `INVESTING_MAIN_ACCOUNT` (last 4 digits), or the only
   account while there is one. Target weights per symbol (percent of the
   account, `CASH` allowed). New cash goes to whatever is furthest below target
   (`cash_plan`); a holding more than `INVESTING_BAND_PCT` (5) points over
   target gets a trim. Proposals (ids `P1`, `P2`…) wait for Nick and expire
-  after 3 days; approving one records it (he places it in the Schwab app for
-  now). Approving a target change updates the targets.
+  after 3 days; approving one stages its real order (Trading, above). Approving a target change updates the targets.
 - **Suggest weights**: the first time Schwab's accounts are in and there are no
   targets, the agent studies the holdings and suggests starting weights
   (alert "Portfolio weights to approve"); Nick says "approve the weights" or
@@ -491,7 +530,8 @@ pushes; placing orders is stage 2 (through the Schwab hub, FUTURE_SESSIONS.md).
 - `investing_status` — targets, drift, cash plan, proposals waiting, playground score
 - `investing_run(job)` — `suggest` / `review` / `playground` now, in the background
 - `set_portfolio_targets(weights | accept_suggested)` — Nick sets or approves the weights
-- `decide_investment(id, approve)` — approve or decline a proposal
+- `decide_investment(id, approve)` — approve or decline a proposal (approving a buy/sell stages its order)
+- `place_trade(id | symbol, side, dollars)` — stage a real Schwab order; Nick approves with the button, "yes" or the code
 - `record_holding(symbol, value_now, cash_used)` — a holding Nick's app shows but Schwab's API doesn't yet (state `manual`, auto-cleared when the API catches up)
 
 ### Agents map (companion) *(new 2026-11-09)*
@@ -912,7 +952,10 @@ SCHWAB_CALLBACK_URL=https://127.0.0.1:8182   # exactly what the Schwab app has r
 SCHWAB_HUB_URL=             # borrow the Schwab hub's login instead: https://schwab.nickolaspearson.com/api/token
 SCHWAB_HUB_SECRET=          # the "jarvis" program secret from the hub page; both set = borrowing
 SCHWAB_LOGIN_PAGE=          # optional; default the hub's front page
-INVESTING_ENABLED=true      # the investing subagents (brain/investing.py); proposals only, no orders
+INVESTING_ENABLED=true      # the investing subagents (brain/investing.py); they propose, Nick approves
+TRADING_ENABLED=true        # kill switch for real Schwab orders (brain/trading.py); each still needs Nick's Approve
+TRADING_MAX_ORDER_USD=100   # largest single order JARVIS may stage
+TRADING_MAX_DAY_USD=250     # most JARVIS's orders may move per ET day, buys + sells
 INVESTING_MAIN_ACCOUNT=     # last 4 digits of the main Schwab account (needed once there are several)
 INVESTING_MODEL=auto:sonnet # model for the investing agents
 INVESTING_REVIEW_HOUR_ET=10.5   # daily review (and weekly playground) after this ET hour, market days

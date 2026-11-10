@@ -11,6 +11,10 @@ a message Nick himself sends.
 - "approve <code>" approves any time before expiry, and one message may
   carry several ("approve 1631, approve 5774"). The verb differs from the
   restart gate's "confirm <code>" so the two never answer each other.
+- "deny <code>" (or decline/reject/cancel <code>) drops just that proposal.
+  The companion's Approve and Deny buttons send exactly these messages
+  (``pending`` lists what they show), so a tap is the same human-only path
+  as typing it.
 - A leading wake phrase ("Hey Jarvis, yes") is ignored: voice transcripts
   often keep it.
 - The proposal is consumed before the action runs, so a failure or a
@@ -39,6 +43,7 @@ _YES = frozenset({"yes", "y", "yeah", "yep", "yup", "yes please", "yes sir", "ye
                   "go", "go ahead", "proceed", "ok", "okay", "approve", "approved",
                   "approve both", "approve all", "yes to both", "both", "do both"})
 _CANCEL = frozenset({"cancel", "no", "nope", "nevermind", "never mind", "not now"})
+_DENY_WORDS = frozenset({"deny", "decline", "reject", "cancel"})
 
 
 class Proposal(NamedTuple):
@@ -131,6 +136,28 @@ def pending_description(session_id: str | None) -> str | None:
     return list(live.values())[-1].description if live else None
 
 
+def pending(session_id: str | None) -> list[dict[str, object]]:
+    """Open proposals for this session, oldest first, for the companion's
+    Approve/Deny buttons: [{"code", "description", "expires_in"}]."""
+    if not session_id:
+        return []
+    with _lock:
+        now = time.monotonic()
+        live = _live(session_id, now)
+        return [{"code": p.code, "description": p.description,
+                 "expires_in": max(0, int(_TTL_S - (now - p.created)))} for p in live.values()]
+
+
+def _denied(normalized: str) -> list[str] | None:
+    """Codes in "deny 1631" / "decline 1631, 5774", else None."""
+    words = [w for w in re.split(r"[\s,.;]+", normalized) if w]
+    if len(words) < 2 or words[0] not in _DENY_WORDS:
+        return None
+    codes = [w for w in words[1:] if _CODE_WORD_RE.fullmatch(w)]
+    rest = [w for w in words[1:] if w not in codes and w not in _CODE_FILLER]
+    return codes if codes and not rest else None
+
+
 def _normalize(text: str) -> str:
     normalized = " ".join(text.lower().strip().split()).rstrip(".!?")
     return _WAKE_RE.sub("", normalized).strip().rstrip(".!?")
@@ -166,6 +193,17 @@ def conversation_action(text: str, session_id: str, *, handled: bool = False) ->
             _pending.pop(session_id, None)
         what = "; ".join(p.description for p in live.values())
         return f"Cancelled: {what}. Nothing was changed, sir."
+    denied = _denied(normalized)
+    if denied is not None:
+        with _lock:
+            current = _pending.get(session_id, {})
+            dropped = [current.pop(c) for c in dict.fromkeys(denied) if c in current]
+            if not current:
+                _pending.pop(session_id, None)
+        if not dropped:
+            return f"Code {', '.join(denied)} does not match anything open, sir. Nothing was changed."
+        log.info("Denied for session %s: %s", session_id, "; ".join(p.description for p in dropped))
+        return f"Denied: {'; '.join(p.description for p in dropped)}. Nothing was done, sir."
     codes = _codes(normalized)
     if codes is None:
         if not (armed and normalized in _YES):

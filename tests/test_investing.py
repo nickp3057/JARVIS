@@ -118,7 +118,8 @@ class TargetsAndProposalsTests(InvestingTestCase):
         self.assertEqual([p["id"] for p in pending], ["P1", "P2"])
         self.assertIn("only holds", client.requests[1]["messages"][2]["content"][1]["content"])
         self.assertIn("Proposals:", summary)
-        self.assertIn("not placing orders", investing.decide("P1", True))
+        with patch.dict("os.environ", {"TRADING_ENABLED": "false"}):
+            self.assertIn("Real orders are switched off", investing.decide("P1", True))
         self.assertEqual(investing.decide("P1", True), "P1 is already approved, sir.")
 
     def test_approving_a_target_change_updates_targets(self):
@@ -136,7 +137,7 @@ class TargetsAndProposalsTests(InvestingTestCase):
                              [_text("Sold a quarter.")]])
         with patch.dict("os.environ", {"INVESTING_EMERGENCY_SELL_PCT": "25"}):
             summary = investing.emergency_job("NVDA", -14.0, client=client)
-        self.assertIn("not placing orders", summary)
+        self.assertIn("waiting for your approval before anything is sold", summary)
         (p,) = investing.pending_proposals()
         self.assertEqual((p["kind"], p["side"], p["dollars"]), ("emergency", "sell", 15.5))
 

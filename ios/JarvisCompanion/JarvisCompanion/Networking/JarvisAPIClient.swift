@@ -134,6 +134,22 @@ struct RepairProposal: Decodable, Identifiable, Hashable {
     var isPending: Bool { status == "pending" }
 }
 
+/// Something JARVIS staged in this chat that waits for Nick: a Schwab order,
+/// a fix, a scene (`GET /api/approvals`). The buttons send "approve <code>" or
+/// "deny <code>" as a chat message, the same gate as typing it.
+struct PendingApproval: Decodable, Identifiable, Hashable {
+    let code: String
+    let description: String
+    let expiresIn: Int
+
+    var id: String { code }
+
+    enum CodingKeys: String, CodingKey {
+        case code, description
+        case expiresIn = "expires_in"
+    }
+}
+
 /// `POST /api/alerts/{id}/report`: a stored incident report plus the chat
 /// prompt that opens it.
 struct IncidentReport: Decodable {
@@ -625,6 +641,12 @@ struct JarvisAPIClient {
     func incidentReport(for alert: JarvisAlert) async throws -> IncidentReport {
         try await postJSON(IncidentReport.self, path: "api/alerts/\(alert.id)/report",
                            body: IncidentReportBody(createdAt: alert.createdAt))
+    }
+
+    func approvals(sessionID: String) async throws -> [PendingApproval] {
+        struct Envelope: Decodable { let approvals: [PendingApproval] }
+        return try await getJSON(Envelope.self, path: "api/approvals",
+                                 query: [URLQueryItem(name: "session_id", value: sessionID)]).approvals
     }
 
     func repairs() async throws -> [RepairProposal] {
