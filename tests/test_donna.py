@@ -67,6 +67,28 @@ class ConversationTests(DonnaTestCase):
         sent = client2.requests[0]["messages"]
         self.assertEqual([m["role"] for m in sent], ["user", "assistant", "user"])
 
+    def test_messages_carry_time_and_gap(self):
+        with patch.object(donna.time, "time", return_value=1_000_000.0):
+            donna.reply("morning", client=FakeClient([text("Hey.")]))
+        later = 1_000_000.0 + 4 * 3600
+        client = FakeClient([text("<note>Morning hello.</note><case_file>x</case_file>"), text("Welcome back.")])
+        with patch.object(donna.time, "time", return_value=later):
+            donna.reply("back again", client=client)
+            stored = donna.current_session()["messages"][0]["text"]
+        sent = client.requests[1]["messages"]
+        self.assertEqual(len(sent), 1)  # 4 hours idle: a new session
+        first = sent[0]["content"] if isinstance(sent[0]["content"], str) else sent[0]["content"][0]["text"]
+        self.assertIn("4 hr since the last message", first)
+        self.assertTrue(first.endswith("back again"))
+        # Stored text stays clean.
+        self.assertEqual(stored, "back again")
+
+    def test_gap_wording(self):
+        self.assertEqual(donna._gap(20), "moments")
+        self.assertEqual(donna._gap(5 * 60), "5 min")
+        self.assertEqual(donna._gap(90 * 60), "1 hr 30 min")
+        self.assertEqual(donna._gap(3 * 86400), "3 days")
+
     def test_context_carries_case_file_notes_and_followups_only(self):
         donna.set_case_file("Nick is a student; brother Jake.")
         client = FakeClient([tool("add_followup", {"text": "Ask about the Jake call"}), text("Got it.")])

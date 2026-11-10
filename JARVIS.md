@@ -1665,8 +1665,9 @@ EMAIL_UNSUB_NOTE=           # vault-relative note path; default Jarvis Memory/Em
 - **Donna mode (iOS 6.2 / build 244, branch `phone-reorg`)** — a private,
   text-only counsellor walled off from JARVIS (`brain/donna.py`,
   `memory/donna.db`; JARVIS's memory, history, extractor, dashboards and TV
-  never see it). Entry is hidden: press and hold the JARVIS logo on the Chat
-  tab (title or the empty-chat orb); the app fades to rose, the rings unwind
+  never see it). Entry is hidden: tap twice, then press and hold the JARVIS
+  logo on the Chat tab (title or the empty-chat orb; a plain hold no longer
+  opens her, since 6.9); the app fades to rose, the rings unwind
   into one line, and the tab bar is covered (`DonnaPresenter`, overlay in
   `RootView`). Hold the line or tap the chevron to leave. Memory works like a
   therapist's notes: each request sends her prompt, a per-session context
@@ -1683,6 +1684,14 @@ EMAIL_UNSUB_NOTE=           # vault-relative note path; default Jarvis Memory/Em
   `POST /api/donna/message|end|import`, `GET|DELETE /api/donna/memory`.
   Conversation on Sonnet (`DONNA_MODEL`), notes on Haiku (`DONNA_NOTES_MODEL`).
   On the Agents map since 6.4 (cost only, never content).
+  6.9: every message of Nick's reaches her with a `[time · gap]` tag
+  (`_timed_history`; derived from stored times, so the cache holds and the
+  stored text stays clean), so she can tell back-to-back replies from a
+  4-hour absence and late night from morning; she now offers check-ins
+  when something hard is coming up (none had ever been scheduled, because
+  she only scheduled when asked and didn't know the clock). The composer
+  rebuilds itself whenever it empties, fixing sent text reappearing and a
+  long draft's height not collapsing.
 - **Phone reorganization + Lists (iOS 6.0–6.1 / builds 242–243, branch `phone-reorg`)** —
   phone tabs are Media · Control · Home · Chat · Settings (Home centred and
   default; "Hub" renamed Control on every device). 6.1: Home fits one screen

@@ -2,7 +2,7 @@ import Foundation
 import SwiftUI
 import UserNotifications
 
-/// Opens and closes Donna mode from anywhere (the Chat tab's logo hold).
+/// Opens and closes Donna mode from anywhere (the Chat tab's logo: tap twice, then hold).
 @MainActor
 final class DonnaPresenter: ObservableObject {
     static let shared = DonnaPresenter()
@@ -22,6 +22,9 @@ final class DonnaModel: ObservableObject {
     @Published private(set) var hasCaseFile = false
 
     private let settings: AppSettings
+    /// What was just sent, so the keyboard re-committing it after the box
+    /// is cleared (predictive text does this) can be thrown away.
+    private var lastSent: (text: String, at: Date)?
 
     init(settings: AppSettings) {
         self.settings = settings
@@ -46,6 +49,7 @@ final class DonnaModel: ObservableObject {
     func send() {
         let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty, !thinking else { return }
+        lastSent = (draft, Date())
         draft = ""
         messages.append(DonnaMessage(role: "user", text: text, at: Date().timeIntervalSince1970))
         thinking = true
@@ -63,6 +67,14 @@ final class DonnaModel: ObservableObject {
                 self.error = error.localizedDescription
             }
         }
+    }
+
+    /// True when the box suddenly refills with the message that just went.
+    func isEcho(_ text: String) -> Bool {
+        guard let lastSent, !text.isEmpty, Date().timeIntervalSince(lastSent.at) < 1.5 else { return false }
+        let sent = lastSent.text.trimmingCharacters(in: .whitespacesAndNewlines)
+        let echoed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        return echoed == sent
     }
 
     /// End now: she writes her note; the next message starts a new session.

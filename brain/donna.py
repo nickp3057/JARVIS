@@ -1,5 +1,5 @@
 """Donna: Nick's private, text-only counsellor, reached from the companion's
-hidden Donna mode (hold the logo on the Chat tab).
+hidden Donna mode (tap twice then hold the logo on the Chat tab).
 
 She is walled off from JARVIS on purpose. Her own database
 (memory/donna.db), her own prompt and a handful of tools; JARVIS's memory,
@@ -169,9 +169,54 @@ def current_session() -> dict[str, Any] | None:
 
 def _session_messages(session_id: int) -> list[dict[str, Any]]:
     with _db() as conn:
-        rows = conn.execute("SELECT role, text FROM messages WHERE session_id = ? ORDER BY id",
+        rows = conn.execute("SELECT role, text, at FROM messages WHERE session_id = ? ORDER BY id",
                             (session_id,)).fetchall()
     return [dict(r) for r in rows]
+
+
+def _gap(seconds: float) -> str:
+    minutes = int(seconds // 60)
+    if minutes < 1:
+        return "moments"
+    if minutes < 60:
+        return f"{minutes} min"
+    hours = minutes // 60
+    if hours < 48:
+        rest = minutes % 60
+        return f"{hours} hr" + (f" {rest} min" if rest and hours < 6 else "")
+    return f"{hours // 24} days"
+
+
+def _previous_message_at(before: float) -> float | None:
+    """When the last message before this one was sent, in any session."""
+    with _db() as conn:
+        row = conn.execute("SELECT MAX(at) AS at FROM messages WHERE at < ?", (before,)).fetchone()
+    return row["at"] if row and row["at"] else None
+
+
+def _stamp(at: float, previous: float | None) -> str:
+    """The [time] tag on each of Nick's messages, so Donna feels the gaps."""
+    when = datetime.fromtimestamp(at).strftime("%a %b %d, %I:%M %p").replace(" 0", " ")
+    since = "first message ever" if previous is None else f"{_gap(at - previous)} since the last message"
+    return f"[{when} · {since}]"
+
+
+def _timed_history(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Model-facing history: Nick's turns carry a [time] tag. Tags are
+    derived from stored times, so earlier turns stay byte-identical (cacheable)."""
+    out: list[dict[str, Any]] = []
+    previous: float | None = None
+    for index, m in enumerate(messages):
+        at = m.get("at")
+        if m["role"] == "user" and at:
+            if index == 0:
+                previous = _previous_message_at(at)
+            out.append({"role": "user", "content": f"{_stamp(at, previous)}\n{m['text']}"})
+        else:
+            out.append({"role": m["role"], "content": m["text"]})
+        if at:
+            previous = at
+    return out
 
 
 def _add_message(session_id: int, role: str, text: str) -> None:
@@ -257,6 +302,7 @@ How you work:
 - When advice helps, make it concrete and small: one thing to try this week, a sentence he could say, an exercise. Draw on CBT, DBT, ACT, motivational interviewing and plain wisdom, without naming the method unless it helps.
 - Be honest. If he's being unfair to himself or to someone else, say so kindly. Notice patterns across sessions ("this is the third time Sunday nights have come up").
 - Keep replies short for a phone screen: usually 2-5 sentences. Longer only for an exercise he asked for. No headings, no bullet lists unless he wants steps.
+- Each of his messages starts with a [time] tag: when he sent it and how long since the previous message. Use it the way a person would: notice when he's been gone for hours or days versus replying back to back, and what time of day it is (late at night, early morning). Never write the tag yourself or quote it.
 - Use what you remember naturally, the way a therapist glances at last week's notes. Don't recite the notes.
 
 Your tools (use them quietly; never mention tools, notes or databases):
@@ -264,7 +310,7 @@ Your tools (use them quietly; never mention tools, notes or databases):
 - add_followup when something deserves a "how did it go?" next time; resolve_followup when he answers it.
 - update_case_file when you learn something durable (a person in his life, a goal, a pattern, what helps or doesn't). Rewrite the whole file, keep it under about 600 words, and keep everything still true.
 - recall_notes when he refers to something from an earlier session that isn't in front of you.
-- schedule_checkin only when he asks you to check on him (or clearly agrees to it).
+- schedule_checkin when he asks you to check on him or says yes to your offer. When something hard is coming up (a tough conversation, an exam, a rough night) or he's in a low stretch, offer once to check in at a specific time, using the clock in his messages to pick a sensible one.
 - web_search / web_fetch only to find a specific exercise or worksheet on the trusted sites, and only when it adds something.
 
 Safety: you are not a licensed therapist and don't claim to be, but don't hide behind that either. If he mentions wanting to die, hurting himself or someone else, or being in danger, stop and take it seriously: stay with him, ask directly, and give him the 988 Suicide & Crisis Lifeline (call or text 988 in the US) and urge him to reach a real person now. That outranks everything else here."""
@@ -435,7 +481,7 @@ def reply(text: str, *, client: Any = None) -> dict[str, Any]:
 
     model = chat_model()
     handlers = {spec["name"]: fn for spec, fn in _TOOLS}
-    history = [{"role": m["role"], "content": m["text"]} for m in _session_messages(session_id)]
+    history = _timed_history(_session_messages(session_id))
     messages: list[dict[str, Any]] = list(history)
     answer = ""
     for _ in range(_MAX_ROUNDS):

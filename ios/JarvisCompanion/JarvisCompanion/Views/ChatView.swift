@@ -55,7 +55,7 @@ struct ChatView: View {
             .toolbarBackground(.hidden, for: .navigationBar)
             .toolbar {
                 // The logo beside the title is also the hidden way into Donna
-                // mode: press and hold.
+                // mode: tap twice, then press and hold.
                 ToolbarItem(placement: .principal) {
                     HStack(spacing: 7) {
                         JarvisCoreMark(size: 22, animated: false)
@@ -633,12 +633,26 @@ private struct DebugReportSheet: View {
 }
 
 private extension View {
-    /// Press and hold opens Donna mode. No hint, no label: it's meant to be
-    /// found only by someone who knows.
-    func donnaDoor() -> some View {
-        onLongPressGesture(minimumDuration: 0.8) {
-            UIImpactFeedbackGenerator(style: .soft).impactOccurred()
-            withAnimation(.easeInOut(duration: 0.6)) { DonnaPresenter.shared.showing = true }
-        }
+    /// Tap twice, then press and hold, opens Donna mode. No hint, no label:
+    /// it's meant to be found only by someone who knows, and a plain hold
+    /// (easy to do by accident) no longer opens her.
+    func donnaDoor() -> some View { modifier(DonnaDoor()) }
+}
+
+private struct DonnaDoor: ViewModifier {
+    /// When the double tap landed; the hold has to start soon after.
+    @State private var armedAt: Date?
+
+    func body(content: Content) -> some View {
+        content
+            .onTapGesture(count: 2) { armedAt = Date() }
+            .simultaneousGesture(
+                LongPressGesture(minimumDuration: 0.6).onEnded { _ in
+                    guard let armedAt, Date().timeIntervalSince(armedAt) < 2.0 else { return }
+                    self.armedAt = nil
+                    UIImpactFeedbackGenerator(style: .soft).impactOccurred()
+                    withAnimation(.easeInOut(duration: 0.6)) { DonnaPresenter.shared.showing = true }
+                }
+            )
     }
 }

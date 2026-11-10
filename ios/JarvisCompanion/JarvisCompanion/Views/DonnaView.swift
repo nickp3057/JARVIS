@@ -31,6 +31,9 @@ struct DonnaView: View {
     @State private var showingMemory = false
     @State private var showingImport = false
     @State private var ending = false
+    /// Rebuilt whenever the box empties, so a long draft's height collapses
+    /// and the keyboard can't commit a half-finished word back into it.
+    @State private var composerID = UUID()
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     init(settings: AppSettings) {
@@ -177,6 +180,14 @@ struct DonnaView: View {
             TextField("Talk to Donna", text: $model.draft, axis: .vertical)
                 .lineLimit(1...6)
                 .focused($composing)
+                .id(composerID)
+                .onChange(of: model.draft) { old, new in
+                    if model.isEcho(new) {
+                        model.draft = ""
+                    } else if new.isEmpty && !old.isEmpty {
+                        resetComposer()
+                    }
+                }
                 .padding(.horizontal, 14)
                 .padding(.vertical, 11)
                 .background(DonnaTheme.card, in: .rect(cornerRadius: 22))
@@ -199,6 +210,14 @@ struct DonnaView: View {
     }
 
     // MARK: Actions
+
+    /// A fresh text field: drops the old height and any pending keyboard
+    /// text, then takes focus back so the keyboard stays up.
+    private func resetComposer() {
+        let wasFocused = composing
+        composerID = UUID()
+        if wasFocused { DispatchQueue.main.async { composing = true } }
+    }
 
     private func leave() {
         composing = false
