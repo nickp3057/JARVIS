@@ -47,3 +47,25 @@ class TvRemoteTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class PlayOnTvTests(unittest.TestCase):
+    def test_show_continues_its_on_deck_episode(self) -> None:
+        responses = {
+            "/identity": {"MediaContainer": {"machineIdentifier": "srv"}},
+            "/hubs/search": {"MediaContainer": {"Hub": [{"Metadata": [
+                {"type": "show", "title": "Suits", "ratingKey": "66"}]}]}},
+            "/library/onDeck": {"MediaContainer": {"Metadata": [
+                {"type": "movie", "title": "Cars 2", "ratingKey": "1"},
+                {"type": "episode", "grandparentRatingKey": "66", "grandparentTitle": "Suits",
+                 "parentIndex": 6, "index": 15, "title": "Quid Pro Quo", "ratingKey": "8330"}]}},
+        }
+        from integrations import plex
+        with patch.object(plex, "_get", side_effect=lambda path, params=None: (True, responses[path])), \
+                patch.object(home_assistant, "_request", return_value=(True, [])) as request:
+            reply = tools.execute_tool("play_on_tv", {"title": "suits"})
+        self.assertIn('season 6, episode 15, "Quid Pro Quo"', reply)
+        sent = request.call_args.kwargs["json"]
+        self.assertEqual(sent["entity_id"], "remote.nick_s_room_tv")
+        self.assertEqual(sent["activity"],
+                         "plex://play/?metadataKey=%2Flibrary%2Fmetadata%2F8330&server=srv")

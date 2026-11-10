@@ -59,3 +59,14 @@ def press(key: str) -> tuple[bool, str]:
     if code is None:
         raise ValueError(f"Unknown button {key!r}.")
     return home_assistant.call_service("remote", "send_command", entity(), {"command": code})
+
+
+def play_plex(rating_key: str | int, server: str | None) -> tuple[bool, str]:
+    """Wake the TV and start a Plex item in the Plex app (a plex:// deep
+    link sent as the remote's turn_on activity; Plex resumes where Nick
+    left off)."""
+    from urllib.parse import quote
+    link = f"plex://play/?metadataKey={quote(f'/library/metadata/{rating_key}', safe='')}"
+    if server:
+        link += f"&server={server}"
+    return home_assistant.call_service("remote", "turn_on", entity(), {"activity": link})

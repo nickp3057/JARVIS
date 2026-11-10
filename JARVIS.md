@@ -313,6 +313,10 @@ RMS envelope from ElevenLabs audio drives the orb in real time using a monotonic
 - `tv_power(state)` — on/off through Home Assistant's Android TV Remote
   entity (`TV_REMOTE_ENTITY`, default `remote.nick_s_room_tv`), which can
   wake the TV from standby (`integrations/tv_remote.py`).
+- `play_on_tv(title)` — play a Plex show or movie on the room TV where Nick
+  left off: `plex.next_up` picks the show's On Deck episode (else its first
+  unwatched one) and `tv_remote.play_plex` sends a `plex://play/?metadataKey=`
+  deep link as the remote's turn_on activity; Plex resumes the position.
 - `home_assistant.call_service` sends `media_player` turn_on/off for any of
   `TV_MEDIA_PLAYERS` (the TV's Cast/group entries) to that remote instead:
   "turning on" a Cast entity opened Home Assistant's cast screen on the TV.

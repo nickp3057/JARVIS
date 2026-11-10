@@ -745,6 +745,20 @@ def _tool_tv_power(args: dict[str, Any]) -> str:
     return tv_remote.power(str(args.get("state", "on")).lower() != "off")[1]
 
 
+def _tool_play_on_tv(args: dict[str, Any]) -> str:
+    from integrations import plex, tv_remote
+    title = str(args.get("title") or "").strip()
+    if not title:
+        return "Play what, sir?"
+    ok, pick = plex.next_up(title)
+    if not ok:
+        return str(pick)
+    sent, detail = tv_remote.play_plex(pick["key"], pick.get("server"))
+    if not sent:
+        return f"The TV didn't answer: {detail}"
+    return f"Playing {pick['label']} on your TV in Plex, sir."
+
+
 def _tool_kill_camera(_: dict[str, Any]) -> str:
     from brain import camera
     camera.kill()
@@ -2135,6 +2149,20 @@ _CUSTOM_TOOLS: list[dict[str, Any]] = [
         },
     },
     {
+        "name": "play_on_tv",
+        "description": (
+            "Play a show or movie from Plex on the TV in Nick's room, continuing where he left "
+            "off: a show starts its next-up (On Deck) episode, a partly watched episode or movie "
+            "resumes. Wakes the TV and opens Plex itself. Use for 'play/put on/continue <title> "
+            "on my TV' or 'turn on <show>'. Not Spotify."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {"title": {"type": "string", "description": "Show or movie title."}},
+            "required": ["title"],
+        },
+    },
+    {
         "name": "kill_camera",
         "description": (
             "Lock the room camera (the iPad lens Nick watches from his phone) off for five "
@@ -2824,6 +2852,7 @@ _DISPATCH: dict[str, Callable[[dict[str, Any]], str]] = {
     "place_trade": _tool_place_trade,
     "record_holding": _tool_record_holding,
     "tv_power": _tool_tv_power,
+    "play_on_tv": _tool_play_on_tv,
     "kill_camera": _tool_kill_camera,
     "barn_door_protocol": _tool_barn_door_protocol,
     "voice_id": _tool_voice_id,
