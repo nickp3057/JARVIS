@@ -173,6 +173,15 @@ approval, give me an approve or deny button". JARVIS.md "Trading" and
   or try one whole share once Nick holds one). If fractional is the block,
   the API can't trade Nick's account at all today: every holding is under a
   share and VOO is ~$600.
+- [ ] **Parked idea, Nick likes it but said "wait till later" (2026-11-10):**
+  swap to low-priced Schwab ETFs so JARVIS can trade whole shares. Prices
+  that day: SCHX $29 (stands in for VOO $687), SPYM $88 (S&P 500), SCHG $34
+  (stands in for AAPL/NVDA/TSLA), SCHB $29. JARVIS would buy whole shares only
+  and carry leftover cash forward. Nick sells VOO once in the Schwab app (the
+  API refused a fractional sell). Test first: one SCHX share through
+  place_trade, to tell "fractional refused" from "account can't trade by API".
+  Other options weighed: JARVIS hands Nick fractional orders to place in the
+  app; a dollar-amount API broker (e.g. Alpaca) for the $5/month playground.
 - [ ] Memory extractor saved a stale fact (id 754514f8, "pending
   confirmation with code 1957"): forget it.
 - [ ] **(was) Fractional orders:** VOO is ~$600 a share, so P4's $27 is a
