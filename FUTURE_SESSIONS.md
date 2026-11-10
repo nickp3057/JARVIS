@@ -1041,7 +1041,8 @@ the monitor. Pair with the health dashboard so restarts are visible.
 
 - **Email, after the triage subagent (shipped 5.89)**: Nick links Gmail
   (`python -m integrations.gmail --auth`, JARVIS.md "Gmail setup"), makes the
-  `Missionaries/<name>` labels, and ideally runs a day with
+  `Mission Emails/<name>` labels (linked and live 2026-11-10; first pass
+  sorted 24 mails cleanly), and ideally runs a day with
   `EMAIL_TRIAGE_DRY_RUN=true`. Then: kept-mail summary in the morning
   briefing; "what did <person> say" / draft a reply by voice (send behind the
   confirm gate); a weekly "inbox cleanup" routine.

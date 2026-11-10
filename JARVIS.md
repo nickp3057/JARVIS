@@ -436,7 +436,7 @@ The email sorter is JARVIS's first subagent (`brain/subagents.py`,
 `brain/email_triage.py`). Once Gmail is linked it sorts new inbox mail every
 `EMAIL_TRIAGE_INTERVAL_S` (15 min): annoying mail to the Trash (30-day,
 restorable), missionary mail into that missionary's folder (Gmail labels under
-`EMAIL_MISSIONARY_PARENT`, default `Missionaries/<name>`), everything even
+`EMAIL_MISSIONARY_PARENT`, default `Mission Emails/<name>`; filed mail is marked read), everything even
 slightly important left in the inbox. Starred mail and `EMAIL_NEVER_TRASH`
 senders are never trashed; a sender filed to the same folder twice is filed
 without asking the model again. Senders trashed `EMAIL_UNSUB_THRESHOLD` times
@@ -967,7 +967,7 @@ EMAIL_TRIAGE_LOOKBACK_DAYS=3 # how far back an automatic pass looks
 EMAIL_TRIAGE_MAX_PER_PASS=60 # messages per automatic pass (sort_inbox(days>7) allows 500)
 EMAIL_TRIAGE_BATCH=25       # messages per subagent run
 EMAIL_TRIAGE_MAX_ROUNDS=8   # tool-loop rounds per batch
-EMAIL_MISSIONARY_PARENT=Missionaries # sub-labels of this label are missionary folders
+EMAIL_MISSIONARY_PARENT=Mission Emails # sub-labels of this label are missionary folders
 EMAIL_MISSIONARY_LABELS=    # extra comma-separated label names that are missionary folders
 EMAIL_NEVER_TRASH=          # comma-separated addresses or domains never to trash
 EMAIL_UNSUB_THRESHOLD=3     # trashes in the window that flag a sender for unsubscribing
@@ -1008,7 +1008,7 @@ EMAIL_UNSUB_NOTE=           # vault-relative note path; default Jarvis Memory/Em
 3. The token lands in `memory/gmail_token.json`; the monitor starts sorting
    on its next pass, no restart needed (the monitor thread starts at launch
    whenever `GOOGLE_CREDENTIALS_FILE` is set). Create the missionary folders
-   as Gmail labels nested under `Missionaries` first.
+   as Gmail labels nested under `Mission Emails` first (Nick's are already there).
 4. Nervous? `EMAIL_TRIAGE_DRY_RUN=true` for a day and read `email_triage_report`.
 
 ## UI Layout

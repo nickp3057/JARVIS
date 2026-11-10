@@ -22,7 +22,7 @@ def _use(tid, name, **args):
 class FakeGmail:
     def __init__(self, messages, labels=None):
         self.messages = {m["id"]: m for m in messages}
-        self.labels = labels or {"Missionaries/Elder Smith": "L1", "Missionaries/Sister Ray": "L2", "Bills": "L3"}
+        self.labels = labels or {"Mission Emails/Elder Smith": "L1", "Mission Emails/Sister Ray": "L2", "Bills": "L3"}
         self.trashed, self.filed, self.untrashed = [], [], []
 
     def patches(self):

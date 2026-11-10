@@ -227,8 +227,8 @@ def _modify(message_id: str, add: list[str], remove: list[str]) -> bool:
 
 
 def file_to_label(message_id: str, label_id: str) -> bool:
-    """Move into a folder: add the label, take it out of the inbox."""
-    return _modify(message_id, [label_id], ["INBOX"])
+    """Move into a folder: add the label, take it out of the inbox, mark it read."""
+    return _modify(message_id, [label_id], ["INBOX", "UNREAD"])
 
 
 def trash(message_id: str) -> bool:

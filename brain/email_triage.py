@@ -5,8 +5,8 @@ Nick's rules (2026-11-06):
   automated noise) goes to the Trash.
 - Missionary mail goes into that missionary's folder (Gmail label). Folders
   are user labels under ``EMAIL_MISSIONARY_PARENT`` (default
-  ``Missionaries``, i.e. ``Missionaries/Elder Smith``) plus any names listed
-  in ``EMAIL_MISSIONARY_LABELS``.
+  ``Mission Emails``, i.e. ``Mission Emails/Austin's Mission``) plus any names
+  listed in ``EMAIL_MISSIONARY_LABELS``. Filed mail is marked read.
 - Anything even slightly important stays in the inbox for Nick to sort.
   When unsure, keep: a wrong trash costs far more than a wrong keep.
 - Senders that keep getting trashed land on an unsubscribe list (a note in
@@ -145,7 +145,7 @@ def is_protected(state: dict[str, Any], address: str) -> bool:
 
 def missionary_folders(labels: dict[str, str]) -> dict[str, str]:
     """Folder display name -> label id, from the user's Gmail labels."""
-    parent = os.getenv("EMAIL_MISSIONARY_PARENT", "Missionaries").strip().strip("/")
+    parent = os.getenv("EMAIL_MISSIONARY_PARENT", "Mission Emails").strip().strip("/")
     explicit = {p.strip() for p in os.getenv("EMAIL_MISSIONARY_LABELS", "").split(",") if p.strip()}
     out: dict[str, str] = {}
     for name, label_id in labels.items():
@@ -351,7 +351,7 @@ def _apply(msg: dict[str, Any], action: str, folder: str, reason: str, state: di
     state["processed"][msg["id"]] = now
     _log_action({"ts": now, "id": msg["id"], "from": msg["from"], "name": msg["from_name"],
                  "subject": msg["subject"][:150], "action": action, "folder": folder,
-                 "reason": reason, "dry_run": not live})
+                 "reason": reason, "marked_read": live and action == "file", "dry_run": not live})
     return True
 
 

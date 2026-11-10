@@ -215,7 +215,7 @@ SETTINGS_SCHEMA: dict[str, dict[str, Any]] = {
     },
     "EMAIL_MISSIONARY_PARENT": {
         "type": "string",
-        "description": "Parent Gmail label whose sub-labels are the missionary folders (e.g. Missionaries).",
+        "description": "Parent Gmail label whose sub-labels are the missionary folders (default Mission Emails).",
     },
     "EMAIL_MISSIONARY_LABELS": {
         "type": "string",
