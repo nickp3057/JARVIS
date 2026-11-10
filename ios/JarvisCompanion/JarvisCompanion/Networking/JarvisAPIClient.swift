@@ -762,6 +762,11 @@ struct JarvisAPIClient {
     }
 
     /// JARVIS and the agents working for him (Core's brain/agent_roster.py).
+    func agentUsage(days: Int) async throws -> AgentUsage {
+        try await getJSON(AgentUsage.self, path: "api/agents/usage",
+                          query: [URLQueryItem(name: "days", value: String(days))])
+    }
+
     func agents() async throws -> AgentRoster {
         try await getJSON(AgentRoster.self, path: "api/agents")
     }

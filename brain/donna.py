@@ -207,12 +207,15 @@ def notes_model() -> str:
 def _create(client: Any, effort: str, **request: Any) -> Any:
     model = request["model"]
     extra = {} if model_select.is_legacy(model) else {"extra_body": {"output_config": {"effort": effort}}}
+    from brain import usage
     try:
-        return client.messages.create(**request, **extra)
+        response = client.messages.create(**request, **extra)
     except Exception as exc:  # noqa: BLE001
-        if extra and model_select.is_settings_rejection(exc):
-            return client.messages.create(**request)
-        raise
+        if not (extra and model_select.is_settings_rejection(exc)):
+            raise
+        response = client.messages.create(**request)
+    usage.record_response("donna", response)
+    return response
 
 
 def _get(block: Any, key: str, default: Any = None) -> Any:

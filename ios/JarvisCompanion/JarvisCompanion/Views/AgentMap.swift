@@ -91,6 +91,11 @@ struct AgentMapView: View {
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(workingCount > 0 ? JarvisTheme.success : Color.secondary)
                 }
+                ToolbarItem(placement: .topBarTrailing) {
+                    NavigationLink { AgentUsageView() } label: {
+                        Label("Usage", systemImage: "dollarsign.circle")
+                    }
+                }
                 ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } }
             }
         }

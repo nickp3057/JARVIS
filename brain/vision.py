@@ -139,6 +139,8 @@ def describe_screen(question: str = "What's on the screen right now?") -> str:
                 }
             ],
         )
+        from brain import usage as _usage
+        _usage.record_response('jarvis', response)
         text_blocks = [b for b in response.content if getattr(b, "type", None) == "text"]
         return "".join(getattr(b, "text", "") for b in text_blocks).strip() or "I see it but have nothing to add."
     except Exception as exc:  # noqa: BLE001

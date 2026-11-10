@@ -31,3 +31,19 @@ final class DonnaModelTests: XCTestCase {
         XCTAssertEqual(memory.moods.first?.score, 6)
     }
 }
+
+final class AgentUsageTests: XCTestCase {
+    func testDecodesAndFormats() throws {
+        let usage = try JSONDecoder().decode(AgentUsage.self, from: Data("""
+        {"days": 7, "since": 1.0, "tracking_since": 1762700000.0, "total_usd": 1.2345,
+         "agents": [{"id": "donna", "name": "Donna", "symbol": "heart.text.square", "usd": 1.2, "calls": 40,
+                     "input_tokens": 90000, "output_tokens": 4000, "models": ["claude-sonnet-5-5"]}],
+         "daily": [{"day": "2026-11-10", "usd": 1.2345}]}
+        """.utf8))
+        XCTAssertEqual(usage.agents.first?.calls, 40)
+        XCTAssertEqual(AgentUsageView.money(0), "$0")
+        XCTAssertEqual(AgentUsageView.money(0.004), "<1¢")
+        XCTAssertEqual(AgentUsageView.shortModel("claude-sonnet-5-5"), "Sonnet 5.5")
+        XCTAssertEqual(AgentUsageView.shortModel("claude-haiku-4-5-20251001"), "Haiku 4.5")
+    }
+}

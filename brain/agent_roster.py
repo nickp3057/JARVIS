@@ -66,6 +66,9 @@ _AGENTS: list[dict[str, Any]] = [
      "role": "Writes the daily countdown to your quizzes and exams.",
      "schedule": "Daily", "jobs": "",
      "state": lambda: (_on("STUDY_BRIEF_ENABLED"), "" if _on("STUDY_BRIEF_ENABLED") else "Switched off.")},
+    {"id": "donna", "kind": "subagent", "name": "Donna", "symbol": "heart.text.square",
+     "role": "Your private counsellor (hidden Donna mode). Only her cost shows here, never what you talk about.",
+     "schedule": "When you open Donna mode", "jobs": "", "state": lambda: (True, "")},
     {"id": "email", "kind": "subagent", "name": "Email sorter", "symbol": "envelope.badge",
      "role": "Trashes junk, files missionary letters, keeps anything important.",
      "schedule": "Every 15 minutes", "jobs": "email_triage", "state": _email_state},
@@ -100,6 +103,33 @@ def _discovered(jobs: list[dict[str, Any]], specs: dict[str, float]) -> list[dic
              "role": "A new background agent JARVIS has started using (not described yet).",
              "schedule": "As needed", "jobs": name, "state": lambda: (True, "")}
             for name, title in sorted(names.items())]
+
+
+def usage_report(days: float | None) -> dict[str, Any]:
+    """Estimated spend per agent over the last ``days`` (None = since tracking
+    began), for the Agents page. Ledger names (``brain/usage.py``) map to an
+    agent by id, then by its job/spec-name prefixes; JARVIS is "jarvis"."""
+    from brain import usage
+
+    raw = usage.summary(days)
+    specs = [{"id": "jarvis", "name": "JARVIS", "symbol": "sparkle", "jobs": ""}] + _AGENTS
+    rows: dict[str, dict[str, Any]] = {
+        s["id"]: {"id": s["id"], "name": s["name"], "symbol": s["symbol"], "usd": 0.0, "calls": 0,
+                  "input_tokens": 0, "output_tokens": 0, "models": []} for s in specs}
+    for ledger_name, stats in raw["agents"].items():
+        spec = next((s for s in specs if s["id"] == ledger_name), None) \
+            or next((s for s in specs if _matches(ledger_name, s["jobs"])), None)
+        key = spec["id"] if spec else "other"
+        row = rows.setdefault(key, {"id": "other", "name": "Other", "symbol": "sparkles", "usd": 0.0, "calls": 0,
+                                    "input_tokens": 0, "output_tokens": 0, "models": []})
+        row["usd"] = round(row["usd"] + stats["usd"], 4)
+        row["calls"] += stats["calls"]
+        row["input_tokens"] += stats["input_tokens"]
+        row["output_tokens"] += stats["output_tokens"]
+        row["models"] = sorted(set(row["models"]) | set(stats["models"]))
+    agents = sorted(rows.values(), key=lambda r: (-r["usd"], r["name"]))
+    return {"days": days, "since": raw["since"], "tracking_since": raw["tracking_since"],
+            "total_usd": round(sum(r["usd"] for r in agents), 4), "agents": agents, "daily": raw["daily"]}
 
 
 def roster() -> dict[str, Any]:

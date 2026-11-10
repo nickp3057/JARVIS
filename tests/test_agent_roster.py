@@ -75,3 +75,45 @@ class RosterTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class UsageReportTests(unittest.TestCase):
+    def setUp(self):
+        import tempfile
+        from pathlib import Path
+        from unittest.mock import patch
+        from brain import usage
+        self.tmp = tempfile.TemporaryDirectory()
+        self.patch = patch.object(usage, "_DB_PATH", Path(self.tmp.name) / "usage.db")
+        self.patch.start()
+        self.usage = usage
+
+    def tearDown(self):
+        self.patch.stop()
+        self.tmp.cleanup()
+
+    def test_costs_and_mapping(self):
+        from brain import agent_roster
+        u = self.usage
+        # Sonnet 5.5: 1M fresh input $2 + 1M cache reads $0.10 + 100K output $1.
+        u.record("donna", "claude-sonnet-5-5", {"input_tokens": 1_000_000, "cache_read_input_tokens": 1_000_000,
+                                                "cache_creation_input_tokens": 0, "output_tokens": 100_000})
+        u.record("jarvis", "claude-opus-5-5", {"input_tokens": 1000, "output_tokens": 100,
+                                               "server_tool_use": {"web_search_requests": 2}})
+        u.record_response("email_triage", {"model": "claude-haiku-5-5",
+                                            "usage": {"input_tokens": 200_000, "output_tokens": 0}})
+        u.record("mystery_job", "claude-haiku-5-5", {"input_tokens": 10})
+        report = agent_roster.usage_report(7)
+        by_id = {a["id"]: a for a in report["agents"]}
+        self.assertAlmostEqual(by_id["donna"]["usd"], 3.10, places=4)
+        self.assertAlmostEqual(by_id["jarvis"]["usd"], 0.004 + 0.002 + 0.02, places=4)
+        self.assertAlmostEqual(by_id["email"]["usd"], 0.10, places=4)  # long-prompt Haiku tier
+        self.assertIn("other", by_id)
+        self.assertEqual(report["agents"][0]["id"], "donna")
+        self.assertEqual(by_id["study"]["usd"], 0.0)  # every agent listed, even idle
+        self.assertAlmostEqual(report["total_usd"], sum(a["usd"] for a in report["agents"]), places=4)
+        self.assertEqual(len(report["daily"]), 1)
+
+    def test_bad_usage_never_raises(self):
+        self.usage.record("jarvis", "x", object())
+        self.usage.record("jarvis", "x", None)

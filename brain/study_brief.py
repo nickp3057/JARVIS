@@ -301,6 +301,8 @@ def compose_bodies_with_model(client: Any, briefs: list[dict[str, Any]], cfg: di
         tool_choice={"type": "tool", "name": "write_briefs"},
         messages=[{"role": "user", "content": json.dumps(payload, ensure_ascii=False)}],
     )
+    from brain import usage as _usage
+    _usage.record_response('study', response)
     bodies: list[str] = []
     for block in getattr(response, "content", []) or []:
         if getattr(block, "type", None) == "tool_use":

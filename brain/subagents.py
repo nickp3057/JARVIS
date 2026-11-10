@@ -137,6 +137,8 @@ def run(spec: SubagentSpec, task: str, *, client: Any = None) -> SubagentResult:
             else:
                 log.warning("Subagent %s model call failed: %s", spec.name, exc)
                 return SubagentResult(False, "", round_no, calls, f"{type(exc).__name__}: {exc}")
+        from brain import usage
+        usage.record_response(spec.name, response)
         blocks = list(_get(response, "content", []) or [])
         messages.append({"role": "assistant", "content": [_block_dict(b) for b in blocks]})
         uses = [b for b in blocks if _get(b, "type") == "tool_use"]

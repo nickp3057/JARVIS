@@ -258,8 +258,11 @@ def _with_cache_breakpoints(messages: list[dict[str, Any]], anchor: int) -> list
     return out
 
 
-def _log_round(started: float, first_token_at: float | None, usage: Any, round_no: int) -> None:
-    """One line per API round so slow turns can be diagnosed from the journal."""
+def _log_round(started: float, first_token_at: float | None, usage: Any, round_no: int, model: str = "") -> None:
+    """One line per API round so slow turns can be diagnosed from the journal,
+    and its tokens in the usage ledger (the Agents page's cost view)."""
+    from brain import usage as usage_ledger
+    usage_ledger.record("jarvis", model, usage)
     total = time.monotonic() - started
     ttft = (first_token_at - started) if first_token_at else total
     log.info(
@@ -547,7 +550,7 @@ class JarvisAgent:
                 else:
                     model_select.mark_plain(model)
                     response = self._client.messages.create(**request)  # type: ignore[union-attr]
-            _log_round(started, None, getattr(response, "usage", None), round_no)
+            _log_round(started, None, getattr(response, "usage", None), round_no, request["model"])
 
             tool_uses = [b for b in response.content if getattr(b, "type", None) == "tool_use"]
             text_blocks = [b for b in response.content if getattr(b, "type", None) == "text"]
@@ -667,7 +670,7 @@ class JarvisAgent:
                 if tail:
                     yield from emit(tail)
                 final = stream.get_final_message()
-            _log_round(started, first_token_at, getattr(final, "usage", None), round_no)
+            _log_round(started, first_token_at, getattr(final, "usage", None), round_no, request["model"])
 
             tool_uses = [b for b in final.content if getattr(b, "type", None) == "tool_use"]
             if final.stop_reason == "refusal" and not text_parts:

@@ -251,6 +251,8 @@ def _call_model(
         tool_choice={"type": "tool", "name": "record_memories"},
         messages=[{"role": "user", "content": prompt}],
     )
+    from brain import usage as _usage
+    _usage.record_response('memory', response)
     for block in getattr(response, "content", []) or []:
         if getattr(block, "type", None) == "tool_use":
             payload = getattr(block, "input", None)
@@ -543,6 +545,8 @@ def refresh_core_profile(client: Any = None) -> bool:
                 messages=[{"role": "user", "content": sources}],
                 **model_select.request_kwargs(model),
             )
+            from brain import usage as _usage
+            _usage.record_response('memory', response)
         except Exception as exc:  # noqa: BLE001
             log.warning("Core profile distillation failed: %s", exc)
             return False

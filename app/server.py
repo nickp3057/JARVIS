@@ -799,6 +799,13 @@ def agents(_: None = _status_read) -> dict[str, object]:
     return agent_roster.roster()
 
 
+@app.get("/api/agents/usage")
+def agents_usage(days: float = 7, _: None = _status_read) -> dict[str, object]:
+    """Estimated model spend per agent over the last ``days`` (0 = all time)."""
+    from brain import agent_roster
+    return agent_roster.usage_report(days if days > 0 else None)
+
+
 @app.post("/api/schwab/login")
 def schwab_login(_: None = Depends(authorize)) -> dict[str, object]:
     """Schwab's login page for the app's web view, and the callback address

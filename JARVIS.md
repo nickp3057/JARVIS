@@ -59,6 +59,7 @@ Pearson-Stark-Jarvis/
 │   ├── maintenance.py       Recurring chores: countdowns + completion log (SQLite)
 │   ├── shopping.py          Shopping list over a saved-item catalog with photos (SQLite)
 │   ├── donna.py             Donna, the private text-only counsellor (own DB, prompt, tools)
+│   ├── usage.py             Ledger of every model call's tokens + estimated $ per agent
 │   ├── briefing.py          Spoken situational briefing (time, weather, agenda, timers)
 │   ├── personality.py       System prompt builder (humor%, address, tool descriptions)
 │   ├── price_watch.py       Guarded public-page price checks + durable targets
@@ -123,6 +124,7 @@ Pearson-Stark-Jarvis/
 │   ├── maintenance.db       Maintenance tasks + log (auto-created, seeded once)
 │   ├── shopping.db          Saved shopping items; on_list = on the list now
 │   ├── donna.db             Donna's sessions, notes, case file, follow-ups, moods, check-ins (private)
+│   ├── usage.db             One row per model call: agent, model, token counts, estimated $
 │   ├── shopping_photos/     <item id>.jpg product photos from the companion
 │   ├── profile.json         Long-term memory facts (auto-created)
 │   ├── habits.json          Bounded per-turn usage log for habit learning
@@ -1599,6 +1601,18 @@ EMAIL_UNSUB_NOTE=           # vault-relative note path; default Jarvis Memory/Em
   Quick add has a quality-profile picker (`GET /api/media/profiles`,
   default Standard for movies, TV for shows). Barn Door now turns the TV on
   (`BARN_DOOR_TV`) and turns the fan light off instead of red.
+- **Agent usage and cost (iOS 6.4 / build 246, branch `phone-reorg`)** —
+  every Messages API response is logged to `memory/usage.db` by
+  `brain/usage.py` (`record` / `record_response`): JARVIS's rounds
+  (`agent._log_round`), vision, the memory keeper and core profile, the study
+  coach, every subagent (by spec name) and Donna. Costs are estimates from
+  list prices in `usage._PRICES` (cache reads/writes, Haiku 5.5's >100K tier,
+  $10 per 1,000 web searches); update that table when prices change.
+  `GET /api/agents/usage?days=N` (0 = all) → `agent_roster.usage_report`,
+  mapping ledger names to agents by id, then job prefixes ("Other" for the
+  rest). The Agents page's $ button opens Usage: Today / Week / 30 / 90 days /
+  All, the total, and each agent's cost, calls, tokens and models. Donna
+  joined the roster. Tests isolate the ledger (`tests/__init__.py`).
 - **Donna mode (iOS 6.2 / build 244, branch `phone-reorg`)** — a private,
   text-only counsellor walled off from JARVIS (`brain/donna.py`,
   `memory/donna.db`; JARVIS's memory, history, extractor, dashboards and TV
@@ -1619,7 +1633,7 @@ EMAIL_UNSUB_NOTE=           # vault-relative note path; default Jarvis Memory/Em
   confirmation. API: `GET /api/donna`,
   `POST /api/donna/message|end|import`, `GET|DELETE /api/donna/memory`.
   Conversation on Sonnet (`DONNA_MODEL`), notes on Haiku (`DONNA_NOTES_MODEL`).
-  Not on the Agents map, on purpose.
+  On the Agents map since 6.4 (cost only, never content).
 - **Phone reorganization + Lists (iOS 6.0–6.1 / builds 242–243, branch `phone-reorg`)** —
   phone tabs are Media · Control · Home · Chat · Settings (Home centred and
   default; "Hub" renamed Control on every device). 6.1: Home fits one screen
