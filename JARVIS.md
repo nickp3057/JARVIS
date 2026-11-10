@@ -1595,9 +1595,11 @@ EMAIL_UNSUB_NOTE=           # vault-relative note path; default Jarvis Memory/Em
   Quick add has a quality-profile picker (`GET /api/media/profiles`,
   default Standard for movies, TV for shows). Barn Door now turns the TV on
   (`BARN_DOOR_TV`) and turns the fan light off instead of red.
-- **Phone reorganization + Lists (iOS 6.0 / build 242, branch `phone-reorg`)** —
-  phone tabs are now Home · Control · Media · Chat · Settings (Home first and
-  default; "Hub" renamed Control on every device). Home: reactor, a **Lists**
+- **Phone reorganization + Lists (iOS 6.0–6.1 / builds 242–243, branch `phone-reorg`)** —
+  phone tabs are Media · Control · Home · Chat · Settings (Home centred and
+  default; "Hub" renamed Control on every device). 6.1: Home fits one screen
+  (160 pt orb; scene picker and a Charles Schwab half-tile share the last row);
+  Settings is glass cards. Home: reactor, a **Lists**
   row of three separate tiles (To do = open reminders only; Shopping; 
   Maintenance = due count), a one-line next-up strip (next assessment, else
   next event → Control), scenes, portfolio. Lists push in Home's stack
@@ -1609,7 +1611,7 @@ EMAIL_UNSUB_NOTE=           # vault-relative note path; default Jarvis Memory/Em
   searchable photo grid. Control: needs-attention, repairs, camera + TV
   remote side by side, switches, then Now (reminders dropped from Now; they
   live in To do). Maintenance list is sectioned Due / Coming up / Log.
-  Settings is an inset-grouped list (Core row → Connection; Appearance;
+  Settings groups (Core row → Connection; Appearance;
   Routine: wake-up, study brief, night volume; JARVIS: agents, memory;
   Accounts: Schwab; About) with each old panel on its own page.
 - **Desk on the Mac (iOS 5.6 / build 149)** — on the Mac, Room and Home are

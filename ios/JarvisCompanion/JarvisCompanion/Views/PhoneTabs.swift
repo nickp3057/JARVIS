@@ -9,10 +9,10 @@ struct PhoneTabs: UIViewControllerRepresentable {
     var pages: [AnyView]
     var reduceMotion: Bool
 
-    /// Home leads (it's where the app opens), then the house controls, the
-    /// media machinery, the conversation, and settings last.
-    static let tabs: [RootView.RootTab] = [.home, .hub, .media, .chat, .settings]
-    private static let symbols = ["house", "switch.2", "play.rectangle.on.rectangle",
+    /// Home sits in the middle (where the app opens), one swipe from
+    /// Control and Chat.
+    static let tabs: [RootView.RootTab] = [.media, .hub, .home, .chat, .settings]
+    private static let symbols = ["play.rectangle.on.rectangle", "switch.2", "house",
                                   "bubble.left.and.bubble.right", "gearshape"]
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
@@ -30,7 +30,7 @@ struct PhoneTabs: UIViewControllerRepresentable {
                                           image: UIImage(systemName: Self.symbols[index]), tag: index)
             return host
         }
-        controller.selectedIndex = Self.tabs.firstIndex(of: selection) ?? 0
+        controller.selectedIndex = Self.tabs.firstIndex(of: selection) ?? 2
         controller.delegate = coordinator
         controller.view.tintColor = UIColor(JarvisTheme.reactor)
         coordinator.controller = controller

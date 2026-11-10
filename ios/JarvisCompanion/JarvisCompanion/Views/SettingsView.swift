@@ -21,68 +21,70 @@ struct SettingsView: View {
 
     var body: some View {
         NavigationStack {
-            List {
-                Section {
-                    NavigationLink { page("Connection") { connectionPanel } } label: { coreRow }
-                }
-                Section("Appearance") {
-                    NavigationLink { page("Theme") {
-                        CockpitPanel("Theme", symbol: "paintpalette") {
-                            ThemePicker()
-                            Text("Your TV and iPad follow this too.").font(.caption).foregroundStyle(.secondary)
+            ScrollView {
+                VStack(alignment: .leading, spacing: 22) {
+                    group {
+                        NavigationLink { page("Connection") { connectionPanel } } label: { coreRow }
+                    }
+                    group("Appearance") {
+                        NavigationLink { page("Theme") {
+                            CockpitPanel("Theme", symbol: "paintpalette") {
+                                ThemePicker()
+                                Text("Your TV and iPad follow this too.").font(.caption).foregroundStyle(.secondary)
+                            }
+                        } } label: {
+                            row("Theme", symbol: "paintpalette", tint: .purple, value: JarvisPalette.current.name)
                         }
-                    } } label: {
-                        row("Theme", symbol: "paintpalette", tint: .purple, value: JarvisPalette.current.name)
                     }
-                }
-                Section("Routine") {
-                    NavigationLink { WakeScheduleView() } label: {
-                        row("Wake-up", symbol: "alarm", tint: .orange)
-                    }
-                    NavigationLink { page("Study brief") { studyPanel } } label: {
-                        row("Study brief", symbol: "graduationcap", tint: .blue,
-                            value: settings.studyAlertsEnabled ? "On" : "Off")
-                    }
-                    NavigationLink { page("Night volume") { NightVolumePanel() } } label: {
-                        row("Night volume", symbol: "moon", tint: .indigo)
-                    }
-                }
-                if !RootView.isPad {
-                    Section {
-                        Button { showingAgents = true } label: {
-                            row("Agents", symbol: "person.3.sequence", tint: .teal, chevron: true)
+                    group("Routine") {
+                        NavigationLink { WakeScheduleView() } label: {
+                            row("Wake-up", symbol: "alarm", tint: .orange)
                         }
-                        Button { showingKnowledge = true } label: {
-                            row("Memory", symbol: "brain", tint: .pink, chevron: true)
+                        divider
+                        NavigationLink { page("Study brief") { studyPanel } } label: {
+                            row("Study brief", symbol: "graduationcap", tint: .blue,
+                                value: settings.studyAlertsEnabled ? "On" : "Off")
                         }
-                    } header: {
-                        Text("JARVIS")
-                    } footer: {
-                        Text("Who works for JARVIS, and what he knows about you.")
-                    }
-                }
-                Section("Accounts") {
-                    NavigationLink { page("Charles Schwab") { SchwabPanel() } } label: {
-                        row("Charles Schwab", symbol: "chart.line.uptrend.xyaxis", tint: .green)
-                    }
-                }
-                Section {
-                    HStack(spacing: 10) {
-                        JarvisCoreMark(size: 30, animated: false)
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("JARVIS Companion").font(.subheadline.weight(.semibold))
-                            Text("Version \(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "—")")
-                                .font(.caption).foregroundStyle(.secondary)
+                        divider
+                        NavigationLink { page("Night volume") { NightVolumePanel() } } label: {
+                            row("Night volume", symbol: "moon", tint: .indigo)
                         }
-                        Spacer()
-                        Image(systemName: "lock.shield").foregroundStyle(JarvisTheme.cyan)
                     }
-                    .accessibilityElement(children: .combine)
+                    if !RootView.isPad {
+                        group("JARVIS", footer: "Who works for JARVIS, and what he knows about you.") {
+                            Button { showingAgents = true } label: {
+                                row("Agents", symbol: "person.3.sequence", tint: .teal)
+                            }
+                            divider
+                            Button { showingKnowledge = true } label: {
+                                row("Memory", symbol: "brain", tint: .pink)
+                            }
+                        }
+                    }
+                    group("Accounts") {
+                        NavigationLink { page("Charles Schwab") { SchwabPanel() } } label: {
+                            row("Charles Schwab", symbol: "chart.line.uptrend.xyaxis", tint: .green)
+                        }
+                    }
+                    group {
+                        HStack(spacing: 10) {
+                            JarvisCoreMark(size: 30, animated: false)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("JARVIS Companion").font(.subheadline.weight(.semibold))
+                                Text("Version \(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "—")")
+                                    .font(.caption).foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            Image(systemName: "lock.shield").foregroundStyle(JarvisTheme.cyan)
+                        }
+                        .padding(.horizontal, 14).padding(.vertical, 10)
+                        .accessibilityElement(children: .combine)
+                    }
                 }
+                .buttonStyle(.plain)
+                .frame(maxWidth: 680).padding(.horizontal, 16).padding(.vertical, 12)
+                .frame(maxWidth: .infinity)
             }
-            .listStyle(.insetGrouped)
-            .scrollContentBackground(.hidden)
-            .scrollDismissesKeyboard(.interactively)
             .sheet(isPresented: $showingKnowledge) { KnowledgeView() }
             .fullScreenCover(isPresented: $showingAgents) { AgentMapView() }
             .background { JarvisBackdrop() }
@@ -100,6 +102,28 @@ struct SettingsView: View {
         }
     }
 
+    /// One settings group: a glass card like Home's tiles, with an optional
+    /// heading above and footnote below.
+    private func group<Content: View>(_ title: String? = nil, footer: String? = nil,
+                                      @ViewBuilder _ content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            if let title {
+                Text(title).font(.footnote.weight(.semibold)).foregroundStyle(.secondary)
+                    .padding(.leading, 14).accessibilityAddTraits(.isHeader)
+            }
+            VStack(spacing: 0) { content() }
+                .jarvisSurface(in: .rect(cornerRadius: 20))
+                .overlay(RoundedRectangle(cornerRadius: 20).strokeBorder(JarvisTheme.border))
+            if let footer {
+                Text(footer).font(.footnote).foregroundStyle(.secondary).padding(.horizontal, 14)
+            }
+        }
+    }
+
+    private var divider: some View {
+        Divider().padding(.leading, 55)
+    }
+
     /// The top row: which Core this phone talks to, like the Apple ID row.
     private var coreRow: some View {
         HStack(spacing: 14) {
@@ -109,13 +133,16 @@ struct SettingsView: View {
                 Text(settings.isConfigured ? settings.baseURLString : "Not connected yet")
                     .font(.caption).foregroundStyle(.secondary).lineLimit(1)
             }
+            Spacer()
+            Image(systemName: "chevron.right").font(.footnote.weight(.semibold)).foregroundStyle(.tertiary)
         }
-        .padding(.vertical, 4)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
+        .contentShape(Rectangle())
     }
 
     /// A Settings-app row: a white glyph on a coloured rounded square.
-    private func row(_ title: String, symbol: String, tint: Color, value: String? = nil,
-                     chevron: Bool = false) -> some View {
+    private func row(_ title: String, symbol: String, tint: Color, value: String? = nil) -> some View {
         HStack(spacing: 12) {
             Image(systemName: symbol)
                 .font(.system(size: 14, weight: .semibold))
@@ -125,10 +152,10 @@ struct SettingsView: View {
             Text(title).foregroundStyle(.primary)
             Spacer()
             if let value { Text(value).foregroundStyle(.secondary) }
-            if chevron {
-                Image(systemName: "chevron.right").font(.footnote.weight(.semibold)).foregroundStyle(.tertiary)
-            }
+            Image(systemName: "chevron.right").font(.footnote.weight(.semibold)).foregroundStyle(.tertiary)
         }
+        .padding(.horizontal, 14)
+        .frame(minHeight: 50)
         .contentShape(Rectangle())
     }
 

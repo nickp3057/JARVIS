@@ -5,6 +5,17 @@ off, JARVIS sounds scattered because a whole tool turn lands in one bubble,
 replies didn't stream, and media adds sometimes fail. He leans toward a
 hub-first app with chat as one tab.
 
+## Home in the middle, one-page Home, glass Settings (6.1 / build 243, 2026-11-09)
+
+Nick's review of 6.0: shopping list approved as is. Phone tabs back to
+Media · Control · Home · Chat · Settings (Home centred, still default). Home
+fits without scrolling: 160 pt orb, and the scene picker and a Charles Schwab
+half-tile share the last row. The scene icon has no dark disc when nothing is
+picked. Settings rows didn't respond on the phone: RootView's iPad-only swipe
+and idle-tap gestures (ancestor `simultaneousGesture`s) swallowed List row
+selection; they're now masked to `.subviews` on the phone, and Settings is a
+ScrollView of glass cards (`jarvisSurface`) with plain-styled links.
+
 ## Phone reorganization + Lists (6.0 / build 242, 2026-11-09, branch `phone-reorg`)
 
 Nick asked for a full reorg modelled on clean apps, with maintenance, to-dos

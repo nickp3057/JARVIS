@@ -75,12 +75,7 @@ struct HubView: View {
                                 hero
                                 listsRow
                                 nextUpStrip
-                                if let scenes = model.scenes.value, !scenes.scenes.isEmpty {
-                                    SceneFocusMenu(model: model, scenes: scenes)
-                                }
-                                if let portfolio = model.portfolio.value, portfolio.configured {
-                                    portfolioStrip(portfolio)
-                                }
+                                scenesAndPortfolio
                             case .hub:
                                 // What needs you first, then the controls, then the day.
                                 if !attentionAlerts.isEmpty { needsAttentionCard }
@@ -248,7 +243,7 @@ struct HubView: View {
 
     @ViewBuilder private var heroReactor: some View {
         if let phoneVoice {
-            PushToTalkOrb(controller: phoneVoice, size: typeSize.isAccessibilitySize ? 130 : 190)
+            PushToTalkOrb(controller: phoneVoice, size: typeSize.isAccessibilitySize ? 120 : 160)
         } else {
             JarvisCoreMark(size: typeSize.isAccessibilitySize ? 130 : 190)
                 .barnDoorTaps()
@@ -733,35 +728,54 @@ struct HubView: View {
         .fixedSize(horizontal: false, vertical: true)
     }
 
-    /// Home's portfolio: one compact line (value and today), or the login
-    /// prompt when Schwab needs it.
-    private func portfolioStrip(_ p: Portfolio) -> some View {
-        HStack(spacing: 12) {
-            Image(systemName: "chart.line.uptrend.xyaxis")
-                .foregroundStyle(JarvisTheme.cyan)
+    /// Home's last row: the scene picker and the portfolio, half each (either
+    /// takes the full width when the other has nothing to show).
+    @ViewBuilder private var scenesAndPortfolio: some View {
+        let scenes = model.scenes.value.flatMap { $0.scenes.isEmpty ? nil : $0 }
+        let portfolio = model.portfolio.value.flatMap { $0.configured ? $0 : nil }
+        let layout = typeSize.isAccessibilitySize
+            ? AnyLayout(VStackLayout(spacing: 10))
+            : AnyLayout(HStackLayout(alignment: .top, spacing: 10))
+        if scenes != nil || portfolio != nil {
+            layout {
+                if let scenes { SceneFocusMenu(model: model, scenes: scenes).frame(maxHeight: .infinity) }
+                if let portfolio { portfolioHalf(portfolio) }
+            }
+            .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    /// The portfolio in half a row: value over today's move, or the login.
+    private func portfolioHalf(_ p: Portfolio) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text("Charles Schwab").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
             if !p.linked || p.loginDueSoon {
-                Text(p.linked ? "Schwab login runs out soon" : "Schwab needs a login")
-                    .font(.subheadline.weight(.semibold))
-                Spacer(minLength: 0)
-                Button("Log in") { schwabLoggingIn = true }
-                    .font(.footnote.weight(.semibold)).foregroundStyle(JarvisTheme.cyan)
+                Button(p.linked ? "Login runs out soon" : "Log in") { schwabLoggingIn = true }
+                    .font(.subheadline.weight(.semibold)).foregroundStyle(JarvisTheme.cyan)
             } else if let value = p.value {
                 Text(value, format: .currency(code: "USD"))
                     .font(.headline.monospacedDigit())
+                    .lineLimit(1).minimumScaleFactor(0.7)
                     .contentTransition(.numericText(value: value))
                     .animation(.snappy, value: value)
-                Spacer(minLength: 0)
-                if let today = p.todayChange { change(today, pct: p.todayPct, label: "today") }
+                if let today = p.todayChange {
+                    let up = today >= 0
+                    Text("\(up ? "▲" : "▼") \(abs(today).formatted(.currency(code: "USD")))"
+                         + (p.todayPct.map { String(format: " (%+.1f%%)", $0) } ?? ""))
+                        .font(.caption.weight(.semibold).monospacedDigit())
+                        .foregroundStyle(up ? JarvisTheme.success : JarvisTheme.critical)
+                        .lineLimit(1).minimumScaleFactor(0.7)
+                        .accessibilityLabel("\(up ? "Up" : "Down") \(abs(today).formatted(.currency(code: "USD"))) today")
+                }
             } else {
-                Text(p.error?.isEmpty == false ? p.error! : "Fetching your accounts…")
-                    .font(.caption).foregroundStyle(.secondary).lineLimit(1)
-                Spacer(minLength: 0)
+                Text(p.error?.isEmpty == false ? p.error! : "Fetching…")
+                    .font(.caption).foregroundStyle(.secondary).lineLimit(2)
             }
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 12)
-        .jarvisSurface(in: .rect(cornerRadius: 16))
-        .overlay(RoundedRectangle(cornerRadius: 16).strokeBorder(JarvisTheme.border))
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+        .padding(12)
+        .jarvisSurface(in: .rect(cornerRadius: 18))
+        .overlay(RoundedRectangle(cornerRadius: 18).strokeBorder(JarvisTheme.border))
     }
 
     private func change(_ amount: Double, pct: Double?, label: String) -> some View {

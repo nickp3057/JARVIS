@@ -123,11 +123,13 @@ struct SceneFocusMenu: View {
                     }
                 }
                 .frame(width: 38, height: 38)
-                .background(current != nil ? JarvisTheme.cyan.opacity(0.9) : JarvisTheme.panelRaised, in: Circle())
+                // Nothing picked: a bare icon, like the other strips' glyphs.
+                .background(current != nil ? JarvisTheme.cyan.opacity(0.9) : Color.clear, in: Circle())
                 .foregroundStyle(current != nil ? JarvisTheme.backgroundDeep : JarvisTheme.cyan)
                 VStack(alignment: .leading, spacing: 1) {
                     Text(title).font(.caption.weight(.semibold)).foregroundStyle(.secondary)
                     Text(current?.name ?? "Pick a scene").font(.headline).foregroundStyle(.primary)
+                        .lineLimit(1).minimumScaleFactor(0.8)
                 }
                 Spacer(minLength: 0)
                 Image(systemName: "chevron.up.chevron.down")

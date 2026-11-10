@@ -144,8 +144,12 @@ struct RootView: View {
                 PushToTalkPanel(controller: phoneVoice)
             }
         }
-        .simultaneousGesture(DragGesture(minimumDistance: 30).onChanged(track).onEnded(swipe))
-        .simultaneousGesture(TapGesture().onEnded { touches &+= 1 })
+        // iPad/Mac only: the tab swipe and the idle timer. On the phone these
+        // ancestor gestures swallowed List row taps (Settings, Maintenance).
+        .simultaneousGesture(DragGesture(minimumDistance: 30).onChanged(track).onEnded(swipe),
+                             including: Self.isPad || Self.isMac ? .all : .subviews)
+        .simultaneousGesture(TapGesture().onEnded { touches &+= 1 },
+                             including: Self.isPad || Self.isMac ? .all : .subviews)
         .task(id: "\(selection)-\(touches)-\(autoReturn)") {
             // Chat is left alone: a half-typed message shouldn't be yanked away.
             guard Self.isPad, !Self.isMac, autoReturn, selection != .room, selection != .chat else { return }
@@ -197,9 +201,9 @@ struct RootView: View {
 
     private var phonePages: [AnyView] {
         // Same order as `PhoneTabs.tabs`.
-        [AnyView(HubView(model: hub, onAsk: ask, onNavigate: navigate, focus: .home, phoneVoice: phoneVoice).environmentObject(settings)),
+        [AnyView(HubView(model: hub, onAsk: ask, focus: .media).environmentObject(settings)),
          AnyView(HubView(model: hub, onAsk: ask, onNavigate: navigate, focus: .hub).environmentObject(settings)),
-         AnyView(HubView(model: hub, onAsk: ask, focus: .media).environmentObject(settings)),
+         AnyView(HubView(model: hub, onAsk: ask, onNavigate: navigate, focus: .home, phoneVoice: phoneVoice).environmentObject(settings)),
          AnyView(ChatView(model: chat).environmentObject(settings)),
          AnyView(SettingsView(embedded: true, studyBrief: hub.studyBrief.value).environmentObject(settings))]
     }
