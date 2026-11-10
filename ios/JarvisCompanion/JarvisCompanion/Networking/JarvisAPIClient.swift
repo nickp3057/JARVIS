@@ -828,6 +828,42 @@ struct JarvisAPIClient {
         _ = try await sendJSON(SharedTheme.self, path: "api/theme", method: "PUT", body: Body(experiments: experiments))
     }
 
+    // MARK: - Donna (private counsellor)
+
+    /// Donna's replies can include a lookup on a trusted site; give her room.
+    private var patient: JarvisAPIClient {
+        JarvisAPIClient(baseURL: baseURL, token: token, timeout: 120, session: session)
+    }
+
+    func donnaState() async throws -> DonnaState {
+        try await getJSON(DonnaState.self, path: "api/donna")
+    }
+
+    func donnaSend(_ text: String) async throws -> DonnaReply {
+        struct Body: Encodable { let text: String }
+        return try await patient.postJSON(DonnaReply.self, path: "api/donna/message", body: Body(text: text))
+    }
+
+    func donnaEnd() async throws {
+        struct Ended: Decodable { let ended: Bool }
+        _ = try await patient.postEmpty(Ended.self, path: "api/donna/end")
+    }
+
+    func donnaImport(_ text: String) async throws -> String {
+        struct Body: Encodable { let text: String }
+        struct Done: Decodable { let caseFile: String; enum CodingKeys: String, CodingKey { case caseFile = "case_file" } }
+        return try await JarvisAPIClient(baseURL: baseURL, token: token, timeout: 300, session: session)
+            .postJSON(Done.self, path: "api/donna/import", body: Body(text: text)).caseFile
+    }
+
+    func donnaMemory() async throws -> DonnaMemory {
+        try await getJSON(DonnaMemory.self, path: "api/donna/memory")
+    }
+
+    func donnaForget() async throws {
+        try await delete(path: "api/donna/memory")
+    }
+
     // MARK: - Shopping list
 
     private struct ShoppingEnvelope: Decodable { let item: ShoppingItem }

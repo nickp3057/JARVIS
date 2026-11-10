@@ -27,6 +27,8 @@ struct RootView: View {
     /// The phone's camera viewer is presented here, above `.id(palette)`, so a
     /// theme flip (Barn Door engaging) doesn't tear down the live feed.
     @ObservedObject private var cameraViewer = RoomCameraPresenter.shared
+    /// Donna mode covers everything, tab bar included, until he leaves.
+    @ObservedObject private var donna = DonnaPresenter.shared
     /// iPad: slide back to Room after a few idle minutes on another tab.
     @AppStorage(RoomView.autoReturnKey) private var autoReturn = true
     /// Bumped by any touch, so the trip back to Room waits for a quiet spell.
@@ -142,6 +144,14 @@ struct RootView: View {
         .overlay(alignment: .bottom) {
             if !Self.isPad && !Self.isMac && phoneVoice.showing {
                 PushToTalkPanel(controller: phoneVoice)
+            }
+        }
+        .overlay {
+            if donna.showing {
+                DonnaView(settings: settings)
+                    .environmentObject(settings)
+                    .transition(.opacity)
+                    .zIndex(10)
             }
         }
         // iPad/Mac only: the tab swipe and the idle timer. On the phone these

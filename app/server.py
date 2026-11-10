@@ -685,6 +685,77 @@ def shopping_get_photo(item_id: int, _: None = Depends(authorize)) -> Response:
                     headers={"Cache-Control": "private, max-age=604800"})
 
 
+# --- Donna (private counsellor; brain/donna.py) ------------------------------
+
+
+class DonnaMessageRequest(BaseModel):
+    text: str = Field(min_length=1, max_length=8_000)
+
+
+class DonnaImportRequest(BaseModel):
+    text: str = Field(min_length=50, max_length=2_000_000)
+
+
+def _donna_state() -> dict[str, object]:
+    from brain import donna
+    return {"session": donna.current_session(), "checkins": donna.pending_checkins(),
+            "has_case_file": bool(donna.case_file())}
+
+
+@app.get("/api/donna")
+def donna_state(_: None = Depends(authorize)) -> dict[str, object]:
+    """The session in progress (if any) and pending check-ins."""
+    from brain import donna
+    donna.close_stale()  # writes any idle session's note first
+    return _donna_state()
+
+
+@app.post("/api/donna/message")
+def donna_message(request: DonnaMessageRequest, _: None = Depends(authorize)) -> dict[str, object]:
+    from brain import donna
+    try:
+        result = donna.reply(request.text)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    return {**result, "checkins": donna.pending_checkins()}
+
+
+@app.post("/api/donna/end")
+def donna_end(_: None = Depends(authorize)) -> dict[str, object]:
+    """End the session now: Donna writes her note."""
+    from brain import donna
+    return {"ended": donna.end_session()}
+
+
+@app.post("/api/donna/import")
+def donna_import(request: DonnaImportRequest, _: None = Depends(authorize)) -> dict[str, object]:
+    """A pasted past conversation becomes (or updates) her case file."""
+    from brain import donna
+    try:
+        return {"case_file": donna.import_history(request.text)}
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+
+@app.get("/api/donna/memory")
+def donna_memory(_: None = Depends(authorize)) -> dict[str, object]:
+    """Everything she keeps, for the "What Donna knows" page."""
+    from brain import donna
+    return {"case_file": donna.case_file(), "notes": donna.all_notes(),
+            "followups": donna.open_followups(), "moods": donna.moods(30)}
+
+
+@app.delete("/api/donna/memory")
+def donna_forget(_: None = Depends(authorize)) -> Response:
+    from brain import donna
+    donna.forget_everything()
+    return Response(status_code=204)
+
+
 # --- Wake-up schedule (music on the TV; brain/wake_alarm.py) ---------------
 
 

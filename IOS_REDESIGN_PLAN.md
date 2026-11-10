@@ -5,6 +5,14 @@ off, JARVIS sounds scattered because a whole tool turn lands in one bubble,
 replies didn't stream, and media adds sometimes fail. He leans toward a
 hub-first app with chat as one tab.
 
+## Donna mode (6.2 / build 244, 2026-11-10)
+
+Hold the JARVIS logo on Chat (title logo or the empty-chat orb, 0.8 s) to
+open Donna, a private text-only counsellor (see JARVIS.md). Rose theme
+(`DonnaTheme`), the ring morphs into a line, the overlay covers the tab bar.
+No Face ID for now (Nick, 2026-11-10). Not yet seen on a device: the
+morph, keyboard handling inside the overlay, check-in notifications.
+
 ## Home in the middle, one-page Home, glass Settings (6.1 / build 243, 2026-11-09)
 
 Nick's review of 6.0: shopping list approved as is. Phone tabs back to

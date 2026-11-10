@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 /// The whole app: one scrolling transcript and one composer.
 struct ChatView: View {
@@ -53,6 +54,16 @@ struct ChatView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbarBackground(.hidden, for: .navigationBar)
             .toolbar {
+                // The logo beside the title is also the hidden way into Donna
+                // mode: press and hold.
+                ToolbarItem(placement: .principal) {
+                    HStack(spacing: 7) {
+                        JarvisCoreMark(size: 22, animated: false)
+                            .donnaDoor()
+                        Text(model.messages.isEmpty ? "JARVIS" : model.activeTitle)
+                            .font(.headline).lineLimit(1)
+                    }
+                }
                 ToolbarItem(placement: .topBarLeading) {
                     Button("History", systemImage: "clock.arrow.circlepath") {
                         showingHistory = true
@@ -366,7 +377,7 @@ struct ChatView: View {
     private var emptyState: some View {
         ScrollView {
             VStack(spacing: 22) {
-                JarvisCoreMark(size: 120).padding(.top, 14)
+                JarvisCoreMark(size: 120).donnaDoor().padding(.top, 14)
                 VStack(spacing: 10) {
                     Text("At your service")
                         .font(.caption.weight(.semibold)).foregroundStyle(JarvisTheme.cyan)
@@ -568,6 +579,17 @@ private struct DebugReportSheet: View {
                 errorText = error.localizedDescription
             }
             isSending = false
+        }
+    }
+}
+
+private extension View {
+    /// Press and hold opens Donna mode. No hint, no label: it's meant to be
+    /// found only by someone who knows.
+    func donnaDoor() -> some View {
+        onLongPressGesture(minimumDuration: 0.8) {
+            UIImpactFeedbackGenerator(style: .soft).impactOccurred()
+            withAnimation(.easeInOut(duration: 0.6)) { DonnaPresenter.shared.showing = true }
         }
     }
 }

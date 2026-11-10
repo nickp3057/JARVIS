@@ -58,6 +58,7 @@ Pearson-Stark-Jarvis/
 │   ├── local_model.py       Optional OpenAI-compatible conversational fallback
 │   ├── maintenance.py       Recurring chores: countdowns + completion log (SQLite)
 │   ├── shopping.py          Shopping list over a saved-item catalog with photos (SQLite)
+│   ├── donna.py             Donna, the private text-only counsellor (own DB, prompt, tools)
 │   ├── briefing.py          Spoken situational briefing (time, weather, agenda, timers)
 │   ├── personality.py       System prompt builder (humor%, address, tool descriptions)
 │   ├── price_watch.py       Guarded public-page price checks + durable targets
@@ -121,6 +122,7 @@ Pearson-Stark-Jarvis/
 │   ├── history.db           SQLite conversation history (auto-created)
 │   ├── maintenance.db       Maintenance tasks + log (auto-created, seeded once)
 │   ├── shopping.db          Saved shopping items; on_list = on the list now
+│   ├── donna.db             Donna's sessions, notes, case file, follow-ups, moods, check-ins (private)
 │   ├── shopping_photos/     <item id>.jpg product photos from the companion
 │   ├── profile.json         Long-term memory facts (auto-created)
 │   ├── habits.json          Bounded per-turn usage log for habit learning
@@ -957,6 +959,8 @@ EMAIL_TRIAGE_ENABLED=true   # sort automatically once Gmail is linked
 EMAIL_TRIAGE_INTERVAL_S=900 # seconds between passes (min 120)
 EMAIL_TRIAGE_DRY_RUN=false  # true: decide and log only, move nothing
 EMAIL_TRIAGE_MODEL=         # model id or auto:<family>; default auto:haiku
+DONNA_MODEL=                # Donna's conversation model; default auto:sonnet
+DONNA_NOTES_MODEL=          # Donna's session notes / case file / import; default auto:haiku
 EMAIL_TRIAGE_LOOKBACK_DAYS=3 # how far back an automatic pass looks
 EMAIL_TRIAGE_MAX_PER_PASS=60 # messages per automatic pass (sort_inbox(days>7) allows 500)
 EMAIL_TRIAGE_BATCH=25       # messages per subagent run
@@ -1595,6 +1599,25 @@ EMAIL_UNSUB_NOTE=           # vault-relative note path; default Jarvis Memory/Em
   Quick add has a quality-profile picker (`GET /api/media/profiles`,
   default Standard for movies, TV for shows). Barn Door now turns the TV on
   (`BARN_DOOR_TV`) and turns the fan light off instead of red.
+- **Donna mode (iOS 6.2 / build 244, branch `phone-reorg`)** — a private,
+  text-only counsellor walled off from JARVIS (`brain/donna.py`,
+  `memory/donna.db`; JARVIS's memory, history, extractor, dashboards and TV
+  never see it). Entry is hidden: press and hold the JARVIS logo on the Chat
+  tab (title or the empty-chat orb); the app fades to rose, the rings unwind
+  into one line, and the tab bar is covered (`DonnaPresenter`, overlay in
+  `RootView`). Hold the line or tap the chevron to leave. Memory works like a
+  therapist's notes: each request sends her prompt, a per-session context
+  block (case file, last 3 session notes, open follow-ups, recent moods) and
+  this session's messages only, all prompt-cached. Ending a session (menu, or
+  30 min idle, written before the next one starts) has Haiku write a note and
+  refresh the case file. Tools: recall_notes, update_case_file, add/resolve
+  followup, log_mood, schedule_checkin (the phone schedules them as local
+  notifications), and web_search/web_fetch limited to `donna.ALLOWED_DOMAINS`.
+  Menu: End session, What Donna knows, Bring old chats over (paste → case
+  file via `POST /api/donna/import`), Forget everything. API: `GET /api/donna`,
+  `POST /api/donna/message|end|import`, `GET|DELETE /api/donna/memory`.
+  Conversation on Sonnet (`DONNA_MODEL`), notes on Haiku (`DONNA_NOTES_MODEL`).
+  Not on the Agents map, on purpose.
 - **Phone reorganization + Lists (iOS 6.0–6.1 / builds 242–243, branch `phone-reorg`)** —
   phone tabs are Media · Control · Home · Chat · Settings (Home centred and
   default; "Hub" renamed Control on every device). 6.1: Home fits one screen
