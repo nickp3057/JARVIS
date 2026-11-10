@@ -469,8 +469,14 @@ guardrails agreed 2026-10-27:
   don't count). Anything whose quote isn't `EQUITY` is refused.
 - **Order shape:** a dollar amount worth at least one share becomes whole
   shares (rounded down) as a DAY limit 0.5% past the last price; under one
-  share becomes a fractional market order, which Schwab's API may refuse
-  (unconfirmed), reported as is. Selling ~everything sells the exact quantity.
+  share becomes a fractional market order. **First live order (2026-11-10,
+  #1008619430771, sell 0.1914 SPCX, market open, SPCX status Normal): Schwab's
+  firm cancelled it at once, "No trades are currently allowed".** Most likely
+  the API refuses fractional quantities; every holding in the main account is
+  under one share, so no whole-share order has been tried yet. A rejected
+  order is reported first ("Schwab rejected it…"), marked `rejected` in the
+  journal, doesn't count toward the day cap, and leaves its proposal open.
+  Selling ~everything sells the exact quantity.
 - Placed orders go in `memory/trades.json`; the proposal becomes `ordered`
   with its `order_id`. `investing_status` shows trading on/off, caps, today's
   orders and approved-but-unsent proposals.

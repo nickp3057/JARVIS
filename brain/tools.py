@@ -2233,8 +2233,11 @@ _CUSTOM_TOOLS: list[dict[str, Any]] = [
             "\"buy $20 of NVDA\"). Stocks and ETFs only, cash only, capped per order and per day. "
             "It returns the exact order (shares, price, dollars) and an approval code; Nick approves "
             "with the Approve button in chat, \"yes\" or \"approve <code>\". Nothing reaches Schwab "
-            "until then, and you cannot approve it for him. Turn vague amounts (\"buy a bunch\") "
-            "into a dollar figure by asking first."
+            "until then, and you cannot approve it for him. When Nick says approve / go / place it for "
+            "proposals already approved, call this at once (pass the id so the proposal is marked) "
+            "rather than asking again: his final yes is the Approve on the staged order. Turn vague "
+            "amounts (\"buy a bunch\") into a dollar figure by asking first. If Schwab rejects an "
+            "order, quote its reason; don't guess one (like market hours)."
         ),
         "input_schema": {
             "type": "object",

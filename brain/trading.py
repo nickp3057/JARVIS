@@ -97,7 +97,7 @@ def _save(orders: list[dict[str, Any]]) -> None:
 
 def spent_today() -> float:
     with _lock:
-        return sum(o["dollars"] for o in _load() if o.get("day") == _today())
+        return sum(o["dollars"] for o in _load() if o.get("day") == _today() and not o.get("rejected"))
 
 
 @dataclass
@@ -287,20 +287,42 @@ def execute(order: Order) -> str:
                         "proposal": order.proposal})
         _save(journal)
     log.info("Placed Schwab order %s: %s", order_id, order.describe())
+    try:
+        state = schwab.order_status(order.account, order_id)
+    except Exception:  # noqa: BLE001
+        state = {}
+    if state.get("status") in _DEAD:
+        # 2026-11-10: Schwab took order 1008619430771 (0.1914 SPCX) and its
+        # firm cancelled it at once, "No trades are currently allowed". Say
+        # so first; it doesn't count toward the day cap or the proposal.
+        _mark_rejected(order_id)
+        why = state.get("why") or "no reason given"
+        hint = (" It was a fractional order, and Schwab's API appears not to accept those; whole "
+                "shares or the Schwab app are the way round it." if order.limit is None else "")
+        log.warning("Schwab rejected order %s: %s", order_id, why)
+        return (f"Schwab rejected it, sir: \"{why}\". Nothing was {'bought' if order.side == 'buy' else 'sold'} "
+                f"(order {order_id}, {order.describe()}).{hint}")
     if order.proposal:
         investing.mark_ordered(order.proposal, order_id)
     status = ""
-    try:
-        state = schwab.order_status(order.account, order_id)
+    if state.get("status"):
         status = f" Schwab says {state['status'].lower().replace('_', ' ')}"
         if state.get("price"):
             status += f" at ${float(state['price']):,.2f}"
-        if state["status"] == "REJECTED" and state.get("why"):
-            status += f" ({state['why']})"
         status += "."
-    except Exception:  # noqa: BLE001
-        pass
     return f"Sent to Schwab, sir: {order.describe()}. Order {order_id}.{status}"
+
+
+_DEAD = {"REJECTED", "CANCELED", "EXPIRED"}
+
+
+def _mark_rejected(order_id: str) -> None:
+    with _lock:
+        journal = _load()
+        for o in journal:
+            if o.get("id") == order_id:
+                o["rejected"] = True
+        _save(journal)
 
 
 def describe() -> str:
@@ -310,9 +332,11 @@ def describe() -> str:
     with _lock:
         today = [o for o in _load() if o.get("day") == _today()]
     line = (f"Trading: on. Every order waits for your Approve; caps ${max_order():,.0f} an order, "
-            f"${max_day():,.0f} a day (${sum(o['dollars'] for o in today):,.2f} used today).")
+            f"${max_day():,.0f} a day (${spent_today():,.2f} used today).")
     if today:
-        line += " Today: " + "; ".join(f"{o['side']} {o['quantity']:g} {o['symbol']} (order {o['id']})" for o in today) + "."
+        line += " Today: " + "; ".join(
+            f"{o['side']} {o['quantity']:g} {o['symbol']} (order {o['id']}{', rejected by Schwab' if o.get('rejected') else ''})"
+            for o in today) + "."
     return line
 
 

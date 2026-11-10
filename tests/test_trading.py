@@ -114,6 +114,23 @@ class TradingTests(unittest.TestCase):
         self.assertEqual(self.placed[0][1]["orderType"], "MARKET")
         self.assertNotIn("price", self.placed[0][1])
 
+    def test_schwab_rejection_is_reported_first_and_not_counted(self):
+        # 2026-11-10: order 1008619430771, 0.1914 SPCX, cancelled by the firm at once.
+        self.account["positions"]["SPCX"]["quantity"] = 0.38
+        self.prices["SPCX"]["last"] = 141.04
+        state = investing._load()
+        investing._add_proposal(state, kind="rebalance", symbol="SPCX", side="sell", dollars=27.0, reason="trim")
+        investing._save(state)
+        investing.stage_order("P1", SESSION)
+        with patch.object(schwab, "order_status", return_value={
+                "status": "REJECTED", "filled": 0, "price": None, "why": "No trades are currently allowed"}):
+            reply = confirm_gate.conversation_action("yes", SESSION)
+        self.assertTrue(reply.startswith('Schwab rejected it, sir: "No trades are currently allowed". Nothing was sold'))
+        self.assertIn("fractional", reply)
+        self.assertEqual(trading.spent_today(), 0)
+        self.assertEqual(investing.find_proposal("P1")["status"], "pending")
+        self.assertIn("rejected by Schwab", trading.describe())
+
     def test_approved_proposal_becomes_an_order_and_is_marked(self):
         state = investing._load()
         investing._add_proposal(state, kind="rebalance", symbol="SPCX", side="sell", dollars=27.0, reason="trim")

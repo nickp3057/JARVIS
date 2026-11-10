@@ -166,7 +166,16 @@ approval, give me an approve or deny button". JARVIS.md "Trading" and
   and P4" (approved 2026-11-10: sell $27 SPCX, buy $27 VOO). Expect two cards
   with the exact order; tap Approve on P3 first. Check the order in the
   Schwab app and `memory/trades.json`.
-- [ ] **Fractional orders:** VOO is ~$600 a share, so P4's $27 is a
+- [ ] **Fractional orders were REJECTED live** (2026-11-10 10:12 MST, order
+  1008619430771, sell 0.1914 SPCX at market: `CANCELED_BY_FIRM`, "No trades
+  are currently allowed"; market open, SPCX `securityStatus` Normal). Find out
+  whether it's fractional-only or the whole account (ask traderapi@schwab.com,
+  or try one whole share once Nick holds one). If fractional is the block,
+  the API can't trade Nick's account at all today: every holding is under a
+  share and VOO is ~$600.
+- [ ] Memory extractor saved a stale fact (id 754514f8, "pending
+  confirmation with code 1957"): forget it.
+- [ ] **(was) Fractional orders:** VOO is ~$600 a share, so P4's $27 is a
   fractional market order. Whether Schwab's Trader API accepts fractional
   quantity is unconfirmed; if it refuses, the reply quotes Schwab. Options
   then: ask traderapi@schwab.com, or whole shares only (most of Nick's
