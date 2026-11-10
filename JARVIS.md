@@ -1614,7 +1614,9 @@ EMAIL_UNSUB_NOTE=           # vault-relative note path; default Jarvis Memory/Em
   followup, log_mood, schedule_checkin (the phone schedules them as local
   notifications), and web_search/web_fetch limited to `donna.ALLOWED_DOMAINS`.
   Menu: End session, What Donna knows, Bring old chats over (paste → case
-  file via `POST /api/donna/import`), Forget everything. API: `GET /api/donna`,
+  file via `POST /api/donna/import`). Erasing her memory is deliberately
+  buried (6.3): a small link at the very bottom of What Donna knows, with a
+  confirmation. API: `GET /api/donna`,
   `POST /api/donna/message|end|import`, `GET|DELETE /api/donna/memory`.
   Conversation on Sonnet (`DONNA_MODEL`), notes on Haiku (`DONNA_NOTES_MODEL`).
   Not on the Agents map, on purpose.

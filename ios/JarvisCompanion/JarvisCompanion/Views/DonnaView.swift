@@ -30,7 +30,6 @@ struct DonnaView: View {
     @State private var unwound = false
     @State private var showingMemory = false
     @State private var showingImport = false
-    @State private var confirmingForget = false
     @State private var ending = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -56,12 +55,6 @@ struct DonnaView: View {
         }
         .sheet(isPresented: $showingMemory) { DonnaMemoryView(model: model) }
         .sheet(isPresented: $showingImport) { DonnaImportView(model: model) }
-        .confirmationDialog("Forget everything Donna knows?", isPresented: $confirmingForget,
-                            titleVisibility: .visible) {
-            Button("Forget everything", role: .destructive) { Task { await model.forgetEverything() } }
-        } message: {
-            Text("Her notes, your case file, moods and check-ins are deleted for good.")
-        }
     }
 
     // MARK: Header: the orb's rings unwind into one quiet line.
@@ -80,7 +73,6 @@ struct DonnaView: View {
                         .disabled(model.messages.isEmpty)
                     Button("What Donna knows", systemImage: "book.closed") { showingMemory = true }
                     Button("Bring old chats over", systemImage: "square.and.arrow.down") { showingImport = true }
-                    Button("Forget everything", systemImage: "trash", role: .destructive) { confirmingForget = true }
                 } label: {
                     Image(systemName: "ellipsis.circle").font(.body.weight(.semibold))
                         .frame(width: 44, height: 44)
@@ -233,6 +225,7 @@ struct DonnaMemoryView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var memory: DonnaMemory?
     @State private var error: String?
+    @State private var confirmingForget = false
 
     var body: some View {
         NavigationStack {
@@ -284,6 +277,14 @@ struct DonnaMemoryView: View {
                             .padding(.vertical, 2)
                         }
                     }
+                    // Out of the way on purpose: the last thing on the page.
+                    Section {
+                        Button("Erase Donna's memory") { confirmingForget = true }
+                            .font(.footnote)
+                            .foregroundStyle(.red.opacity(0.8))
+                            .frame(maxWidth: .infinity)
+                    }
+                    .listRowBackground(Color.clear)
                 } else if let error {
                     Text(error).foregroundStyle(.secondary)
                 } else {
@@ -295,6 +296,17 @@ struct DonnaMemoryView: View {
             .navigationTitle("What Donna knows")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
+            .confirmationDialog("Erase everything Donna knows?", isPresented: $confirmingForget,
+                                titleVisibility: .visible) {
+                Button("Erase everything", role: .destructive) {
+                    Task {
+                        await model.forgetEverything()
+                        dismiss()
+                    }
+                }
+            } message: {
+                Text("Her notes, your case file, moods and check-ins are deleted for good. This can't be undone.")
+            }
             .task {
                 do { memory = try await model.memory() } catch { self.error = error.localizedDescription }
             }
