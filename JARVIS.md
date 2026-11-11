@@ -836,7 +836,7 @@ DOWNLOAD_BATCH_MAX_WAIT_S=1800  # episodes are announced once per show (brain/do
 HUMOR_PERCENT=30           # 0-100
 ADDRESS=sir                # how JARVIS addresses Nick
 ELEVENLABS_SPEED=1.155     # TTS speed; clamped to 0.7–1.2 in speech/tts.py (code default 1.05)
-ELEVENLABS_MODEL_ID=eleven_flash_v2_5
+ELEVENLABS_MODEL=eleven_flash_v2_5  # TTS model (read once at startup; restart after changing)
 TTS_STREAM_PLAYBACK=1       # Linux: ElevenLabs audio plays through aplay as it downloads (first word ~0.2 s sooner on short lines, ~0.75 s on long ones); 0 = wait for the whole clip as before
 DEFAULT_LOCATION=Herriman, Utah
 ANTHROPIC_MODEL=auto        # empty/auto = newest Haiku (Models API, checked daily); auto:sonnet; or a full id to pin
@@ -868,7 +868,7 @@ WHISPER_TEMPERATURE_FALLBACK=false
 # Feature flags / tuning (all optional, sensible defaults)
 STARTUP_NETWORK_GRACE_S=120   # boot grace: monitors retry without recording outages
 BRIEFING_ON_LAUNCH=false    # speak a briefing at startup
-STREAMING_TTS=false         # opt-in sentence-streamed TTS in every interactive mode
+STREAMING_TTS=false         # opt-in sentence-streamed TTS in every interactive mode, the room voice ("Hey JARVIS") included
 MEMORY_MAX_FACTS=60         # cap facts injected into the prompt (0 = no cap)
 MEMORY_RELEVANT_FACTS=12    # query-matched/recent profile facts per turn
 OBSIDIAN_VAULT_PATH=        # optional vault root; defaults to memory/obsidian
@@ -1087,6 +1087,7 @@ EMAIL_UNSUB_NOTE=           # vault-relative note path; default Jarvis Memory/Em
 
 ## Recently Shipped
 
+- **6.13 / build 255 (2026-11-10): the room voice streams long replies.** With `STREAMING_TTS=true`, "Hey JARVIS" starts speaking as soon as Claude has written the first sentence instead of waiting for the whole reply (`RoomVoice._converse_streamed`; one worker thread runs the turn because the runtime's turn lock is re-entrant and voice trust is a context variable). A one-sentence reply, or a bare "Done." after a tool, still takes the old path (jingle, TTS cache). Barge-in and an iPad hush stop it between sentences as well as mid-clip, and the reply is always written to history in full. `runtime.respond_streaming(spoken=True)` now switches to the room session the way `respond()` does. Room voice previously ignored `STREAMING_TTS`. Also fixed docs: the TTS model variable is `ELEVENLABS_MODEL`, not `ELEVENLABS_MODEL_ID`. `tests/__init__.py` pins `STREAMING_TTS=false` so the dev `.env` can't flip tests onto the streamed path.
 - **5.98 / build 241 (2026-11-09): speed pass (measured on the Optiplex, then fixed).** A full audit of the live system: tests, imports, every read endpoint, the log's 432 model rounds, per-thread CPU, the voice path and the apps' request mix. What it found, with the numbers:
   - **Already fast, left alone.** Every read endpoint answers in 2–9 ms warm (worst cold: `/api/status/media` 407 ms, then cached). Prompt caching works: 214 of 274 first rounds read the ~28k-token prefix from cache; the 60 cold ones were all idle gaps over the 1 h TTL or deploys that changed the tool list. Model first token: median 1.22 s on round 1, 0.89 s on later rounds (the API, not us). Per-turn context building is under 10 ms (vault recall 6 ms). The "hot" thread (15% of a core) is the wake word: 3.3 ms per 80 ms frame at full clock, 10 ms because the CPU idles at 800 MHz between frames (`powersave` governor); inherent to always-on listening.
   - **Speech starts sooner.** `speak()` waited for the whole ElevenLabs clip before starting aplay (median 0.58 s, 0.9–1.1 s for long lines). On Linux it now streams the PCM into `aplay -t raw` as it arrives (`_stream_elevenlabs`; `TTS_STREAM_PLAYBACK=0` reverts). Measured from the Optiplex with Nick's voice: first audio at 172 ms instead of 409 ms for "The fan is off, sir.", 187 ms instead of 945 ms for a 12 s alert. A hush, barge-in or `stop_playback` still stops it at once and is never re-spoken; a failed request or a dead aplay before any sound falls back to the whole-clip path (and Piper). Cached lines still replay from `memory/tts_cache/`; a streamed line is cached only when it played in full. The GUI's audio-reactive orb (`on_envelope`) keeps the whole-clip path.

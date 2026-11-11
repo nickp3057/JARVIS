@@ -67,6 +67,11 @@ _JINGLE_REPLIES = {"done", "yes sir", "yes, sir", "ok", "okay"}
 _DISMISS = re.compile(r"\b(stop|cancel|dismiss|enough|off|okay|ok|thanks|thank you|got it|i'm up|shut up|quiet)\b")
 
 
+def _streaming_enabled() -> bool:
+    """STREAMING_TTS: speak a model reply a sentence at a time as it's written."""
+    return os.getenv("STREAMING_TTS", "false").strip().lower() in ("1", "true", "yes", "on")
+
+
 def _vocabulary_prompt() -> str:
     """A sentence of the room's own words (scene and device names, timers,
     volume) so Whisper hears "desk lights" rather than "this flights"."""
@@ -351,20 +356,29 @@ class RoomVoice:
 
     def _speak(self, text: str, cache: bool | str = False) -> bool:
         """Say ``text``; True if Nick cut in with the wake word."""
-        from speech.tts import speak, stop_playback
-        room_volume.prepare()
+        from speech.tts import speak
         self.last_reply = text
+        return self._play(lambda _interrupt: speak(text, cache=cache))
+
+    def _play(self, say) -> bool:  # noqa: ANN001
+        """Run ``say(interrupt_event)`` while listening for a barge-in; True if
+        Nick cut in with the wake word. The event is set by a barge-in or a
+        hush, so a reply spoken a sentence at a time stops between sentences
+        too, not only mid-clip."""
+        from speech.tts import stop_playback
+        room_volume.prepare()
         stream = self.stream
         if self._hushed.is_set():
             return False
         if stream is None or os.getenv("VOICE_BARGE_IN", "1").strip().lower() in ("0", "off", "false", "no"):
-            speak(text, cache=cache)
+            say(self._hushed)  # a hush is the only way to stop it
             return False
+        interrupt = threading.Event()
         done = threading.Event()
 
         def run() -> None:
             try:
-                speak(text, cache=cache)
+                say(interrupt)
             finally:
                 done.set()
 
@@ -373,12 +387,14 @@ class RoomVoice:
         stream.drain()
         while not done.is_set() and not self.stop.is_set():
             if self._hushed.is_set():  # synthesis may finish after the tap's stop: keep it quiet
+                interrupt.set()
                 stop_playback()
                 done.wait(0.1)
                 continue
             frame = stream.read(timeout=0.1)
             if frame is not None and self._heard_wake(frame):
                 log.info("Barge-in: stopped speaking")
+                interrupt.set()
                 stop_playback()
                 done.wait(2)
                 self.detector.reset()
@@ -549,6 +565,8 @@ class RoomVoice:
             self._finish("done" if worked else "error", "" if worked else "That didn't work, sir.")
             return False
 
+        if _streaming_enabled() and getattr(self.runtime, "brain_online", False):
+            return self._converse_streamed(text, speaker)
         try:
             with voice_trust.speaking(speaker):
                 reply = self.runtime.respond(text, spoken=True)
@@ -559,6 +577,11 @@ class RoomVoice:
         if self._hushed.is_set():  # tapped while he was thinking: keep the answer to himself
             log.info("Room voice reply dropped after a hush: %r", reply[:80])
             return False
+        return self._answer(text, reply)
+
+    def _answer(self, text: str, reply: str) -> bool:
+        """Say a finished reply (or play the jingle for a bare "Done." after a
+        tool); True keeps a follow-up window open."""
         if self.runtime.last_used_tools and reply.strip().lower().rstrip(".!") in _JINGLE_REPLIES:
             self._learn(text)
             self._finish("done", "")
@@ -566,11 +589,85 @@ class RoomVoice:
         voice_presence.update("speaking", reply=reply)
         self._barged = self._speak(reply, cache="auto")  # a reply said before replays without synthesis
         voice_presence.update("idle")
+        return self._wants_follow_up(reply)
+
+    def _wants_follow_up(self, reply: str) -> bool:
         # A question or a chat keeps listening briefly; a finished task doesn't,
         # unless it asked something ("which one?") or waits on Nick's yes.
         from brain import confirm_gate
         asked = "?" in reply or confirm_gate.awaiting_yes(self.runtime.room_session_id)
         return (asked or not self.runtime.last_used_tools) and not self._barged
+
+    def _converse_streamed(self, text: str, speaker) -> bool:  # noqa: ANN001
+        """A model turn spoken sentence by sentence while Claude is still
+        writing the rest (``STREAMING_TTS``), so a long answer starts as soon
+        as its first sentence exists instead of after the last one.
+
+        One worker thread runs the whole turn: the runtime's turn lock is
+        re-entrant (owned by the thread that took it) and voice trust is a
+        context variable, so neither may hop threads mid-turn. It always
+        drains the reply, even after a hush or barge-in, so history keeps
+        what was said. A reply that is one sentence (or "Done.") ends before
+        anything is spoken and takes the normal path: jingle, cache, presence.
+        """
+        import queue
+
+        from brain import voice_trust
+        from speech.tts import _split_ready_sentences, speak_stream
+
+        fragments: queue.Queue = queue.Queue()
+        parts: list[str] = []
+        end = object()
+        failed = threading.Event()
+
+        def produce() -> None:
+            try:
+                with voice_trust.speaking(speaker):
+                    for fragment in self.runtime.respond_streaming(text, spoken=True):
+                        if fragment:
+                            parts.append(fragment)
+                            fragments.put(fragment)
+            except Exception:  # noqa: BLE001
+                log.exception("Room voice turn failed")
+                failed.set()
+            finally:
+                fragments.put(end)
+
+        threading.Thread(target=produce, name="room-voice-turn", daemon=True).start()
+
+        head, finished = "", False
+        while True:  # thinking: wait for a whole first sentence (or the end)
+            item = fragments.get()
+            if item is end:
+                finished = True
+                break
+            head += item
+            if _split_ready_sentences(head)[0]:
+                break
+
+        if failed.is_set() and not head.strip():
+            self._finish("error", "Something went wrong, sir.")
+            return False
+        if self._hushed.is_set():
+            log.info("Room voice reply dropped after a hush: %r", head[:80])
+            return False
+        if finished:
+            return self._answer(text, head) if head.strip() else False
+
+        def rest():
+            yield head
+            while (item := fragments.get()) is not end:
+                yield item
+            voice_presence.update(reply="".join(parts).strip())
+
+        log.info("Room voice streaming its reply: %r…", head[:60])
+        voice_presence.update("speaking", reply=head.strip())
+        self._barged = self._play(lambda interrupt: speak_stream(rest(), interrupt_event=interrupt))
+        self.last_reply = "".join(parts).strip()
+        voice_presence.update("idle")
+        if self._barged or self._hushed.is_set():
+            return False  # the turn finishes writing in the background
+        return self._wants_follow_up(self.last_reply)
 
     def _learn(self, text: str) -> None:
         """A simple action Claude did for this phrase: maybe now a shortcut."""

@@ -139,6 +139,7 @@ class HandleTests(unittest.TestCase):
         self.sounds = patch.object(room_sounds, "play").start()
         self.speak = patch("speech.tts.speak").start()
         patch.object(room_voice.time, "sleep").start()
+        patch.dict(os.environ, {"STREAMING_TTS": "false"}).start()  # the whole-reply path
         self.addCleanup(patch.stopall)
         self.audio = np.concatenate([LOUD] * 5)
 
@@ -197,6 +198,63 @@ class HandleTests(unittest.TestCase):
         self.sounds.assert_called_once_with("error", wait=True)
 
 
+class StreamedReplyTests(unittest.TestCase):
+    """STREAMING_TTS: a long reply starts after its first sentence."""
+
+    def setUp(self) -> None:
+        voice_presence.reset_for_tests()
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        patch.object(voice_shortcuts, "_FILE", Path(tmp.name) / "shortcuts.json").start()
+        self.sounds = patch.object(room_sounds, "play").start()
+        self.speak = patch("speech.tts.speak").start()
+        patch.object(room_voice.time, "sleep").start()
+        patch.dict(os.environ, {"STREAMING_TTS": "true"}).start()
+        patch.object(quick_commands, "run", return_value=None).start()
+        self.addCleanup(patch.stopall)
+        self.audio = np.concatenate([LOUD] * 5)
+
+    def runtime(self, fragments, tools=False):  # noqa: ANN001
+        runtime = Mock(last_used_tools=tools, brain_online=True)
+        runtime.respond_streaming.side_effect = lambda text, spoken: iter(fragments)
+        return runtime
+
+    def test_sentences_are_spoken_as_they_arrive(self) -> None:
+        runtime = self.runtime(["Fifty-four and ", "sunny, sir. Rain ", "by six. Want an umbrella reminder?"])
+        follow_up = make_voice("weather tomorrow", runtime)._handle(self.audio)
+        runtime.respond_streaming.assert_called_once_with("weather tomorrow", spoken=True)
+        said = [c.args[0] for c in self.speak.call_args_list]
+        self.assertEqual(said, ["Fifty-four and sunny, sir.", "Rain by six.", "Want an umbrella reminder?"])
+        self.assertTrue(follow_up)
+        full = "Fifty-four and sunny, sir. Rain by six. Want an umbrella reminder?"
+        self.assertEqual(voice_presence.current()["reply"], full)
+        self.assertEqual(voice_presence.current()["phase"], "idle")
+
+    def test_a_bare_done_is_still_the_jingle(self) -> None:
+        runtime = self.runtime(["Done."], tools=True)
+        self.assertFalse(make_voice("make it cosy", runtime)._handle(self.audio))
+        self.sounds.assert_called_once_with("done", wait=True)
+        self.speak.assert_not_called()
+
+    def test_a_one_sentence_reply_keeps_the_cache(self) -> None:
+        make_voice("hi", self.runtime(["Evening, ", "sir."]))._handle(self.audio)
+        self.speak.assert_called_once_with("Evening, sir.", cache="auto")
+
+    def test_a_failed_turn_is_an_error(self) -> None:
+        runtime = Mock(last_used_tools=False, brain_online=True)
+        runtime.respond_streaming.side_effect = RuntimeError("API down")
+        with self.assertLogs("jarvis.speech.room_voice", level="ERROR"):
+            self.assertFalse(make_voice("what's up", runtime)._handle(self.audio))
+        self.sounds.assert_called_once_with("error", wait=True)
+
+    def test_off_by_default(self) -> None:
+        with patch.dict(os.environ, {"STREAMING_TTS": "false"}):
+            runtime = Mock(last_used_tools=False, brain_online=True)
+            runtime.respond.return_value = "Fine, sir."
+            make_voice("hi", runtime)._handle(self.audio)
+        runtime.respond_streaming.assert_not_called()
+
+
 class HushTests(unittest.TestCase):
     """A tap on the iPad ends the exchange: no reply spoken, no follow-up."""
 
@@ -205,6 +263,7 @@ class HushTests(unittest.TestCase):
         patch.object(room_sounds, "play").start()
         self.speak = patch("speech.tts.speak").start()
         self.stop_playback = patch("speech.tts.stop_playback").start()
+        patch.dict(os.environ, {"STREAMING_TTS": "false"}).start()
         self.addCleanup(patch.stopall)
         self.audio = np.concatenate([LOUD] * 5)
 

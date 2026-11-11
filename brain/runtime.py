@@ -525,6 +525,10 @@ class JarvisRuntime:
         task_id = self.start_task("Reasoning", user_input.strip())
         try:
             with self._turn_lock:
+                if spoken:  # the room voice's own conversation, as in respond()
+                    if not session_exists(self.room_session_id):
+                        self.room_session_id = start_new_session()
+                    self.agent.switch_session(self.room_session_id)
                 self.agent.spoken_turn = spoken
                 try:
                     for chunk in self.agent.respond_streaming(user_input):

@@ -14,3 +14,10 @@ tool_health._FILE = Path(_TMP) / "tool_health.json"
 event_bus._REPEATS_FILE = Path(_TMP) / "alert_repeats.json"  # and off memory/alert_repeats.json
 usage._DB_PATH = Path(_TMP) / "usage.db"  # every faked model response would otherwise hit the real ledger
 memory_extractor._core_client = lambda: None  # an import never reaches the real API to distil the core profile
+
+# The room voice streams a reply only when STREAMING_TTS is on; the dev .env
+# may turn it on, so tests that fake runtime.respond stay on the whole-reply
+# path unless they ask for streaming themselves.
+import os  # noqa: E402
+
+os.environ["STREAMING_TTS"] = "false"
