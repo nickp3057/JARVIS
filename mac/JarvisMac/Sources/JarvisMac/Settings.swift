@@ -1,14 +1,11 @@
 import Foundation
-import Security
 
 /// Where Core lives and the companion token. The address sits in
-/// UserDefaults; the token goes in the login Keychain.
+/// UserDefaults; the token in a private file (see "Token file").
 @MainActor
 final class MacSettings: ObservableObject {
     static let defaultServerPort = 8000
     private static let addressKey = "serverAddress"
-    private static let service = "com.jarvis.donna-mac"
-    private static let account = "JARVIS_API_TOKEN"
 
     @Published var address: String {
         didSet { UserDefaults.standard.set(address, forKey: Self.addressKey) }
@@ -40,30 +37,31 @@ final class MacSettings: ObservableObject {
         return components.url
     }
 
-    // MARK: Keychain
+    // MARK: Token file
+    // Not the Keychain: this app is signed ad hoc, so every rebuild would
+    // ask for the login password again. A file only Nick's account can read
+    // (0600, in a 0700 folder) is the same protection the user account gives.
 
-    private static var query: [String: Any] {
-        [kSecClass as String: kSecClassGenericPassword,
-         kSecAttrService as String: service,
-         kSecAttrAccount as String: account]
+    private static var tokenURL: URL {
+        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appending(path: "JARVIS/token")
     }
 
     private static func loadToken() -> String? {
-        var q = query
-        q[kSecReturnData as String] = true
-        q[kSecMatchLimit as String] = kSecMatchLimitOne
-        var item: CFTypeRef?
-        guard SecItemCopyMatching(q as CFDictionary, &item) == errSecSuccess,
-              let data = item as? Data else { return nil }
-        return String(data: data, encoding: .utf8)
+        guard let data = try? Data(contentsOf: tokenURL) else { return nil }
+        return String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     private static func saveToken(_ token: String) {
         let trimmed = token.trimmingCharacters(in: .whitespacesAndNewlines)
-        SecItemDelete(query as CFDictionary)
-        guard !trimmed.isEmpty else { return }
-        var q = query
-        q[kSecValueData as String] = Data(trimmed.utf8)
-        SecItemAdd(q as CFDictionary, nil)
+        let fm = FileManager.default
+        guard !trimmed.isEmpty else {
+            try? fm.removeItem(at: tokenURL)
+            return
+        }
+        let folder = tokenURL.deletingLastPathComponent()
+        try? fm.createDirectory(at: folder, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+        fm.createFile(atPath: tokenURL.path, contents: Data(trimmed.utf8), attributes: [.posixPermissions: 0o600])
+        try? fm.setAttributes([.posixPermissions: 0o600], ofItemAtPath: tokenURL.path)
     }
 }

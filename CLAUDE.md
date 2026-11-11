@@ -44,8 +44,8 @@ python -m app.main --server   # authenticated HTTP API for the iOS companion
 # One-time: create a Desktop shortcut for the GUI
 python create_shortcut.py
 
-# Donna for Mac (SwiftUI client of /api/donna; installs ~/Applications/Donna.app)
-mac/DonnaMac/build.sh --open
+# JARVIS for Mac (native SwiftUI client: Chat, Home, Alerts, Donna; installs ~/Applications/JARVIS.app)
+mac/JarvisMac/build.sh --open
 
 # JARVIS TV (Android launcher for the TCL TV; see JARVIS.md "JARVIS TV")
 TV=10.0.0.46:5555 tv/launcher/deploy.sh

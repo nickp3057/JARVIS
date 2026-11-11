@@ -40,7 +40,7 @@ Pearson-Stark-Jarvis/
 │   ├── client_tokens.py     Scoped per-client tokens (events:read, status:read, chat, settings:write, wake:write) + CLI (create/grant/list/revoke); hashes in memory/client_tokens.json
 │   └── server.py            Authenticated HTTP bridge for the iOS companion (+ /api/clients/events SSE)
 │
-├── mac/DonnaMac/            Donna for Mac: SwiftUI client of /api/donna (SwiftPM; build.sh installs ~/Applications/Donna.app)
+├── mac/JarvisMac/           JARVIS for Mac: native SwiftUI client (Chat, Home, Alerts, Donna); SwiftPM, build.sh installs ~/Applications/JARVIS.app
 │
 ├── brain/
 │   ├── agent.py             JarvisAgent: session management, tool loop, history
@@ -1089,7 +1089,14 @@ EMAIL_UNSUB_NOTE=           # vault-relative note path; default Jarvis Memory/Em
 
 ## Recently Shipped
 
-- **Donna for Mac (companion 6.15 / build 257, 2026-11-10).** A small native macOS app so Nick can type to Donna on the Mac instead of the phone (`mac/DonnaMac/`, SwiftUI, Swift Package, no Xcode project). `mac/DonnaMac/build.sh` builds it and installs an ad-hoc-signed `~/Applications/Donna.app` (`--open` also launches it). It is another client of Core's existing endpoints (`GET /api/donna`, `POST /api/donna/message|end`, `GET /api/donna/memory`) with the companion token, so it shares Donna's one open session with the phone: a conversation started on either device continues on the other, and the window reloads when it comes to the front (⌘R also reloads). Return sends; Shift-Return or Option-Return adds a new line. The toolbar has End session (with a confirmation) and What Donna knows (read-only). On first launch, Settings (⌘,) takes Core's address (bare host gets `http://` and port 8000, as on the phone) and `JARVIS_API_TOKEN`; the token goes in the login Keychain. It keeps the phone's rose palette. Left on the phone on purpose: importing old chats, erasing her memory, and check-in notifications (the phone schedules those; the Mac doing it too would notify twice). No server change.
+- **JARVIS for Mac (companion 6.16 / build 258, 2026-11-10).** A dedicated native macOS app, not the iPad app ported over (`mac/JarvisMac/`, SwiftUI, Swift Package, no Xcode project). `mac/JarvisMac/build.sh` builds it and installs an ad-hoc-signed `~/Applications/JARVIS.app` (`--open` also launches it; it quits a running copy first). It is a thin client of Core's existing API with the companion token, so no server change. Mac-style layout: a sidebar with **Chat**, **Home**, **Alerts** and, under Private, **Donna**; ⌘1–⌘4 switch sections, ⌘N starts a new chat, ⌘R refreshes, ⌘, opens Settings.
+  - **Chat:** history list (`GET /sessions`, shared with the phone; right-click to delete) beside the transcript. Replies stream (`POST /chat/stream` with `X-Jarvis-Stream-Segments: 1`, so each `ROUND_BREAK` starts a new bubble) and render inline markdown.
+  - **Home:** scene tiles (`/api/home/scenes`, the current scene outlined; click runs it, or leaves it if it is current) and device tiles grouped by domain from `/api/home/entities` with on/off switches (`/api/home/control`) and a brightness slider for dimmable lights (`/api/home/light`, sent when the drag ends). Refreshes every 15 s while open.
+  - **Alerts:** `/api/alerts/recent` (24 h), with Re-check (`/api/alerts/refresh`) and Clear (with a confirmation). Warnings and criticals badge the sidebar, polled every 60 s.
+  - **Donna:** her rose space inside the window, sharing the one open session with the phone (reloads when the app comes to the front), End Session (with a confirmation) and What Donna knows (read-only). Importing old chats, erasing her memory and check-in notifications stay on the phone (the Mac doing check-ins too would notify twice).
+  - **Composer:** Return sends; Shift- or Option-Return adds a line (a `TextEditor` whose plain Return is intercepted; a vertical `TextField` dropped newlines added in code). If a send fails, the text goes back in the box.
+  - **Settings:** Core's address (a bare host gets `http://` and port 8000, as on the phone) and `JARVIS_API_TOKEN`. The token is kept in `~/Library/Application Support/JARVIS/token` (0600), not the Keychain: an ad-hoc-signed app gets a new signature each rebuild, and the Keychain would ask for the login password every time.
+  - Verified against a local fake Core with the same response shapes (streamed chat with round breaks, multi-line Donna messages, home, alerts); not yet run against the real Core.
 - **6.13 / build 255 (2026-11-10): the room voice streams long replies.** With `STREAMING_TTS=true`, "Hey JARVIS" starts speaking as soon as Claude has written the first sentence instead of waiting for the whole reply (`RoomVoice._converse_streamed`; one worker thread runs the turn because the runtime's turn lock is re-entrant and voice trust is a context variable). A one-sentence reply, or a bare "Done." after a tool, still takes the old path (jingle, TTS cache). Barge-in and an iPad hush stop it between sentences as well as mid-clip, and the reply is always written to history in full. `runtime.respond_streaming(spoken=True)` now switches to the room session the way `respond()` does. Room voice previously ignored `STREAMING_TTS`. Also fixed docs: the TTS model variable is `ELEVENLABS_MODEL`, not `ELEVENLABS_MODEL_ID`. `tests/__init__.py` pins `STREAMING_TTS=false` so the dev `.env` can't flip tests onto the streamed path.
 - **5.98 / build 241 (2026-11-09): speed pass (measured on the Optiplex, then fixed).** A full audit of the live system: tests, imports, every read endpoint, the log's 432 model rounds, per-thread CPU, the voice path and the apps' request mix. What it found, with the numbers:
   - **Already fast, left alone.** Every read endpoint answers in 2–9 ms warm (worst cold: `/api/status/media` 407 ms, then cached). Prompt caching works: 214 of 274 first rounds read the ~28k-token prefix from cache; the 60 cold ones were all idle gaps over the 1 h TTL or deploys that changed the tool list. Model first token: median 1.22 s on round 1, 0.89 s on later rounds (the API, not us). Per-turn context building is under 10 ms (vault recall 6 ms). The "hot" thread (15% of a core) is the wake word: 3.3 ms per 80 ms frame at full clock, 10 ms because the CPU idles at 800 MHz between frames (`powersave` governor); inherent to always-on listening.
@@ -2616,8 +2623,8 @@ python -m app.main --server
 # Create Desktop shortcut (run once)
 python create_shortcut.py
 
-# Donna for Mac (builds + installs ~/Applications/Donna.app)
-mac/DonnaMac/build.sh --open
+# JARVIS for Mac (builds + installs ~/Applications/JARVIS.app)
+mac/JarvisMac/build.sh --open
 ```
 
 ---
