@@ -57,7 +57,7 @@ import numpy as np
 from brain import voice_presence, voice_shortcuts
 from jarvis_logger import get_logger
 from speech import room_sounds, room_volume
-from speech.audio import FRAME_MS, SAMPLE_RATE, MicStream, rms, rms_threshold
+from speech.audio import FRAME_MS, SAMPLE_RATE, MicStream, rescan_devices, rms, rms_threshold
 from speech.wake_words import strip_wake_word
 
 log = get_logger(__name__)
@@ -148,6 +148,7 @@ class RoomVoice:
                 log.exception("Room voice stopped; retrying in 30 s")
                 voice_presence.update("idle")
                 self.stop.wait(30)
+                rescan_devices()  # a mic plugged in since startup is invisible until PortAudio rescans
 
     # --- the loop ------------------------------------------------------------
 

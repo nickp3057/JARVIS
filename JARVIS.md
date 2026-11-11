@@ -1755,6 +1755,10 @@ EMAIL_UNSUB_NOTE=           # vault-relative note path; default Jarvis Memory/Em
   a tap or any light coming on cancels it. Core's room voice now logs
   `Mic open: <device>`; set `MIC_DEVICE=CMTECK` on the Optiplex (left
   empty it opened the onboard jack, so "Hey JARVIS" never heard anything).
+  A missing mic retries every 30 s, and each retry first rescans audio
+  devices (`speech/audio.py:rescan_devices`; PortAudio only lists them at
+  startup), so a mic plugged in after Core starts is picked up without a
+  restart (2026-11-10).
 - **Room rainbows: lamp in the desk scenes, the fan ring follows the strip
   (2026-11-04, iOS 5.78 / build 221)** — `ops/optiplex/room_rainbows.py`
   (run on the Optiplex) gives every HA scene that turns the desk lights on

@@ -67,6 +67,19 @@ def to_mono_16k(block: np.ndarray, rate: int, target: int = SAMPLE_RATE) -> np.n
     return np.clip(np.round(samples), -32768, 32767).astype(np.int16)
 
 
+def rescan_devices() -> None:
+    """Make PortAudio list audio devices again. It enumerates them once, at
+    initialisation, so a USB mic plugged in after startup never shows up to
+    a retry without this. Only safe with no stream open (the room voice
+    calls it between attempts; it is the only user of ``MicStream`` in Core)."""
+    try:
+        import sounddevice as sd
+        sd._terminate()
+        sd._initialize()
+    except Exception:  # noqa: BLE001
+        log.debug("Audio device rescan failed", exc_info=True)
+
+
 class MicStream:
     """Context-managed input stream with both a frame queue and a rolling buffer."""
 
