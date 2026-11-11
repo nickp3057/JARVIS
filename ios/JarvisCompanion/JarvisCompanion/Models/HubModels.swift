@@ -848,3 +848,43 @@ struct MediaProfiles: Decodable {
     let `default`: String
     let error: String?
 }
+
+
+/// Battery of the laptop JARVIS Core runs on (`GET /api/host/battery`).
+struct HostBattery: Decodable, Equatable {
+    let host: String?
+    let present: Bool
+    var percent: Int? = nil
+    /// "charging", "discharging", "not charging" (held at the charge limit) or "full".
+    var state: String? = nil
+    var pluggedIn: Bool? = nil
+    var uptimeSeconds: Int? = nil
+
+    enum CodingKeys: String, CodingKey {
+        case host, present, percent, state
+        case pluggedIn = "plugged_in"
+        case uptimeSeconds = "uptime_seconds"
+    }
+
+    var symbol: String {
+        guard let percent else { return "battery.0percent" }
+        if state == "charging" { return "battery.100percent.bolt" }
+        switch percent {
+        case ..<13: return "battery.0percent"
+        case ..<38: return "battery.25percent"
+        case ..<63: return "battery.50percent"
+        case ..<88: return "battery.75percent"
+        default: return "battery.100percent"
+        }
+    }
+
+    var summary: String {
+        switch (state, pluggedIn) {
+        case ("charging", _): return "Charging"
+        case ("not charging", _): return "Plugged in · held at the charge limit"
+        case ("full", _): return "Plugged in · full"
+        case (_, true): return "Plugged in"
+        default: return "On battery"
+        }
+    }
+}

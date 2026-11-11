@@ -18,6 +18,7 @@ struct SettingsView: View {
     @State private var showingKnowledge = false
     @State private var showingAgents = false
     @ObservedObject private var push = PushRegistrar.shared
+    @State private var hostBattery: HostBattery?
 
     var body: some View {
         NavigationStack {
@@ -25,6 +26,11 @@ struct SettingsView: View {
                 VStack(alignment: .leading, spacing: 22) {
                     group {
                         NavigationLink { page("Connection") { connectionPanel } } label: { coreRow }
+                        divider
+                        NavigationLink { page("Laptop") { HostBatteryPanel(battery: $hostBattery) } } label: {
+                            row("Laptop", symbol: hostBattery?.symbol ?? "laptopcomputer", tint: .green,
+                                value: hostBattery?.percent.map { "\($0)%" })
+                        }
                     }
                     group("Appearance") {
                         NavigationLink { page("Theme") {
@@ -95,6 +101,10 @@ struct SettingsView: View {
                 }
             }
             .task { await refreshPermission() }
+            .task {
+                guard settings.isConfigured else { return }
+                hostBattery = try? await JarvisAPIClient.make(from: settings).hostBattery()
+            }
             .onChange(of: scenePhase) { _, phase in
                 if phase == .active { Task { await refreshPermission() } }
             }
@@ -351,6 +361,65 @@ struct ThemePicker: View {
         return Circle().fill(Color(red: c.0, green: c.1, blue: c.2))
             .frame(width: 22, height: 22)
             .overlay(Circle().strokeBorder(.white.opacity(0.25)))
+    }
+}
+
+/// Settings › Laptop: the battery of the Surface Laptop JARVIS Core runs on,
+/// refreshed every 10 seconds while the page is open.
+struct HostBatteryPanel: View {
+    @Binding var battery: HostBattery?
+    @EnvironmentObject private var settings: AppSettings
+    @State private var failed = false
+
+    var body: some View {
+        CockpitPanel("Laptop battery", symbol: battery?.symbol ?? "laptopcomputer") {
+            if let battery, battery.present, let percent = battery.percent {
+                HStack(alignment: .firstTextBaseline) {
+                    Text("\(percent)%").font(.system(size: 44, weight: .semibold, design: .rounded)).monospacedDigit()
+                    Spacer()
+                    Image(systemName: battery.symbol).font(.title2).foregroundStyle(tint(percent, battery))
+                }
+                ProgressView(value: Double(percent), total: 100).tint(tint(percent, battery))
+                Text(battery.summary).font(.subheadline.weight(.medium))
+                Text(details(battery)).font(.caption).foregroundStyle(.secondary)
+            } else if battery?.present == false {
+                Text("JARVIS Core's machine has no battery.").font(.subheadline)
+            } else {
+                Text(failed ? "Can't reach JARVIS Core." : "Checking…").font(.subheadline)
+                    .foregroundStyle(failed ? JarvisTheme.amber : .secondary)
+            }
+        }
+        .task {
+            while !Task.isCancelled {
+                await load()
+                try? await Task.sleep(for: .seconds(10))
+            }
+        }
+    }
+
+    private func tint(_ percent: Int, _ battery: HostBattery) -> Color {
+        if battery.pluggedIn == true { return .green }
+        return percent < 20 ? JarvisTheme.amber : JarvisTheme.cyan
+    }
+
+    private func details(_ battery: HostBattery) -> String {
+        var parts: [String] = []
+        if let host = battery.host { parts.append(host) }
+        if let up = battery.uptimeSeconds {
+            parts.append("up " + Duration.seconds(up).formatted(.units(allowed: [.days, .hours, .minutes], width: .abbreviated, maximumUnitCount: 2)))
+        }
+        parts.append("updates every 10 s")
+        return parts.joined(separator: " · ")
+    }
+
+    private func load() async {
+        guard settings.isConfigured else { return }
+        do {
+            battery = try await JarvisAPIClient.make(from: settings).hostBattery()
+            failed = false
+        } catch {
+            failed = true
+        }
     }
 }
 

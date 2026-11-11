@@ -1455,6 +1455,14 @@ def _room_volume_state() -> dict[str, object]:
             "night_level": room_volume.night_level()}
 
 
+@app.get("/api/host/battery")
+def host_battery(_: None = Depends(authorize)) -> dict[str, object]:
+    """Battery of the laptop Core runs on (``app/host_battery.py``), for the
+    companion's Settings › Laptop, which polls it while open."""
+    from app import host_battery as battery
+    return battery.status()
+
+
 @app.get("/api/room/volume")
 def room_volume_get(_: None = Depends(authorize)) -> dict[str, object]:
     """The room speaker's level (0-10, ``speech/room_volume.py``); ``night``

@@ -1571,6 +1571,11 @@ EMAIL_UNSUB_NOTE=           # vault-relative note path; default Jarvis Memory/Em
   `GET /api/room/volume` reports `night_level`) that edits the night level at
   any hour; it applies at once only inside quiet hours. On the iPad it's also
   in the Room's Menu › Room settings, so it works without leaving full screen.
+  Settings › Laptop (under Connection) shows the battery of the laptop Core
+  runs on (`GET /api/host/battery`, `app/host_battery.py`, read from
+  `/sys/class/power_supply`: percent, charging/discharging/"not charging" =
+  held at the 50% charge limit, plugged in, host, uptime); the row shows the
+  percent and the page refreshes every 10 s while open.
   Broadcasts: `POST /api/voice/announce {"text"}` (`chat` scope; 409 when the
   room voice is off) and the `announce_in_room` tool ("tell my room dinner's
   ready" from the phone).

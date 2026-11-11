@@ -1158,6 +1158,11 @@ struct JarvisAPIClient {
     }
 
     /// The room speaker's volume (JARVIS's voice and sounds on the Optiplex).
+    /// The battery of the laptop Core runs on (Settings › Laptop).
+    func hostBattery() async throws -> HostBattery {
+        try await getJSON(HostBattery.self, path: "api/host/battery")
+    }
+
     func roomVolume() async throws -> RoomVolume {
         try await getJSON(RoomVolume.self, path: "api/room/volume")
     }
