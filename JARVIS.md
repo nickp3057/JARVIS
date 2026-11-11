@@ -40,6 +40,8 @@ Pearson-Stark-Jarvis/
 │   ├── client_tokens.py     Scoped per-client tokens (events:read, status:read, chat, settings:write, wake:write) + CLI (create/grant/list/revoke); hashes in memory/client_tokens.json
 │   └── server.py            Authenticated HTTP bridge for the iOS companion (+ /api/clients/events SSE)
 │
+├── mac/DonnaMac/            Donna for Mac: SwiftUI client of /api/donna (SwiftPM; build.sh installs ~/Applications/Donna.app)
+│
 ├── brain/
 │   ├── agent.py             JarvisAgent: session management, tool loop, history
 │   ├── apps.py              Windows app launcher (open/close/focus via PowerShell)
@@ -1087,6 +1089,7 @@ EMAIL_UNSUB_NOTE=           # vault-relative note path; default Jarvis Memory/Em
 
 ## Recently Shipped
 
+- **Donna for Mac (companion 6.15 / build 257, 2026-11-10).** A small native macOS app so Nick can type to Donna on the Mac instead of the phone (`mac/DonnaMac/`, SwiftUI, Swift Package, no Xcode project). `mac/DonnaMac/build.sh` builds it and installs an ad-hoc-signed `~/Applications/Donna.app` (`--open` also launches it). It is another client of Core's existing endpoints (`GET /api/donna`, `POST /api/donna/message|end`, `GET /api/donna/memory`) with the companion token, so it shares Donna's one open session with the phone: a conversation started on either device continues on the other, and the window reloads when it comes to the front (⌘R also reloads). Return sends; Shift-Return or Option-Return adds a new line. The toolbar has End session (with a confirmation) and What Donna knows (read-only). On first launch, Settings (⌘,) takes Core's address (bare host gets `http://` and port 8000, as on the phone) and `JARVIS_API_TOKEN`; the token goes in the login Keychain. It keeps the phone's rose palette. Left on the phone on purpose: importing old chats, erasing her memory, and check-in notifications (the phone schedules those; the Mac doing it too would notify twice). No server change.
 - **6.13 / build 255 (2026-11-10): the room voice streams long replies.** With `STREAMING_TTS=true`, "Hey JARVIS" starts speaking as soon as Claude has written the first sentence instead of waiting for the whole reply (`RoomVoice._converse_streamed`; one worker thread runs the turn because the runtime's turn lock is re-entrant and voice trust is a context variable). A one-sentence reply, or a bare "Done." after a tool, still takes the old path (jingle, TTS cache). Barge-in and an iPad hush stop it between sentences as well as mid-clip, and the reply is always written to history in full. `runtime.respond_streaming(spoken=True)` now switches to the room session the way `respond()` does. Room voice previously ignored `STREAMING_TTS`. Also fixed docs: the TTS model variable is `ELEVENLABS_MODEL`, not `ELEVENLABS_MODEL_ID`. `tests/__init__.py` pins `STREAMING_TTS=false` so the dev `.env` can't flip tests onto the streamed path.
 - **5.98 / build 241 (2026-11-09): speed pass (measured on the Optiplex, then fixed).** A full audit of the live system: tests, imports, every read endpoint, the log's 432 model rounds, per-thread CPU, the voice path and the apps' request mix. What it found, with the numbers:
   - **Already fast, left alone.** Every read endpoint answers in 2–9 ms warm (worst cold: `/api/status/media` 407 ms, then cached). Prompt caching works: 214 of 274 first rounds read the ~28k-token prefix from cache; the 60 cold ones were all idle gaps over the 1 h TTL or deploys that changed the tool list. Model first token: median 1.22 s on round 1, 0.89 s on later rounds (the API, not us). Per-turn context building is under 10 ms (vault recall 6 ms). The "hot" thread (15% of a core) is the wake word: 3.3 ms per 80 ms frame at full clock, 10 ms because the CPU idles at 800 MHz between frames (`powersave` governor); inherent to always-on listening.
@@ -2612,6 +2615,9 @@ python -m app.main --server
 
 # Create Desktop shortcut (run once)
 python create_shortcut.py
+
+# Donna for Mac (builds + installs ~/Applications/Donna.app)
+mac/DonnaMac/build.sh --open
 ```
 
 ---
