@@ -129,6 +129,17 @@ Nick's running to-do list for the project. When one ships, move it to
 `JARVIS.md` "Recently Shipped" and delete it here. Newest asks at the bottom
 of each group.
 
+### His own voice: a local Piper voice trained on Paul Bettany (planned 2026-11-10, nothing built)
+
+Nick wants JARVIS to sound like Paul Bettany's JARVIS, for his own room only (never shared or published), and to stop paying ElevenLabs. Never clone it on ElevenLabs: their terms forbid cloning a voice without consent, and a ban would take STT with it. Chosen route: **plan B, fine-tune a Piper voice**; RVC voice conversion (plan A) is the fallback if Piper sounds too flat, built from the same dataset.
+
+- **Training box:** Nick's Windows PC (RTX 3060 12 GB), only while training; WSL2 + CUDA, since Piper training on plain Windows is painful. Check where Piper's training code lives now (rhasspy/piper was archived; the successor repo moved) before writing setup steps.
+- **Audio, mostly automatic:** the Plex library already has Iron Man (2008), Iron Man 2, Iron Man 3 and Avengers: Age of Ultron (NAS `/volume2/data/media/movies`). Missing and worth adding: The Avengers (2012), WandaVision (Vision is close to JARVIS), Civil War, Infinity War. Interviews would add his everyday voice, but weight the set toward the calm JARVIS delivery.
+- **Dataset script (to write, runs on the PC):** take the 5.1 **center channel** (mostly dialogue) with ffmpeg → vocal isolation (Demucs) → Whisper large-v3 with timestamps → 2–12 s clips → speaker embeddings with the TitaNet model voice ID already uses (`models/speaker/nemo_en_titanet_small.onnx`, `brain/speaker_id.py`) → keep clips close to a few seed clips Nick confirms by ear (~10 minutes of his time) → LJSpeech-style `wavs/` + `metadata.csv`. Drop overlaps, music-heavy and heavily processed lines. Target 15–60 min of clean speech; fine-tune from a British male Piper checkpoint (en_GB medium) so less audio is needed. One night of training.
+- **Core wiring (Mac, behind a setting):** `TTS_PROVIDER=piper` + `PIPER_VOICE_MODEL` path; load `PiperVoice` once in-process (today's fallback shells out to `python -m piper` and reloads the model every line) and stream raw PCM into `aplay -t raw` like `_stream_elevenlabs`; works with the TTS cache, room streaming, barge-in/hush; also `speech/remote_voice.py` so the phone voice matches; ElevenLabs becomes the fallback. Optional light EQ for the film's digital sheen. `length_scale`/`noise_scale` as `.env` knobs.
+- **Latency:** comparable to the streamed ElevenLabs path (~170 ms to first audio) and never depends on the internet; measure on the Surface.
+- **Dropping ElevenLabs entirely** would also mean `STT_PROVIDER=local` (Whisper small.en on the Surface); measure it against Scribe's ~0.5 s before switching.
+
 ### Speed pass (2026-11-09, 5.98 / build 241): check
 Full audit and fixes in JARVIS.md "Recently Shipped" (5.98). Tested and timed
 against the real services, but **not deployed and never played on the
