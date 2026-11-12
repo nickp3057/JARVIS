@@ -140,6 +140,20 @@ Nick wants JARVIS to sound like Paul Bettany's JARVIS, for his own room only (ne
 - **Latency:** comparable to the streamed ElevenLabs path (~170 ms to first audio) and never depends on the internet; measure on the Surface.
 - **Dropping ElevenLabs entirely** would also mean `STT_PROVIDER=local` (Whisper small.en on the Surface); measure it against Scribe's ~0.5 s before switching.
 
+### Voice Studio / Voicebox as a test bench (asked 2026-11-12)
+
+Nick saw a video on "Voice Studio" (likely VoiceStudio by debpalash, or Jamie Pine's Voicebox; both are local GUIs over several open TTS engines, incl. Qwen3-TTS, Chatterbox). Use it as an A/B bench on the PC's 3060, not as JARVIS's runtime: feed every engine the same cleaned ~15 s Bettany reference (`~/jarvis-voice/r2-tune/ref-jarvis.wav`) and judge by ear against "sounds like a real person" (the bar Piper r2 and Chatterbox missed). If one wins, wire that engine directly behind `TTS_PROVIDER`, served from the PC, with a fallback voice when the PC is off.
+
+### Home network, Optiplex and homelab (asked 2026-11-12)
+
+**Switch at the xFi pod (cheap, worth it now).** The pod outside Nick's room already wires his PC. An 8-port gigabit switch on the pod (an easy-smart one like TP-Link TL-SG108E if he wants VLANs later) wires the Surface (Core), the Mac when docked and the Optiplex. Caveat: everything on the pod still shares the pod's wireless backhaul to the gateway, so traffic to the NAS (wired at the gateway) is only as good as that link; traffic between devices on the switch is full gigabit. Main win is stability for Core, which is on Wi-Fi today. **Surface catch:** its one USB-C port is the charger and its one USB-A port feeds the mic/speaker splitter, so Ethernet needs either a USB-C hub with Ethernet and power passthrough, or charging through the Surface Connect port to free USB-C. Later: Ethernet or MoCA into the room replaces the backhaul.
+
+**Optiplex → Minecraft server (doable now, over Wi-Fi).** Paper (Java) + GeyserMC + Floodgate so Bedrock friends join a Java server; MCXboxBroadcast so consoles see it in their friends tab (they can't add custom servers); playit.gg for friends outside the house (handles Bedrock's UDP 19132; consoles can't run Tailscale), no router port forward. Reserve the Optiplex's IP on the Xfinity gateway first (its DHCP address drifted before). Upgrade RAM to 16 GB (DDR4 SO-DIMM) before running anything real: it has ~4 GB.
+
+**Plex off the NAS: not on the Optiplex.** Plex can't send only transcoding elsewhere (ClusterPlex exists but is fragile); the real fix is running Plex Media Server on a box with hardware transcoding and reading media from the NAS. The Optiplex is Wi-Fi-only and its Skylake Quick Sync can't decode HEVC 10-bit/4K HDR, so wait for new hardware. Hardware transcoding needs Plex Pass (check whether Nick has it). When it moves: copy Plex's config, keep the same media paths (`/movies`, `/tv`, `/data`) so nothing rescans, and repoint JARVIS (`PLEX_URL`), Tautulli, letterboxd-plex-sync and the CleanCut pipeline.
+
+**Future homelab (after moving out).** Mini rack; NAS keeps the arr stack and storage; a "powerhouse" box runs Plex and a local LLM. A Mac mini (Apple Silicon, lots of unified memory) fits both: Plex runs natively with hardware transcoding, idles at a few watts. Plan JARVIS as **hybrid, ~90% local by volume**: wake word, STT, TTS, quick commands, memory search and background summaries on the local model; Claude for multi-step tool chains, Donna and judgment calls (local models are still weaker at reliable tool use). Fits the existing fallback router and per-job model picker. UPS with NUT: on battery, shut down non-essentials, keep modem, router, Wi-Fi and the JARVIS box up (internet only lasts as long as Xfinity's node has power).
+
 ### Speed pass (2026-11-09, 5.98 / build 241): check
 Full audit and fixes in JARVIS.md "Recently Shipped" (5.98). Tested and timed
 against the real services, but **not deployed and never played on the
