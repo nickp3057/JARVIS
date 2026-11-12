@@ -349,6 +349,7 @@ runtime knows, the more JARVIS feels like one mind instead of several scripts.
 
 ## Runtime Monitor Settings
 
+- Temp 4K monitor (`integrations/temp_4k.py`): on when `RADARR4K_URL`/`RADARR4K_API_KEY` are set and `TEMP_4K_MONITOR_ENABLED` isn't off; every `TEMP_4K_INTERVAL_S` (300) it alerts when a temporary 4K film lands and deletes it from the 4K Radarr when `TEMP_4K_HOURS` is up.
 - Schwab monitor + streamer: on when `SCHWAB_APP_KEY`/`SECRET`/`CALLBACK_URL`
   are set (`integrations/schwab.py`). Holdings every `SCHWAB_POLL_SECONDS`
   (30) in market hours, prices streamed live; raises `schwab_login` a day

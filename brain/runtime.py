@@ -278,6 +278,10 @@ class JarvisRuntime:
         if nas_host.monitor_enabled() and not self._nas_host_started:
             self._nas_host_started = True
             threading.Thread(target=self._nas_host_monitor_loop, daemon=True).start()
+        from integrations import temp_4k
+        if _monitor_on("TEMP_4K_MONITOR_ENABLED") and temp_4k.configured() and not getattr(self, "_temp_4k_started", False):
+            self._temp_4k_started = True
+            threading.Thread(target=self._temp_4k_monitor_loop, daemon=True).start()
         if os.getenv("JARVIS_HEALTHCHECKS_URL", "").strip() and not self._deadman_started:
             self._deadman_started = True
             threading.Thread(target=self._deadman_loop, daemon=True).start()
@@ -411,6 +415,28 @@ class JarvisRuntime:
                             self.raise_alert("device_online", f"{name} back online", f"{name} is reachable again.",
                                              source="home", severity="info", push=False)
             if self._stop_monitors.wait(float(os.getenv("DEVICE_WATCH_INTERVAL_S", "60"))):
+                break
+
+    def _temp_4k_monitor_loop(self) -> None:
+        """Temporary 4K movies (integrations/temp_4k.py): say when one is
+        ready, delete it from the 4K Radarr when its time is up. Starts only
+        when RADARR4K_URL/RADARR4K_API_KEY are set (restart after adding them)."""
+        from integrations import temp_4k
+
+        def alert(kind: str, title: str, detail: str, *, severity: str = "info", push: bool = True) -> None:
+            self.raise_alert(kind, title, detail, source="media", severity=severity, push=push,
+                             dedupe_key=f"{kind}:{title}")
+
+        while not self._stop_monitors.is_set():
+            try:
+                temp_4k.tick(alert)
+            except Exception as exc:  # noqa: BLE001 - a bad pass must not end the loop
+                log.warning("Temp 4K monitor pass failed: %s", exc)
+            try:
+                interval = float(os.getenv("TEMP_4K_INTERVAL_S", "300"))
+            except ValueError:
+                interval = 300.0
+            if self._stop_monitors.wait(max(30.0, interval)):
                 break
 
     def _nas_host_monitor_loop(self) -> None:

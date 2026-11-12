@@ -93,6 +93,7 @@ TOOL_STATUS = "\x1d"
 _TOOL_LABELS = {
     "find_movie": "Searching Radarr",
     "add_movie": "Adding to Radarr",
+    "temporary_4k": "Checking the 4K Radarr",
     "find_series": "Searching Sonarr",
     "add_series": "Adding to Sonarr",
     "diagnose_media": "Tracing the media pipeline",

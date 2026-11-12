@@ -85,6 +85,7 @@ _TOOL_LABELS: dict[str, str] = {
     "next_event": "calendar",
     "find_movie": "media requests",
     "add_movie": "media requests",
+    "temporary_4k": "media requests",
     "find_series": "media requests",
     "add_series": "media requests",
     "download_status": "downloads",

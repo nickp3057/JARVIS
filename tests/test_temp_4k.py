@@ -1,0 +1,150 @@
+import tempfile
+import unittest
+from pathlib import Path
+from unittest import mock
+
+from integrations import servarr_common as servarr
+from integrations import temp_4k
+
+LIBRARY = [
+    {"id": 1, "tmdbId": 671, "title": "Harry Potter and the Sorcerer's Stone", "year": 2001,
+     "movieFile": {"quality": {"quality": {"resolution": 1080}}}},
+    {"id": 2, "tmdbId": 672, "title": "Harry Potter and the Chamber of Secrets", "year": 2002,
+     "movieFile": {"quality": {"quality": {"resolution": 1080}}}},
+    {"id": 3, "tmdbId": 155, "title": "The Dark Knight", "year": 2008,
+     "movieFile": {"quality": {"quality": {"resolution": 2160}}}},
+]
+
+
+class FakeArr:
+    """Both Radarrs: the main library and a 4K instance that starts empty."""
+
+    def __init__(self):
+        self.four_k: dict[int, dict] = {}
+        self.deleted: list[int] = []
+        self.searched: list[int] = []
+
+    def call(self, service, method, path, **kwargs):
+        ok, payload = self._route(service, method, path, kwargs)
+        return servarr.Result(ok, payload, "ok" if ok else "rejected")
+
+    def request(self, service, method, path, **kwargs):
+        return self._route(service, method, path, kwargs)
+
+    def _route(self, service, method, path, kwargs):
+        params = kwargs.get("params") or {}
+        if service == "radarr" and path == "/api/v3/movie":
+            return True, LIBRARY
+        if service != "radarr4k":
+            return False, "unexpected"
+        if method == "GET" and path == "/api/v3/movie":
+            return True, [m for m in self.four_k.values() if m["tmdbId"] == params.get("tmdbId")]
+        if path == "/api/v3/movie/lookup":
+            tmdb = int(params["term"].split(":")[1])
+            return True, [{"tmdbId": tmdb, "title": "x"}]
+        if method == "POST" and path == "/api/v3/movie":
+            movie_id = len(self.four_k) + 10
+            self.four_k[movie_id] = {**kwargs["json"], "id": movie_id, "hasFile": False}
+            return True, self.four_k[movie_id]
+        if method == "GET" and path.startswith("/api/v3/movie/"):
+            return True, self.four_k[int(path.rsplit("/", 1)[1])]
+        if method == "DELETE":
+            movie_id = int(path.rsplit("/", 1)[1])
+            self.deleted.append(movie_id)
+            self.four_k.pop(movie_id, None)
+            return True, ""
+        if path == "/api/v3/command":
+            self.searched += kwargs["json"]["movieIds"]
+            return True, {}
+        if path == "/api/v3/queue":
+            return True, {"records": []}
+        return False, f"unhandled {method} {path}"
+
+
+class TempFourKTests(unittest.TestCase):
+    def setUp(self):
+        self.dir = tempfile.TemporaryDirectory()
+        self.arr = FakeArr()
+        patches = [
+            mock.patch.object(temp_4k, "_STATE_FILE", Path(self.dir.name) / "temp_4k.json"),
+            mock.patch.object(temp_4k, "configured", return_value=True),
+            mock.patch.object(servarr, "call", self.arr.call),
+            mock.patch.object(servarr, "request", self.arr.request),
+            mock.patch.object(servarr, "resolve_quality", return_value=(7, "Temp 4K")),
+            mock.patch.object(servarr, "resolve_root_folder", return_value=("/temp-4k-movies", "")),
+            mock.patch.dict("os.environ", {"TEMP_4K_HOURS": "48", "TEMP_4K_GIVE_UP_HOURS": "72"}),
+        ]
+        for patch in patches:
+            patch.start()
+            self.addCleanup(patch.stop)
+        self.addCleanup(self.dir.cleanup)
+        self.alerts: list[tuple] = []
+
+    def alert(self, kind, title, detail, **kw):
+        self.alerts.append((kind, title))
+
+    def test_request_adds_owned_film_to_4k_radarr(self):
+        reply = temp_4k.request("Harry Potter and the Sorcerer's Stone")
+        self.assertIn("Searching for a 4K copy", reply)
+        (added,) = self.arr.four_k.values()
+        self.assertEqual(added["qualityProfileId"], 7)
+        self.assertEqual(added["rootFolderPath"], "/temp-4k-movies")
+        self.assertEqual(temp_4k.entries()[0]["tmdb_id"], 671)
+
+    def test_ambiguous_title_asks(self):
+        reply = temp_4k.request("Harry Potter")
+        self.assertIn("Several films match", reply)
+        self.assertEqual(self.arr.four_k, {})
+
+    def test_film_not_owned_is_refused(self):
+        self.assertIn("can't find", temp_4k.request("Dune"))
+
+    def test_already_4k_needs_nothing(self):
+        self.assertIn("already 4K", temp_4k.request("The Dark Knight"))
+        self.assertEqual(self.arr.four_k, {})
+
+    def test_ready_then_expired_is_deleted(self):
+        temp_4k.request("Chamber of Secrets", hours=24)
+        movie_id = temp_4k.entries()[0]["radarr4k_id"]
+        temp_4k.tick(self.alert, now=1000.0)
+        self.assertEqual(self.alerts, [])  # still downloading
+        self.arr.four_k[movie_id]["hasFile"] = True
+        temp_4k.tick(self.alert, now=2000.0)
+        self.assertEqual(self.alerts[-1][0], "temp_4k_ready")
+        self.assertEqual(temp_4k.entries()[0]["expires_at"], 2000.0 + 24 * 3600)
+        temp_4k.tick(self.alert, now=2000.0 + 23 * 3600)
+        self.assertEqual(self.arr.deleted, [])
+        temp_4k.tick(self.alert, now=2000.0 + 24 * 3600)
+        self.assertEqual(self.arr.deleted, [movie_id])
+        self.assertEqual(temp_4k.entries(), [])
+        self.assertEqual(self.alerts[-1][0], "temp_4k_removed")
+
+    def test_asking_again_extends_instead_of_duplicating(self):
+        temp_4k.request("Chamber of Secrets")
+        movie_id = temp_4k.entries()[0]["radarr4k_id"]
+        self.arr.four_k[movie_id]["hasFile"] = True
+        temp_4k.tick(self.alert, now=5000.0)
+        reply = temp_4k.request("Chamber of Secrets", hours=96)
+        self.assertIn("already here in 4K", reply)
+        self.assertEqual(len(self.arr.four_k), 1)
+        self.assertGreater(temp_4k.entries()[0]["expires_at"], 5000.0 + 48 * 3600)
+
+    def test_gives_up_when_no_release_appears(self):
+        temp_4k.request("Chamber of Secrets")
+        requested = temp_4k.entries()[0]["requested_at"]
+        temp_4k.tick(self.alert, now=requested + 73 * 3600)
+        self.assertEqual(self.alerts[-1][0], "temp_4k_failed")
+        self.assertEqual(temp_4k.entries(), [])
+
+    def test_remove_early(self):
+        temp_4k.request("Sorcerer's Stone")
+        self.assertIn("Removed the 4K copy", temp_4k.remove("sorcerer's stone"))
+        self.assertEqual(temp_4k.entries(), [])
+
+    def test_unconfigured_explains(self):
+        with mock.patch.object(temp_4k, "configured", return_value=False):
+            self.assertIn("isn't set up yet", temp_4k.request("Chamber of Secrets"))
+
+
+if __name__ == "__main__":
+    unittest.main()

@@ -60,6 +60,7 @@ from brain.vision import describe_screen
 from brain.weather import get_weather
 from integrations import media_doctor
 from integrations import radarr as radarr
+from integrations import temp_4k
 from integrations import qbittorrent as qbittorrent
 from integrations import servarr_common as servarr
 from integrations import sonarr as sonarr
@@ -584,6 +585,15 @@ def _tool_diagnose_media(args: dict[str, Any]) -> str:
 
 def _tool_apply_media_fix(args: dict[str, Any]) -> str:
     return media_doctor.propose_fix(args.get("_jarvis_session_id"), args.get("fix_id", ""))
+
+
+def _tool_temporary_4k(args: dict[str, Any]) -> str:
+    action = str(args.get("action", "request")).strip().lower()
+    if action == "status":
+        return temp_4k.status()
+    if action == "remove":
+        return temp_4k.remove(args.get("title", ""))
+    return temp_4k.request(args.get("title", ""), hours=args.get("hours"))
 
 
 def _tool_find_movie(args: dict[str, Any]) -> str:
@@ -2542,6 +2552,30 @@ _CUSTOM_TOOLS: list[dict[str, Any]] = [
         },
     },
     {
+        "name": "temporary_4k",
+        "description": (
+            "Temporary 4K copy of a movie Nick already owns, for watching soon "
+            "('get a 4K file of Harry Potter for tonight', 'keep it for the "
+            "weekend', 'is my 4K movie ready?'). A separate 4K Radarr downloads a "
+            "4K web release next to his 1080p copy (Plex shows both versions) and "
+            "deletes it automatically, by default 2 days after it lands; the 1080p "
+            "file is never touched. Movies only. action=request (default) fetches "
+            "or extends; hours sets how long to keep it once ready ('for the "
+            "weekend' from Friday is about 72); status lists them; remove drops "
+            "one early. Use the film's full title (e.g. 'Harry Potter and the "
+            "Sorcerer's Stone', not 'Harry Potter 1'). Not for permanent 4K: "
+            "that's the main Radarr's 'Favorite 4K' profile."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "action": {"type": "string", "enum": ["request", "status", "remove"]},
+                "title": {"type": "string", "description": "Full movie title, optionally with a year."},
+                "hours": {"type": "number", "description": "How long to keep it after it's ready."},
+            },
+        },
+    },
+    {
         "name": "find_movie",
         "description": (
             "Search Radarr for a movie by title. Use this FIRST whenever Nick "
@@ -2876,6 +2910,7 @@ _DISPATCH: dict[str, Callable[[dict[str, Any]], str]] = {
     "remove_maintenance_task": _tool_remove_maintenance_task,
     "diagnose_media": _tool_diagnose_media,
     "apply_media_fix": _tool_apply_media_fix,
+    "temporary_4k": _tool_temporary_4k,
     "find_movie": _tool_find_movie,
     "add_movie": _tool_add_movie,
     "find_series": _tool_find_series,

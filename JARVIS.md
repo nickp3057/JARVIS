@@ -97,6 +97,7 @@ Pearson-Stark-Jarvis/
 │   ├── servarr_common.py    Shared Radarr/Sonarr HTTP client + quality/root-folder
 │   │                        resolver + NL quality-phrase fuzzy matching
 │   ├── radarr.py            find_movie (lookup) / add_movie (confirm-gated)
+│   ├── temp_4k.py           temporary 4K copies via a second Radarr (radarr4k), auto-removed
 │   ├── sonarr.py            find_series (lookup) / add_series (confirm-gated)
 │   ├── nas_host.py          NAS host-health snapshot (containers, RAID, SMART, volumes, temps): debounced alerts + incident-report lines
 │   ├── media_doctor.py      Traces one title request→arr→indexer→qBit→import→Plex; names the stalled stage; fixes via confirm_gate
@@ -598,6 +599,15 @@ entry in `brain/agent_roster.py` (name, kind, icon, description, schedule);
   POST with `monitored: true`, `addOptions.searchForMovie: true`. Refuses
   unless `confirmed: true` and the ID came from the same session's latest,
   unexpired lookup; quality is a natural phrase fuzzy-matched to a profile.
+- `temporary_4k(action?, title?, hours?)` — "4K Harry Potter for tonight".
+  A second Radarr (`radarr4k`) downloads a 4K web release of a film already
+  in the main library into `/volume2/data/media/temp-4k-movies`; Plex shows
+  it as a second version. `request` (default) fetches or extends, `status`
+  lists, `remove` drops one early. The runtime's temp-4K monitor alerts when
+  it lands and deletes it `TEMP_4K_HOURS` (48) later; requests with no 4K
+  release after `TEMP_4K_GIVE_UP_HOURS` (72) are dropped. Movies only; the
+  1080p file is never touched; already-4K films are refused. State:
+  `memory/temp_4k.json`. Setup: "Temporary 4K Radarr setup" below.
 - `find_series(title)` — Sonarr `/series/lookup`. Same shape, TVDB id.
 - `add_series(tvdb_id, quality?, root_folder?, monitor?, season_folder?, confirmed)`
   — Sonarr `/series` POST with `addOptions.searchForMissingEpisodes: true`.
@@ -825,6 +835,17 @@ SONARR_LANGUAGE_PROFILE_ID=       # Sonarr v3 only; blank = first listed profile
 RADARR_QUALITY_MAP=4k efficient => UHD Bluray + WEB; 1080p => HD-1080p; 4k => Ultra-HD
 SONARR_QUALITY_MAP=1080p => HD-1080p; 4k => Ultra-HD
 
+# Temporary 4K (integrations/temp_4k.py): the second Radarr. Monitor starts
+# only when both are set (restart Core after adding them).
+RADARR4K_URL=http://<same host as RADARR_URL>:7879
+RADARR4K_API_KEY=...
+RADARR4K_QUALITY=Temp 4K          # profile in the 4K Radarr
+RADARR4K_ROOT_FOLDER=             # blank = its only root folder (/temp-4k-movies)
+TEMP_4K_HOURS=48                  # kept this long after the file lands
+TEMP_4K_GIVE_UP_HOURS=72          # drop a request with no 4K release by then
+TEMP_4K_MONITOR_ENABLED=true
+TEMP_4K_INTERVAL_S=300
+
 # qBittorrent WebUI (optional, read-only integration)
 QBITTORRENT_URL=http://localhost:8080
 QBITTORRENT_USERNAME=
@@ -1030,6 +1051,53 @@ EMAIL_UNSUB_WINDOW_DAYS=30
 EMAIL_UNSUB_NOTE=           # vault-relative note path; default Jarvis Memory/Email Unsubscribe List.md
 ```
 
+## Temporary 4K Radarr setup (one time)
+
+Status 2026-11-12: JARVIS side shipped; the NAS side below isn't done yet.
+Needs sudo on the NAS (`ssh nas`).
+
+1. Folders, and the port pre-seeded (both Radarrs share gluetun's network, so
+   the second can't use 7878):
+   `sudo mkdir -p /volume1/docker/radarr4k/config /volume2/data/media/temp-4k-movies`
+   `echo '<Config><Port>7879</Port></Config>' | sudo tee /volume1/docker/radarr4k/config/config.xml`
+   `sudo chown -R 1000:1000 /volume1/docker/radarr4k /volume2/data/media/temp-4k-movies`
+2. In `/volume1/docker/docker-compose.yaml` (back it up first): add
+   `- 7879:7879` under gluetun's `ports`, and a service next to `radarr`:
+   ```yaml
+     radarr4k:
+       image: lscr.io/linuxserver/radarr:latest
+       container_name: radarr4k
+       network_mode: service:gluetun
+       environment:
+         - PUID=1000
+         - PGID=1000
+         - TZ=America/Denver
+       volumes:
+         - /volume1/docker/radarr4k/config:/config
+         - /volume2/data:/data
+         - /volume1/docker/downloads:/downloads
+         - /volume2/data/media/temp-4k-movies:/temp-4k-movies
+       restart: unless-stopped
+       depends_on:
+         - gluetun
+   ```
+   Then `sudo /volume1/docker/watchdog/recover_stack.sh manual` (recreates
+   gluetun with the new port, then its dependents), and
+   `cd /volume1/docker && sudo docker compose --project-name stack up -d --no-deps radarr4k`.
+3. Updater and recovery: `ops/nas/stack_updater.sh` and `recover_stack.sh`
+   list `radarr4k` with the other gluetun dependents, so a gluetun restart
+   recreates it and the weekly update pulls it. Install them only after the
+   container exists (`docker rm -f` of a missing name fails the chain). The
+   repo's `stack_updater.sh` also carries the stricter error handling not yet
+   live on the NAS.
+4. In the 4K Radarr (http://10.0.0.147:7879; Claude can do this over its
+   API): root folder `/temp-4k-movies`; profile **Temp 4K** = WEBDL-2160p +
+   WEBRip-2160p only, upgrades off, no size cap; qBittorrent download client
+   with category `radarr4k`; add it as an app in Prowlarr; a Plex Media
+   Server connection so Plex rescans on import and delete.
+5. Plex: Movies library → Manage Library → add folder `/data/media/temp-4k-movies`.
+6. Core's `.env`: `RADARR4K_URL`, `RADARR4K_API_KEY`, then restart Core.
+
 ## Google Calendar setup (one time)
 
 1. Google Cloud Console -> create a project -> enable the Google Calendar API.
@@ -1089,6 +1157,7 @@ EMAIL_UNSUB_NOTE=           # vault-relative note path; default Jarvis Memory/Em
 
 ## Recently Shipped
 
+- **Temporary 4K movies (2026-11-12).** "Get a 4K file of Harry Potter for tonight": `temporary_4k` tool + temp-4K monitor (`integrations/temp_4k.py`) over a second Radarr whose folder is `temp-4k-movies`; alert when ready, auto-removed 2 days after it lands; the 1080p copy is never touched. NAS side pending: "Temporary 4K Radarr setup".
 - **JARVIS for Mac (companion 6.16 / build 258, 2026-11-10).** A dedicated native macOS app, not the iPad app ported over (`mac/JarvisMac/`, SwiftUI, Swift Package, no Xcode project). `mac/JarvisMac/build.sh` builds it and installs an ad-hoc-signed `~/Applications/JARVIS.app` (`--open` also launches it; it quits a running copy first). It is a thin client of Core's existing API with the companion token, so no server change. Mac-style layout: a sidebar with **Chat**, **Home**, **Alerts** and, under Private, **Donna**; ⌘1–⌘4 switch sections, ⌘N starts a new chat, ⌘R refreshes, ⌘, opens Settings.
   - **Chat:** history list (`GET /sessions`, shared with the phone; right-click to delete) beside the transcript. Replies stream (`POST /chat/stream` with `X-Jarvis-Stream-Segments: 1`, so each `ROUND_BREAK` starts a new bubble) and render inline markdown. Like the phone (6.17), the reader hands text to the UI on a 40 ms timer rather than when the next byte arrives; Core often receives a round from Claude in one burst, and the byte-driven check showed a word or two and then held the rest until the stream closed.
   - **Home:** scene tiles (`/api/home/scenes`, the current scene outlined; click runs it, or leaves it if it is current) and device tiles grouped by domain from `/api/home/entities` with on/off switches (`/api/home/control`) and a brightness slider for dimmable lights (`/api/home/light`, sent when the drag ends). Refreshes every 15 s while open.

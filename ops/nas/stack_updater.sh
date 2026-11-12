@@ -8,7 +8,7 @@ export PATH
 WD=/volume1/docker/watchdog
 LOG="$WD/updater.log"
 STATUS="$WD/updater_status.txt"
-AUTO="gluetun qbittorrent radarr sonarr prowlarr flaresolverr tailscale letterboxd-plex-sync"
+AUTO="gluetun qbittorrent radarr radarr4k sonarr prowlarr flaresolverr tailscale letterboxd-plex-sync"
 CHECK_ONLY=0
 if [ "${1:-}" = "--check" ]; then CHECK_ONLY=1; fi
 
@@ -65,11 +65,11 @@ if [ -n "$CHANGED" ] && [ "$CHECK_ONLY" = "0" ]; then
     docker compose --project-name stack up -d --no-deps --force-recreate gluetun >> "$LOG" 2>&1
     sleep 20
     PHASE=recreate-dependents
-    docker rm -f qbittorrent radarr sonarr prowlarr flaresolverr >> "$LOG" 2>&1
+    docker rm -f qbittorrent radarr radarr4k sonarr prowlarr flaresolverr >> "$LOG" 2>&1
     docker compose --project-name stack up -d --no-deps --force-recreate \
-      qbittorrent radarr sonarr prowlarr flaresolverr >> "$LOG" 2>&1
+      qbittorrent radarr radarr4k sonarr prowlarr flaresolverr >> "$LOG" 2>&1
     sleep 130
-    OTHER=$(echo "$CHANGED" | tr ' ' '\n' | awk 'NF && !/^(gluetun|qbittorrent|radarr|sonarr|prowlarr|flaresolverr)$/' | tr '\n' ' ')
+    OTHER=$(echo "$CHANGED" | tr ' ' '\n' | awk 'NF && !/^(gluetun|qbittorrent|radarr|radarr4k|sonarr|prowlarr|flaresolverr)$/' | tr '\n' ' ')
     PHASE=recreate-other
     if [ -n "$OTHER" ]; then docker compose --project-name stack up -d --no-deps $OTHER >> "$LOG" 2>&1; fi
   else

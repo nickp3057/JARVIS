@@ -111,6 +111,7 @@ class MonitorSwitchTests(unittest.TestCase):
         patch("integrations.google_calendar.is_configured", return_value=False).start()
         patch("integrations.qbittorrent.is_configured", return_value=False).start()
         patch("integrations.gmail.is_configured", return_value=False).start()
+        patch("integrations.temp_4k.configured", return_value=False).start()
         patch.object(runtime_module, "_watched_devices", return_value=[]).start()
         self.addCleanup(patch.stopall)
 
@@ -126,12 +127,14 @@ class MonitorSwitchTests(unittest.TestCase):
         patch("integrations.qbittorrent.is_configured", return_value=True).start()
         patch("integrations.gmail.is_configured", return_value=True).start()
         patch("integrations.nas_host.monitor_enabled", return_value=True).start()
+        patch("integrations.temp_4k.configured", return_value=True).start()
         with patch.dict(os.environ, {"HOME_MONITOR_ENABLED": "no", "WEATHER_MONITOR_ENABLED": "no",
                                      "PRICE_WATCH_MONITOR_ENABLED": "no", "JARVIS_HEALTHCHECKS_URL": "https://hc"}):
             self.rt.start_monitors()
         self.assertEqual(sorted(self.started), ["_calendar_monitor_loop", "_deadman_loop",
                                                 "_download_monitor_loop", "_email_triage_loop",
-                                                "_nas_host_monitor_loop", "_wake_monitor_loop"])
+                                                "_nas_host_monitor_loop", "_temp_4k_monitor_loop",
+                                                "_wake_monitor_loop"])
 
     def test_monitor_switch_words(self) -> None:
         for value, on in (("true", True), ("ON", True), ("1", True), ("false", False), ("off", False), ("", False)):
