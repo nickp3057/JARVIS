@@ -105,7 +105,7 @@ installed on Nick’s iPhone 17 Pro; physical-device feel still needs Nick’s c
 
 ## Already fixed on the server/app side (this branch)
 
-- Streaming: `/chat/stream` sends `nosniff`, so short replies type out live.
+- Streaming: `/chat/stream` sends `nosniff`, so short replies type out live. 6.17: the app delivers buffered text on a 40 ms timer (`StreamTextBuffer`), not on the next byte's arrival, which had shown a word or two and then the whole paragraph at the end.
 - One bubble per model round (`X-Jarvis-Stream-Segments`, U+001E marker).
 - Quieter tool turns (no pre-tool narration) and no guessed media adds
   (several matches → exact-title "yes" via the confirm gate).

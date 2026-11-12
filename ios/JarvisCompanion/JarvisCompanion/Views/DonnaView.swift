@@ -35,6 +35,7 @@ struct DonnaView: View {
     /// and the keyboard can't commit a half-finished word back into it.
     @State private var composerID = UUID()
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.scenePhase) private var scenePhase
 
     init(settings: AppSettings) {
         _model = StateObject(wrappedValue: DonnaModel(settings: settings))
@@ -55,6 +56,9 @@ struct DonnaView: View {
         .task {
             await model.load()
             withAnimation(reduceMotion ? nil : .spring(duration: 1.1, bounce: 0.15)) { unwound = true }
+        }
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active { Task { await model.refresh() } }
         }
         .sheet(isPresented: $showingMemory) { DonnaMemoryView(model: model) }
         .sheet(isPresented: $showingImport) { DonnaImportView(model: model) }

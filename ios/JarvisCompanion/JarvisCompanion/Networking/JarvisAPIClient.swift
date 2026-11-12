@@ -401,23 +401,30 @@ struct JarvisAPIClient {
             if let boundSessionID = http.value(forHTTPHeaderField: "X-Jarvis-Session-ID") {
                 await onSession(boundSessionID)
             }
-            var pending = Data()
-            let clock = ContinuousClock()
-            var lastDelivery = clock.now
-            for try await byte in bytes {
-                try Task.checkCancellation()
-                pending.append(byte)
-                let deliveryDue = pending.count >= 512
-                    || lastDelivery.duration(to: clock.now) >= .milliseconds(40)
-                if deliveryDue, let text = String(data: pending, encoding: .utf8) {
-                    await onChunk(text)
-                    pending.removeAll(keepingCapacity: true)
-                    lastDelivery = clock.now
+            // Delivery runs on its own 40 ms clock, not on byte arrival:
+            // Core often gets a whole round from Claude in one burst, and a
+            // check made only when the next byte lands showed the first word,
+            // then held the rest until the stream closed (after tool rounds
+            // and history saving), so the paragraph appeared all at once.
+            let buffer = StreamTextBuffer()
+            let flusher = Task {
+                while !Task.isCancelled {
+                    try? await Task.sleep(for: .milliseconds(40))
+                    if let text = buffer.take() { await onChunk(text) }
                 }
             }
-            if !pending.isEmpty, let text = String(data: pending, encoding: .utf8) {
-                await onChunk(text)
+            do {
+                for try await byte in bytes {
+                    try Task.checkCancellation()
+                    buffer.append(byte)
+                }
+            } catch {
+                flusher.cancel()
+                throw error
             }
+            flusher.cancel()
+            await flusher.value  // the flusher's last chunk lands before the tail
+            if let text = buffer.take(final: true) { await onChunk(text) }
             return http.value(forHTTPHeaderField: "X-Jarvis-Session-ID")
         } catch let error as URLError {
             throw JarvisAPIError.transport(error)
@@ -1270,5 +1277,37 @@ struct JarvisAPIClient {
             throw JarvisAPIError.malformedResponse(body)
         }
         return decoded.id
+    }
+}
+
+/// A streamed reply's bytes, written by the reader and drained by a timer.
+/// ``take()`` returns everything that decodes as UTF-8 so far; a character
+/// split across network packets waits for its last byte.
+final class StreamTextBuffer: @unchecked Sendable {
+    private let lock = NSLock()
+    private var pending = Data()
+
+    func append(_ byte: UInt8) {
+        lock.lock()
+        pending.append(byte)
+        lock.unlock()
+    }
+
+    func take(final: Bool = false) -> String? {
+        lock.lock()
+        defer { lock.unlock() }
+        guard !pending.isEmpty else { return nil }
+        for held in 0...min(3, pending.count - 1) {
+            let end = pending.count - held
+            if let text = String(data: pending.prefix(end), encoding: .utf8) {
+                pending.removeFirst(end)
+                return text
+            }
+        }
+        if final {  // a broken tail: show what we can rather than drop it
+            defer { pending.removeAll() }
+            return String(decoding: pending, as: UTF8.self)
+        }
+        return nil
     }
 }

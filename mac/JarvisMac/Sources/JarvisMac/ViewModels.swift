@@ -261,11 +261,31 @@ final class DonnaModel: ObservableObject {
                 messages.append(DonnaMessage(role: "assistant", text: reply.reply, at: Date().timeIntervalSince1970))
                 error = nil
             } catch {
+                // Core usually finished and saved her answer anyway (the Mac
+                // slept, the network dropped): fetch it before giving up.
+                if await recover(sent: text) { return }
                 if messages.last?.text == text { messages.removeLast() }
                 draft = text
                 self.error = error.localizedDescription
             }
         }
+    }
+
+    /// After a failed send: wait for Core's copy of her reply. True once the
+    /// session shows `sent` followed by an answer.
+    private func recover(sent text: String) async -> Bool {
+        for attempt in 0..<20 {
+            if attempt > 0 { try? await Task.sleep(for: .seconds(3)) }
+            guard let state = try? await JarvisAPI.make(settings).donnaState() else { continue }
+            let remote = state.session?.messages ?? []
+            guard let asked = remote.lastIndex(where: { $0.fromNick && $0.text == text }) else { return false }
+            if remote.index(after: asked) < remote.endIndex {
+                messages = remote
+                error = nil
+                return true
+            }
+        }
+        return false
     }
 
     /// End now: she writes her note; the next message starts a new session.

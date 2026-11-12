@@ -61,12 +61,43 @@ final class DonnaModel: ObservableObject {
                 await Self.schedule(reply.checkins)
                 error = nil
             } catch {
+                // The request often dies while Core carries on (the app went
+                // to the background, Wi-Fi handed off): her answer is saved
+                // there. Fetch it before calling this a failure.
+                if await recover(sent: text) { return }
                 // Put the words back so nothing he wrote is lost.
                 if messages.last?.text == text { messages.removeLast() }
                 draft = text
                 self.error = error.localizedDescription
             }
         }
+    }
+
+    /// After a failed send: wait for Core's copy of her reply (it may still be
+    /// writing it). True once the session shows `sent` followed by an answer.
+    private func recover(sent text: String) async -> Bool {
+        for attempt in 0..<20 {
+            if attempt > 0 { try? await Task.sleep(for: .seconds(3)) }
+            guard let state = try? await client().donnaState() else { continue }
+            let remote = state.session?.messages ?? []
+            guard let asked = remote.lastIndex(where: { $0.fromNick && $0.text == text }) else {
+                return false  // it never reached her
+            }
+            if remote.index(after: asked) < remote.endIndex {
+                messages = remote
+                await Self.schedule(state.checkins)
+                error = nil
+                return true
+            }
+        }
+        return false
+    }
+
+    /// Back from the background: show anything that landed meanwhile
+    /// (a reply finished on Core, or a message sent from the Mac).
+    func refresh() async {
+        guard !thinking, !loading else { return }
+        await load()
     }
 
     /// True when the box suddenly refills with the message that just went.

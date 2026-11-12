@@ -1090,7 +1090,7 @@ EMAIL_UNSUB_NOTE=           # vault-relative note path; default Jarvis Memory/Em
 ## Recently Shipped
 
 - **JARVIS for Mac (companion 6.16 / build 258, 2026-11-10).** A dedicated native macOS app, not the iPad app ported over (`mac/JarvisMac/`, SwiftUI, Swift Package, no Xcode project). `mac/JarvisMac/build.sh` builds it and installs an ad-hoc-signed `~/Applications/JARVIS.app` (`--open` also launches it; it quits a running copy first). It is a thin client of Core's existing API with the companion token, so no server change. Mac-style layout: a sidebar with **Chat**, **Home**, **Alerts** and, under Private, **Donna**; ⌘1–⌘4 switch sections, ⌘N starts a new chat, ⌘R refreshes, ⌘, opens Settings.
-  - **Chat:** history list (`GET /sessions`, shared with the phone; right-click to delete) beside the transcript. Replies stream (`POST /chat/stream` with `X-Jarvis-Stream-Segments: 1`, so each `ROUND_BREAK` starts a new bubble) and render inline markdown.
+  - **Chat:** history list (`GET /sessions`, shared with the phone; right-click to delete) beside the transcript. Replies stream (`POST /chat/stream` with `X-Jarvis-Stream-Segments: 1`, so each `ROUND_BREAK` starts a new bubble) and render inline markdown. Like the phone (6.17), the reader hands text to the UI on a 40 ms timer rather than when the next byte arrives; Core often receives a round from Claude in one burst, and the byte-driven check showed a word or two and then held the rest until the stream closed.
   - **Home:** scene tiles (`/api/home/scenes`, the current scene outlined; click runs it, or leaves it if it is current) and device tiles grouped by domain from `/api/home/entities` with on/off switches (`/api/home/control`) and a brightness slider for dimmable lights (`/api/home/light`, sent when the drag ends). Refreshes every 15 s while open.
   - **Alerts:** `/api/alerts/recent` (24 h), with Re-check (`/api/alerts/refresh`) and Clear (with a confirmation). Warnings and criticals badge the sidebar, polled every 60 s.
   - **Donna:** her rose space inside the window, sharing the one open session with the phone (reloads when the app comes to the front), End Session (with a confirmation) and What Donna knows (read-only). Importing old chats, erasing her memory and check-in notifications stay on the phone (the Mac doing check-ins too would notify twice).
@@ -1702,6 +1702,12 @@ EMAIL_UNSUB_NOTE=           # vault-relative note path; default Jarvis Memory/Em
   buried (6.3): a small link at the very bottom of What Donna knows, with a
   confirmation. API: `GET /api/donna`,
   `POST /api/donna/message|end|import`, `GET|DELETE /api/donna/memory`.
+  Replies are not streamed: one `POST /api/donna/message` returns the whole
+  answer. 6.17: when that request dies (app backgrounded, network handoff,
+  timeout) Core still finishes and saves her reply, so the phone and Mac
+  poll `GET /api/donna` (up to ~1 min) for the answer after his message
+  before calling it a failure, and the phone re-reads the session whenever
+  it returns to the foreground.
   Conversation on Sonnet (`DONNA_MODEL`), notes on Haiku (`DONNA_NOTES_MODEL`).
   On the Agents map since 6.4 (cost only, never content).
   6.9: every message of Nick's reaches her with a `[time · gap]` tag

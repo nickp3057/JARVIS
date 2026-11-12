@@ -70,25 +70,25 @@ struct JarvisAPI {
             for try await byte in bytes { data.append(byte) }
             throw JarvisAPIError.server(code, Self.detail(data))
         }
-        // Bytes arrive one at a time; hold a partial UTF-8 character until it
-        // completes, and hand text over in small batches to keep the UI calm.
-        var pending = Data()
-        var batch = ""
-        var lastFlush = Date()
-        for try await byte in bytes {
-            pending.append(byte)
-            if let text = String(data: pending, encoding: .utf8) {
-                batch += text
-                pending.removeAll(keepingCapacity: true)
-            }
-            if !batch.isEmpty, Date().timeIntervalSince(lastFlush) > 0.04 {
-                let out = batch
-                batch = ""
-                lastFlush = Date()
-                await onText(out)
+        // Text is handed over on a 40 ms clock, not when the next byte lands:
+        // Core often gets a whole round in one burst, and a byte-driven check
+        // showed the first word and held the rest until the stream closed.
+        let buffer = StreamTextBuffer()
+        let flusher = Task {
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .milliseconds(40))
+                if let text = buffer.take() { await onText(text) }
             }
         }
-        if !batch.isEmpty { await onText(batch) }
+        do {
+            for try await byte in bytes { buffer.append(byte) }
+        } catch {
+            flusher.cancel()
+            throw error
+        }
+        flusher.cancel()
+        await flusher.value
+        if let text = buffer.take(final: true) { await onText(text) }
         return http?.value(forHTTPHeaderField: "X-Jarvis-Session-ID")
     }
 
@@ -183,4 +183,36 @@ struct AnyEncodable: Encodable {
     private let encodeValue: (Encoder) throws -> Void
     init<T: Encodable>(_ value: T) { encodeValue = value.encode }
     func encode(to encoder: Encoder) throws { try encodeValue(encoder) }
+}
+
+/// A streamed reply's bytes, written by the reader and drained by a timer.
+/// ``take()`` returns everything that decodes as UTF-8 so far; a character
+/// split across network packets waits for its last byte.
+final class StreamTextBuffer: @unchecked Sendable {
+    private let lock = NSLock()
+    private var pending = Data()
+
+    func append(_ byte: UInt8) {
+        lock.lock()
+        pending.append(byte)
+        lock.unlock()
+    }
+
+    func take(final: Bool = false) -> String? {
+        lock.lock()
+        defer { lock.unlock() }
+        guard !pending.isEmpty else { return nil }
+        for held in 0...min(3, pending.count - 1) {
+            let end = pending.count - held
+            if let text = String(data: pending.prefix(end), encoding: .utf8) {
+                pending.removeFirst(end)
+                return text
+            }
+        }
+        if final {  // a broken tail: show what we can rather than drop it
+            defer { pending.removeAll() }
+            return String(decoding: pending, as: UTF8.self)
+        }
+        return nil
+    }
 }
