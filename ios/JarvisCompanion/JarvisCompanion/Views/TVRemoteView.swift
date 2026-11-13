@@ -2,7 +2,8 @@ import SwiftUI
 
 /// A remote for the TV in Nick's room: each press goes to JARVIS Core
 /// (`POST /api/tv/remote`), which sends it through Home Assistant's Android
-/// TV Remote connection, so it works whatever app is on screen. A 2x2 at the
+/// TV Remote connection, so it works whatever app is on screen. An Input menu
+/// switches HDMI 1-4 (or opens the TV's input list), and a 2x2 at the
 /// bottom opens Plex, YouTube, Spotify or the TV's Settings.
 struct TVRemoteView: View {
     @EnvironmentObject private var settings: AppSettings
@@ -28,6 +29,7 @@ struct TVRemoteView: View {
                     round("speaker.slash", label: "Mute", key: "mute")
                     round("speaker.plus", label: "Volume up", key: "volume_up", repeats: true)
                 }
+                inputs
                 apps
                 if let error {
                     Label(error, systemImage: "exclamationmark.triangle")
@@ -43,6 +45,24 @@ struct TVRemoteView: View {
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
             .sensoryFeedback(.impact(weight: .light), trigger: tick)
         }
+    }
+
+    /// Input switcher: HDMI 1-4 straight away, or the TV's own input list.
+    private var inputs: some View {
+        Menu {
+            ForEach(1...4, id: \.self) { n in
+                Button("HDMI \(n)", systemImage: "cable.connector") { press("hdmi_\(n)") }
+            }
+            Divider()
+            Button("Input list on the TV", systemImage: "list.bullet") { press("input") }
+        } label: {
+            Label("Input", systemImage: "rectangle.on.rectangle").font(.subheadline.weight(.semibold))
+                .frame(maxWidth: 360, minHeight: 46)
+                .jarvisSurface(in: .rect(cornerRadius: 14))
+                .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(JarvisTheme.border))
+        }
+        .buttonStyle(CockpitButtonStyle())
+        .accessibilityLabel("Switch the TV's input")
     }
 
     /// Quick launch: opens the app on the TV (waking it if needed).

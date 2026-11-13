@@ -9,6 +9,7 @@ struct TodoListView: View {
     @State private var newTodo = ""
     @FocusState private var adding: Bool
     @State private var ticking: Set<String> = []
+    @State private var expanded: Set<String> = []
 
     @MainActor
     static func open(_ model: HubViewModel) -> [NowReminder] {
@@ -19,15 +20,33 @@ struct TodoListView: View {
         let items = Self.open(model)
         List {
             Section {
+                // Like Reminders: the + is a real button (adds what's typed,
+                // or puts the cursor in the field), Return adds and keeps the
+                // field open for the next one.
                 HStack(spacing: 12) {
-                    Image(systemName: "plus.circle.fill")
-                        .font(.title3)
-                        .foregroundStyle(JarvisTheme.cyan)
-                        .frame(width: 44)
-                    TextField("Add a to-do", text: $newTodo)
+                    Button { if hasText { add() } else { adding = true } } label: {
+                        Image(systemName: "plus.circle.fill")
+                            .font(.title3)
+                            .foregroundStyle(JarvisTheme.cyan)
+                            .frame(width: 44, height: 44)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(hasText ? "Add this to-do" : "New to-do")
+                    TextField("Add a to-do", text: $newTodo, axis: .vertical)
+                        .lineLimit(1...4)
                         .focused($adding)
                         .submitLabel(.done)
                         .onSubmit(add)
+                        .onChange(of: newTodo) { _, text in
+                            // Return in a vertical field inserts a newline; treat it as submit.
+                            if text.hasSuffix("\n") { newTodo = String(text.dropLast()); add() }
+                        }
+                    if hasText {
+                        Button("Add", action: add)
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(JarvisTheme.cyan)
+                            .buttonStyle(.plain)
+                    }
                 }
                 .padding(.vertical, 2)
             }
@@ -74,7 +93,8 @@ struct TodoListView: View {
                     .font(.body.weight(.medium))
                     .strikethrough(ticked)
                     .foregroundStyle(ticked ? .secondary : .primary)
-                    .lineLimit(3)
+                    .lineLimit(expanded.contains(reminder.id) ? nil : 1)
+                    .truncationMode(.tail)
                 if let dueAt = reminder.dueAt {
                     Label(Date(timeIntervalSince1970: dueAt).formatted(.dateTime.weekday(.abbreviated).hour().minute()),
                           systemImage: reminder.isDue ? "exclamationmark.circle" : "bell")
@@ -82,7 +102,14 @@ struct TodoListView: View {
                         .foregroundStyle(reminder.isDue ? JarvisTheme.amber : .secondary)
                 }
             }
-            Spacer(minLength: 0)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(Rectangle())
+            .onTapGesture {  // cut off with "…"; tap to read the whole thing
+                withAnimation(.snappy) {
+                    if expanded.contains(reminder.id) { expanded.remove(reminder.id) } else { expanded.insert(reminder.id) }
+                }
+            }
+            .accessibilityHint("Shows the whole to-do")
         }
         .listRowInsets(EdgeInsets(top: 4, leading: 4, bottom: 4, trailing: 16))
         .swipeActions(edge: .leading) {
@@ -99,6 +126,8 @@ struct TodoListView: View {
             ticking.remove(reminder.id)
         }
     }
+
+    private var hasText: Bool { !newTodo.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
 
     private func add() {
         let text = newTodo

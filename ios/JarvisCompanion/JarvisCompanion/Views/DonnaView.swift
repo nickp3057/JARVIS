@@ -235,8 +235,9 @@ struct DonnaView: View {
         guard !ending else { return }
         ending = true
         Task {
-            await model.endSession()
+            let ended = await model.endSession()
             ending = false
+            if ended { leave() }  // ending the session closes Donna
         }
     }
 }

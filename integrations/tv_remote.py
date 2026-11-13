@@ -20,6 +20,9 @@ KEYS = {
     "ok": "DPAD_CENTER", "back": "BACK", "home": "HOME",
     "play_pause": "MEDIA_PLAY_PAUSE", "rewind": "MEDIA_REWIND", "fast_forward": "MEDIA_FAST_FORWARD",
     "volume_up": "VOLUME_UP", "volume_down": "VOLUME_DOWN", "mute": "VOLUME_MUTE",
+    # Inputs: "input" opens the TV's own input list; hdmi_N jumps straight there.
+    "input": "TV_INPUT", "hdmi_1": "TV_INPUT_HDMI_1", "hdmi_2": "TV_INPUT_HDMI_2",
+    "hdmi_3": "TV_INPUT_HDMI_3", "hdmi_4": "TV_INPUT_HDMI_4",
 }
 # Companion quick-launch button -> Android TV package (remote.turn_on activity).
 APPS = {

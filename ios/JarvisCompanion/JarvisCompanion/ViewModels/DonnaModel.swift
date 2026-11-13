@@ -109,14 +109,18 @@ final class DonnaModel: ObservableObject {
     }
 
     /// End now: she writes her note; the next message starts a new session.
-    func endSession() async {
-        guard !messages.isEmpty else { return }
+    /// True when it ended, so the view can close Donna.
+    @discardableResult
+    func endSession() async -> Bool {
+        guard !messages.isEmpty else { return false }
         do {
             try await client().donnaEnd()
             messages = []
             hasCaseFile = true
+            return true
         } catch {
             self.error = error.localizedDescription
+            return false
         }
     }
 

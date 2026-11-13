@@ -26,6 +26,13 @@ class TvRemoteTests(unittest.TestCase):
             "POST", "/api/services/remote/turn_on", json={"entity_id": "remote.nick_s_room_tv"})
         self.assertEqual(message, "TV on, sir.")
 
+    def test_input_buttons(self) -> None:
+        tv_remote.press("hdmi_2")
+        self.request.assert_called_with("POST", "/api/services/remote/send_command",
+                                        json={"entity_id": "remote.nick_s_room_tv", "command": "TV_INPUT_HDMI_2"})
+        tv_remote.press("input")
+        self.assertEqual(self.request.call_args.kwargs["json"]["command"], "TV_INPUT")
+
     def test_other_media_players_are_untouched(self) -> None:
         home_assistant.call_service("media_player", "turn_on", "media_player.zacks_tv")
         self.request.assert_called_once_with(
