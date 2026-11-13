@@ -154,6 +154,23 @@ Nick saw a video on "Voice Studio" (likely VoiceStudio by debpalash, or Jamie Pi
 
 **Future homelab (after moving out).** Mini rack; NAS keeps the arr stack and storage; a "powerhouse" box runs Plex and a local LLM. A Mac mini (Apple Silicon, lots of unified memory) fits both: Plex runs natively with hardware transcoding, idles at a few watts. Plan JARVIS as **hybrid, ~90% local by volume**: wake word, STT, TTS, quick commands, memory search and background summaries on the local model; Claude for multi-step tool chains, Donna and judgment calls (local models are still weaker at reliable tool use). Fits the existing fallback router and per-job model picker. UPS with NUT: on battery, shut down non-essentials, keep modem, router, Wi-Fi and the JARVIS box up (internet only lasts as long as Xfinity's node has power).
 
+### Bedroom blind tilt automation (planned 2026-11-13, waiting on hardware, nothing built)
+
+Cheap and portable (Nick takes it when he moves out). **The blind:** 2" faux-wood venetian with **cord tilt** (two strings into a tilter box at the end of the headrail; the strings wind on a spool that drives a gear on the tilt rod) and a **square metal tilt rod**. Tilt only; raising and lowering stays manual.
+
+- **Hardware (Nick buys):** a wand tilter matching the rod (measure the square bar flat-to-flat, likely 1/4" or 5/16", and the inside width of the headrail; search "2 inch faux wood blind wand tilter 1/4 square") plus a **SwitchBot Blind Tilt** (~$60–70, clips on the wand, solar). Swap the tilter in ~10 minutes; **keep the original** so it goes back exactly as it was (it's his parents' blind). The Blind Tilt is **Bluetooth LE only** (no Thread; SwitchBot's Matter goes through their hubs). No hub needed.
+- **Why not other routes:** a motor on the bar won't work with the cord tilter still in place (its gearing won't backdrive); SOMA-style pullers are for beaded loop chains. Fallbacks if the swap is vetoed: tie the two cords into a loop around a DIY ESP32 + geared motor pulley stuck to the sill (no change to the blind), or buy a ~$15–30 wand blind and shelve the original.
+- **Chosen wiring, Option A:** JARVIS drives it directly from the **Surface's Bluetooth** (Linux/BlueZ) with `pySwitchbot` (the library HA uses), as `integrations/` module + tool ("open/close the blinds", "tilt to 50%"), usable in scenes and the wake-up scene, and mirror its state to HA. HA can't see it natively because HA runs in Docker on the NAS, which has no usable Bluetooth. Option B (if A is flaky or out of range): a ~$10 ESP32 flashed as an ESPHome Bluetooth proxy near the window, so HA picks it up as a cover entity with no new JARVIS code.
+- **Before building:** `bluetoothctl show` on the Surface (`Powered: yes`) and check it's within BLE range of the window. Nick asked to wait until the SwitchBot is in hand to test.
+
+### Nightstand iPad mini (planned 2026-11-13, waiting on hardware, nothing built)
+
+Nick is getting a free iPad mini from work. Plan: it **replaces the Google Nest Hub on the nightstand**; the iPad Air stays as the room panel by the door. The desk (Surface, the current mic and speaker) is at the other end of a ~17 ft room.
+
+- **Phase 1 (no new code):** install the companion app, keep it plugged in, Guided Access on the Room screen. Check the dim night look (no pulsing or flashing, see Nick's taste), movie mode, camera view, scenes. Find what the Hub still does that the mini doesn't (alarms, a clock face readable from bed, "Hey Google" timers) and list it.
+- **Phase 2, the mini as a voice satellite:** the app listens for "Hey JARVIS" on device while it's on screen (iOS only allows the mic in the foreground, fine for a plugged-in panel), streams the utterance to Core (`/chat/stream` or a new room-voice endpoint), and plays the reply on the mini's speaker. **Arbitration:** when the desk mic and the mini both hear the wake word within ~1 s, Core lets the louder/closer one answer and the other stays quiet (compare wake scores or RMS). Reuse the room voice's interrupt (tap to stop) and night volume. Decide whether replies to the mini also play on the desk speaker (probably not).
+- **Open questions for Nick:** does the mini replace the Hub's alarm (needs a reliable wake-up sound with the app in front, or use iOS Clock)? Should the door iPad also become a satellite? Wake-word model on iOS: openWakeWord ported to Core ML vs. Apple's on-device speech recognition watching for the phrase.
+
 ### Speed pass (2026-11-09, 5.98 / build 241): check
 Full audit and fixes in JARVIS.md "Recently Shipped" (5.98). Tested and timed
 against the real services, but **not deployed and never played on the

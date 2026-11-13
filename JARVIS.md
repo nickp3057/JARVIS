@@ -967,6 +967,7 @@ ROOM_ANNOUNCEMENTS=1        # speak runtime announcements (never in quiet hours)
 ROOM_QUIET_HOURS=22-7       # night mode hours; empty turns night mode off
 ROOM_NIGHT_VOLUME=4         # 0-10 speaker level in quiet hours (voice at night, or the app's Settings > Night volume, override it)
 ROOM_VOLUME_CONTROL=Master  # ALSA mixer control for "volume 4" / "louder"
+ROOM_VOLUME_MAPPED=1        # levels use amixer -M (loudness-matched: 8 = about -6 dB, not -12.75); 0 = raw hardware steps
 LIGHT_RAINBOWS=             # light=select:option (or light=scene.x) pairs for the Rainbow button (defaults to Nick's strip + desk DIY scenes, the lamp's built-in Rainbow scene, and the fan ring's scene.fan_light_rainbow Tap-to-Run)
 ALERT_REPEAT_WINDOW_S=1800  # suppress repeat pushes, retain visible alerts even across restarts (memory/alert_repeats.json); 0 = off
 RING_LIGHTS=light.nicks_fan # colour-only lights: the apps never send white (the fan's RGB ring)
@@ -1053,8 +1054,19 @@ EMAIL_UNSUB_NOTE=           # vault-relative note path; default Jarvis Memory/Em
 
 ## Temporary 4K Radarr setup (one time)
 
-Status 2026-11-12: JARVIS side shipped; the NAS side below isn't done yet.
-Needs sudo on the NAS (`ssh nas`).
+Status 2026-11-13: steps 1–3 done, and step 4 done over the API (root folder,
+Temp 4K profile id 7 = WEB 2160p only, qBittorrent category `radarr4k`,
+recycle bin off so removals free space, "Radarr 4K" app in Prowlarr with the
+same four active indexers as the main Radarr). Custom formats copied from the
+main Radarr minus the size ladders; Temp 4K scores only the hard blocks
+(-10000: non-English, AV1, Opus, BR-DISK, LQ, upscaled, extras, DV without HDR
+fallback, remux, 3D) and HDR +60, min score 0, so within a tier Radarr's
+seeder ranking decides (size doesn't matter for a 48-hour copy). Prowlarr's
+app profile already enforces 20 minimum seeders. No Plex connection: the main
+Radarr has none either, so Plex's own folder watching picks up imports.
+Left: the 4K Radarr's UI login (it asks for one on first visit), step 5
+(Plex folder) and step 6 (Core `.env`). Needs sudo on the NAS (`ssh nas`); no nano
+there, so edit files with a `sudo python3` one-shot or vi.
 
 1. Folders, and the port pre-seeded (both Radarrs share gluetun's network, so
    the second can't use 7878):
@@ -1088,8 +1100,8 @@ Needs sudo on the NAS (`ssh nas`).
    list `radarr4k` with the other gluetun dependents, so a gluetun restart
    recreates it and the weekly update pulls it. Install them only after the
    container exists (`docker rm -f` of a missing name fails the chain). The
-   repo's `stack_updater.sh` also carries the stricter error handling not yet
-   live on the NAS.
+   repo's `stack_updater.sh` also carries the stricter error handling
+   (installed 2026-11-13).
 4. In the 4K Radarr (http://10.0.0.147:7879; Claude can do this over its
    API): root folder `/temp-4k-movies`; profile **Temp 4K** = WEBDL-2160p +
    WEBRip-2160p only, upgrades off, no size cap; qBittorrent download client
@@ -1157,7 +1169,9 @@ Needs sudo on the NAS (`ssh nas`).
 
 ## Recently Shipped
 
-- **Temporary 4K movies (2026-11-12).** "Get a 4K file of Harry Potter for tonight": `temporary_4k` tool + temp-4K monitor (`integrations/temp_4k.py`) over a second Radarr whose folder is `temp-4k-movies`; alert when ready, auto-removed 2 days after it lands; the 1080p copy is never touched. NAS side pending: "Temporary 4K Radarr setup".
+- **Room volume on a loudness-matched scale (companion 6.20 / build 262, 2026-11-13).** `speech/room_volume.py` runs `amixer -M`, so "volume 8" is about -6 dB instead of -12.75 dB (raw steps made 8 sound like a quarter of 10 on the Surface). Stored levels keep their numbers, so they get louder: the night level (7 on the Surface) is now about -9 dB; say "night volume 5" for roughly the old loudness. `ROOM_VOLUME_MAPPED=0` restores raw steps.
+- **Temporary 4K live (2026-11-13).** NAS side set up (see "Temporary 4K Radarr setup"); first end-to-end run: Michael (2026), asked by voice, 24.3 GB iTunes DV/HDR WEB-DL in about 25 minutes, ready alert, Plex chose the 4K version.
+- **Temporary 4K movies (2026-11-12).** "Get a 4K file of Harry Potter for tonight": `temporary_4k` tool + temp-4K monitor (`integrations/temp_4k.py`) over a second Radarr whose folder is `temp-4k-movies`; alert when ready, auto-removed 2 days after it lands; the 1080p copy is never touched. NAS side done 2026-11-13 except the Plex folder and Core `.env`: "Temporary 4K Radarr setup".
 - **JARVIS for Mac (companion 6.16 / build 258, 2026-11-10).** A dedicated native macOS app, not the iPad app ported over (`mac/JarvisMac/`, SwiftUI, Swift Package, no Xcode project). `mac/JarvisMac/build.sh` builds it and installs an ad-hoc-signed `~/Applications/JARVIS.app` (`--open` also launches it; it quits a running copy first). It is a thin client of Core's existing API with the companion token, so no server change. Mac-style layout: a sidebar with **Chat**, **Home**, **Alerts** and, under Private, **Donna**; ⌘1–⌘4 switch sections, ⌘N starts a new chat, ⌘R refreshes, ⌘, opens Settings.
   - **Chat:** history list (`GET /sessions`, shared with the phone; right-click to delete) beside the transcript. Replies stream (`POST /chat/stream` with `X-Jarvis-Stream-Segments: 1`, so each `ROUND_BREAK` starts a new bubble) and render inline markdown. Like the phone (6.17), the reader hands text to the UI on a 40 ms timer rather than when the next byte arrives; Core often receives a round from Claude in one burst, and the byte-driven check showed a word or two and then held the rest until the stream closed.
   - **Home:** scene tiles (`/api/home/scenes`, the current scene outlined; click runs it, or leaves it if it is current) and device tiles grouped by domain from `/api/home/entities` with on/off switches (`/api/home/control`) and a brightness slider for dimmable lights (`/api/home/light`, sent when the drag ends). Refreshes every 15 s while open.

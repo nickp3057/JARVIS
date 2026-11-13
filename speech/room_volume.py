@@ -1,7 +1,7 @@
 """The room speaker's volume, by voice, with a quieter night mode.
 
 Levels are 0-10 like a smart speaker ("volume 4", "louder", "quieter"),
-10% of the ALSA control each. The card comes from ``AUDIO_OUTPUT_DEVICE``
+10% of the ALSA control each on its loudness-matched (``amixer -M``) scale. The card comes from ``AUDIO_OUTPUT_DEVICE``
 (``plughw:1,0`` -> card 1), the control from ``ROOM_VOLUME_CONTROL``
 (``Master``).
 
@@ -43,11 +43,20 @@ def _control() -> str:
     return os.getenv("ROOM_VOLUME_CONTROL", "Master").strip() or "Master"
 
 
+def _scale_args() -> list[str]:
+    """``-M`` = alsamixer's loudness-matched scale. Without it a percentage is
+    raw hardware steps, which on the Surface's ALC274 made level 8 (80%)
+    -12.75 dB, about a quarter as loud as 10. ``ROOM_VOLUME_MAPPED=0`` goes
+    back to raw steps."""
+    return [] if os.getenv("ROOM_VOLUME_MAPPED", "1").strip().lower() in {"0", "false", "no", "off"} else ["-M"]
+
+
 def _amixer(*args: str) -> str | None:
     if not sys.platform.startswith("linux"):
         return None
     try:
-        done = subprocess.run(["amixer", *_card_args(), *args], capture_output=True, text=True, timeout=3)
+        done = subprocess.run(["amixer", *_scale_args(), *_card_args(), *args],
+                              capture_output=True, text=True, timeout=3)
     except (OSError, subprocess.SubprocessError):
         log.debug("amixer failed", exc_info=True)
         return None

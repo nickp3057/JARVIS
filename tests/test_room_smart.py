@@ -193,6 +193,17 @@ class VolumeTests(unittest.TestCase):
         room_volume.prepare(datetime(2026, 1, 2, 8))
         self.assertEqual(self.sets, ["30%", "70%"])  # 69% remembered as level 7
 
+    def test_levels_use_the_loudness_matched_scale(self) -> None:
+        patch.stopall()
+        run = Mock(return_value=Mock(returncode=0, stdout=""))
+        with patch.object(room_volume.sys, "platform", "linux"), patch.object(room_volume.subprocess, "run", run), \
+                patch.dict(os.environ, {"AUDIO_OUTPUT_DEVICE": "plughw:CARD=PCH,DEV=0"}):
+            room_volume._apply(8)
+            self.assertEqual(run.call_args.args[0], ["amixer", "-M", "-c", "PCH", "-q", "sset", "Master", "80%"])
+            with patch.dict(os.environ, {"ROOM_VOLUME_MAPPED": "0"}):
+                room_volume._apply(8)
+            self.assertNotIn("-M", run.call_args.args[0])
+
     def test_night_level_set_by_day_waits_for_night(self) -> None:
         self.assertEqual(room_volume.night_level(), 3)
         room_volume.set_night_level(5, datetime(2026, 1, 1, 15))
