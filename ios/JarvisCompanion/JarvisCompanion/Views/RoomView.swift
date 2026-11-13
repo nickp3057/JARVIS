@@ -849,6 +849,17 @@ private struct MovieModeView: View {
                         model.toggle(bedroom, to: !on)
                     }
                 }
+                Menu {
+                    TVInputs.menuItems(press: press)
+                } label: {
+                    Label("Input", systemImage: "rectangle.on.rectangle")
+                        .font(.headline)
+                        .frame(maxWidth: .infinity, minHeight: 56)
+                        .foregroundStyle(.white.opacity(0.7))
+                        .background(Color.white.opacity(0.06), in: .rect(cornerRadius: 16))
+                }
+                .buttonStyle(CockpitButtonStyle())
+                .accessibilityLabel("Switch the TV's input")
                 wide("TV remote", symbol: "appletvremote.gen4", action: showRemote)
             }
         }
