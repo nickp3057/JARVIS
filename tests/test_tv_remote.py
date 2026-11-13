@@ -28,10 +28,11 @@ class TvRemoteTests(unittest.TestCase):
 
     def test_input_buttons(self) -> None:
         tv_remote.press("hdmi_2")
-        self.request.assert_called_with("POST", "/api/services/remote/send_command",
-                                        json={"entity_id": "remote.nick_s_room_tv", "command": "TV_INPUT_HDMI_2"})
-        tv_remote.press("input")
-        self.assertEqual(self.request.call_args.kwargs["json"]["command"], "TV_INPUT")
+        self.request.assert_called_with("POST", "/api/services/remote/turn_on", json={
+            "entity_id": "remote.nick_s_room_tv",
+            "activity": "content://android.media.tv/passthrough/com.tcl.tvinput%2F.TvPassThroughService%2FHW16"})
+        with self.assertRaises(ValueError):
+            tv_remote.press("hdmi_4")
 
     def test_other_media_players_are_untouched(self) -> None:
         home_assistant.call_service("media_player", "turn_on", "media_player.zacks_tv")

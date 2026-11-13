@@ -3,7 +3,7 @@ import SwiftUI
 /// A remote for the TV in Nick's room: each press goes to JARVIS Core
 /// (`POST /api/tv/remote`), which sends it through Home Assistant's Android
 /// TV Remote connection, so it works whatever app is on screen. An Input menu
-/// switches HDMI 1-4 (or opens the TV's input list), and a 2x2 at the
+/// switches to the PS5, Switch or Wii U (HDMI 1-3), and a 2x2 at the
 /// bottom opens Plex, YouTube, Spotify or the TV's Settings.
 struct TVRemoteView: View {
     @EnvironmentObject private var settings: AppSettings
@@ -47,14 +47,19 @@ struct TVRemoteView: View {
         }
     }
 
-    /// Input switcher: HDMI 1-4 straight away, or the TV's own input list.
+    /// Input switcher. Names match what the TV calls its ports (Settings >
+    /// Inputs); Core maps hdmi_N to the input itself (TV_HDMI_INPUTS).
+    private static let ports: [(port: Int, name: String, symbol: String)] = [
+        (1, "PlayStation 5", "playstation.logo"),
+        (2, "Nintendo Switch", "gamecontroller"),
+        (3, "Wii U", "gamecontroller.fill"),
+    ]
+
     private var inputs: some View {
         Menu {
-            ForEach(1...4, id: \.self) { n in
-                Button("HDMI \(n)", systemImage: "cable.connector") { press("hdmi_\(n)") }
+            ForEach(Self.ports, id: \.port) { input in
+                Button("\(input.name) · HDMI \(input.port)", systemImage: input.symbol) { press("hdmi_\(input.port)") }
             }
-            Divider()
-            Button("Input list on the TV", systemImage: "list.bullet") { press("input") }
         } label: {
             Label("Input", systemImage: "rectangle.on.rectangle").font(.subheadline.weight(.semibold))
                 .frame(maxWidth: 360, minHeight: 46)

@@ -20,10 +20,26 @@ KEYS = {
     "ok": "DPAD_CENTER", "back": "BACK", "home": "HOME",
     "play_pause": "MEDIA_PLAY_PAUSE", "rewind": "MEDIA_REWIND", "fast_forward": "MEDIA_FAST_FORWARD",
     "volume_up": "VOLUME_UP", "volume_down": "VOLUME_DOWN", "mute": "VOLUME_MUTE",
-    # Inputs: "input" opens the TV's own input list; hdmi_N jumps straight there.
-    "input": "TV_INPUT", "hdmi_1": "TV_INPUT_HDMI_1", "hdmi_2": "TV_INPUT_HDMI_2",
-    "hdmi_3": "TV_INPUT_HDMI_3", "hdmi_4": "TV_INPUT_HDMI_4",
 }
+# HDMI inputs. The TV_INPUT* keys do nothing on the TCL (its stock home
+# screen handles them, and JARVIS TV replaced it), so hdmi_N opens the
+# input's passthrough channel, which the TV's own TV app (com.tcl.tv) plays.
+# Input ids come from `adb shell dumpsys tv_input`; on Nick's TCL HDMI 1-3
+# are HW15 (PS5), HW16 (Switch), HW17 (Wii U).
+_DEFAULT_HDMI = ",".join(f"com.tcl.tvinput/.TvPassThroughService/HW{n}" for n in (15, 16, 17))
+
+
+def hdmi_inputs() -> list[str]:
+    return [i.strip() for i in os.getenv("TV_HDMI_INPUTS", _DEFAULT_HDMI).split(",") if i.strip()]
+
+
+def input_link(port: int) -> str | None:
+    """The deep link that switches the TV to HDMI ``port`` (1-based)."""
+    from urllib.parse import quote
+    inputs = hdmi_inputs()
+    if not 1 <= port <= len(inputs):
+        return None
+    return "content://android.media.tv/passthrough/" + quote(inputs[port - 1], safe="")
 # Companion quick-launch button -> Android TV package (remote.turn_on activity).
 APPS = {
     "app_plex": "com.plexapp.android",
@@ -58,6 +74,11 @@ def press(key: str) -> tuple[bool, str]:
         return power(key == "power_on")
     if key in APPS:  # wakes the TV if needed and opens the app
         return home_assistant.call_service("remote", "turn_on", entity(), {"activity": APPS[key]})
+    if key.startswith("hdmi_") and key[5:].isdigit():
+        link = input_link(int(key[5:]))
+        if link is None:
+            raise ValueError(f"The TV has no {key.replace('_', ' ').upper()}.")
+        return home_assistant.call_service("remote", "turn_on", entity(), {"activity": link})
     code = KEYS.get(key)
     if code is None:
         raise ValueError(f"Unknown button {key!r}.")
