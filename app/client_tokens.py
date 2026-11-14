@@ -3,7 +3,8 @@
 ``JARVIS_API_TOKEN`` stays the admin token for the iOS companion and keeps
 full access. Every other client gets its own token here, limited to scopes:
 
-- ``events:read``  live alert stream (``GET /api/clients/events``)
+- ``events:read``  live alert stream (``GET /api/clients/events``), answer
+                   cards included (``event: card``, brain/answer_cards.py)
 - ``status:read``  read-only dashboard/status endpoints
 - ``chat``         talk to JARVIS (``POST /chat``), e.g. the TV remote's mic.
                    JARVIS's own confirmation rules still apply to risky tools.

@@ -75,9 +75,12 @@ Pearson-Stark-Jarvis/
 │   ├── runtime.py           JarvisRuntime — wraps agent + status snapshot
 │   ├── settings.py          Whitelist-based .env editor (update_setting tool)
 │   ├── standing_orders.py   Durable behavioural directives from Nick, injected every turn
+│   ├── lessons.py           JARVIS's lessons from his own mistakes (memory/lessons.json): decay, reinforce, cap, per-turn block
+│   ├── reflector.py         Reflection after failed turns: cheap heuristics, then one Haiku call writes a lesson
 │   ├── tool_health.py       Self-diagnosis ledger: per-tool failures, degraded flags, prompt warning
 │   ├── notifications.py     Phone alert router: companion push (APNs, stubbed) then HA notify fallback
-│   ├── event_bus.py         Single alert bus: publish once; phone (APNs→HA) and SSE client streams subscribe
+│   ├── event_bus.py         Single alert bus: publish once; phone (APNs→HA) and SSE client streams subscribe; also answer cards (`publish_card`)
+│   ├── answer_cards.py      Answer screens: `show_screen` builds a typed card (weather_today, calendar_day, timers), publishes it, returns the spoken facts
 │   ├── arr_stack.py         Arr alert hysteresis/per-indexer tracking, restart confirmation gate, async recovery follow-up
 │   ├── confirm_gate.py      `act()` runs what Nick asked for at once (a guest voice only gets a proposal); `propose()` is the session-bound "yes"/"approve <code>" gate for fixes JARVIS suggests itself; several proposals at once, "yes" approves all staged that turn, one message can carry several codes
 │   ├── arr_incidents.py     Arr push policy: watchdog-recovery hold + summary, minimum downtime, grouped incidents, daily indexer digest
@@ -87,7 +90,7 @@ Pearson-Stark-Jarvis/
 │   ├── timers.py            Timer store: set/cancel/pause/resume/dismiss/alarming state
 │   ├── tools.py             All tool schemas + dispatch (45+ tools)
 │   ├── vision.py            Screenshot via PyQt6 + Claude vision API call
-│   └── weather.py           Open-Meteo weather lookup
+│   └── weather.py           Open-Meteo weather lookup (+ `get_weather_today`: hourly temps/rain chance, sunrise/sunset, for the weather screen)
 │
 ├── integrations/
 │   ├── home_assistant.py    HA REST API: control_device / list_entities
@@ -137,7 +140,7 @@ Pearson-Stark-Jarvis/
 │
 ├── tv/                    JARVIS TV: the TCL Google TV's home screen (see "JARVIS TV")
 │   ├── launcher/            Hand-built Android app com.tvhome (no Gradle): build.sh, deploy.sh
-│   │   └── src/com/tvhome/  HomeActivity (glance + Plex/Settings), ReactorView (phone's mark), Jarvis (Core client), AlertStream
+│   │   └── src/com/tvhome/  HomeActivity (glance + Plex/Settings), ReactorView (phone's mark), Jarvis (Core client), AlertStream, AnswerCard (answer screens)
 │   │                        + Banner (live alerts over any app), NightlyRefresh (no-sound fix),
 │   │                        RemoteBridgeService (voice -> Plex, boot cleanup), SelfAdb
 │   ├── provision.sh         Creates the TV's scoped token on the Optiplex and hands it to the TV
@@ -204,6 +207,14 @@ RMS envelope from ElevenLabs audio drives the orb in real time using a monotonic
 ### Time & Info
 - `get_time` — current local time/date
 - `get_weather(location?)` — Open-Meteo current + forecast
+- `show_screen(card, location?)` — answer screens: puts a readout on the iPad
+  Room tab, the phone and the room TV and returns the same facts to speak.
+  `card` is `weather_today` (now, hourly temps and rain chance for the rest of
+  the day, high/low, sunrise/sunset, wind), `calendar_day` (the rest of
+  today's events) or `timers` (running timers, counting down). The model uses
+  it instead of get_weather / todays_agenda / list_timers when Nick asks for
+  one of those directly; incidental lookups stay text-only. See "Answer
+  screens" below.
 - `morning_briefing` — spoken greeting + time + weather + running timers
 
 ### Home Assistant
@@ -549,7 +560,7 @@ order that still waits for Nick's Approve (Trading, above).
 
 ### Agents map (companion) *(new 2026-11-09)*
 `GET /api/agents` (`status:read`, `brain/agent_roster.py`): JARVIS as the head
-and every agent that works for him (memory keeper, study coach, email sorter,
+and every agent that works for him (memory keeper, reflector, study coach, email sorter,
 portfolio advisor, crash watch, playground trader) with on/off and why, what
 it's doing now, what's waiting for Nick, and its last 5 runs (per-job history
 in `subagents.jobs_snapshot()`). The companion's **Agents** view
@@ -559,7 +570,7 @@ from the iPad Room menu (and the iPad Memory tab toolbar, next to Link map) and,
 Each agent has a `kind`: **subagent** (`brain/subagents.py`: own instructions
 and tools, works in steps: email sorter, portfolio advisor, crash watch,
 playground trader) or **helper** (one model call, no tools: memory keeper,
-study coach). The map shows subagents with a solid ring and helpers with a
+reflector, study coach). The map shows subagents with a solid ring and helpers with a
 smaller dashed one, in separate list sections. **The map is fluid**: any
 subagent job or spec that runs without an `_AGENTS` entry still appears
 (`new:<name>`, sparkles icon, named after its job), and the app draws whatever
@@ -767,6 +778,37 @@ entry in `brain/agent_roster.py` (name, kind, icon, description, schedule);
   conversational model forgot to persist it. The existing orders are fed into
   the extraction prompt so wording is reused rather than duplicated.
 
+### Lessons from failed turns *(new 2026-11-13)*
+- `list_lessons` — the one-line lessons JARVIS drew from his own mistakes,
+  with ids and how often each was reinforced.
+- `forget_lesson(identifier)` — by id, a unique fragment, or `all` (owner-only,
+  in `voice_trust.LOCKED_TOOLS`).
+- How they're made (`brain/reflector.py`): after every trusted turn the agent
+  hands the exchange and its tool results to the reflector. Heuristics in code
+  flag a bad turn, and only then one forced-tool call on the extraction model
+  (`LESSONS_MODEL`, falling back to `MEMORY_EXTRACT_MODEL`, Haiku) writes at
+  most one lesson, on a daemon thread (two at most in flight). Signals:
+  **correction** (Nick's next message within 5 minutes says "no, the …",
+  "that's wrong", "not that", "I said …", "that didn't work", "still not …",
+  "you misheard", "wrong room"; a bare or polite "no", or a "no" answering
+  JARVIS's own question, is not one), **repeat** (he says nearly the same
+  thing, ≥2 content words and ≥0.7 similarity, within two turns and 5
+  minutes), **false_success** (a tool result looked like a failure per
+  `tool_health.looks_like_failure` or an "error" prefix, and the reply never
+  admitted it). The model sees the standing orders and existing lessons and
+  returns an empty lesson for false alarms, explicit "from now on" rules (the
+  memory keeper turns those into standing orders) and honest outages.
+- The store (`brain/lessons.py`, `memory/lessons.json`): text, tool,
+  situation, signal, created, last_reinforced, hits. The same lesson again
+  (same tool, wording ≥0.6 similar) reinforces instead of duplicating. Weight
+  is hits halved every `LESSONS_HALF_LIFE_DAYS`; under 0.15 it is dropped (a
+  one-hit lesson lasts about 5½ weeks at 14 days); capped at `LESSONS_MAX`,
+  weakest first. The top `LESSONS_IN_CONTEXT`, ranked by weight times overlap
+  with Nick's message, ride in `<turn_context>` as "Lessons from your own past
+  mistakes", never the system prompt. Usage is recorded as `lessons`; the
+  Agents map shows it as the **Reflector** helper. Lessons are about JARVIS;
+  facts about Nick stay in `memory.py`, his explicit rules in standing orders.
+
 ### Study brief *(new)*
 - `study_brief_preview` — read back the daily study brief's settings and what
   the next notification will say. The brief itself is served to the phone by
@@ -910,8 +952,13 @@ MEMORY_CORE_MODEL=          # model that builds the core profile (default auto:s
 MEMORY_CORE_REFRESH_H=24    # rebuild the core profile for newly learned facts at most this often (imports rebuild at once)
 MEMORY_AUTO_CONFIDENCE=0.75 # facts at/above this write directly; below -> proposals
 MEMORY_EXTRACT_MIN_CHARS=12 # skip extraction for very short user turns ("yes")
+LESSONS_ENABLED=true        # reflection after failed turns (brain/reflector.py) + lessons in the turn context
+LESSONS_MODEL=              # reflector model; falls back to MEMORY_EXTRACT_MODEL, then auto:haiku
+LESSONS_MAX=40              # cap on stored lessons (weakest dropped first)
+LESSONS_IN_CONTEXT=4        # lessons injected per turn (0 = store but don't inject)
+LESSONS_HALF_LIFE_DAYS=14   # a lesson's weight halves this often unless reinforced
 HABITS_MIN_TURNS=10         # turns logged before the habits digest is injected
-VISION_MODEL=claude-sonnet-4-6
+VISION_MODEL=               # empty/auto follows the newest Sonnet (auto:sonnet); a concrete id pins it
 VISION_ALL_MONITORS=true    # capture the whole virtual desktop
 WEB_SEARCH_MAX_USES=5       # max web_search calls per turn
 WEB_FETCH_ENABLED=true      # Anthropic web_fetch server tool
@@ -1170,6 +1217,8 @@ there, so edit files with a `sudo python3` one-shot or vi.
 
 ## Recently Shipped
 
+- **Answer screens (companion, TV 9.5, 2026-11-13).** "What's the weather?" puts a weather readout on the iPad's Room tab, the phone and the room TV, like JARVIS putting it up on the nearest display. Trigger: the model calls the new `show_screen(card)` tool (instead of `get_weather` / `todays_agenda` / `list_timers`) only when Nick asks for something with a visual shape; the tool description carries the rule, so the persona block is untouched. `brain/answer_cards.py` builds the card once (one builder per type), publishes it with `event_bus.publish_card`, and returns the spoken facts plus a note to keep the reply short. Cards are the bus's second event kind: own ids and 20-card history, never pushed to the phone, never on Needs attention, 60 s `ttl_s`. `GET /api/clients/events` (scope `events:read`, so the TV's existing token works) sends them as `event: card` frames with no `id:` line (Last-Event-ID only tracks alerts) and replays unexpired cards on connect; `?only=cards` streams just cards (the companion). Cards so far: `weather_today` (`brain/weather.get_weather_today`: the same Open-Meteo call with `hourly=temperature_2m,precipitation_probability,weather_code,is_day`, sunrise/sunset, gusts; hours from now to midnight, 8-18 of them; times as Unix seconds, conditions as one word: clear/partly/cloudy/fog/drizzle/rain/snow/storm), `calendar_day` (rest of today, `allow_interactive=False`) and `timers` (remaining seconds; clients count down). Companion: `AnswerCardPresenter` follows the card stream while the app is active and `AnswerCardOverlay` (RootView, over every tab, under Donna) shows the newest card in the panel style of the current palette; tap anywhere or wait a minute to clear it. TV: `AlertStream` routes `event: card` to `AnswerCard` (right side, over any app, no focus, fade only), screen on only. A new card type is one builder plus one renderer per client (`AnswerCard.swift` payload + view, `AnswerCard.java`).
+- **Reflection after failed turns (2026-11-13).** JARVIS learns from turns that went badly, not only explicit corrections: `brain/reflector.py` flags a correction ("no, the bedroom", "that's wrong", "I said…"), a repeat within two turns, or a tool error the reply glossed over, then one Haiku call writes a one-line lesson to `memory/lessons.json` (`brain/lessons.py`). Repeats reinforce, unreinforced lessons fade (half-life 14 days), the top four relevant ones ride in `<turn_context>`. Tools `list_lessons` / `forget_lesson`; Reflector on the Agents map; settings `LESSONS_*`. Tests: `tests/test_lessons.py`. See "Lessons from failed turns".
 - **iPad TV remote + movie-mode inputs (companion 6.23 / build 265, 2026-11-13).** On iPad the remote is a page-sized sheet (iOS 18 `presentationSizing(.page)`) laid out as a console: power, a 300 pt d-pad and Back/Home/Play on the left; Inputs (one tile per port, PS5 / Switch / Wii U), Volume and Apps on the right. The old form sheet was too short and pushed the d-pad into the title. Phone keeps the single column, now scrollable. Movie mode's bottom row has an Input menu beside TV remote. Port names live in `TVInputs` (TVRemoteView.swift).
 - **TV input switcher, to-do sheet, Donna end (companion 6.21-6.22 / builds 263-264, 2026-11-13).** The TV remote (phone and iPad) has an Input menu: PlayStation 5, Nintendo Switch, Wii U (HDMI 1-3, the TV's own port names). The `TV_INPUT*` remote keys do nothing on the TCL (its stock home screen handles them and JARVIS TV replaced it), so `hdmi_N` sends HA `remote.turn_on` with the deep link `content://android.media.tv/passthrough/<input id>`, which the TV's own TV app (`com.tcl.tv`) plays. Input ids come from `TV_HDMI_INPUTS` (default `com.tcl.tvinput/.TvPassThroughService/HW15,HW16,HW17`; find them with `adb shell dumpsys tv_input`). To-do sheet: the + is a real button (adds what's typed, else focuses the field), the field grows to four lines with an Add button, and rows show one line with "…" and expand on tap. Donna's End session now closes Donna once she has saved her note.
 - **Room volume on a loudness-matched scale (companion 6.20 / build 262, 2026-11-13).** `speech/room_volume.py` runs `amixer -M`, so "volume 8" is about -6 dB instead of -12.75 dB (raw steps made 8 sound like a quarter of 10 on the Surface). Stored levels keep their numbers, so they get louder: the night level (7 on the Surface) is now about -9 dB; say "night volume 5" for roughly the old loudness. `ROOM_VOLUME_MAPPED=0` restores raw steps.

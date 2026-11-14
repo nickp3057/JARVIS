@@ -1332,6 +1332,7 @@ async def traffic_stream(request: Request, _: None = _status_read) -> StreamingR
 async def client_events(
     request: Request,
     since: int = 0,
+    only: str | None = None,
     last_event_id: str | None = Header(default=None, alias="Last-Event-ID"),
     _: None = Depends(require_scope("events:read")),
 ) -> StreamingResponse:
@@ -1339,53 +1340,74 @@ async def client_events(
 
     Replays alerts newer than ``Last-Event-ID`` (or ``?since=``) so a client
     that reconnects misses nothing still in the 200-alert history, then
-    streams live ones with a keep-alive comment every 15 s."""
+    streams live ones with a keep-alive comment every 15 s.
+
+    Answer cards (``brain/answer_cards.py``) ride the same stream as
+    ``event: card`` frames with no ``id:`` line, so they never move a
+    client's Last-Event-ID; cards still on screen are replayed on connect.
+    ``?only=cards`` streams just the cards (the companion app)."""
     await asyncio.to_thread(runtime)  # monitors are what publish alerts
     try:
         start = int(last_event_id) if last_event_id else since
     except ValueError:
         start = since
+    alerts_wanted = only != "cards"
     loop = asyncio.get_running_loop()
     queue: asyncio.Queue = asyncio.Queue(maxsize=200)
     name = f"sse-{uuid.uuid4()}"
 
-    def offer(alert: event_bus.Alert) -> None:
+    def offer(item: object) -> None:
         try:
-            queue.put_nowait(alert)
+            queue.put_nowait(item)
         except asyncio.QueueFull:
             pass  # slow client: it can catch up from history on reconnect
 
-    def on_alert(alert: event_bus.Alert) -> None:
+    def on_event(item: object) -> None:
         try:
-            loop.call_soon_threadsafe(offer, alert)
+            loop.call_soon_threadsafe(offer, item)
         except RuntimeError:
             pass  # loop closed: the stream is gone
 
     # Subscribe before replaying so nothing published in between is lost;
     # ids dedupe the overlap.
-    event_bus.subscribe(name, on_alert)
+    if alerts_wanted:
+        event_bus.subscribe(name, on_event)
+    event_bus.subscribe_cards(name, on_event)
 
     def frame(alert: event_bus.Alert) -> str:
         return f"id: {alert.id}\nevent: alert\ndata: {json.dumps(alert.to_dict())}\n\n"
 
+    def card_frame(card: event_bus.Card) -> str:
+        return f"event: card\ndata: {json.dumps(card.to_dict())}\n\n"
+
     async def events():
         last = start
+        last_card = 0
         try:
-            for alert in event_bus.since(start):
+            for alert in event_bus.since(start) if alerts_wanted else []:
                 last = alert.id
                 yield frame(alert)
+            for card in event_bus.live_cards():
+                last_card = card.id
+                yield card_frame(card)
             while not await request.is_disconnected():
                 try:
-                    alert = await asyncio.wait_for(queue.get(), timeout=_SSE_KEEPALIVE_S)
+                    item = await asyncio.wait_for(queue.get(), timeout=_SSE_KEEPALIVE_S)
                 except asyncio.TimeoutError:
                     yield ": keep-alive\n\n"
                     continue
-                if alert.id > last:
-                    last = alert.id
+                if isinstance(item, event_bus.Card):
+                    if item.id > last_card:
+                        last_card = item.id
+                        _pushed(request, "card")
+                        yield card_frame(item)
+                elif item.id > last:
+                    last = item.id
                     _pushed(request, "alert")
-                    yield frame(alert)
+                    yield frame(item)
         finally:
             event_bus.unsubscribe(name)
+            event_bus.unsubscribe_cards(name)
 
     return StreamingResponse(events(), media_type="text/event-stream", headers={
         "Cache-Control": "no-cache", "X-Accel-Buffering": "no", "X-Content-Type-Options": "nosniff",

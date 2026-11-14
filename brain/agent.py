@@ -38,7 +38,7 @@ try:
 except ImportError:  # the agent disables itself in __init__
     anthropic = None  # type: ignore[assignment]
 
-from brain import memory_extractor
+from brain import lessons, memory_extractor, reflector
 from brain import model_select
 from brain.habits import render_habits_block
 from brain.history import append_turn, load_history, load_session_messages, start_new_session
@@ -48,6 +48,7 @@ from brain.memory import render_memory_block
 from brain import standing_orders
 from brain.personality import (
     build_habits_section,
+    build_lessons_section,
     build_systems_health_section,
     build_memory_section,
     build_persona_prompt,
@@ -102,6 +103,7 @@ _TOOL_LABELS = {
     "control_device": "Talking to Home Assistant",
     "home_status": "Checking the house",
     "get_weather": "Checking the weather",
+    "show_screen": "Putting it on screen",
     "todays_agenda": "Checking your calendar",
     "arr_stack_status": "Checking the NAS",
 }
@@ -354,6 +356,8 @@ class JarvisAgent:
         self._recent_tool_context: dict[str, str] = {}
         # Tools executed during the most recent turn, for background learning.
         self._last_turn_tools: list[tuple[str, dict[str, Any]]] = []
+        # The same turn's (tool, result text) pairs, for the reflector.
+        self._last_turn_results: list[tuple[str, str]] = []
 
     # --- Public ----------------------------------------------------------
 
@@ -522,6 +526,7 @@ class JarvisAgent:
         nudged = False
         tool_context: list[dict[str, Any]] = []
         self._last_turn_tools = []
+        self._last_turn_results = []
 
         for round_no in range(1, _MAX_TOOL_TURNS + 1):
             started = time.monotonic()
@@ -606,6 +611,7 @@ class JarvisAgent:
         text_parts: list[str] = []
         tool_context: list[dict[str, Any]] = []
         self._last_turn_tools = []
+        self._last_turn_results = []
 
         for round_no in range(1, _MAX_TOOL_TURNS + 1):
             at_round_start = True
@@ -740,6 +746,7 @@ class JarvisAgent:
         """Memory recalled for this message, habits, tool health, recent tool results."""
         dynamic = build_memory_section(render_memory_block(latest_user_text))
         dynamic += build_habits_section(render_habits_block())
+        dynamic += build_lessons_section(lessons.render_block(latest_user_text))
         dynamic += build_systems_health_section(tool_health.render_block())
         context = self._recent_tool_context.get(self._session_id)
         if context:
@@ -792,6 +799,7 @@ class JarvisAgent:
 
     def _save_tool_context(self, entries: list[dict[str, Any]]) -> None:
         self._last_turn_tools = [(str(e["tool"]), dict(e["input"])) for e in entries]
+        self._last_turn_results = [(str(e["tool"]), str(e.get("result") or "")[:600]) for e in entries]
         if entries:
             self._recent_tool_context[self._session_id] = json.dumps(entries, ensure_ascii=False)[:6000]
 
@@ -805,10 +813,17 @@ class JarvisAgent:
         from brain import voice_trust
         if not voice_trust.trusted():  # a guest's words never become facts about Nick or JARVIS
             self._last_turn_tools = []
+            self._last_turn_results = []
             return
         try:
             memory_extractor.observe_turn(self._client, user_input, reply, self._last_turn_tools)
         except Exception:  # noqa: BLE001
             log.exception("Could not queue turn for background learning")
+        try:
+            reflector.observe_turn(self._client, self._session_id, user_input, reply,
+                                   getattr(self, "_last_turn_results", []))
+        except Exception:  # noqa: BLE001
+            log.exception("Could not hand turn to the reflector")
         finally:
             self._last_turn_tools = []
+            self._last_turn_results = []

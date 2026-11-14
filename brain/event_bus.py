@@ -10,6 +10,13 @@ decide delivery:
   the TV and future clients), which replay recent alerts on reconnect via
   ``since(last_id)``.
 
+Answer cards (``publish_card``) are the bus's second event kind: a typed
+readout JARVIS puts up on every screen (iPad Room, phone, TV) when Nick asks
+for something with a visual shape ("what's the weather?"). They have their
+own ids, history and subscribers, never push to the phone, never reach the
+Needs attention list, and expire after ``ttl_s`` (live clients replay only
+unexpired ones on reconnect). ``brain/answer_cards.py`` builds them.
+
 Alerts are deduplicated by ``dedupe_key`` within ``cooldown_s`` so a monitor
 that re-detects the same condition every poll doesn't spam every channel.
 Fast subscribers run synchronously. Network subscribers use a bounded FIFO
@@ -248,9 +255,76 @@ def is_cleared(alert: Alert) -> bool:
     return alert.id <= _cleared_through or alert.id in _resolved
 
 
-def reset_for_tests() -> None:
-    global _next_id, _cleared_through, _repeats
+# --- Answer cards -------------------------------------------------------------
+
+CARD_TTL_S = 60.0
+
+
+@dataclass(frozen=True)
+class Card:
+    id: int
+    card: str  # e.g. weather_today, calendar_day, timers
+    title: str
+    data: dict[str, Any]
+    source: str
+    created_at: float
+    ttl_s: float = CARD_TTL_S
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+    def live(self, now: float | None = None) -> bool:
+        return (time.time() if now is None else now) - self.created_at < self.ttl_s
+
+
+CardSubscriber = Callable[[Card], Any]
+_next_card_id = 1
+_cards: deque[Card] = deque(maxlen=20)
+_card_subscribers: dict[str, CardSubscriber] = {}
+
+
+def publish_card(card: str, title: str, data: dict[str, Any], *, source: str,
+                 ttl_s: float = CARD_TTL_S) -> Card:
+    """Put an answer card on every live screen. Delivered synchronously to
+    card subscribers (the SSE streams just queue it)."""
+    global _next_card_id
     with _lock:
+        shown = Card(_next_card_id, card, title, dict(data), source, time.time(), float(ttl_s))
+        _next_card_id += 1
+        _cards.append(shown)
+        subscribers = list(_card_subscribers.items())
+    log.info("Card %s [%s] %s", shown.id, card, title)
+    for name, callback in subscribers:
+        try:
+            callback(shown)
+        except Exception:  # noqa: BLE001 - one broken screen must not block the others
+            log.exception("Card subscriber %s failed", name)
+    return shown
+
+
+def live_cards() -> list[Card]:
+    """Cards still on screen (oldest first), for a client that just connected."""
+    now = time.time()
+    with _lock:
+        return [c for c in _cards if c.live(now)]
+
+
+def subscribe_cards(name: str, callback: CardSubscriber) -> None:
+    with _lock:
+        _card_subscribers[name] = callback
+
+
+def unsubscribe_cards(name: str) -> None:
+    with _lock:
+        _card_subscribers.pop(name, None)
+
+
+def reset_for_tests() -> None:
+    global _next_id, _cleared_through, _repeats, _next_card_id
+    with _lock:
+        _next_card_id = 1
+        _cards.clear()
+        _card_subscribers.clear()
         _next_id = 1
         _cleared_through = 0
         _repeats = {}

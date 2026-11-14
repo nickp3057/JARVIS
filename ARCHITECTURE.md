@@ -32,8 +32,8 @@ Current responsibilities:
 - Keep the request prefix cacheable end to end. Tool schemas and the persona
   carry 1-hour `cache_control` breakpoints; the system prompt is only the
   persona plus standing orders (both change only when Nick changes them).
-  Everything that varies per turn (recalled memory facts, habits, degraded-tool
-  health, recent tool results) is appended as a `<turn_context>` block to the
+  Everything that varies per turn (recalled memory facts, habits, lessons,
+  degraded-tool health, recent tool results) is appended as a `<turn_context>` block to the
   newest user message of the request only, never stored in history. Two
   5-minute breakpoints sit on the newest block and on the reply before this
   turn's message, so later tool rounds and the next turn read the whole
@@ -396,7 +396,7 @@ or, for grouped arr incidents, `runtime.push_to_phone`). Publishers never pick a
 channel. Subscribers: the phone (`runtime._deliver_alert_to_phone` →
 `brain/notifications.py`: APNs companion push, HA notify only as fallback;
 `push=False` alerts skip it) and each open `GET /api/clients/events` SSE
-stream (replay via `Last-Event-ID`, 15 s keep-alives). `GET /api/alerts/recent` (status:read) returns the same in-memory history newest first for polling clients; the Hub's Needs attention card uses it; `POST /api/alerts/refresh` (the card's Refresh button, `refresh_alerts`) re-checks each alert live via `brain/alert_checks.py` and hides the fixed ones; `POST /api/alerts/clear` (`clear_alerts`, voice) hides everything raised so far. Repeats of one problem (`event_bus.condense_key`) are one row with a `repeats` count, share a push `collapse_id`, and suppress duplicate phone pushes within `ALERT_REPEAT_WINDOW_S` while retaining each occurrence in history for polling and replay. Already-live subscribers are not re-notified of the same active condition; its first observation after restart is delivered quietly to rebuild client state. A resolved problem recurring, or a severity escalation, can push immediately. Refresh never infers recovery from an informational message sharing a source: arr alerts require a healthy live stack; NAS alerts carry condition keys checked against fresh host telemetry. Legacy NAS alerts without keys remain until explicitly cleared or aged out. History is in memory only and resets when jarvis-api restarts. New monitors should
+stream (replay via `Last-Event-ID`, 15 s keep-alives). The same stream carries answer cards (`event: card`, `event_bus.publish_card` from `brain/answer_cards.py`): a typed readout for every screen, with its own ids, a 60 s life and no phone push or Needs attention row; `?only=cards` filters to them. `GET /api/alerts/recent` (status:read) returns the same in-memory history newest first for polling clients; the Hub's Needs attention card uses it; `POST /api/alerts/refresh` (the card's Refresh button, `refresh_alerts`) re-checks each alert live via `brain/alert_checks.py` and hides the fixed ones; `POST /api/alerts/clear` (`clear_alerts`, voice) hides everything raised so far. Repeats of one problem (`event_bus.condense_key`) are one row with a `repeats` count, share a push `collapse_id`, and suppress duplicate phone pushes within `ALERT_REPEAT_WINDOW_S` while retaining each occurrence in history for polling and replay. Already-live subscribers are not re-notified of the same active condition; its first observation after restart is delivered quietly to rebuild client state. A resolved problem recurring, or a severity escalation, can push immediately. Refresh never infers recovery from an informational message sharing a source: arr alerts require a healthy live stack; NAS alerts carry condition keys checked against fresh host telemetry. Legacy NAS alerts without keys remain until explicitly cleared or aged out. History is in memory only and resets when jarvis-api restarts. New monitors should
 call `raise_alert`, not `notifications.send`.
 
 Clients other than the iOS companion use their own scoped tokens
@@ -459,6 +459,23 @@ behave ("stop saying certainly"). The model writes them through
 renders them into a system block after the persona each turn (never into
 the persona text itself). The persona's hard rules require a behavioural correction to be
 persisted this way, or as a setting, rather than obeyed once.
+
+## Lessons (reflection after failed turns)
+
+`brain/lessons.py` is a fifth store, and the only one about JARVIS himself:
+one-line lessons from turns that went badly (`memory/lessons.json`).
+`brain/reflector.py` sees every trusted turn with its tool results and, only
+when cheap heuristics flag a correction, a repeat within two turns, or a tool
+error the reply glossed over, spends one extraction-model call on a daemon
+thread to write a lesson. It is a sanctioned out-of-turn model caller
+(usage name `lessons`, "Reflector" on the Agents map). Repeating a lesson
+reinforces it; unreinforced lessons decay by half-life and are pruned; the
+store is capped. The top few relevant ones ride in `<turn_context>`, never the
+system prompt. Explicit "from now on" rules stay standing orders.
+
+- `LESSONS_ENABLED` (true), `LESSONS_MODEL` (falls back to
+  `MEMORY_EXTRACT_MODEL`), `LESSONS_MAX` (40), `LESSONS_IN_CONTEXT` (4),
+  `LESSONS_HALF_LIFE_DAYS` (14).
 
 ## Study Brief Settings
 

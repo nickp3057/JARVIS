@@ -47,13 +47,16 @@ class TurnCachingTests(unittest.TestCase):
         agent._recent_tool_context = {"s": '[{"tool": "x"}]'}
         agent._session_id = "s"
         with patch.object(agent_mod.standing_orders, "render_block", return_value=""), \
-             patch("brain.agent.render_memory_block", return_value="- remembers tea"):
+             patch("brain.agent.render_memory_block", return_value="- remembers tea"), \
+             patch.object(agent_mod.lessons, "render_block", return_value="- check the kettle first"):
             blocks = agent._system_blocks()
             context = agent._turn_context("tea?")
         self.assertEqual(len(blocks), 1)
         self.assertEqual(blocks[0]["cache_control"], {"type": "ephemeral", "ttl": "1h"})
         self.assertIn("remembers tea", context)
         self.assertIn("Recent trusted tool results", context)
+        self.assertIn("check the kettle first", context)  # lessons ride per turn, not in the system prompt
+        self.assertNotIn("kettle", str(blocks))
 
 
 class ParallelToolTests(unittest.TestCase):

@@ -147,6 +147,16 @@ struct RootView: View {
             }
         }
         .overlay {
+            // Answer screens ("what's the weather?") over whatever tab is up;
+            // under Donna, who covers everything.
+            AnswerCardOverlay()
+        }
+        .task(id: "\(scenePhase)-\(settings.connectionIdentity)") {
+            // Follow JARVIS's answer cards while the app is open.
+            guard scenePhase == .active, settings.isConfigured else { return }
+            await AnswerCardPresenter.shared.follow(settings)
+        }
+        .overlay {
             if donna.showing {
                 DonnaView(settings: settings)
                     .environmentObject(settings)

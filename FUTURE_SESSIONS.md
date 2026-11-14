@@ -761,16 +761,15 @@ Little things mentioned along the way, roughly smallest first:
 - [x] iPad Room tab: weather beside the date (icon + temperature from
   `/api/glance`, refreshed every 10 min; iOS 5.67, 2026-11-02). Check it
   shows and fits on one line at home.
-- [ ] **Rich answer screens ("interactive returns", asked 2026-11-02, on
-  hold).** When Nick asks JARVIS something with a visual shape, the iPad
-  (and phone) pulls up a screen for it instead of only speaking: first one
-  is "what's the weather?" → a today screen (now, hourly temps and rain
-  chance, high/low, sunrise/sunset, wind). Sketch: the tool result carries a
-  typed card (`{"card": "weather_today", ...}`) that Core publishes on the
-  event bus; the Room tab's dialogue / a sheet renders it and it dismisses
-  itself after a minute or on tap. Needs an hourly forecast from the weather
-  integration (open-meteo already has it). Later cards: calendar day, timers,
-  a movie's details, the TV remote.
+- [x] **Rich answer screens ("interactive returns", asked 2026-11-02;
+  shipped 2026-11-13, see JARVIS.md "Answer screens").** `show_screen`
+  puts weather_today, calendar_day or timers cards on the iPad Room tab,
+  phone and TV. Check at home: the model picks `show_screen` for "what's
+  the weather?" but not for incidental checks; the card reads well on the
+  iPad, phone and TV in a couple of themes (Barn Door included); the TV card
+  doesn't get in the way over Plex. Later cards: a movie's details, the TV
+  remote, sending a card only to the screen nearest the voice that asked
+  (today every screen shows it).
 
 ### Is the Optiplex enough? (checked 2026-10-28)
 
@@ -1063,8 +1062,14 @@ shipped. Design:
 - Start with the smallest useful case: letting JARVIS add a *new tool* that
   wraps an existing integration, because it cannot break existing behaviour.
 
-### 2. Reflection after failed turns
-JARVIS should learn from turns that went badly, not only from explicit
+### 2. Reflection after failed turns *(shipped 2026-11-13)*
+**Shipped** as `brain/reflector.py` + `brain/lessons.py` (see JARVIS.md
+"Lessons from failed turns"). Follow-ups: watch jarvis.log for
+`Reflector flagged` false alarms and tune the heuristics; a companion view of
+lessons if Nick wants one (today: `list_lessons` / `forget_lesson` by voice);
+let lessons feed Tier 2 #5 self-tuning when one names a setting.
+
+Original spec: JARVIS should learn from turns that went badly, not only from explicit
 corrections.
 - Signals: Nick repeats himself within two turns, says "no", "that's wrong",
   "not that", or a tool errored and the reply pretended it worked.

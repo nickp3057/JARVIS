@@ -46,7 +46,7 @@ LOCKED_TOOLS = frozenset({
     "adjust_fact_confidence", "propose_memory_fact", "apply_memory_proposal",
     "reject_memory_proposal", "clear_conversation",
     # behaviour and settings
-    "add_standing_order", "remove_standing_order", "update_setting", "voice_shortcuts",
+    "add_standing_order", "remove_standing_order", "forget_lesson", "update_setting", "voice_shortcuts",
     # protocols
     "barn_door_protocol",
     # changes to the system itself

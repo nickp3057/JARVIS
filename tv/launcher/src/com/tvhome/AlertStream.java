@@ -15,6 +15,7 @@ import java.nio.charset.StandardCharsets;
  * Follows Core's live alert stream (GET /api/clients/events, server-sent
  * events): every alert refreshes the home screen, and fresh warnings and
  * criticals show as a banner over whatever is on screen, Plex included.
+ * {@code event: card} frames are answer screens ({@link AnswerCard}).
  * Each connection replays Core's recent history (ids restart at 1 whenever
  * Core restarts, so a remembered id can't be trusted); only alerts under two
  * minutes old count, and each one only once.
@@ -70,18 +71,45 @@ final class AlertStream {
             BufferedReader in = new BufferedReader(
                     new InputStreamReader(conn.getInputStream(), StandardCharsets.UTF_8));
             StringBuilder data = new StringBuilder();
+            String event = "";
             String line;
             while ((line = in.readLine()) != null) {
                 if (line.startsWith("data:")) {
                     data.append(line.substring(5).trim());
-                } else if (line.isEmpty() && data.length() > 0) {
-                    handle(c, new JSONObject(data.toString()));
-                    data.setLength(0);
+                } else if (line.startsWith("event:")) {
+                    event = line.substring(6).trim();
+                } else if (line.isEmpty()) {
+                    if (data.length() > 0) {
+                        JSONObject body = new JSONObject(data.toString());
+                        if ("card".equals(event)) card(c, body);
+                        else handle(c, body);
+                        data.setLength(0);
+                    }
+                    event = "";
                 }
             }
         } finally {
             conn.disconnect();
         }
+    }
+
+    /**
+     * An answer screen (Core's brain/answer_cards.py): shown on the right
+     * for what's left of its time, once, and only with the screen on. Card
+     * ids are their own series, so they're remembered apart from alerts.
+     */
+    private static void card(Context c, JSONObject card) {
+        if (!AnswerCard.known(card.optString("card"))) return;
+        long ttl = (long) (card.optDouble("ttl_s", 60) * 1000);
+        long age = System.currentTimeMillis() - (long) (card.optDouble("created_at") * 1000);
+        if (age >= ttl) return;
+        synchronized (SEEN) {
+            if (!SEEN.add("card" + card.optLong("id") + "@" + card.optDouble("created_at"))) return;
+        }
+        if (!c.getSystemService(PowerManager.class).isInteractive()) return;
+        Log.i(TAG, "card " + card.optLong("id") + " [" + card.optString("card") + "] age=" + age / 1000 + "s");
+        // A skewed clock still gets a few seconds on screen.
+        AnswerCard.show(c, Jarvis.theme(c), card, Math.max(8_000, ttl - Math.max(0, age)));
     }
 
     private static void handle(Context c, JSONObject alert) {

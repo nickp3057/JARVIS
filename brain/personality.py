@@ -343,6 +343,22 @@ def build_habits_section(habits_block: str = "") -> str:
     )
 
 
+def build_lessons_section(lessons_block: str = "") -> str:
+    """Render lessons JARVIS drew from his own past mistakes, or "" when none apply.
+
+    Fed by brain/lessons.py (written by the reflector, brain/reflector.py).
+    Per-turn, so it rides in <turn_context>, never the cached persona."""
+    lessons_block = (lessons_block or "").strip()
+    if not lessons_block:
+        return ""
+    return (
+        "\n\n# Lessons from your own past mistakes\n"
+        "Learned when a turn went badly (Nick had to correct or repeat himself, or a tool "
+        "failed unnoticed). Apply them when relevant; don't mention them.\n\n"
+        f"{lessons_block}\n"
+    )
+
+
 def build_system_prompt(memory_block: str = "") -> str:
     """Assemble the full system prompt: persona + long-term memory.
 

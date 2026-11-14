@@ -203,7 +203,10 @@ def _geocode_uncached(location: str) -> tuple[float, float, str] | None:
 
 # --- Forecast --------------------------------------------------------------
 
-def _fetch_forecast(lat: float, lon: float) -> dict[str, Any] | None:
+def _fetch_forecast(lat: float, lon: float, *, hourly: bool = False) -> dict[str, Any] | None:
+    """Current conditions and today's high/low; ``hourly`` adds the hour-by-hour
+    temperature and rain chance (two days, so late evening still has hours
+    ahead), sunrise/sunset and whether it's daytime, for the answer screen."""
     params = {
         "latitude": lat,
         "longitude": lon,
@@ -214,6 +217,13 @@ def _fetch_forecast(lat: float, lon: float) -> dict[str, Any] | None:
         "timezone": "auto",
         "forecast_days": 1,
     }
+    if hourly:
+        params.update({
+            "current": params["current"] + ",is_day,wind_gusts_10m",
+            "daily": params["daily"] + ",sunrise,sunset,precipitation_probability_max",
+            "hourly": "temperature_2m,precipitation_probability,weather_code,is_day",
+            "forecast_days": 2,
+        })
     return _get_json(_FORECAST_URL, params, "Forecast")
 
 
@@ -293,3 +303,124 @@ def get_weather_snapshot(location: str | None = None) -> WeatherSnapshot:
         humidity_percent=round(float(humidity)) if humidity is not None else None,
         wind_mph=round(float(wind)) if wind is not None else None,
     )
+
+
+# --- Answer screen ------------------------------------------------------------
+
+def condition(code: int) -> str:
+    """One word a screen can draw an icon from: clear, partly, cloudy, fog,
+    drizzle, rain, snow or storm."""
+    if code in (0, 1):
+        return "clear"
+    if code == 2:
+        return "partly"
+    if code == 3:
+        return "cloudy"
+    if code in (45, 48):
+        return "fog"
+    if code in (51, 53, 55, 56, 57):
+        return "drizzle"
+    if code in (71, 73, 75, 77, 85, 86):
+        return "snow"
+    if code in (95, 96, 99):
+        return "storm"
+    if code in (61, 63, 65, 66, 67, 80, 81, 82):
+        return "rain"
+    return "cloudy"
+
+
+def _local_epoch(text: Any, offset_s: float) -> float | None:
+    """Open-Meteo's local ISO time (``timezone=auto``, no offset) as Unix time."""
+    from datetime import datetime, timezone
+    try:
+        naive = datetime.fromisoformat(str(text))
+    except ValueError:
+        return None
+    return naive.replace(tzinfo=timezone.utc).timestamp() - offset_s
+
+
+def _num(value: Any) -> int | None:
+    try:
+        return round(float(value)) if value is not None else None
+    except (TypeError, ValueError):
+        return None
+
+
+# The screen shows the rest of today hour by hour; late in the evening it
+# runs on into the night so there is always something to read.
+_MIN_HOURS, _MAX_HOURS = 8, 18
+
+
+def get_weather_today(location: str | None = None, *, now: float | None = None) -> dict[str, Any]:
+    """Structured "today" weather for the answer screen (``weather_today``).
+
+    Keys: online, location, temp_f, description, condition, is_day, high_f,
+    low_f, humidity_percent, wind_mph, gust_mph, rain_chance (today's max),
+    sunrise / sunset (Unix time), hours: [{at, temp_f, rain_chance,
+    condition, is_day}] from this hour to midnight (8 to 18 entries); or
+    online False with an error."""
+    import time as _time
+    target = (location or "").strip() or os.getenv("DEFAULT_LOCATION", "").strip()
+    if not target:
+        return {"online": False, "error": "DEFAULT_LOCATION is not set."}
+    geocoded = _geocode(target)
+    if geocoded is None:
+        return {"online": False, "location": target, "error": f"I couldn't find a place called {target}."}
+    lat, lon, display_name = geocoded
+    forecast = _fetch_forecast(lat, lon, hourly=True)
+    current = (forecast or {}).get("current") or {}
+    if forecast is None or current.get("temperature_2m") is None or current.get("weather_code") is None:
+        return {"online": False, "location": display_name,
+                "error": f"I couldn't reach the weather service for {display_name}."}
+    daily = forecast.get("daily") or {}
+    offset = float(forecast.get("utc_offset_seconds") or 0)
+    now = _time.time() if now is None else now
+
+    def first(key: str) -> Any:
+        values = daily.get(key) or [None]
+        return values[0]
+
+    hourly = forecast.get("hourly") or {}
+    times = hourly.get("time") or []
+    temps = hourly.get("temperature_2m") or []
+    rain = hourly.get("precipitation_probability") or []
+    codes = hourly.get("weather_code") or []
+    day_flags = hourly.get("is_day") or []
+    midnight = None
+    if daily.get("time"):
+        midnight = _local_epoch(f"{daily['time'][0]}T00:00", offset)
+    hours: list[dict[str, Any]] = []
+    for index, stamp in enumerate(times):
+        at = _local_epoch(stamp, offset)
+        if at is None or at + 3600 <= now:  # this hour still counts until it ends
+            continue
+        if len(hours) >= _MAX_HOURS:
+            break
+        if len(hours) >= _MIN_HOURS and midnight is not None and at >= midnight + 86400:
+            break
+        code = codes[index] if index < len(codes) and codes[index] is not None else 0
+        hours.append({
+            "at": at,
+            "temp_f": _num(temps[index] if index < len(temps) else None),
+            "rain_chance": _num(rain[index] if index < len(rain) else None),
+            "condition": condition(int(code)),
+            "is_day": bool(day_flags[index]) if index < len(day_flags) else True,
+        })
+    code = int(current["weather_code"])
+    return {
+        "online": True,
+        "location": display_name,
+        "temp_f": _num(current.get("temperature_2m")),
+        "description": _describe_code(code),
+        "condition": condition(code),
+        "is_day": bool(current.get("is_day", 1)),
+        "high_f": _num(first("temperature_2m_max")),
+        "low_f": _num(first("temperature_2m_min")),
+        "humidity_percent": _num(current.get("relative_humidity_2m")),
+        "wind_mph": _num(current.get("wind_speed_10m")),
+        "gust_mph": _num(current.get("wind_gusts_10m")),
+        "rain_chance": _num(first("precipitation_probability_max")),
+        "sunrise": _local_epoch(first("sunrise"), offset) if first("sunrise") else None,
+        "sunset": _local_epoch(first("sunset"), offset) if first("sunset") else None,
+        "hours": hours,
+    }

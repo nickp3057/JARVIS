@@ -332,6 +332,11 @@ def _tool_get_weather(args: dict[str, Any]) -> str:
     return get_weather(args.get("location"))
 
 
+def _tool_show_screen(args: dict[str, Any]) -> str:
+    from brain import answer_cards
+    return answer_cards.show(str(args.get("card") or ""), {"location": args.get("location")})
+
+
 def _tool_set_timer(args: dict[str, Any]) -> str:
     duration_seconds = float(args.get("duration_seconds", 0) or 0)
     duration_minutes = float(args.get("duration_minutes", 0) or 0)
@@ -515,6 +520,16 @@ def _tool_list_standing_orders(_: dict[str, Any]) -> str:
 
 def _tool_remove_standing_order(args: dict[str, Any]) -> str:
     return remove_order(args.get("identifier", ""))
+
+
+def _tool_list_lessons(_: dict[str, Any]) -> str:
+    from brain import lessons
+    return lessons.list_lessons()
+
+
+def _tool_forget_lesson(args: dict[str, Any]) -> str:
+    from brain import lessons
+    return lessons.forget_lesson(args.get("identifier", ""))
 
 
 def _tool_study_brief_preview(_: dict[str, Any]) -> str:
@@ -1589,6 +1604,31 @@ _CUSTOM_TOOLS: list[dict[str, Any]] = [
         },
     },
     {
+        "name": "show_screen",
+        "description": (
+            "Put an answer screen up on Nick's displays (the iPad's Room tab, the phone app and "
+            "the room TV) and get the same facts back to speak. Use it INSTEAD of get_weather, "
+            "todays_agenda or list_timers when Nick directly asks for something with a visual "
+            "shape: the weather or forecast ('what's the weather', 'will it rain today') -> "
+            "weather_today; his day ('what's my day look like', 'what's on today') -> "
+            "calendar_day; his running timers ('what timers have I got') -> timers. Not for "
+            "incidental lookups inside another task (a jacket suggestion, after setting a "
+            "timer, the briefing). Keep the spoken reply to a sentence or two: the screen "
+            "carries the detail and clears itself after a minute."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "card": {"type": "string", "enum": ["weather_today", "calendar_day", "timers"]},
+                "location": {
+                    "type": "string",
+                    "description": "weather_today only: a place other than home (e.g. 'Tokyo, Japan').",
+                },
+            },
+            "required": ["card"],
+        },
+    },
+    {
         "name": "set_timer",
         "description": "Set a timer or reminder. JARVIS speaks the message when it expires.",
         "input_schema": {
@@ -1955,6 +1995,28 @@ _CUSTOM_TOOLS: list[dict[str, Any]] = [
     {
         "name": "remove_standing_order",
         "description": "Drop a standing order by id or by a unique fragment of its wording.",
+        "input_schema": {
+            "type": "object",
+            "properties": {"identifier": {"type": "string"}},
+            "required": ["identifier"],
+        },
+    },
+    {
+        "name": "list_lessons",
+        "description": (
+            "List the lessons you have drawn from your own past mistakes (turns where Nick "
+            "had to correct or repeat himself, or a tool failed unnoticed), with ids and how "
+            "often each was reinforced. Use when Nick asks what you've learned or why you "
+            "now do something differently."
+        ),
+        "input_schema": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "forget_lesson",
+        "description": (
+            "Drop a lesson by id, a unique fragment of its wording, or 'all' when Nick says "
+            "a lesson is wrong. Not for standing orders (remove_standing_order) or facts (forget_fact)."
+        ),
         "input_schema": {
             "type": "object",
             "properties": {"identifier": {"type": "string"}},
@@ -2829,6 +2891,7 @@ _DISPATCH: dict[str, Callable[[dict[str, Any]], str]] = {
     "clear_conversation": _tool_clear_conversation,
     "conversation_history_stats": _tool_conversation_stats,
     "get_weather": _tool_get_weather,
+    "show_screen": _tool_show_screen,
     "set_timer": _tool_set_timer,
     "cancel_timer": _tool_cancel_timer,
     "pause_timer": _tool_pause_timer,
@@ -2867,6 +2930,8 @@ _DISPATCH: dict[str, Callable[[dict[str, Any]], str]] = {
     "reject_repair": _tool_reject_repair,
     "list_standing_orders": _tool_list_standing_orders,
     "remove_standing_order": _tool_remove_standing_order,
+    "list_lessons": _tool_list_lessons,
+    "forget_lesson": _tool_forget_lesson,
     "study_brief_preview": _tool_study_brief_preview,
     "morning_briefing": _tool_morning_briefing,
     "add_reminder": _tool_add_reminder,

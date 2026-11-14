@@ -25,8 +25,13 @@ log = get_logger(__name__)
 _ENV_PATH = Path(__file__).resolve().parent.parent / ".env"
 load_dotenv(dotenv_path=_ENV_PATH)
 
-# Vision model is configurable; default to a current vision-capable model.
-_VISION_MODEL = os.getenv("VISION_MODEL", "claude-sonnet-4-6")
+
+def _vision_model() -> str:
+    """VISION_MODEL, read live; empty or ``auto`` follows the newest Sonnet."""
+    from brain import model_select
+    return model_select.resolve(os.getenv("VISION_MODEL", "").strip() or "auto:sonnet", "claude-sonnet-5-5")
+
+
 _SCREEN_PNG = Path(__file__).resolve().parent.parent / "memory" / "_screen_cap.png"
 
 
@@ -113,7 +118,7 @@ def describe_screen(question: str = "What's on the screen right now?") -> str:
         from anthropic import Anthropic  # type: ignore
         client = Anthropic(api_key=api_key)
         response = client.messages.create(
-            model=_VISION_MODEL,
+            model=_vision_model(),
             max_tokens=512,
             messages=[
                 {

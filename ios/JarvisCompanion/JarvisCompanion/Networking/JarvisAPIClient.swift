@@ -483,6 +483,32 @@ struct JarvisAPIClient {
         }
     }
 
+    /// Answer screens (`GET /api/clients/events?only=cards`, server-sent
+    /// events): calls `onCard` for each card JARVIS puts up, including any
+    /// still on screen when the stream connects. Runs until cancelled or dropped.
+    func streamCards(onCard: @escaping @MainActor (AnswerCard) -> Void) async throws {
+        var request = request(path: "api/clients/events")
+        if let url = request.url, var components = URLComponents(url: url, resolvingAgainstBaseURL: false) {
+            components.queryItems = [URLQueryItem(name: "only", value: "cards")]
+            request.url = components.url
+        }
+        request.timeoutInterval = 60  // Core sends a keep-alive every 15 s
+        request.setValue("text/event-stream", forHTTPHeaderField: "Accept")
+        do {
+            let (bytes, response) = try await session.bytes(for: request)
+            _ = try validate(response)
+            for try await line in bytes.lines {
+                try Task.checkCancellation()
+                // With only=cards every data line is a card.
+                guard line.hasPrefix("data: "), let data = line.dropFirst(6).data(using: .utf8),
+                      let card = try? JSONDecoder().decode(AnswerCard.self, from: data) else { continue }
+                await onCard(card)
+            }
+        } catch let error as URLError {
+            throw JarvisAPIError.transport(error)
+        }
+    }
+
     func checkHealth() async throws {
         let request = request(path: "health")
         let (data, response) = try await session.data(for: request)
