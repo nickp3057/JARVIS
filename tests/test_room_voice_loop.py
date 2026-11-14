@@ -163,7 +163,7 @@ class HandleTests(unittest.TestCase):
         runtime.respond.return_value = "Done."
         with patch.object(quick_commands, "run", return_value=None):
             follow_up = make_voice("make it cosy", runtime)._handle(self.audio)
-        runtime.respond.assert_called_once_with("make it cosy", spoken=True)
+        runtime.respond.assert_called_once_with("make it cosy", spoken=True, room=True)
         self.sounds.assert_called_once_with("done", wait=True)
         self.speak.assert_not_called()
         self.assertFalse(follow_up)
@@ -216,13 +216,13 @@ class StreamedReplyTests(unittest.TestCase):
 
     def runtime(self, fragments, tools=False):  # noqa: ANN001
         runtime = Mock(last_used_tools=tools, brain_online=True)
-        runtime.respond_streaming.side_effect = lambda text, spoken: iter(fragments)
+        runtime.respond_streaming.side_effect = lambda text, spoken, room: iter(fragments)
         return runtime
 
     def test_sentences_are_spoken_as_they_arrive(self) -> None:
         runtime = self.runtime(["Fifty-four and ", "sunny, sir. Rain ", "by six. Want an umbrella reminder?"])
         follow_up = make_voice("weather tomorrow", runtime)._handle(self.audio)
-        runtime.respond_streaming.assert_called_once_with("weather tomorrow", spoken=True)
+        runtime.respond_streaming.assert_called_once_with("weather tomorrow", spoken=True, room=True)
         said = [c.args[0] for c in self.speak.call_args_list]
         self.assertEqual(said, ["Fifty-four and sunny, sir.", "Rain by six.", "Want an umbrella reminder?"])
         self.assertTrue(follow_up)
@@ -277,7 +277,7 @@ class HushTests(unittest.TestCase):
         runtime = Mock(last_used_tools=False)
         voice = make_voice("what do you think about that", runtime)
 
-        def respond(text, spoken):  # noqa: ANN001
+        def respond(text, spoken, room):  # noqa: ANN001
             self.assertTrue(voice.hush())  # tapped while he was thinking
             return "Quite something, sir. Shall I go on?"
 

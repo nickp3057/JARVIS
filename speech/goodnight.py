@@ -12,6 +12,9 @@ Answers it understands: yes (and silence: he's going to sleep), a new time
 or a bare "no", which asks "What time, sir?" once. A changed time or a
 skipped morning is a one-day change; the weekly schedule stays as it was.
 
+A guest's voice (voice ID on, not matched as Nick) gets the scene and a
+plain goodnight, never the alarm question (``ask_alarm=False``).
+
 The voice front end passes ``say`` / ``listen`` (``speech/room_voice.py``);
 lines are fixed templates, so their audio caches after the first night.
 """
@@ -135,10 +138,16 @@ def _morning(now: datetime) -> tuple[str, datetime | None]:
 
 
 def run(say: Callable[[str], None], listen: Callable[[], str | None],
-        lights_out: Callable[[], None], now: datetime | None = None) -> str:
-    """The whole routine; returns what happened to the alarm, for the log."""
+        lights_out: Callable[[], None], now: datetime | None = None, *, ask_alarm: bool = True) -> str:
+    """The whole routine; returns what happened to the alarm, for the log.
+    ``ask_alarm=False`` (a guest's voice): the scene and a goodnight only;
+    Nick's alarm is neither read out nor changeable."""
     now = now or datetime.now()
     sir = _address()
+    if not ask_alarm:
+        lights_out()
+        say("Goodnight. Sleep well.")
+        return "not asked (guest)"
     day, at = _morning(now)
     if at is not None:
         say(f"Goodnight, {sir}. Your alarm's set for {_say_time(at)}. Is that fine?")

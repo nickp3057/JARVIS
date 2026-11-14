@@ -231,11 +231,16 @@ approval, give me an approve or deny button". JARVIS.md "Trading" and
   quantity is unconfirmed; if it refuses, the reply quotes Schwab. Options
   then: ask traderapi@schwab.com, or whole shares only (most of Nick's
   ~$250 account can't be traded that way).
-- [ ] P4 needs P3's sale money: the buy counts open Schwab sell orders as
-  cash. If P3 fills before P4 is approved, check `cashAvailableForTrading`
-  includes the unsettled proceeds (cash account) so P4 isn't refused.
+- [ ] P4 needs P3's sale money: since 2026-11-14 a buy counts only the
+  filled part of this account's open sells (and subtracts open buys). Once P3
+  fills, check `cashAvailableForTrading` includes the unsettled proceeds (cash
+  account) so P4 isn't refused, and that a partly filled open sell isn't
+  counted twice (once in that figure, once by `_in_flight_cash`).
 - [ ] `account_hash` (`/trader/v1/accounts/accountNumbers`) and the order's
-  `Location` header id were written from Schwab's docs, untested live.
+  `Location` header id were written from Schwab's docs, untested live. Also
+  untested live (2026-11-14): `accountNumber` on `/trader/v1/orders` entries
+  (the open-order account filter and the lost-answer lookup rely on it) and
+  the "outcome unknown" reply after a Schwab timeout.
 - [ ] Is Nick's account cash or margin? `trade_cash` falls back to
   `cashBalance` when there's no `cashAvailableForTrading`.
 - [ ] Buttons: every confirm-gate proposal (scenes, stack fixes, media
@@ -529,8 +534,10 @@ install on the phone and iPad, then check:
 - [ ] **Voice ID next steps**: the room voice could say "Sorry, only Nick
   can do that" without a model call when a guest's command maps to a locked
   tool; a "who am I talking to?" line in the iPad's voice overlay; maybe
-  per-person profiles (sister, guests) later. Goodnight still lets anyone
-  answer the alarm question; decide if that should be Nick-only.
+  per-person profiles (sister, guests) later. Done 2026-11-14: a guest's
+  goodnight skips the alarm question, a guest can't end the wake-up ring,
+  and money by room voice needs a voiceprint match. The alarm *answer* is
+  still not voice-checked (whoever answers right after Nick's goodnight).
 - [ ] **Leave home → lights out / Peace (backup-to-the-backup)**: when
   Nick leaves the house, turn the room off or run Peace automatically. First
   check whether his iPhone shows up in Home Assistant as a `person.*` or

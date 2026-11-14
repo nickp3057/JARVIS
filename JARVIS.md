@@ -328,6 +328,16 @@ RMS envelope from ElevenLabs audio drives the orb in real time using a monotonic
   `status`, `enroll` (the next `VOICE_ID_SAMPLES` room sentences become
   samples, counted aloud, no wake word between them), `cancel`, `reset`.
   Locked itself, so only Nick (or the phone app) can re-enrol.
+- **Money needs a real match.** `place_trade` / `decide_investment`
+  (`voice_trust.MONEY_TOOLS`) and approving a staged order by room voice need
+  a positive voiceprint match (`voice_trust.may_move_money`); with `VOICE_ID`
+  off or nothing enrolled the room voice is Nick for everything else but is
+  told "I'll need that one from the app, sir". The app and desktop are
+  unaffected.
+- **Nick's wake-up is his.** A guest's "goodnight" runs the Goodnight scene
+  without the alarm question, a guest's "good morning" isn't the routine,
+  and a guest can't end the wake-up ring (kitchen timers still stop for
+  anyone). With voice ID off everyone counts as Nick, as before.
 
 ### Nick's room TV *(new)*
 - `kill_camera()` — lock the room camera (the iPad lens Nick watches from
@@ -507,13 +517,19 @@ guardrails agreed 2026-10-27:
   at $25.77 or more (last $25.90), about $25.90, in account ...1234 for P3".
   Nothing reaches Schwab until Nick taps **Approve** in the companion's chat,
   says "yes" as his next message, or "approve <code>" within 10 minutes.
-  Always `propose`, never `act`.
+  Always `propose`, never `act`. A money proposal by room voice is only
+  approved on a voiceprint match (see Voice ID); otherwise it stays open for
+  the app. While a "yes" is armed in the room, "cancel" / "never mind" /
+  "forget it" cancels it out loud, a yes or code goes to the gate, and any
+  other command (a light, a timer) disarms it so a later "okay" can't fire it.
 - **Caps:** `TRADING_MAX_ORDER_USD` (100) per order, `TRADING_MAX_DAY_USD`
   (250) per ET day, buys and sells together; checked when staged and again
   (with fresh account numbers) the moment Nick approves.
 - **Cash only, stocks/ETFs only.** A buy may spend `trade_cash`
-  (`cashAvailableForTrading`, never margin buying power) plus open Schwab sell
-  orders; a sell never exceeds what Schwab's API shows held (manual holdings
+  (`cashAvailableForTrading`, never margin buying power) plus the filled part
+  of this account's open sells, minus what its open buys could still cost
+  (orders in other accounts on the login don't count; an unfilled DAY limit
+  sell isn't cash); a sell never exceeds what Schwab's API shows held (manual holdings
   don't count). Anything whose quote isn't `EQUITY` is refused.
 - **Order shape:** a dollar amount worth at least one share becomes whole
   shares (rounded down) as a DAY limit 0.5% past the last price; under one
@@ -526,7 +542,12 @@ guardrails agreed 2026-10-27:
   journal, doesn't count toward the day cap, and leaves its proposal open.
   Selling ~everything sells the exact quantity.
 - Placed orders go in `memory/trades.json`; the proposal becomes `ordered`
-  with its `order_id`. `investing_status` shows trading on/off, caps, today's
+  with its `order_id`. Only an HTTP error answer counts as "Schwab refused
+  it". A timeout or dropped connection after sending
+  (`schwab.OrderOutcomeUnknown`) is journaled `status: unknown`, counts toward
+  the day cap, is looked for in Schwab's recent orders, and Nick is told to
+  check the Schwab app before retrying. A placed order whose answer had no
+  Location header gets its id from the same lookup. `investing_status` shows trading on/off, caps, today's
   orders and approved-but-unsent proposals.
 - **Kill switch:** `TRADING_ENABLED=false` (default on). Also stops an order
   already staged if Nick approves after it's switched off.
@@ -1263,6 +1284,7 @@ there, so edit files with a `sudo python3` one-shot or vi.
 
 ## Recently Shipped
 
+- **Money and voice-gate safety fixes (2026-11-14).** From a review of the trading and voice paths: (1) the phone's hold-to-talk is spoken style only and stays in its own session; only `speech/room_voice.py` passes `room=True` to `runtime.respond` / `respond_streaming`, so phone proposals no longer land in the room session. (2) A Schwab timeout or connection reset after sending is never "refused, nothing was bought": `place_order` raises `OrderOutcomeUnknown`, the order is journaled `unknown` and counted toward the day cap, a matching order is looked up (`schwab.recent_orders`) and Nick is told to check before retrying; a missing Location header finds the id the same way instead of journaling "?". (3) While a "yes" is armed in the room, "cancel" / "never mind" / "forget it" / "nothing" reaches the confirm gate instead of the stop quick answer, a yes or code goes to the model turn, and any other utterance disarms it (`confirm_gate.reply_kind`). (4) Money by room voice needs a positive voiceprint match: `voice_trust.may_move_money`, `MONEY_TOOLS` (`place_trade`, `decide_investment`) and money proposals (`propose(..., money=True)`) held for the app when voice ID is off or nothing is enrolled. (5) The cash-only check counts only this account's orders, only the filled part of open sells, and subtracts open buys. (6) A Schwab hub hiccup while logged out keeps `required_since`, so no second "Schwab needs you" alert. (7) `speaker_id` uses an RLock (enrolment with no model deadlocked). (8) A guest's goodnight skips the alarm question, a guest's good morning isn't the routine, and a guest can't end the wake-up ring. (9) `confirm_gate`'s docstring describes `act` vs `propose`. Tests: `tests/test_money_voice_safety.py`, `tests/test_trading.py`. Not tried live: a real Schwab timeout, and voice ID on with a guest in the room.
 - **Local Piper voice behind one setting (2026-11-14).** Core-side wiring for the Bettany voice being trained on Nick's PC: `TTS_PROVIDER=piper` + `PIPER_VOICE_MODEL=<path>.onnx` makes a local Piper voice JARVIS's main voice, on the room speaker and the phone, with ElevenLabs as the fallback; nothing changes while `TTS_PROVIDER` is unset/`elevenlabs`. `speech/piper_voice.py` loads `PiperVoice` once in-process and caches it by path (the old fallback ran `python -m piper` and reloaded the model every line), supports piper-tts 1.2.x (`synthesize_stream_raw`) and 1.3+ (`synthesize` + `SynthesisConfig`), and reads the knobs `PIPER_LENGTH_SCALE`, `PIPER_NOISE_SCALE`, `PIPER_NOISE_W`, `PIPER_SPEAKER_ID` live. Room: `tts._stream_piper` pipes each sentence's PCM into `aplay -t raw` at the model's own rate as soon as it is synthesized (Linux; `TTS_STREAM_PLAYBACK=0` and the GUI orb use a whole-clip WAV instead); barge-in, hush and `stop_playback` stop it like the ElevenLabs stream, `cache=True`/`"auto"` lines get their own cache entries per model and knobs, and audio from the fallback voice is never cached under Piper's key. Phone: `remote_voice.pcm_stream` sends the same voice, resampled to 22.05 kHz if needed. If Piper can't speak a line (piper-tts missing, model or config missing, synthesis error before the first audio) the line goes to ElevenLabs and the reason is logged once (`Piper voice unavailable, using the fallback voice: ...`); a failure mid-sentence is never re-spoken in another voice. Each line logs `4. TTS first audio (Piper stream): N ms` at INFO. Test by ear: `python -m speech.tts --say "Good evening, sir." --provider piper --model voices/en_GB-alan-medium.onnx` (prints ms to first audio; `--wav out.wav` writes a file instead). The ElevenLabs-mode Piper fallback also tries the in-process voice first, then the old CLI. piper-tts is not in `requirements.txt` and not in the Mac venv; install it on the Surface (`.venv/bin/pip install piper-tts`). Not done: the optional light EQ (hook noted in `piper_voice.py`). Tests: `tests/test_piper_voice.py`.
 - **"Let me know when X happens" + reminders on the phone (2026-11-14).** Due reminders now also go through `runtime.raise_alert` (kind `reminder`, info, push), so they buzz the phone and show on the TV; still spoken once in the room and one inbox line (`raise_alert` gained `inbox_kind` / `speakable`; announcements are no longer logged twice). New `watch_for` / `list_watches` / `cancel_watch` tools and `brain/watches.py`: durable web watches (query, done-when condition, cadence, optional not-before, expiry) checked by the new `watcher` subagent (cheap model + web_search) from a runtime monitor; met watches alert with the answer and retire, expired ones leave a quiet note; checks capped per day and per watch. Watcher on the Agents map; settings `WATCH_*`. Tests: `tests/test_watches.py`. Not run against the live API yet.
 - **Answer screens in the reply panel, bigger (companion 6.26 / build 268, TV 9.6, 2026-11-14).** Nick's notes after the first run: on the iPad's Room tab the card now shows inside JARVIS's reply panel under the reply (the panel stays up while the card does) rather than floating over the screen; the phone and other tabs keep the floating panel. Every size is roughly doubled (`AnswerCardContent(k:)`, 1 on iPad, 0.72 on phone; the current temperature is 110 pt), the TV card is 760 dp wide with text 1.45x, and cards clear after 45 s instead of 60.

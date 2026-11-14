@@ -14,7 +14,9 @@ schwab"), with the guardrails agreed on 2026-10-27:
   checked when staged and again the moment Nick approves.
 - **Cash only.** A buy may spend ``trade_cash`` (a cash account's
   cashAvailableForTrading; a margin account's plain cash, never margin) plus
-  sells still in flight at Schwab. No options, no shorting: stocks and ETFs
+  the filled part of this account's open sells, minus what its open buys
+  could still cost (``_in_flight_cash``; other accounts on the login don't
+  count, and an unfilled DAY limit sell may never fill). No options, no shorting: stocks and ETFs
   (Schwab's ``EQUITY``) only, and a sell never exceeds what Schwab says is held.
 - **Kill switch:** ``TRADING_ENABLED=false`` stops new orders being staged
   or placed (default on since Nick asked for it).
@@ -28,7 +30,12 @@ and the refusal is reported as is. Selling (nearly) everything sells the exact
 quantity held.
 
 Journal: ``memory/trades.json`` (every order placed, for the day cap and
-``describe``).
+``describe``). When the order went out but Schwab's answer was lost (a
+timeout or dropped connection after sending), it is journaled with status
+"unknown" and counted toward the day cap, a matching order is looked for in
+Schwab's recent orders, and Nick is told to check before trying again: it is
+never reported as refused. A placed order whose reply had no Location header
+gets its id the same way, so later status checks still work.
 """
 from __future__ import annotations
 
@@ -156,17 +163,31 @@ def size(symbol: str, side: str, dollars: float, price: float, held: float, acco
     return Order(account, symbol, side, quantity, price, limit, proposal)
 
 
-def _in_flight_sells(account: dict[str, Any] | None = None) -> float:
-    """Roughly what open Schwab sell orders will raise (counts toward a buy)."""
+def _in_flight_cash(last4: str) -> float:
+    """What this account's open Schwab orders change about the cash a buy may
+    spend: plus what open sells have already sold (the filled part only; an
+    unfilled DAY limit sell may never fill), minus what open buys still
+    could cost. Orders in other accounts on the login don't count. May be
+    negative; when Schwab can't be asked, open buys can't be ruled out, so
+    nothing is added."""
     from integrations import schwab
     try:
-        sells = [o for o in schwab.open_orders(days=2) if o["side"] == "sell"]
+        orders = [o for o in schwab.open_orders(days=2) if o.get("account") == last4]
     except Exception:  # noqa: BLE001
         return 0.0
-    if not sells:
+    if not orders:
         return 0.0
-    prices = schwab.quotes([o["symbol"] for o in sells])
-    return sum(float(o.get("quantity") or 0) * prices.get(o["symbol"], {}).get("last", 0) for o in sells)
+    prices = schwab.quotes(sorted({o["symbol"] for o in orders}))
+    total = 0.0
+    for o in orders:
+        last = float(prices.get(o["symbol"], {}).get("last", 0) or 0)
+        quantity, filled = float(o.get("quantity") or 0), float(o.get("filled") or 0)
+        if o["side"] == "sell":
+            total += filled * last
+        elif o["side"] == "buy":
+            price = float(o.get("price") or 0) or last * (1 + _LIMIT_SLACK)
+            total -= max(0.0, quantity - filled) * price
+    return total
 
 
 _staged_sells: list[tuple[float, float]] = []  # (when, roughly what it raises), staged not yet approved
@@ -243,7 +264,7 @@ def stage(session_id: str | None, symbol: str, side: str, dollars: float, propos
     if order is None or account is None:
         return f"I can't stage that, sir: {why}."
     order.proposal = proposal
-    in_flight = _in_flight_sells() + _staged_sells_value() if order.side == "buy" else 0.0
+    in_flight = _in_flight_cash(order.account) + _staged_sells_value() if order.side == "buy" else 0.0
     problem = check(order, account, extra_cash=in_flight)
     if problem:
         return f"I won't stage that order, sir: {problem}. Nothing was sent to Schwab."
@@ -256,7 +277,7 @@ def stage(session_id: str | None, symbol: str, side: str, dollars: float, propos
                 "refuse those, and I'll say so if it does.")
     elif abs(order.quantity * order.price - dollars) > max(1.0, dollars * 0.1):
         note = f" Whole shares only, so that's ${order.quantity * order.price:,.2f} rather than ${dollars:,.2f}."
-    return confirm_gate.propose(session_id, order.describe(), lambda: execute(order)) + note
+    return confirm_gate.propose(session_id, order.describe(), lambda: execute(order), money=True) + note
 
 
 def execute(order: Order) -> str:
@@ -272,20 +293,38 @@ def execute(order: Order) -> str:
     if account is None:
         return f"Schwab didn't return account ...{order.account}, sir, so nothing was sent."
     with _lock:
-        problem = check(order, account, extra_cash=_in_flight_sells() if order.side == "buy" else 0.0)
+        problem = check(order, account, extra_cash=_in_flight_cash(order.account) if order.side == "buy" else 0.0)
         if problem:
             return f"I stopped before sending it, sir: {problem}. Nothing went to Schwab."
+        sent_at = time.time()
         try:
             order_id = schwab.place_order(order.account, order.body())
+        except schwab.OrderOutcomeUnknown as exc:
+            # It may well be at Schwab: count it, look for it, never call it refused.
+            log.error("Order outcome unknown (%s): %s", exc, order.describe())
+            match = _find_placed(order, sent_at)
+            order_id = (match or {}).get("id", "")
+            _journal(order, order_id, status="unknown")
+            if order.proposal:  # so it can't be staged a second time while Nick checks
+                investing.mark_ordered(order.proposal, order_id or "unknown")
+            seen = (f" I can see a matching order at Schwab, {order_id}, "
+                    f"{str(match.get('status', '')).lower().replace('_', ' ')}." if match else
+                    " I can't see it among Schwab's orders yet, but it may still have gone through.")
+            return (f"I sent it, sir, but Schwab's answer never came back, so I can't say whether it "
+                    f"went through: {order.describe()}.{seen} Please check the Schwab app before "
+                    "trying again; I've counted it against today's cap.")
         except Exception as exc:  # noqa: BLE001
             log.exception("Order refused: %s", order.describe())
             return f"Schwab refused it, sir: {exc}. Nothing was bought or sold."
-        journal = _load()
-        journal.append({"at": time.time(), "day": _today(), "id": order_id, "account": order.account,
-                        "symbol": order.symbol, "side": order.side, "quantity": order.quantity,
-                        "limit": order.limit, "price": order.price, "dollars": order.dollars,
-                        "proposal": order.proposal})
-        _save(journal)
+        if not order_id:  # placed, but no Location header: find its id so status checks work
+            order_id = (_find_placed(order, sent_at) or {}).get("id", "")
+        _journal(order, order_id)
+    if not order_id:
+        log.warning("Schwab took the order but its id couldn't be found: %s", order.describe())
+        if order.proposal:
+            investing.mark_ordered(order.proposal, "unknown")
+        return (f"Sent to Schwab, sir: {order.describe()}. Schwab didn't say which order number it got, "
+                "so check the Schwab app for its status.")
     log.info("Placed Schwab order %s: %s", order_id, order.describe())
     try:
         state = schwab.order_status(order.account, order_id)
@@ -316,6 +355,50 @@ def execute(order: Order) -> str:
 _DEAD = {"REJECTED", "CANCELED", "EXPIRED"}
 
 
+def _journal(order: Order, order_id: str, *, status: str = "placed") -> None:
+    with _lock:
+        journal = _load()
+        journal.append({"at": time.time(), "day": _today(), "id": order_id, "account": order.account,
+                        "symbol": order.symbol, "side": order.side, "quantity": order.quantity,
+                        "limit": order.limit, "price": order.price, "dollars": order.dollars,
+                        "proposal": order.proposal, "status": status})
+        _save(journal)
+
+
+def _entered_at(text: str) -> float | None:
+    for fmt in ("%Y-%m-%dT%H:%M:%S%z", "%Y-%m-%dT%H:%M:%S.%f%z"):
+        try:
+            return datetime.strptime(text, fmt).timestamp()
+        except ValueError:
+            continue
+    return None
+
+
+def _find_placed(order: Order, sent_at: float) -> dict[str, Any] | None:
+    """The newest Schwab order matching this one (account, symbol, side,
+    quantity) entered since just before it was sent and not already in the
+    journal, or None (also when Schwab can't be asked)."""
+    from integrations import schwab
+    try:
+        recent = schwab.recent_orders(days=1)
+    except Exception as exc:  # noqa: BLE001
+        log.warning("Couldn't list Schwab orders to find one just sent: %s", exc)
+        return None
+    with _lock:
+        known = {str(o.get("id")) for o in _load() if o.get("id")}
+    matches = []
+    for o in recent:
+        if (o.get("account") != order.account or o.get("symbol") != order.symbol or o.get("side") != order.side
+                or abs(float(o.get("quantity") or 0) - order.quantity) > 1e-6 or not o.get("id")
+                or o["id"] in known):
+            continue
+        at = _entered_at(str(o.get("entered_at") or ""))
+        if at is not None and at < sent_at - 120:
+            continue
+        matches.append((at or 0.0, o))
+    return max(matches, key=lambda m: m[0])[1] if matches else None
+
+
 def _mark_rejected(order_id: str) -> None:
     with _lock:
         journal = _load()
@@ -335,7 +418,9 @@ def describe() -> str:
             f"${max_day():,.0f} a day (${spent_today():,.2f} used today).")
     if today:
         line += " Today: " + "; ".join(
-            f"{o['side']} {o['quantity']:g} {o['symbol']} (order {o['id']}{', rejected by Schwab' if o.get('rejected') else ''})"
+            f"{o['side']} {o['quantity']:g} {o['symbol']} (order {o.get('id') or 'number unknown'}"
+            f"{', rejected by Schwab' if o.get('rejected') else ''}"
+            f"{', outcome unknown: check the Schwab app' if o.get('status') == 'unknown' else ''})"
             for o in today) + "."
     return line
 

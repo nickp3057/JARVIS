@@ -16,6 +16,13 @@ timers, music, weather, questions. A guest can not:
   "call him ma'am" from a sister never becomes a profile fact;
 - approve a staged fix with "yes" or a code (``brain/agent._arr_stack_action``).
 
+Money (``MONEY_TOOLS``: staging or approving a trade, and approving a staged
+order in ``brain/confirm_gate``) needs more than "not a guest" on the room
+mic: ``may_move_money`` wants a positive voiceprint match. With ``VOICE_ID``
+off or nothing enrolled the room voice counts as Nick for everything else,
+but not for money; those turns are told to use the app. The app, the desktop
+and trusted client tokens are authenticated channels, so they stay allowed.
+
 The speaker is a ``contextvars`` value: it follows the turn's thread and is
 copied into the agent's parallel tool workers. Outside ``speaking()`` the
 speaker is Nick, so every authenticated path behaves exactly as before.
@@ -35,6 +42,7 @@ class Speaker:
     verified: bool              # True: may use locked tools
     score: float | None = None  # voiceprint similarity, when one was measured
     reason: str = ""            # for logs: why this verdict
+    room: bool = False          # heard on the room mic (speaker_id.identify), not an authenticated channel
 
 
 OWNER = Speaker("nick", True, reason="authenticated channel")
@@ -62,6 +70,10 @@ LOCKED_TOOLS = frozenset({
     # what JARVIS is watching the web for on Nick's behalf
     "cancel_watch",
 })
+
+# Tools that move Nick's money: on the room mic they need a positive voiceprint match.
+MONEY_TOOLS = frozenset({"place_trade", "decide_investment"})
+MONEY_REFUSAL_LINE = "I'll need that one from the app, sir. Money only moves on your confirmed voice or your phone."
 
 _current: contextvars.ContextVar[Speaker | None] = contextvars.ContextVar("jarvis_speaker", default=None)
 
@@ -93,8 +105,20 @@ def guest(reason: str, score: float | None = None) -> Speaker:
     return Speaker("guest", False, score=score, reason=reason)
 
 
+def may_move_money() -> bool:
+    """An authenticated channel, or a room voice that matched Nick's
+    voiceprint. "Voice ID off" or "nothing enrolled" is not enough."""
+    speaker = current()
+    return speaker.verified and (not speaker.room or speaker.score is not None)
+
+
 def refusal(tool: str) -> str | None:
-    """The tool result for a locked tool asked for by a guest, else None."""
+    """The tool result for a locked tool asked for by a guest (or a money
+    tool asked for by an unconfirmed room voice), else None."""
+    if tool in MONEY_TOOLS and trusted() and not may_move_money():
+        return (f"Refused: {tool} moves Nick's money, and on the room mic that needs a positive voiceprint "
+                "match (voice ID is off, nothing is enrolled, or it couldn't confirm him). Nothing was "
+                f'staged or sent. Tell him: "{MONEY_REFUSAL_LINE}"')
     if trusted() or tool not in locked_tools():
         return None
     return (f"Refused: {tool} is locked to Nick's voice, and this speaker was not recognised as Nick. "

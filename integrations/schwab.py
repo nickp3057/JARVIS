@@ -127,9 +127,14 @@ def _borrow(force: bool = False) -> dict[str, Any]:
         if info.get("login_required"):
             # Stable while it lasts, so the runtime alerts once, not every minute.
             info["required_since"] = _borrowed.get("required_since") or now
-        elif not info.get("access_token") and _borrowed.get("login_expires_at"):
-            # The hub is down, not logged out: keep showing the known expiry.
-            info["login_expires_at"] = _borrowed["login_expires_at"]
+        elif not info.get("access_token"):
+            if _borrowed.get("login_expires_at"):
+                # The hub is down, not logged out: keep showing the known expiry.
+                info["login_expires_at"] = _borrowed["login_expires_at"]
+            if _borrowed.get("required_since"):
+                # A hiccup while logged out mustn't restart the clock: the next
+                # login_required keeps its timestamp, so no second alert.
+                info["required_since"] = _borrowed["required_since"]
         _borrowed.clear()
         _borrowed.update(info)
         if info.get("access_token"):
@@ -376,13 +381,29 @@ def account_hash(last4: str) -> str:
     raise RuntimeError(f"Schwab has no account ending {last4}.")
 
 
+class OrderOutcomeUnknown(Exception):
+    """The order went out but no answer came back (timeout, connection
+    dropped): Schwab may or may not have it. Never report it as refused."""
+
+
 def place_order(last4: str, order: dict[str, Any]) -> str:
-    """Send one order; returns Schwab's order id (from the Location header)."""
-    resp = requests.post(f"{_API}/trader/v1/accounts/{account_hash(last4)}/orders", json=order, timeout=20,
-                         headers={"Authorization": f"Bearer {access_token()}", "Accept": "application/json"})
+    """Send one order; returns Schwab's order id (from the Location header),
+    or "" when Schwab took it without saying which id it got.
+
+    Raises ``RuntimeError`` when nothing can have been placed (no token, no
+    account, or an HTTP error answer) and ``OrderOutcomeUnknown`` when the
+    request may have reached Schwab but its answer was lost."""
+    url = f"{_API}/trader/v1/accounts/{account_hash(last4)}/orders"
+    headers = {"Authorization": f"Bearer {access_token()}", "Accept": "application/json"}
+    try:
+        resp = requests.post(url, json=order, timeout=20, headers=headers)
+    except requests.exceptions.ConnectTimeout as exc:
+        raise RuntimeError(f"couldn't reach Schwab ({exc})") from exc  # never connected: nothing sent
+    except requests.RequestException as exc:
+        raise OrderOutcomeUnknown(str(exc)[:300]) from exc
     if resp.status_code not in (200, 201):
         raise RuntimeError(f"Schwab refused the order: HTTP {resp.status_code} {resp.text[:300]}")
-    return resp.headers.get("Location", "").rstrip("/").rsplit("/", 1)[-1] or "?"
+    return resp.headers.get("Location", "").rstrip("/").rsplit("/", 1)[-1]
 
 
 def order_status(last4: str, order_id: str) -> dict[str, Any]:
@@ -394,9 +415,11 @@ def order_status(last4: str, order_id: str) -> dict[str, Any]:
             "why": o.get("statusDescription", "")}
 
 
-def open_orders(days: int = 7) -> list[dict[str, Any]]:
-    """Orders entered in the last ``days`` that haven't filled or died, every
-    account: [{"symbol", "side", "quantity", "status", "entered"}]."""
+def recent_orders(days: int = 7) -> list[dict[str, Any]]:
+    """Every order entered in the last ``days``, any status, every account on
+    the login: [{"id", "account" (last four), "symbol", "side", "quantity",
+    "filled", "price" (limit, or None), "status", "entered" (date),
+    "entered_at" (Schwab's timestamp)}]."""
     from datetime import timedelta, timezone
 
     now = datetime.now(timezone.utc)
@@ -405,13 +428,19 @@ def open_orders(days: int = 7) -> list[dict[str, Any]]:
                                        "toEnteredTime": fmt(now), "maxResults": 50}) or []
     out = []
     for o in orders:
-        if o.get("status") in _DONE_ORDERS:
-            continue
         leg = (o.get("orderLegCollection") or [{}])[0]
-        out.append({"symbol": leg.get("instrument", {}).get("symbol", "?"),
+        entered = str(o.get("enteredTime", ""))
+        out.append({"id": str(o.get("orderId", "")), "account": str(o.get("accountNumber", ""))[-4:],
+                    "symbol": leg.get("instrument", {}).get("symbol", "?"),
                     "side": str(leg.get("instruction", "")).lower(), "quantity": o.get("quantity"),
-                    "status": o.get("status", ""), "entered": str(o.get("enteredTime", ""))[:10]})
+                    "filled": o.get("filledQuantity", 0) or 0, "price": o.get("price"),
+                    "status": o.get("status", ""), "entered": entered[:10], "entered_at": entered})
     return out
+
+
+def open_orders(days: int = 7) -> list[dict[str, Any]]:
+    """``recent_orders`` that haven't filled or died (still every account)."""
+    return [o for o in recent_orders(days) if o["status"] not in _DONE_ORDERS]
 
 
 def price_history(symbol: str, months: int = 6) -> list[tuple[str, float]]:

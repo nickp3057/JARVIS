@@ -64,6 +64,7 @@ log = get_logger(__name__)
 
 _JINGLE_REPLIES = {"done", "yes sir", "yes, sir", "ok", "okay"}
 # While a timer rings, any of these (with or without "Hey JARVIS") stops it.
+_GUEST_ALARM_LINE = "That alarm is Nick's to stop, I'm afraid. He can end it from his phone."
 _DISMISS = re.compile(r"\b(stop|cancel|dismiss|enough|off|okay|ok|thanks|thank you|got it|i'm up|shut up|quiet)\b")
 
 
@@ -507,12 +508,24 @@ class RoomVoice:
         # Nick, or a guest who can't use locked tools.
         speaker = verdict[0] if verdict else voice_trust.guest("voice ID failed")
 
+        # A staged proposal (a trade, a fix) is waiting on a bare "yes": the
+        # answer goes to the gate, never to a fast path that would leave it armed.
+        routed = self._answer_to_proposal(text, speaker)
+        if routed is not None:
+            return routed
+
         if (self._alarming() or self._wake_ringing()) and _DISMISS.search(text.lower()):
+            if self._wake_ringing() and not speaker.verified:
+                # Nick's wake-up is his to end: a guest's "stop" doesn't count as him being up.
+                log.info("Wake-up ring: ignored a guest's dismissal (%s)", speaker.reason)
+                self._say(_GUEST_ALARM_LINE)
+                voice_presence.update("idle")
+                return False
             self._dismiss_alarms()
             voice_presence.update("idle")
             return False
 
-        if good_morning.is_good_morning(text):
+        if good_morning.is_good_morning(text) and speaker.verified:
             good_morning.run(self._say)
             voice_presence.update("idle")
             return False
@@ -539,7 +552,10 @@ class RoomVoice:
             return False
 
         if goodnight.is_goodnight(text):
-            outcome = goodnight.run(self._say, self._listen_for_answer, self._lights_out)
+            # A guest gets the Goodnight scene but not the alarm question: only
+            # Nick moves or skips his wake-up (with voice ID off, everyone is Nick).
+            outcome = goodnight.run(self._say, self._listen_for_answer, self._lights_out,
+                                    ask_alarm=speaker.verified)
             log.info("Goodnight routine: alarm %s", outcome)
             voice_presence.update("idle")
             return False
@@ -565,11 +581,45 @@ class RoomVoice:
             self._finish("done" if worked else "error", "" if worked else "That didn't work, sir.")
             return False
 
+        return self._converse(text, speaker)
+
+    def _answer_to_proposal(self, text: str, speaker) -> bool | None:  # noqa: ANN001
+        """While a confirm-gate "yes" is armed in the room session: a yes or a
+        code goes to the model turn (the gate there checks who may approve,
+        and money needs a voiceprint match); "cancel" / "never mind" / "forget
+        it" cancels it out loud; anything else disarms it and carries on down
+        the normal paths. None: nothing armed, or the utterance carries on."""
+        from brain import confirm_gate, voice_trust
+        session = getattr(self.runtime, "room_session_id", None)
+        if not isinstance(session, str) or not confirm_gate.awaiting_yes(session):
+            return None
+        kind = confirm_gate.reply_kind(text)
+        if kind in ("yes", "codes"):
+            log.info("Room voice: %r answers a staged proposal", text)
+            return self._converse(text, speaker)
+        if kind == "cancel" and speaker.verified:
+            with voice_trust.speaking(speaker):
+                said = confirm_gate.conversation_action(text, session)
+            if self._alarming() or self._wake_ringing():
+                self._dismiss_alarms()
+            if said:
+                voice_presence.update("speaking", reply=said)
+                self._speak(said)
+            voice_presence.update("idle")
+            return False
+        # Anything else (or a guest's "cancel"): no longer armed, so a later
+        # "okay" can't approve it; it stays open for "approve <code>" or the app.
+        confirm_gate.conversation_action(text, session, handled=True)
+        return None
+
+    def _converse(self, text: str, speaker) -> bool:  # noqa: ANN001
+        """A model turn in the room session; True keeps a follow-up window open."""
+        from brain import voice_trust
         if _streaming_enabled() and getattr(self.runtime, "brain_online", False):
             return self._converse_streamed(text, speaker)
         try:
             with voice_trust.speaking(speaker):
-                reply = self.runtime.respond(text, spoken=True)
+                reply = self.runtime.respond(text, spoken=True, room=True)
         except Exception:  # noqa: BLE001
             log.exception("Room voice turn failed")
             self._finish("error", "Something went wrong, sir.")
@@ -623,7 +673,7 @@ class RoomVoice:
         def produce() -> None:
             try:
                 with voice_trust.speaking(speaker):
-                    for fragment in self.runtime.respond_streaming(text, spoken=True):
+                    for fragment in self.runtime.respond_streaming(text, spoken=True, room=True):
                         if fragment:
                             parts.append(fragment)
                             fragments.put(fragment)

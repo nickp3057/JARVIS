@@ -9,7 +9,8 @@ vectors are, in ``memory/voiceprint.json``.
 
 Verdicts (``identify``):
 
-- ``VOICE_ID`` off, or nothing enrolled yet: Nick (same as before voice ID).
+- ``VOICE_ID`` off, or nothing enrolled yet: Nick (same as before voice ID),
+  except for money: trades by room voice need a real match.
 - enrolled, but the model can't load or the clip is too short to judge:
   guest. Locked tools fail closed rather than open.
 - otherwise: Nick when the score clears the threshold, else guest.
@@ -43,7 +44,8 @@ _SAMPLE_RATE = 16000
 _MIN_SECONDS = 0.8
 _ENROLL_TTL_S = 600
 
-_lock = threading.Lock()
+# Re-entrant: take_sample holds it and may call available() -> _load_extractor().
+_lock = threading.RLock()
 _extractor: Any = None
 _extractor_path: str | None = None
 _enrolling: dict[str, Any] | None = None  # {"needed": n, "samples": [vec], "until": t}
@@ -176,11 +178,13 @@ def score(audio: np.ndarray) -> float | None:
 
 
 def identify(audio: np.ndarray) -> voice_trust.Speaker:
-    """Nick or a guest, for one room-voice command."""
+    """Nick or a guest, for one room-voice command. Every verdict is marked
+    ``room``: an unmeasured "Nick" (voice ID off, nothing enrolled) still
+    can't move money (``voice_trust.may_move_money``)."""
     if not enabled():
-        return voice_trust.Speaker("nick", True, reason="voice ID off")
+        return voice_trust.Speaker("nick", True, reason="voice ID off", room=True)
     if not enrolled():
-        return voice_trust.Speaker("nick", True, reason="no voiceprint enrolled")
+        return voice_trust.Speaker("nick", True, reason="no voiceprint enrolled", room=True)
     value = score(audio)
     if value is None:
         reason = "clip too short" if np.asarray(audio).size < _SAMPLE_RATE * _MIN_SECONDS else "model unavailable"
@@ -189,7 +193,7 @@ def identify(audio: np.ndarray) -> voice_trust.Speaker:
     verdict = value >= _threshold()
     log.info("Voice ID: %s (score %.2f, threshold %.2f)", "Nick" if verdict else "guest", value, _threshold())
     if verdict:
-        return voice_trust.Speaker("nick", True, score=value, reason="voiceprint match")
+        return voice_trust.Speaker("nick", True, score=value, reason="voiceprint match", room=True)
     return voice_trust.guest("voiceprint mismatch", score=value)
 
 
