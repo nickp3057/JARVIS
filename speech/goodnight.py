@@ -49,8 +49,28 @@ def _clean(text: str | None) -> str:
     return re.sub(r"\s+", " ", text.replace("jarvis", " ")).strip(" .")
 
 
+# Words that can sit around "good night" without changing what it means:
+# politeness, "I said", and the ways the mic mishears "Jarvis".
+_FILLER = {"hey", "hi", "hay", "oh", "ok", "okay", "alright", "all", "right", "well", "so", "and",
+           "thanks", "thank", "you", "i", "said", "say", "sir", "buddy", "then", "anyway", "now",
+           "jervis", "jarvis's", "two", "to", "too", "drivers", "driver", "travis", "jarvas", "service", "jervais", "j"}
+
+
 def is_goodnight(text: str) -> bool:
-    return _clean(text) in _TRIGGERS
+    """"Good night", and also "Hey Jarvis, good night", "Thank you, Jarvis.
+    Good night", "I said good night" or "Good night. Hey drivers, good night".
+    Anything else in the sentence ("turn off the lights, good night") goes to
+    the conversation instead."""
+    cleaned = _clean(text)
+    if cleaned in _TRIGGERS:
+        return True
+    rest = re.sub(r"[.:'-]", " ", cleaned)
+    found = False
+    for trigger in sorted(_TRIGGERS, key=len, reverse=True):
+        pattern = r"\b" + re.escape(trigger.replace("'", " ")) + r"\b"
+        rest, hits = re.subn(pattern, " ", rest)
+        found = found or hits > 0
+    return found and all(word in _FILLER for word in rest.split())
 
 
 def parse_spoken_time(text: str) -> str | None:

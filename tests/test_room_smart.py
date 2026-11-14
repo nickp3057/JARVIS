@@ -45,6 +45,7 @@ class QuickAnswerTests(unittest.TestCase):
         patch.object(timers, "_store", store).start()
         patch.object(store, "_persist_locked").start()
         patch.object(status_hub, "weather_status", return_value=WEATHER).start()
+        self.card = patch.object(quick_answers, "_put_weather_on_screen").start()
         self.volume = patch.object(room_volume, "set_level", side_effect=lambda n, now=None: max(0, min(10, n))).start()
         patch.object(room_volume, "level", return_value=6).start()
         self.addCleanup(patch.stopall)
@@ -65,6 +66,10 @@ class QuickAnswerTests(unittest.TestCase):
         self.assertEqual(self.ask("is it cold outside").kind, "weather")
         for later in ("what's the weather tomorrow", "weather this weekend", "is it going to rain"):
             self.assertIsNone(self.ask(later), later)
+
+    def test_weather_quick_answer_puts_the_card_up(self) -> None:
+        self.ask("what's the weather")
+        self.card.assert_called_once()
 
     def test_weather_down_goes_to_the_conversation(self) -> None:
         with patch.object(status_hub, "weather_status", return_value={"error": "offline"}):

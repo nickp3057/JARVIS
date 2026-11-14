@@ -178,5 +178,19 @@ class RoomVoiceRoutineTests(unittest.TestCase):
         activate.assert_not_called()
 
 
+class GoodnightTriggerTests(unittest.TestCase):
+    def test_goodnight_with_politeness_and_misheard_name(self) -> None:
+        # Real transcripts from the room log that used to miss the routine.
+        for said in ("Good night", "Hey, Jarvis. Good night", "Thank you, Jervis. Good night",
+                     "I said good night", "Two drivers. Good night",
+                     "Good night. Hey drivers, good night", "Okay Jarvis, I'm going to bed"):
+            self.assertTrue(goodnight.is_goodnight(said), said)
+
+    def test_other_requests_are_not_goodnight(self) -> None:
+        for said in ("turn off the lights good night", "set an alarm for 7 good night",
+                     "good night mode on the tv", "good morning", "what's the weather"):
+            self.assertFalse(goodnight.is_goodnight(said), said)
+
+
 if __name__ == "__main__":
     unittest.main()

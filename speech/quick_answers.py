@@ -287,7 +287,24 @@ def _weather() -> Answer | None:
         line += f", sir, with a high of {round(high)} and a low of {round(low)}."
     else:
         line += ", sir."
+    _put_weather_on_screen()
     return Answer(say=line, kind="weather")
+
+
+def _put_weather_on_screen() -> None:
+    """The quick answer speaks; the full readout goes up on the iPad, phone
+    and TV at the same time (in the background, so the reply isn't held)."""
+    import threading
+
+    def run() -> None:
+        try:
+            from brain import answer_cards
+            answer_cards.show("weather_today", source="room voice")
+        except Exception:  # noqa: BLE001 - the spoken answer already went out
+            import logging
+            logging.getLogger(__name__).exception("Weather card failed")
+
+    threading.Thread(target=run, name="weather-card", daemon=True).start()
 
 
 def _calendar(now: datetime) -> Answer:
