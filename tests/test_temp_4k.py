@@ -3,6 +3,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
+from integrations import plex
 from integrations import servarr_common as servarr
 from integrations import temp_4k
 
@@ -73,6 +74,7 @@ class TempFourKTests(unittest.TestCase):
             mock.patch.object(servarr, "resolve_quality", return_value=(7, "Temp 4K")),
             mock.patch.object(servarr, "resolve_root_folder", return_value=("/temp-4k-movies", "")),
             mock.patch.dict("os.environ", {"TEMP_4K_HOURS": "48", "TEMP_4K_GIVE_UP_HOURS": "72"}),
+            mock.patch.object(plex, "is_configured", return_value=False),
         ]
         for patch in patches:
             patch.start()
@@ -139,6 +141,71 @@ class TempFourKTests(unittest.TestCase):
     def test_remove_early(self):
         temp_4k.request("Sorcerer's Stone")
         self.assertIn("Removed the 4K copy", temp_4k.remove("sorcerer's stone"))
+        self.assertEqual(temp_4k.entries(), [])
+
+    def _ready(self, title="Chamber of Secrets", hours=24):
+        temp_4k.request(title, hours=hours)
+        movie_id = temp_4k.entries()[0]["radarr4k_id"]
+        self.arr.four_k[movie_id]["hasFile"] = True
+        temp_4k.tick(self.alert, now=2000.0)
+        return movie_id
+
+    def test_film_already_in_4k_radarr_is_adopted_and_never_deleted(self):
+        self.arr.four_k[50] = {"id": 50, "tmdbId": 672, "hasFile": True}  # there before JARVIS
+        temp_4k.request("Chamber of Secrets", hours=24)
+        self.assertTrue(temp_4k.entries()[0]["adopted"])
+        temp_4k.tick(self.alert, now=2000.0)
+        temp_4k.tick(self.alert, now=2000.0 + 25 * 3600)
+        self.assertEqual(self.arr.deleted, [])  # files left alone
+        self.assertEqual(temp_4k.entries(), [])  # only the tracking goes
+        self.assertIn(50, self.arr.four_k)
+
+    def test_old_entries_without_the_field_still_expire(self):
+        movie_id = self._ready()
+        with temp_4k._lock:
+            state = temp_4k._load()
+            for entry in state:
+                entry.pop("adopted", None)  # written before this field existed
+            temp_4k._save(state)
+        temp_4k.tick(self.alert, now=2000.0 + 24 * 3600)
+        self.assertEqual(self.arr.deleted, [movie_id])
+
+    def test_expiry_waits_while_the_film_is_playing(self):
+        movie_id = self._ready()
+        playing = [{"title": "Harry Potter and the Chamber of Secrets", "year": 2002, "guids": ["tmdb://672"]}]
+        with mock.patch.object(plex, "is_configured", return_value=True), \
+                mock.patch.object(plex, "playing_movies", return_value=(True, playing)):
+            temp_4k.tick(self.alert, now=2000.0 + 24 * 3600)
+            self.assertEqual(self.arr.deleted, [])
+        with mock.patch.object(plex, "is_configured", return_value=True), \
+                mock.patch.object(plex, "playing_movies", return_value=(True, [])):
+            temp_4k.tick(self.alert, now=2000.0 + 26 * 3600)
+        self.assertEqual(self.arr.deleted, [movie_id])
+
+    def test_plex_errors_defer_only_for_a_bounded_time(self):
+        movie_id = self._ready()
+        with mock.patch.object(plex, "is_configured", return_value=True), \
+                mock.patch.object(plex, "playing_movies", return_value=(False, "can't reach Plex")):
+            temp_4k.tick(self.alert, now=2000.0 + 24 * 3600)
+            self.assertEqual(self.arr.deleted, [])
+            temp_4k.tick(self.alert, now=2000.0 + 24 * 3600 + temp_4k._PLEX_DEFER_MAX_S + 1)
+        self.assertEqual(self.arr.deleted, [movie_id])
+
+    def test_entry_removed_mid_pass_does_not_break_the_pass(self):
+        temp_4k.request("Chamber of Secrets")
+        movie_id = temp_4k.entries()[0]["radarr4k_id"]
+        self.arr.four_k[movie_id]["hasFile"] = True
+        real_request = self.arr.request
+
+        def vanish(service, method, path, **kwargs):
+            if path == f"/api/v3/movie/{movie_id}":
+                with temp_4k._lock:
+                    temp_4k._save([])  # Nick removed it just now
+            return real_request(service, method, path, **kwargs)
+
+        with mock.patch.object(servarr, "request", vanish):
+            temp_4k.tick(self.alert, now=2000.0)
+        self.assertEqual(self.alerts, [])
         self.assertEqual(temp_4k.entries(), [])
 
     def test_unconfigured_explains(self):

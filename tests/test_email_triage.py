@@ -163,6 +163,77 @@ class TriageTests(unittest.TestCase):
         with patch.object(gmail, "is_linked", return_value=False):
             self.assertIn("isn't linked", email_triage.triage())
 
+    def test_model_call_does_not_hold_the_state_lock(self):
+        import threading
+        fake = FakeGmail([_msg("a", "deals@shop.com", "50% off")])
+        free = []
+
+        class Probe(FakeClient):
+            def create(self, **kwargs):
+                got = []
+
+                def probe():
+                    ok = email_triage._state_lock.acquire(timeout=1)
+                    got.append(ok)
+                    if ok:
+                        email_triage._state_lock.release()
+
+                t = threading.Thread(target=probe)
+                t.start()
+                t.join()
+                free.append(bool(got and got[0]))
+                return super().create(**kwargs)
+
+        ps = fake.patches()
+        for p in ps:
+            p.start()
+        try:
+            email_triage.triage(client=Probe([[_use("1", "keep_email", id="a", reason="x")],
+                                              [{"type": "text", "text": "ok"}]]))
+        finally:
+            for p in ps:
+                p.stop()
+        self.assertTrue(free and all(free))  # restore/unsubscribe could run meanwhile
+
+    def test_sender_protected_mid_pass_is_not_trashed(self):
+        fake = FakeGmail([_msg("a", "deals@shop.com", "50% off")])
+
+        class Restorer(FakeClient):
+            def create(self, **kwargs):
+                with email_triage._state_lock:  # Nick restores this sender while the model thinks
+                    state = email_triage._load()
+                    state["protected"].append("deals@shop.com")
+                    email_triage._save(state)
+                return super().create(**kwargs)
+
+        ps = fake.patches()
+        for p in ps:
+            p.start()
+        try:
+            email_triage.triage(client=Restorer([[_use("1", "trash_email", id="a", reason="promo")],
+                                                 [{"type": "text", "text": "ok"}]]))
+        finally:
+            for p in ps:
+                p.stop()
+        self.assertEqual(fake.trashed, [])
+        self.assertIn("deals@shop.com", email_triage._load()["protected"])  # not overwritten by the pass
+
+    def test_action_log_rotates(self):
+        import json
+        import time
+        log = self.tmp / "log.jsonl"
+        old = {"ts": time.time() - 200 * 86400, "id": "old", "action": "trash"}
+        new = {"ts": time.time(), "id": "new", "action": "trash"}
+        log.write_text(json.dumps(old) + "\n" + json.dumps(new) + "\nnot json\n", encoding="utf-8")
+        email_triage._rotate_log()
+        kept = [json.loads(line)["id"] for line in log.read_text(encoding="utf-8").splitlines()]
+        self.assertEqual(kept, ["new"])
+        with patch.object(email_triage, "_LOG_MAX_LINES", 2):
+            for i in range(5):
+                email_triage._log_action({"ts": time.time(), "id": str(i)})
+            email_triage._rotate_log()
+        self.assertEqual(len(log.read_text(encoding="utf-8").splitlines()), 2)
+
 
 class GmailHelperTests(unittest.TestCase):
     def test_summarize_message(self):

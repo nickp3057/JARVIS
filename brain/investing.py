@@ -132,6 +132,44 @@ def _today(now: datetime | None = None) -> str:
     return (now or datetime.now(_ET)).date().isoformat()
 
 
+# NYSE full-day closures (observed dates). Extend each year; a date missing
+# here just means the agents run on a closed day, as they did before.
+_NYSE_HOLIDAYS = frozenset({
+    "2026-01-01", "2026-01-19", "2026-02-16", "2026-04-03", "2026-05-25", "2026-06-19",
+    "2026-07-03", "2026-09-07", "2026-11-26", "2026-12-25",
+    "2027-01-01", "2027-01-18", "2027-02-15", "2027-03-26", "2027-05-31", "2027-06-18",
+    "2027-07-05", "2027-09-06", "2027-11-25", "2027-12-24",
+})
+
+
+def market_day(now: datetime) -> bool:
+    """A weekday the US stock market is open (not an NYSE holiday)."""
+    return now.weekday() < 5 and now.date().isoformat() not in _NYSE_HOLIDAYS
+
+
+def _claim_run(state: dict[str, Any], *keys: str) -> None:
+    """Stamp a job as run today before it starts (so a crash mid-run never
+    repeats it); _release_run hands the day back if it failed."""
+    for key in keys:
+        state["runs"][key] = _today()
+
+
+def _release_run(*keys: str) -> None:
+    """A job failed without doing anything: un-stamp it so it runs again later
+    today, once (``<key>:retried`` stops a broken job looping all day)."""
+    today = _today()
+    with _lock:
+        state = _load()
+        if state["runs"].get(f"{keys[0]}:retried") == today:
+            return
+        for key in keys:
+            if state["runs"].get(key) == today:
+                state["runs"].pop(key)
+        state["runs"][f"{keys[0]}:retried"] = today
+        _save(state)
+    log.info("Investing job %s failed; it may retry once later today", keys[0])
+
+
 # --- The main account --------------------------------------------------------
 
 def main_account() -> dict[str, Any] | None:
@@ -613,7 +651,7 @@ def suggest_targets_job(client: Any = None) -> str:
         return problem
     with _lock:
         state = _load()
-        state["runs"]["suggest"] = state["runs"][f"suggest@{_SUGGEST_VERSION}"] = _today()
+        _claim_run(state, f"suggest@{_SUGGEST_VERSION}", "suggest")
         _save(state)
     got: dict[str, Any] = {}
 
@@ -632,6 +670,7 @@ def suggest_targets_job(client: Any = None) -> str:
             "reasons": {"type": "string"}}, "required": ["weights", "reasons"]}, suggest)], searches=5)
     result = subagents.run(spec, render_account(account, {}) + "\n\nSuggest starting target weights.", client=client)
     if not got:
+        _release_run(f"suggest@{_SUGGEST_VERSION}", "suggest")
         return "I couldn't settle on starting weights this time, sir." + (f" ({result.error})" if result.error else "")
     with _lock:
         state = _load()
@@ -725,13 +764,15 @@ def review_job(client: Any = None) -> str:
             targets, label = state["suggested"]["weights"], "Suggested target (not yet approved)"
         if not targets:
             return "There are no target weights yet, sir, so there's nothing to review against."
-        state["runs"]["review"] = _today()
+        _claim_run(state, "review")
         _save(state)
     made: list[dict[str, Any]] = []
     working = {"targets": targets, "proposals": [], "next_id": state["next_id"]}
     spec = _spec("investing_review", _REVIEW_SYSTEM, _proposal_tools(working, account, made), searches=5)
     result = subagents.run(spec, render_account(account, targets, label) + f"\n\nToday is {_today()}. Review the account.",
                            client=client)
+    if not result.ok and not made:
+        _release_run("review")
     with _lock:
         state = _load()
         for p in made:  # re-number against the saved counter
@@ -819,9 +860,10 @@ def playground_job(client: Any = None) -> str:
     with _lock:
         state = _load()
         accrue_playground(state, _quote_one)
-        state["runs"]["playground"] = _today()
+        _claim_run(state, "playground")
         _save(state)
         pg = state["playground"]
+        last_trade = pg["trades"][-1:]  # the list is capped, so compare the newest, not the count
 
     def trade(side: str, args: dict[str, Any]) -> str:
         symbol = str(args.get("symbol", "")).strip().upper()
@@ -891,6 +933,11 @@ def playground_job(client: Any = None) -> str:
     task = (describe_playground(pg) + f"\n\nYour last journal entries:\n{recent}\n\nToday is {_today()}. "
             "Run this week's session.")
     result = subagents.run(spec, task, client=client)
+    if not result.ok:
+        with _lock:
+            traded = ((_load()["playground"] or {}).get("trades") or [])[-1:] != last_trade
+        if not traded:  # never re-run a session that already moved paper money
+            _release_run("playground")
     return result.text or ("Playground session stopped early." + (f" ({result.error})" if result.error else ""))
 
 
@@ -898,7 +945,7 @@ def playground_job(client: Any = None) -> str:
 
 def _review_time(now: datetime) -> bool:
     hour = _num("INVESTING_REVIEW_HOUR_ET", 10.5, 9.5, 15.5)
-    return now.weekday() < 5 and now.hour + now.minute / 60 >= hour and now.hour < 16
+    return market_day(now) and now.hour + now.minute / 60 >= hour and now.hour < 16
 
 
 def due_jobs(now: datetime | None = None, state: dict[str, Any] | None = None,
@@ -915,7 +962,7 @@ def due_jobs(now: datetime | None = None, state: dict[str, Any] | None = None,
     stale = (state["suggested"] or {}).get("v", 1) < _SUGGEST_VERSION
     if not state["targets"] and (not state["suggested"] or stale) and runs.get(f"suggest@{_SUGGEST_VERSION}") != today:
         jobs.append(("suggest", None))
-    market = now.weekday() < 5 and (9, 30) <= (now.hour, now.minute) < (16, 0)
+    market = market_day(now) and (9, 30) <= (now.hour, now.minute) < (16, 0)
     if market:
         for symbol, pct in day_drops(account).items():
             if pct <= -drop_pct() and state["drop_checked"].get(symbol) != today:

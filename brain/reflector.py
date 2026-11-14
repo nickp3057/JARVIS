@@ -30,7 +30,7 @@ import os
 import re
 import threading
 import time
-from collections import deque
+from collections import OrderedDict, deque
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -76,7 +76,8 @@ class Turn:
     at: float = field(default_factory=time.time)
 
 
-_recent: dict[str, deque[Turn]] = {}
+_MAX_SESSIONS = 50  # each launch / phone conversation is a session; keep the newest
+_recent: OrderedDict[str, deque[Turn]] = OrderedDict()
 _recent_lock = threading.Lock()
 _inflight = threading.BoundedSemaphore(_MAX_INFLIGHT)
 
@@ -262,7 +263,11 @@ def observe_turn(
         return None
     current = Turn(str(user_text or ""), str(reply or ""), [(str(n), str(r or "")) for n, r in (tool_results or [])])
     with _recent_lock:
-        history = _recent.setdefault(session_id or "", deque(maxlen=3))
+        key = session_id or ""
+        history = _recent.setdefault(key, deque(maxlen=3))
+        _recent.move_to_end(key)
+        while len(_recent) > _MAX_SESSIONS:
+            _recent.popitem(last=False)  # least recently used session
         previous = list(history)
         history.append(current)
     found = detect(previous, current)

@@ -18,8 +18,14 @@ I'm up stops the music.
 The event alone can't wake a TV that dropped off Wi-Fi in standby, so Core
 also powers it on through Home Assistant (``tv_remote.power``). If the TV
 still isn't on ``WAKE_BACKUP_DELAY_S`` (90) later and Nick hasn't answered,
-the backup ring starts: the room voice beeps the Optiplex speaker until I'm
-up, Snooze, "stop" by voice, or ``WAKE_BACKUP_RING_S`` (600) runs out.
+the backup ring starts: the room voice beeps the room speaker on the Core
+host until I'm up, Snooze, "stop" by voice, or ``WAKE_BACKUP_RING_S`` (600)
+runs out.
+
+A snooze lives in its own key (``snooze``), so it never overwrites a pending
+one-off; files from before that kept it as ``once`` with ``"snooze": true``
+and are read that way. Every read-modify-write of the file holds ``_lock``
+(the wake monitor's ``due`` and a Snooze from the phone can land together).
 """
 from __future__ import annotations
 
@@ -37,7 +43,7 @@ from jarvis_logger import get_logger
 log = get_logger(__name__)
 
 _FILE = Path(__file__).resolve().parents[1] / "memory" / "wake_alarm.json"
-_lock = threading.Lock()
+_lock = threading.RLock()  # held across load -> save; _save takes it too
 DAY_NAMES = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
 _SPOTIFY_LINK = re.compile(r"open\.spotify\.com/(?:intl-[a-z]+/)?(playlist|album|track|artist)/([A-Za-z0-9]+)")
 _SPOTIFY_URI = re.compile(r"^spotify:(playlist|album|track|artist):[A-Za-z0-9]+$")
@@ -45,7 +51,7 @@ _SPOTIFY_URI = re.compile(r"^spotify:(playlist|album|track|artist):[A-Za-z0-9]+$
 
 def _blank() -> dict[str, Any]:
     return {"times": [None] * 7, "music": "", "label": "", "volume": 30,
-            "enabled": True, "once": None, "overrides": {}, "last_fired": ""}
+            "enabled": True, "once": None, "snooze": None, "overrides": {}, "last_fired": ""}
 
 
 def _migrate(data: dict[str, Any]) -> dict[str, Any]:
@@ -77,13 +83,18 @@ def load() -> dict[str, Any] | None:
     if not isinstance(data, dict):
         return None
     data = _migrate(data)
+    once = data.get("once")
+    if isinstance(once, dict) and once.get("snooze"):  # older files kept the snooze as the one-off
+        data["snooze"], data["once"] = {"at": once["at"]}, None
+    if not isinstance(data.get("snooze"), dict) or not data["snooze"].get("at"):
+        data["snooze"] = None
     times = data.get("times")
     if not isinstance(times, list) or len(times) != 7:
         data["times"] = [None] * 7
     today = datetime.now().date().isoformat()
     overrides = data.get("overrides") if isinstance(data.get("overrides"), dict) else {}
     data["overrides"] = {d: t for d, t in overrides.items() if d >= today}  # past days drop off
-    return data if any(data["times"]) or data.get("once") or data["overrides"] else None
+    return data if any(data["times"]) or data.get("once") or data["snooze"] or data["overrides"] else None
 
 
 def _save(data: dict[str, Any] | None) -> None:
@@ -178,7 +189,13 @@ def set_alarm(time_text: str, days_text: str | None = None, music: str | None = 
     relative = relative_time(time_text, now)
     hhmm = relative or parse_time(time_text)
     when = (days_text or "").strip().lower()
-    data = load() or _blank()
+    with _lock:
+        return _set_alarm(data=load() or _blank(), hhmm=hhmm, when=when, relative=relative,
+                          days_text=days_text, music=music, label=label, volume=volume, now=now)
+
+
+def _set_alarm(*, data: dict[str, Any], hhmm: str, when: str, relative: str | None, days_text: str | None,
+               music: str | None, label: str, volume: int | None, now: datetime) -> dict[str, Any]:
     music = None if music is None else normalize_music(music)
     label = (label or "").strip() or (music[7:] if music and music.startswith("search:") else "")
     day = None if relative is not None else _one_day(when, now)
@@ -208,12 +225,14 @@ def set_schedule(times: list[str | None], music: str = "", label: str = "", volu
     """Replace the weekly schedule (the companion app's editor); keeps the one-off."""
     if len(times) != 7:
         raise ValueError("A schedule needs a time (or none) for each of the 7 days.")
-    data = load() or _blank()
-    data["times"] = [parse_time(t) if t else None for t in times]
+    parsed = [parse_time(t) if t else None for t in times]
     music = normalize_music(music)
-    data.update(music=music, label=((label or "").strip() or (music[7:] if music.startswith("search:") else ""))[:80],
-                volume=max(5, min(100, int(volume))), enabled=bool(enabled))
-    _save(data)
+    with _lock:
+        data = load() or _blank()
+        data["times"] = parsed
+        data.update(music=music, label=((label or "").strip() or (music[7:] if music.startswith("search:") else ""))[:80],
+                    volume=max(5, min(100, int(volume))), enabled=bool(enabled))
+        _save(data)
     return data
 
 
@@ -224,12 +243,13 @@ def skip(day_text: str = "tomorrow", restore: bool = False, now: datetime | None
     day = _one_day((day_text or "tomorrow").strip().lower(), now)
     if day is None:
         raise ValueError(f"I need today, tomorrow or a date like 2026-10-30, not {day_text!r}.")
-    data = load() or _blank()
-    if restore:
-        data["overrides"].pop(day, None)
-    else:
-        data["overrides"][day] = ""
-    _save(data)
+    with _lock:
+        data = load() or _blank()
+        if restore:
+            data["overrides"].pop(day, None)
+        else:
+            data["overrides"][day] = ""
+        _save(data)
     return day
 
 
@@ -266,9 +286,9 @@ def ringing_state(now: float | None = None) -> dict[str, Any] | None:
     with _ring_lock:
         fired = dict(_fired)
     data = load()
-    once = (data or {}).get("once") or {}
-    if once.get("snooze"):
-        until = datetime.fromisoformat(once["at"]).timestamp()
+    snoozed = (data or {}).get("snooze") or {}
+    if snoozed.get("at"):
+        until = datetime.fromisoformat(snoozed["at"]).timestamp()
         if until > now:
             return {"state": "snoozed", "since": fired.get("at"), "detail": fired.get("detail", ""), "until": until}
     if fired and not _answered.is_set() and now - fired["at"] < RINGING_WINDOW_S:
@@ -391,20 +411,22 @@ def snooze(now: datetime | None = None) -> datetime:
     Core rings it, so the phone gets its I'm up / Snooze buttons again."""
     _answer()
     now = now or datetime.now()
-    data = load() or _blank()
     at = (now + timedelta(minutes=SNOOZE_MINUTES)).replace(second=0, microsecond=0)
-    data["once"] = {"at": at.isoformat(timespec="minutes"), "music": "", "label": "", "snooze": True}
-    _save(data)
+    with _lock:
+        data = load() or _blank()
+        data["snooze"] = {"at": at.isoformat(timespec="minutes")}  # a pending one-off stays put
+        _save(data)
     return at
 
 
 def awake() -> None:
     """I'm up: a pending snooze doesn't ring, and the backup ring stops."""
     _answer()
-    data = load()
-    if data and (data.get("once") or {}).get("snooze"):
-        data["once"] = None
-        _save(data)
+    with _lock:
+        data = load()
+        if data and data.get("snooze"):
+            data["snooze"] = None
+            _save(data)
 
 
 def good_morning_targets(states: list[dict[str, Any]]) -> list[str]:
@@ -439,7 +461,11 @@ def good_morning() -> tuple[bool, str]:
 
 def cancel(days_text: str | None = None) -> bool:
     """Clear some days (keeping the rest), or the whole schedule and the one-off."""
-    data = load()
+    with _lock:
+        return _cancel(load(), days_text)
+
+
+def _cancel(data: dict[str, Any] | None, days_text: str | None) -> bool:
     if data is None:
         return False
     if not days_text:
@@ -464,6 +490,11 @@ def _at(day: datetime, hhmm: str) -> datetime:
 def _upcoming(data: dict[str, Any], now: datetime, *, exclude_fired: bool = False) -> tuple[datetime, dict[str, Any]] | None:
     """(when, what plays) for the next alarm after ``now``."""
     found: list[tuple[datetime, dict[str, Any]]] = []
+    snoozed = data.get("snooze")
+    if snoozed:
+        at = datetime.fromisoformat(snoozed["at"])
+        if at > now:  # resumes whatever was playing
+            found.append((at, {"music": "", "label": "", "once": False, "snooze": True}))
     once = data.get("once")
     if once:
         at = datetime.fromisoformat(once["at"])
@@ -496,21 +527,24 @@ def next_time(data: dict[str, Any] | None, now: datetime | None = None) -> datet
 def due(now: datetime | None = None) -> dict[str, Any] | None:
     """What to play if an alarm should fire now (within 10 minutes of its
     time, once per alarm): ``{"music", "label", "volume", "time"}``."""
-    data = load()
     now = now or datetime.now()
-    if not data:
-        return None
-    upcoming = _upcoming(data, now - timedelta(minutes=10), exclude_fired=True)
-    if not upcoming or upcoming[0] > now:
-        return None
-    at, what = upcoming
-    key = at.isoformat(timespec="minutes")
-    if data.get("last_fired") == key:
-        return None
-    data["last_fired"] = key
-    if what["once"]:
-        data["once"] = None  # a one-off: gone after it goes off
-    _save(data)
+    with _lock:
+        data = load()
+        if not data:
+            return None
+        upcoming = _upcoming(data, now - timedelta(minutes=10), exclude_fired=True)
+        if not upcoming or upcoming[0] > now:
+            return None
+        at, what = upcoming
+        key = at.isoformat(timespec="minutes")
+        if data.get("last_fired") == key:
+            return None
+        data["last_fired"] = key
+        if what.get("snooze"):
+            data["snooze"] = None  # rang again: the snooze is spent
+        elif what["once"]:
+            data["once"] = None  # a one-off: gone after it goes off
+        _save(data)
     return {"music": what["music"], "label": what["label"], "volume": data["volume"], "time": at.strftime("%H:%M")}
 
 

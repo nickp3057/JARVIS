@@ -189,7 +189,17 @@ def _effects_to_restore() -> dict[str, str]:
     return effects
 
 
+def engaged() -> bool:
+    """Barn Door is up while the shared theme is its red one."""
+    return theme.current()["theme"] == "barnDoor"
+
+
 def stand_down() -> str:
+    if not engaged():
+        # Nothing to undo: replaying the old snapshot would throw the room
+        # back to however it looked at the last Barn Door, and theme.restore()
+        # would drop whatever theme Nick has picked since.
+        return "Barn Door isn't engaged, sir. Nothing to stand down."
     restored = theme.restore()  # first, so the TV lets go at once
     threading.Thread(target=_tv_back, daemon=True, name="barn-door-tv-back").start()
     home_assistant.call_service("scene", "turn_on", f"scene.{_SCENE}")

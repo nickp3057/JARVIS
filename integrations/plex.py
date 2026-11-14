@@ -1,6 +1,7 @@
 """Minimal Plex Media Server client: is a title on Plex yet, and rescan.
 
-Only the media doctor uses this. ``PLEX_URL`` and ``PLEX_TOKEN`` are read
+The media doctor uses this, and the temporary-4K monitor asks what's
+playing before it deletes a 4K copy (``playing_movies``). ``PLEX_URL`` and ``PLEX_TOKEN`` are read
 live from ``.env``; without a token every call reports "not configured" and
 the doctor skips the Plex stage instead of failing.
 """
@@ -74,6 +75,21 @@ def find_title(title: str, year: int | None = None) -> tuple[bool, list[dict[str
                 continue
             hits.append({"title": item.get("title"), "year": item.get("year"), "type": item.get("type")})
     return True, hits
+
+
+def playing_movies() -> tuple[bool, list[dict[str, Any]] | str]:
+    """Movies playing (or paused) on Plex right now: title, year, guids
+    ("tmdb://671", ...). ``(False, reason)`` when Plex can't be asked."""
+    ok, payload = _get("/status/sessions", {"includeGuids": 1})
+    if not ok:
+        return False, str(payload)
+    playing: list[dict[str, Any]] = []
+    for item in ((payload or {}).get("MediaContainer") or {}).get("Metadata") or []:
+        if not isinstance(item, dict) or item.get("type") != "movie":
+            continue
+        guids = [str(g.get("id", "")) for g in item.get("Guid") or [] if isinstance(g, dict)]
+        playing.append({"title": item.get("title"), "year": item.get("year"), "guids": guids})
+    return True, playing
 
 
 def refresh_libraries() -> str:

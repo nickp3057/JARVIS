@@ -61,10 +61,37 @@ PIPER_VOICE_MODEL = piper_voice.FALLBACK_VOICE
 # Milliseconds from the start of the last line to its first sound (CLI, logs).
 last_first_audio_ms: float | None = None
 
-ELEVENLABS_API_KEY = os.getenv("ELEVENLABS_API_KEY", "")
-ELEVENLABS_VOICE_ID = os.getenv("ELEVENLABS_VOICE_ID", "")
-ELEVENLABS_MODEL = os.getenv("ELEVENLABS_MODEL", "eleven_flash_v2_5")
-ELEVENLABS_SPEED = float(os.getenv("ELEVENLABS_SPEED", "1.05"))  # 0.7 to 1.2
+# ElevenLabs settings are read live from .env (update_setting edits apply
+# without a restart). These module values are overrides only: None means
+# "read .env", anything else (tests) wins.
+ELEVENLABS_API_KEY: str | None = None
+ELEVENLABS_VOICE_ID: str | None = None
+ELEVENLABS_MODEL: str | None = None
+ELEVENLABS_SPEED = 1.05  # default when ELEVENLABS_SPEED is unset or garbled (0.7 to 1.2)
+
+
+def _eleven_key() -> str:
+    return ELEVENLABS_API_KEY if ELEVENLABS_API_KEY is not None else os.getenv("ELEVENLABS_API_KEY", "").strip()
+
+
+def _eleven_voice() -> str:
+    return ELEVENLABS_VOICE_ID if ELEVENLABS_VOICE_ID is not None else os.getenv("ELEVENLABS_VOICE_ID", "").strip()
+
+
+def _eleven_model() -> str:
+    if ELEVENLABS_MODEL is not None:
+        return ELEVENLABS_MODEL
+    return os.getenv("ELEVENLABS_MODEL", "").strip() or "eleven_flash_v2_5"
+
+
+def _eleven_speed() -> float:
+    try:
+        speed = float(os.getenv("ELEVENLABS_SPEED", "") or ELEVENLABS_SPEED)
+    except ValueError:
+        speed = ELEVENLABS_SPEED
+    if speed != speed:  # NaN
+        speed = ELEVENLABS_SPEED
+    return max(0.7, min(1.2, speed))
 
 _ELEVENLABS_TIMEOUT_SECONDS = 15
 _ELEVENLABS_SAMPLE_RATE = 22050
@@ -74,7 +101,7 @@ _ELEVENLABS_OUTPUT_FORMAT = f"pcm_{_ELEVENLABS_SAMPLE_RATE}"
 # --- ElevenLabs (primary) ---------------------------------------------------
 
 def _elevenlabs_configured() -> bool:
-    return bool(ELEVENLABS_API_KEY and ELEVENLABS_VOICE_ID)
+    return bool(_eleven_key() and _eleven_voice())
 
 
 def _wrap_pcm_as_wav(pcm_bytes: bytes, path: Path, sample_rate: int) -> None:
@@ -87,26 +114,25 @@ def _wrap_pcm_as_wav(pcm_bytes: bytes, path: Path, sample_rate: int) -> None:
 
 def _elevenlabs_request(text: str) -> tuple[str, dict]:
     """URL and ``requests`` keyword arguments for one line of speech."""
-    # Re-read speed from env on every call so update_setting changes take
-    # effect immediately without a restart.
-    current_speed = float(os.getenv("ELEVENLABS_SPEED", str(ELEVENLABS_SPEED)))
-    url = f"https://api.elevenlabs.io/v1/text-to-speech/{ELEVENLABS_VOICE_ID}"
+    # Everything re-read from env on every call so update_setting changes
+    # take effect immediately without a restart.
+    url = f"https://api.elevenlabs.io/v1/text-to-speech/{_eleven_voice()}"
     return url, {
         "headers": {
-            "xi-api-key": ELEVENLABS_API_KEY,
+            "xi-api-key": _eleven_key(),
             "Content-Type": "application/json",
             "Accept": "audio/wav",
         },
         "params": {"output_format": _ELEVENLABS_OUTPUT_FORMAT},
         "json": {
             "text": text,
-            "model_id": ELEVENLABS_MODEL,
+            "model_id": _eleven_model(),
             "voice_settings": {
                 "stability": 0.5,
                 "similarity_boost": 0.75,
                 "style": 0.0,
                 "use_speaker_boost": True,
-                "speed": max(0.7, min(1.2, current_speed)),
+                "speed": _eleven_speed(),
             },
         },
         "timeout": _ELEVENLABS_TIMEOUT_SECONDS,
@@ -539,7 +565,7 @@ def _cache_path(text: str) -> Path:
                         *(str(knobs[name]) for name in sorted(knobs)), text.strip()))
         return _CACHE_DIR / f"{hashlib.sha1(key.encode()).hexdigest()[:20]}.wav"
     speed = os.getenv("ELEVENLABS_SPEED", str(ELEVENLABS_SPEED))
-    key = "|".join((ELEVENLABS_VOICE_ID, ELEVENLABS_MODEL, speed, text.strip()))
+    key = "|".join((_eleven_voice(), _eleven_model(), speed, text.strip()))
     return _CACHE_DIR / f"{hashlib.sha1(key.encode()).hexdigest()[:20]}.wav"
 
 

@@ -10,6 +10,13 @@ The clock starts when the 4K file lands: ``TEMP_4K_HOURS`` (default 48) later,
 the runtime's temp-4K monitor deletes the movie and its file from the 4K Radarr
 (``tick``). A request that hasn't downloaded after ``TEMP_4K_GIVE_UP_HOURS``
 (default 72) is dropped. State lives in ``memory/temp_4k.json``.
+
+Safety: a film that was already in the 4K Radarr before JARVIS asked is
+``adopted``; when its time is up JARVIS only stops tracking it and never
+deletes its files (an entry without the field is one JARVIS added). Before an
+expiry delete the monitor asks Plex what's playing (``integrations/plex.py``)
+and waits while that film is on; if Plex can't be asked it waits too, but
+never more than ``_PLEX_DEFER_MAX_S`` past the expiry.
 """
 
 from __future__ import annotations
@@ -31,6 +38,10 @@ SERVICE = "radarr4k"
 MAIN = "radarr"
 _STATE_FILE = Path(__file__).resolve().parent.parent / "memory" / "temp_4k.json"
 _lock = threading.RLock()
+# A film still playing (or a Plex that can't be asked) holds an expiry delete
+# back, but never longer than this past the expiry: a paused-forever session
+# or a dead Plex can't keep a 4K copy around for good.
+_PLEX_DEFER_MAX_S = 12 * 3600
 
 
 def _hours(name: str, default: float) -> float:
@@ -156,7 +167,7 @@ def request(title: str, hours: float | None = None) -> str:
     if _resolution(movie) >= 2160:
         return f"{_label(movie)} is already 4K in your library, sir. Nothing to fetch."
 
-    added, detail = _add_to_4k(tmdb_id)
+    added, detail, adopted = _add_to_4k(tmdb_id)
     if added is None:
         return detail
     entry = {
@@ -168,6 +179,8 @@ def request(title: str, hours: float | None = None) -> str:
         "hours": keep,
         "ready_at": None,
         "expires_at": None,
+        # Already in the 4K Radarr before this request: not JARVIS's to delete.
+        "adopted": adopted,
     }
     with _lock:
         state = [e for e in _load() if e.get("tmdb_id") != tmdb_id] + [entry]
@@ -183,38 +196,40 @@ def _span(hours: float) -> str:
     return f"{hours:g} hours"
 
 
-def _add_to_4k(tmdb_id: Any) -> tuple[int | None, str]:
-    """Put the film in the 4K Radarr and start a search; its 4K Radarr id."""
+def _add_to_4k(tmdb_id: Any) -> tuple[int | None, str, bool]:
+    """Put the film in the 4K Radarr and start a search: (its 4K Radarr id,
+    why not, adopted). ``adopted`` is True when the film was already there
+    before this request, so expiry must never delete its files."""
     ok, found = servarr.request(SERVICE, "GET", "/api/v3/movie", params={"tmdbId": tmdb_id})
     if ok and isinstance(found, list) and found:
         movie_id = int(found[0]["id"])
         servarr.call(SERVICE, "POST", "/api/v3/command", json={"name": "MoviesSearch", "movieIds": [movie_id]})
-        return movie_id, ""
+        return movie_id, "", True
 
     ok, lookup = servarr.request(SERVICE, "GET", "/api/v3/movie/lookup", params={"term": f"tmdb:{tmdb_id}"})
     if not ok:
-        return None, str(lookup)
+        return None, str(lookup), False
     matches = [m for m in lookup if m.get("tmdbId") == tmdb_id] if isinstance(lookup, list) else []
     if not matches:
-        return None, "The 4K Radarr couldn't find that film by its TMDB id, sir."
+        return None, "The 4K Radarr couldn't find that film by its TMDB id, sir.", False
     profile = os.getenv("RADARR4K_QUALITY", "").strip() or "Temp 4K"
     profile_id, profile_detail = servarr.resolve_quality(SERVICE, profile)
     if profile_id is None:
-        return None, profile_detail
+        return None, profile_detail, False
     root, root_detail = servarr.resolve_root_folder(SERVICE)
     if root is None:
-        return None, root_detail
+        return None, root_detail, False
     body = dict(matches[0])
     body.update({"qualityProfileId": profile_id, "rootFolderPath": root, "monitored": True,
                  "minimumAvailability": "released", "addOptions": {"searchForMovie": True}})
     outcome = servarr.call(SERVICE, "POST", "/api/v3/movie", json=body)
     if outcome.ok and isinstance(outcome.payload, dict) and outcome.payload.get("id"):
-        return int(outcome.payload["id"]), ""
+        return int(outcome.payload["id"]), "", False
     # A timed-out add may still have landed: look before giving up (never re-POST).
     ok, found = servarr.request(SERVICE, "GET", "/api/v3/movie", params={"tmdbId": tmdb_id})
     if ok and isinstance(found, list) and found:
-        return int(found[0]["id"]), ""
-    return None, str(outcome.payload)
+        return int(found[0]["id"]), "", False
+    return None, str(outcome.payload), False
 
 
 def status() -> str:
@@ -255,15 +270,20 @@ def remove(title: str) -> str:
     if len(found) > 1:
         return "Which one, sir: " + "; ".join(_label(e) for e in found) + "?"
     done, detail = _delete(found[0])
+    if done and found[0].get("adopted"):
+        return (f"{_label(found[0])} was in the 4K library before I fetched it, sir, so I've stopped "
+                "tracking it and left its files alone.")
     return f"Removed the 4K copy of {_label(found[0])}, sir; the regular one is untouched." if done else detail
 
 
 def _delete(entry: dict[str, Any]) -> tuple[bool, str]:
-    movie_id = entry.get("radarr4k_id")
-    outcome = servarr.call(SERVICE, "DELETE", f"/api/v3/movie/{movie_id}",
-                           params={"deleteFiles": "true", "addImportExclusion": "false"})
-    if not outcome.ok and outcome.kind != "not_found":
-        return False, str(outcome.payload)
+    """Drop the entry; delete the 4K movie and its files only if JARVIS added it."""
+    if not entry.get("adopted"):  # missing field (older entries): JARVIS added it
+        movie_id = entry.get("radarr4k_id")
+        outcome = servarr.call(SERVICE, "DELETE", f"/api/v3/movie/{movie_id}",
+                               params={"deleteFiles": "true", "addImportExclusion": "false"})
+        if not outcome.ok and outcome.kind != "not_found":
+            return False, str(outcome.payload)
     with _lock:
         _save([e for e in _load() if e.get("tmdb_id") != entry.get("tmdb_id")])
     return True, ""
@@ -282,34 +302,77 @@ def tick(alert: Alert, now: float | None = None) -> None:
         return
     now = time.time() if now is None else now
     for entry in entries():
-        if not entry.get("ready_at"):
-            ok, movie = servarr.request(SERVICE, "GET", f"/api/v3/movie/{entry.get('radarr4k_id')}")
-            if ok and isinstance(movie, dict) and movie.get("hasFile"):
-                with _lock:
-                    state = _load()
-                    for item in state:
-                        if item.get("tmdb_id") == entry.get("tmdb_id"):
-                            item["ready_at"] = now
-                            item["expires_at"] = now + float(item.get("hours") or keep_hours()) * 3600
-                            entry = item
+        try:
+            _tick_entry(entry, alert, now)
+        except Exception:  # noqa: BLE001 - one odd entry must not stop the rest
+            log.exception("Temp 4K pass failed for %s", _label(entry))
+
+
+def _same_film(entry: dict[str, Any], playing: dict[str, Any]) -> bool:
+    if entry.get("tmdb_id") and f"tmdb://{entry['tmdb_id']}" in (playing.get("guids") or []):
+        return True
+    same_name = servarr._normalize(str(playing.get("title") or "")) == servarr._normalize(str(entry.get("title") or ""))
+    return same_name and (not playing.get("year") or not entry.get("year") or playing["year"] == entry["year"])
+
+
+def _plex_holds(entry: dict[str, Any], now: float) -> bool:
+    """True while the expiry delete should wait: the film is playing on Plex,
+    or Plex can't be asked. Never more than _PLEX_DEFER_MAX_S past expiry."""
+    from integrations import plex
+
+    if not plex.is_configured():
+        return False
+    if now - float(entry.get("expires_at") or now) > _PLEX_DEFER_MAX_S:
+        return False
+    try:
+        ok, playing = plex.playing_movies()
+    except Exception as exc:  # noqa: BLE001 - treat as "can't be asked"
+        ok, playing = False, str(exc)
+    if not ok:
+        log.warning("Temp 4K: Plex can't say what's playing (%s); holding %s", playing, _label(entry))
+        return True
+    if any(_same_film(entry, item) for item in playing if isinstance(item, dict)):
+        log.info("Temp 4K: %s is playing; removal waits", _label(entry))
+        return True
+    return False
+
+
+def _tick_entry(entry: dict[str, Any], alert: Alert, now: float) -> None:
+    if not entry.get("ready_at"):
+        ok, movie = servarr.request(SERVICE, "GET", f"/api/v3/movie/{entry.get('radarr4k_id')}")
+        if ok and isinstance(movie, dict) and movie.get("hasFile"):
+            ready = None
+            with _lock:
+                state = _load()
+                for item in state:
+                    if item.get("tmdb_id") == entry.get("tmdb_id"):
+                        item["ready_at"] = now
+                        item["expires_at"] = now + float(item.get("hours") or keep_hours()) * 3600
+                        ready = item
+                if ready is not None:
                     _save(state)
-                alert("temp_4k_ready", f"{entry.get('title')} is ready in 4K",
-                      f"{_label(entry)} is in Plex in 4K; pick the 4K version when you play it. "
-                      f"It goes back to 1080p {_when(entry['expires_at'])}.", severity="info", push=True)
-            elif now - float(entry.get("requested_at") or now) > give_up_hours() * 3600:
-                done, detail = _delete(entry)
-                if done:
-                    alert("temp_4k_failed", f"No 4K copy of {entry.get('title')}",
-                          f"The 4K Radarr found no 4K release of {_label(entry)} in "
-                          f"{give_up_hours():g} hours, so I've dropped the request.",
-                          severity="warning", push=True)
-                else:
-                    log.warning("Temp 4K give-up delete failed for %s: %s", _label(entry), detail)
-            continue
-        if now >= float(entry.get("expires_at") or 0):
+            if ready is None:  # removed meanwhile (Nick dropped it): nothing to announce
+                return
+            alert("temp_4k_ready", f"{ready.get('title')} is ready in 4K",
+                  f"{_label(ready)} is in Plex in 4K; pick the 4K version when you play it. "
+                  f"It goes back to 1080p {_when(ready['expires_at'])}.", severity="info", push=True)
+        elif now - float(entry.get("requested_at") or now) > give_up_hours() * 3600:
             done, detail = _delete(entry)
             if done:
-                alert("temp_4k_removed", f"{entry.get('title')} back to 1080p",
-                      f"Removed the temporary 4K copy of {_label(entry)}.", severity="info", push=False)
+                alert("temp_4k_failed", f"No 4K copy of {entry.get('title')}",
+                      f"The 4K Radarr found no 4K release of {_label(entry)} in "
+                      f"{give_up_hours():g} hours, so I've dropped the request.",
+                      severity="warning", push=True)
             else:
-                log.warning("Temp 4K expiry delete failed for %s: %s", _label(entry), detail)
+                log.warning("Temp 4K give-up delete failed for %s: %s", _label(entry), detail)
+        return
+    if now < float(entry.get("expires_at") or 0):
+        return
+    if not entry.get("adopted") and _plex_holds(entry, now):
+        return  # playing (or Plex unreachable): try again next pass
+    done, detail = _delete(entry)
+    if done:
+        what = ("Stopped tracking" if entry.get("adopted") else "Removed") + f" the temporary 4K copy of {_label(entry)}."
+        alert("temp_4k_removed", f"{entry.get('title')} back to 1080p", what, severity="info", push=False)
+    else:
+        log.warning("Temp 4K expiry delete failed for %s: %s", _label(entry), detail)

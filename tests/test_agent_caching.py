@@ -78,5 +78,19 @@ class ParallelToolTests(unittest.TestCase):
         self.assertEqual([c["tool"] for c in context], ["a", "b"])
 
 
+class ToolContextCapTests(unittest.TestCase):
+    def test_tool_context_keeps_only_recent_sessions(self):
+        agent = object.__new__(JarvisAgent)
+        agent._recent_tool_context = {}
+        for i in range(agent_mod._TOOL_CONTEXT_SESSIONS + 5):
+            agent._session_id = f"s{i}"
+            agent._save_tool_context([{"tool": "x", "input": {}, "result": "ok"}])
+        agent._session_id = "s3"  # touched again: moves to the newest end
+        agent._save_tool_context([{"tool": "y", "input": {}, "result": "ok"}])
+        self.assertEqual(len(agent._recent_tool_context), agent_mod._TOOL_CONTEXT_SESSIONS)
+        self.assertNotIn("s0", agent._recent_tool_context)
+        self.assertIn("s3", agent._recent_tool_context)
+
+
 if __name__ == "__main__":
     unittest.main()

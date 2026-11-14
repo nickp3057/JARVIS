@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import threading
 import time
 import unittest
 from unittest.mock import Mock, patch
@@ -20,6 +21,12 @@ class _TwoIterationStop:
     def wait(self, _: float) -> bool:
         self.waits += 1
         return self.waits >= 2
+
+
+class _ThreeIterationStop(_TwoIterationStop):
+    def wait(self, _: float) -> bool:
+        self.waits += 1
+        return self.waits >= 3
 
 
 class RuntimeMonitorTests(unittest.TestCase):
@@ -224,6 +231,74 @@ class StartupGraceTests(unittest.TestCase):
              patch.dict(os.environ, {"QBITTORRENT_MONITOR_INTERVAL_S": "0"}):
             runtime._download_monitor_loop()
         self.assertIn("Download monitor offline", self.titles(runtime))
+
+    def test_download_monitor_survives_an_odd_record(self) -> None:
+        runtime = object.__new__(JarvisRuntime)
+        runtime._stop_monitors = _ThreeIterationStop()
+        runtime._download_monitor_failed = False
+        runtime.record_event = Mock()
+        runtime.announce = Mock()
+        runtime.raise_alert = Mock()
+        first = [{"hash": "abc", "name": "Movie", "progress": 0.9, "state": "downloading"}]
+        odd = [{"hash": "abc", "name": "Movie", "progress": "garbage", "state": "downloading"}]
+        done = [{"hash": "abc", "name": "Movie", "progress": 1.0, "state": "uploading"}]
+        with patch("integrations.qbittorrent.download_snapshot",
+                   side_effect=[(True, first), (True, odd), (True, done)]), \
+                patch.dict(os.environ, {"QBITTORRENT_MONITOR_INTERVAL_S": "not-a-number",
+                                        "QBITTORRENT_ANNOUNCE_COMPLETIONS": "true"}, clear=False):
+            runtime._download_monitor_loop()
+        runtime.announce.assert_called_once()  # the loop lived on to see the completion
+
+    def test_device_watch_survives_a_bad_pass_and_bad_interval(self) -> None:
+        runtime = object.__new__(JarvisRuntime)
+        runtime._stop_monitors = _ThreeIterationStop()
+        runtime.raise_alert = Mock()
+        offline = [{"entity_id": "light.desk", "state": "unavailable", "attributes": {}}]
+        with patch("brain.runtime.get_states", side_effect=[RuntimeError("boom"), (True, offline), (True, offline)]), \
+                patch.dict(os.environ, {"JARVIS_WATCH_DEVICES": "light.desk", "DEVICE_OFFLINE_ALERT_MIN": "0",
+                                        "DEVICE_WATCH_INTERVAL_S": "sixty"}, clear=False):
+            runtime._device_watch_loop()
+        self.assertEqual(runtime._stop_monitors.waits, 3)
+        self.assertEqual(runtime.raise_alert.call_args.args[0], "device_offline")
+
+    def test_schwab_loop_survives_a_broken_token_file(self) -> None:
+        from integrations import schwab
+        runtime = object.__new__(JarvisRuntime)
+        runtime._stop_monitors = threading.Event()
+        runtime.raise_alert = Mock()
+        calls = []
+
+        def wait(_interval):
+            calls.append(_interval)
+            if len(calls) >= 2:
+                runtime._stop_monitors.set()
+            return True
+
+        with patch.object(schwab, "login_warning", side_effect=KeyError("refresh_issued_at")), \
+                patch.object(schwab, "linked", return_value=False), \
+                patch.object(schwab, "market_open", return_value=True), \
+                patch.object(schwab.linked_event, "wait", side_effect=wait), \
+                patch.dict(os.environ, {"SCHWAB_POLL_SECONDS": "oops"}, clear=False):
+            runtime._schwab_monitor_loop()
+        self.assertEqual(calls, [30.0, 30.0])
+
+    def test_env_float_falls_back_on_garbage(self) -> None:
+        from brain.runtime import _env_float
+        with patch.dict(os.environ, {"X_TEST_S": "abc"}, clear=False):
+            self.assertEqual(_env_float("X_TEST_S", 60.0), 60.0)
+        with patch.dict(os.environ, {"X_TEST_S": "nan"}, clear=False):
+            self.assertEqual(_env_float("X_TEST_S", 60.0), 60.0)
+        with patch.dict(os.environ, {"X_TEST_S": "2"}, clear=False):
+            self.assertEqual(_env_float("X_TEST_S", 60.0, 5.0), 5.0)
+
+    def test_dedupe_keys_are_bounded(self) -> None:
+        from brain.runtime import _BoundedKeys
+        keys = _BoundedKeys(3)
+        for k in "abcd":
+            keys.add(k)
+        self.assertEqual(len(keys), 3)
+        self.assertNotIn("a", keys)
+        self.assertIn("d", keys)
 
 
 if __name__ == "__main__":

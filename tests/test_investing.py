@@ -170,6 +170,33 @@ class ScheduleTests(InvestingTestCase):
         self.assertEqual([k for k, _ in investing.due_jobs(self._at(2026, 11, 9, 9, 45), state, acct)], ["emergency"])
         self.assertEqual(investing.due_jobs(self._at(2026, 11, 8, 11, 0), state, acct), [])
 
+    def test_market_holidays_run_nothing(self):
+        state = investing._load()
+        state["targets"] = {"VOO": 100}
+        acct = _account(0.0, NVDA=(90.0, -10.0))
+        # Thanksgiving 2026 is a Thursday; Monday 2027-01-18 is MLK Day.
+        self.assertEqual(investing.due_jobs(self._at(2026, 11, 26, 11, 0), state, acct), [])
+        self.assertEqual(investing.due_jobs(self._at(2027, 1, 18, 11, 0), state, acct), [])
+        self.assertTrue(investing.market_day(self._at(2026, 11, 27, 11, 0)))
+
+    def test_failed_review_may_retry_once_the_same_day(self):
+        state = investing._load()
+        state["targets"] = {"VOO": 100}
+        investing._save(state)
+        failed = subagents.SubagentResult(ok=False, text="", rounds=0, error="API down")
+        with patch.object(subagents, "run", return_value=failed):
+            investing.review_job()
+            self.assertNotIn("review", investing._load()["runs"])  # handed back: runs again later
+            investing.review_job()
+            self.assertEqual(investing._load()["runs"]["review"], investing._today())  # only one retry
+        ok = subagents.SubagentResult(ok=True, text="All fine.", rounds=1)
+        state = investing._load()
+        state["runs"] = {}
+        investing._save(state)
+        with patch.object(subagents, "run", return_value=ok):
+            investing.review_job()
+        self.assertEqual(investing._load()["runs"]["review"], investing._today())
+
     def test_no_account_no_jobs(self):
         self.assertEqual(investing.due_jobs(self._at(2026, 11, 9, 11, 0), investing._load(), None), [])
 

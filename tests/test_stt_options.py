@@ -35,10 +35,6 @@ class DecodeOptionTests(unittest.TestCase):
         self.assertEqual(transcriber.transcribe(np.zeros(16000, dtype=np.float32)), "")
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class PromptTests(unittest.TestCase):
     def test_room_words_steer_whisper_and_can_be_overridden(self) -> None:
         import os
@@ -52,3 +48,36 @@ class PromptTests(unittest.TestCase):
             self.assertIsNone(t._initial_prompt())
         with patch.dict(os.environ, {"WHISPER_PROMPT": "Lamp."}):
             self.assertEqual(t._initial_prompt(), "Lamp.")
+
+
+class LiveSettingsTests(unittest.TestCase):
+    def test_whisper_settings_are_read_live_and_model_reloads_by_name(self):
+        loaded = []
+
+        class FakeWhisper:
+            def __init__(self, size, device, compute_type):
+                loaded.append((size, device, compute_type))
+
+        fake_module = MagicMock(WhisperModel=FakeWhisper)
+        transcriber = stt.Transcriber()
+        env = {"WHISPER_MODEL": "small.en", "WHISPER_DEVICE": "cpu", "WHISPER_COMPUTE_TYPE": "int8"}
+        with patch.dict("sys.modules", {"faster_whisper": fake_module}), patch.dict(os.environ, env):
+            transcriber._ensure_loaded()
+            transcriber._ensure_loaded()  # same settings: no reload
+            self.assertEqual(loaded, [("small.en", "cpu", "int8")])
+            with patch.dict(os.environ, {"WHISPER_MODEL": "base.en"}):
+                transcriber._ensure_loaded()
+            self.assertEqual(loaded[-1], ("base.en", "cpu", "int8"))
+            live = stt.Transcriber("tiny.en")  # the caption model keeps its size
+            live._ensure_loaded()
+            self.assertEqual(loaded[-1][0], "tiny.en")
+
+    def test_beam_size_tolerates_bad_values(self):
+        with patch.dict(os.environ, {"WHISPER_BEAM_SIZE": "five"}):
+            self.assertEqual(stt._whisper_beam_size(), 1)
+        with patch.dict(os.environ, {"WHISPER_BEAM_SIZE": "3"}):
+            self.assertEqual(stt._whisper_beam_size(), 3)
+
+
+if __name__ == "__main__":
+    unittest.main()

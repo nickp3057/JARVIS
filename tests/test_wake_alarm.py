@@ -143,6 +143,39 @@ class WakeAlarmTests(unittest.TestCase):
         self.assertIn("cancelled", tools.execute_tool("cancel_wake_up", {}))
         self.assertIsNone(wake_alarm.public())
 
+    def test_snooze_keeps_a_pending_one_off(self) -> None:
+        now = datetime(2026, 10, 28, 6, 31)
+        wake_alarm.set_alarm("10:00", "once", music="Back in Black", now=now)
+        wake_alarm.snooze(now)
+        self.assertEqual(wake_alarm.load()["once"]["at"], "2026-10-28T10:00")  # not overwritten
+        self.assertEqual(wake_alarm.due(datetime(2026, 10, 28, 6, 40, 5))["music"], "")  # the snooze rings
+        fired = wake_alarm.due(datetime(2026, 10, 28, 10, 0, 5))
+        self.assertEqual(fired["music"], "search:Back in Black")  # and the one-off still does
+
+    def test_old_snooze_in_once_is_read(self) -> None:
+        wake_alarm._FILE.write_text(json.dumps({
+            "times": [None] * 7, "music": "", "label": "", "volume": 30, "enabled": True,
+            "once": {"at": "2026-10-28T06:40", "music": "", "label": "", "snooze": True},
+            "overrides": {}, "last_fired": ""}))
+        data = wake_alarm.load()
+        self.assertIsNone(data["once"])
+        self.assertEqual(data["snooze"], {"at": "2026-10-28T06:40"})
+        self.assertIsNotNone(wake_alarm.due(datetime(2026, 10, 28, 6, 40, 5)))
+
+    def test_concurrent_snoozes_and_dues_keep_the_file_whole(self) -> None:
+        import threading
+        wake_alarm.set_alarm("7:00", "weekdays")
+        now = datetime(2026, 10, 28, 6, 31)
+        threads = [threading.Thread(target=wake_alarm.snooze, args=(now,)) for _ in range(10)]
+        threads += [threading.Thread(target=wake_alarm.due, args=(now,)) for _ in range(10)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+        data = wake_alarm.load()
+        self.assertEqual(data["times"][2], "07:00")
+        self.assertEqual(data["snooze"], {"at": "2026-10-28T06:40"})
+
 
 class GoodMorningTests(unittest.TestCase):
     STATES = [

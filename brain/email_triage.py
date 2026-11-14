@@ -47,7 +47,12 @@ _STATE_FILE = _MEMORY / "email_triage.json"
 _LOG_FILE = _MEMORY / "email_triage_log.jsonl"
 _PROCESSED_CAP = 20_000
 _LEARN_AFTER = 2  # same sender filed to the same folder this many times -> file without asking
-_state_lock = threading.Lock()
+_LOG_KEEP_DAYS = 90  # the action log (report, restore) keeps this long...
+_LOG_MAX_LINES = 20_000  # ...and at most this many lines
+# Guards load -> mutate -> save of the state file only. Never hold it across
+# Gmail or model calls: restore / mark_unsubscribed run on Nick's turn.
+_state_lock = threading.RLock()
+_log_lock = threading.Lock()
 
 
 # --- Settings (read live) ----------------------------------------------------
@@ -107,11 +112,40 @@ def _save(state: dict[str, Any]) -> None:
 
 def _log_action(entry: dict[str, Any]) -> None:
     try:
-        _LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
-        with _LOG_FILE.open("a", encoding="utf-8") as handle:
-            handle.write(json.dumps(entry) + "\n")
+        with _log_lock:
+            _LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
+            with _LOG_FILE.open("a", encoding="utf-8") as handle:
+                handle.write(json.dumps(entry) + "\n")
     except OSError as exc:
         log.error("Could not write email triage log: %s", exc)
+
+
+def _rotate_log() -> None:
+    """Keep the last _LOG_KEEP_DAYS days (and at most _LOG_MAX_LINES lines) of
+    the action log; rewritten atomically so a crash never truncates it."""
+    cutoff = time.time() - _LOG_KEEP_DAYS * 86400
+    with _log_lock:
+        try:
+            lines = _LOG_FILE.read_text(encoding="utf-8").splitlines()
+        except OSError:
+            return
+        keep = []
+        for line in lines:
+            try:
+                entry = json.loads(line)
+                if isinstance(entry, dict) and float(entry.get("ts", 0)) >= cutoff:
+                    keep.append(line)
+            except (TypeError, ValueError):
+                continue
+        keep = keep[-_LOG_MAX_LINES:]
+        if len(keep) == len(lines):
+            return
+        try:
+            tmp = _LOG_FILE.with_suffix(".jsonl.tmp")
+            tmp.write_text("".join(f"{line}\n" for line in keep), encoding="utf-8")
+            tmp.replace(_LOG_FILE)
+        except OSError as exc:
+            log.error("Could not rotate email triage log: %s", exc)
 
 
 def _read_log(since: float) -> list[dict[str, Any]]:
@@ -125,8 +159,11 @@ def _read_log(since: float) -> list[dict[str, Any]]:
             entry = json.loads(line)
         except ValueError:
             continue
-        if isinstance(entry, dict) and float(entry.get("ts", 0)) >= since:
-            out.append(entry)
+        try:
+            if isinstance(entry, dict) and float(entry.get("ts", 0)) >= since:
+                out.append(entry)
+        except (TypeError, ValueError):
+            continue
     return out
 
 
@@ -321,19 +358,26 @@ def _decide_batch(batch: list[dict[str, Any]], state: dict[str, Any], folders: d
     return decisions, result.ok
 
 
-def _apply(msg: dict[str, Any], action: str, folder: str, reason: str, state: dict[str, Any],
-           folders: dict[str, str]) -> bool:
+def _move(msg: dict[str, Any], action: str, folder: str, folders: dict[str, str]) -> bool:
+    """The Gmail side of a decision (nothing in dry run). Runs outside _state_lock."""
     from integrations import gmail
 
-    live = not dry_run()
+    if dry_run():
+        return True
     try:
-        if live and action == "trash":
+        if action == "trash":
             gmail.trash(msg["id"])
-        elif live and action == "file":
+        elif action == "file":
             gmail.file_to_label(msg["id"], folders[folder])
     except Exception as exc:  # noqa: BLE001 - one bad message never sinks the pass
         log.warning("Gmail %s failed for %s: %s", action, msg["id"], exc)
         return False
+    return True
+
+
+def _record(msg: dict[str, Any], action: str, folder: str, reason: str, state: dict[str, Any]) -> None:
+    """Bookkeeping for a decision that went through; caller holds _state_lock."""
+    live = not dry_run()
     now = time.time()
     info = state["senders"].setdefault(msg["from"], {"name": msg["from_name"], "trashed": [], "kept": 0, "filed": 0})
     info["name"] = msg["from_name"] or info.get("name", "")
@@ -352,7 +396,31 @@ def _apply(msg: dict[str, Any], action: str, folder: str, reason: str, state: di
     _log_action({"ts": now, "id": msg["id"], "from": msg["from"], "name": msg["from_name"],
                  "subject": msg["subject"][:150], "action": action, "folder": folder,
                  "reason": reason, "marked_read": live and action == "file", "dry_run": not live})
-    return True
+
+
+def _apply_many(items: list[tuple[dict[str, Any], str, str, str]], folders: dict[str, str],
+                counts: dict[str, int]) -> None:
+    """Carry out decisions: re-check them against the latest state (a sender
+    restored or protected mid-pass is not trashed), move in Gmail without the
+    lock, then record under it on a freshly loaded state."""
+    if not items:
+        return
+    with _state_lock:
+        state = _load()
+        checked = []
+        for msg, action, folder, reason in items:
+            if msg["id"] in state["processed"]:
+                continue
+            if action == "trash" and is_protected(state, msg["from"]):
+                action, folder, reason = "keep", "", "protected sender"
+            checked.append((msg, action, folder, reason))
+    done = [item for item in checked if _move(item[0], item[1], item[2], folders)]
+    with _state_lock:
+        state = _load()
+        for msg, action, folder, reason in done:
+            _record(msg, action, folder, reason, state)
+            counts[action] += 1
+        _save(state)  # progress survives a crash between batches
 
 
 def triage(days: int | None = None, limit: int | None = None, *, client: Any = None) -> str:
@@ -370,42 +438,47 @@ def triage(days: int | None = None, limit: int | None = None, *, client: Any = N
     ids = gmail.list_message_ids(f"in:inbox newer_than:{int(days)}d", limit) or []
     with _state_lock:
         state = _load()
-        before = {c["from"] for c in unsubscribe_candidates(state)}
-        fresh = [i for i in ids if i not in state["processed"]]
-        messages = [m for m in (gmail.get_message(i) for i in fresh) if m]
-        counts = {"trash": 0, "file": 0, "keep": 0}
-        pending: list[dict[str, Any]] = []
-        for msg in messages:
-            learned = _learned_folder(state, msg["from"], folders)
-            if msg["starred"]:
-                if _apply(msg, "keep", "", "starred", state, folders):
-                    counts["keep"] += 1
-            elif learned:
-                if _apply(msg, "file", learned, "known missionary sender", state, folders):
-                    counts["file"] += 1
-            else:
-                pending.append(msg)
-        batch_size = _int("EMAIL_TRIAGE_BATCH", 25, 1, 100)
-        failed = False
-        for start in range(0, len(pending), batch_size):
-            batch = pending[start:start + batch_size]
-            decisions, ok = _decide_batch(batch, state, folders, client)
-            for msg in batch:
-                decision = decisions.get(msg["id"])
-                if decision is None:
-                    if not ok:
-                        continue  # model failed: retry this one next pass
-                    decision = ("keep", "", "no decision")
-                if _apply(msg, *decision, state, folders):
-                    counts[decision[0]] += 1
-            _save(state)  # progress survives a crash between batches
-            if not ok and not decisions:
-                failed = True
-                break
+    before = {c["from"] for c in unsubscribe_candidates(state)}
+    fresh = [i for i in ids if i not in state["processed"]]
+    messages = [m for m in (gmail.get_message(i) for i in fresh) if m]
+    counts = {"trash": 0, "file": 0, "keep": 0}
+    pending: list[dict[str, Any]] = []
+    quick: list[tuple[dict[str, Any], str, str, str]] = []
+    for msg in messages:
+        learned = _learned_folder(state, msg["from"], folders)
+        if msg["starred"]:
+            quick.append((msg, "keep", "", "starred"))
+        elif learned:
+            quick.append((msg, "file", learned, "known missionary sender"))
+        else:
+            pending.append(msg)
+    _apply_many(quick, folders, counts)
+    batch_size = _int("EMAIL_TRIAGE_BATCH", 25, 1, 100)
+    failed = False
+    for start in range(0, len(pending), batch_size):
+        batch = pending[start:start + batch_size]
+        with _state_lock:
+            state = _load()  # the model sees the latest protections
+        decisions, ok = _decide_batch(batch, state, folders, client)
+        items = []
+        for msg in batch:
+            decision = decisions.get(msg["id"])
+            if decision is None:
+                if not ok:
+                    continue  # model failed: retry this one next pass
+                decision = ("keep", "", "no decision")
+            items.append((msg, *decision))
+        _apply_many(items, folders, counts)
+        if not ok and not decisions:
+            failed = True
+            break
+    with _state_lock:
+        state = _load()
         _save(state)
         new_unsubs = [c for c in unsubscribe_candidates(state) if c["from"] not in before]
         if new_unsubs or before:
             write_unsubscribe_note(state)
+    _rotate_log()
     total = sum(counts.values())
     if not total:
         return "Nothing new to sort in your inbox, sir." if not failed else "I couldn't sort your inbox just now, sir; I'll try again on the next pass."
@@ -494,16 +567,24 @@ def restore(query: str, days: float = 30) -> str:
     targets = [e for i, e in restored.items() if i not in already]
     if not targets:
         return f"I haven't trashed anything matching '{query}' lately, sir."
+    # Protect the senders first, so a triage pass running now can't trash them again.
+    with _state_lock:
+        state = _load()
+        for sender in {e["from"] for e in targets}:
+            if sender not in state["protected"]:
+                state["protected"].append(sender)
+        _save(state)
     done = 0
+    for entry in targets:
+        try:
+            if gmail.untrash(entry["id"]):
+                done += 1
+                _log_action({**entry, "ts": time.time(), "action": "restored"})
+        except Exception as exc:  # noqa: BLE001
+            log.warning("Untrash failed for %s: %s", entry["id"], exc)
     with _state_lock:
         state = _load()
         for entry in targets:
-            try:
-                if gmail.untrash(entry["id"]):
-                    done += 1
-                    _log_action({**entry, "ts": time.time(), "action": "restored"})
-            except Exception as exc:  # noqa: BLE001
-                log.warning("Untrash failed for %s: %s", entry["id"], exc)
             if entry["from"] not in state["protected"]:
                 state["protected"].append(entry["from"])
             info = state["senders"].get(entry["from"])

@@ -128,6 +128,15 @@ v1 shipped 2026-10-27 and is the TV's home screen (JARVIS.md "JARVIS TV"). Open:
 - [ ] Reminders only fire while something pops them (room voice in server mode); a Core without the room voice never sends them.
 - [ ] Playwright on the Surface (`pip install playwright` + `python -m playwright install --with-deps chromium`) if JARVIS should click and fill forms; without it he reads pages over plain HTTP.
 
+### Reliability pass (2026-11-14, Core only): check after deploy
+
+See JARVIS.md Recently Shipped.
+- [ ] The Michael (2026) temp-4K entry (expires Mon Nov 16 23:24) still removes on time, and waits if it's playing on Plex (the new `/status/sessions?includeGuids=1` call is untested against the real Plex).
+- [ ] A wake-up backup ring plays at alarm loudness (`ROOM_ALARM_VOLUME`, 8) and the room goes back to its normal level after; snoozing while a one-off alarm is set keeps the one-off.
+- [ ] "Stand down" with Barn Door off just says so.
+- [ ] The investing review skips Thanksgiving (2026-11-26).
+- [ ] Yearly chore: add the 2028 NYSE holidays to `_NYSE_HOLIDAYS` in `brain/investing.py` before 2028.
+
 ## Nick's stated goal
 
 Make JARVIS the ever-learning, ever-changing, self-adjusting, self-healing

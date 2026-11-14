@@ -88,6 +88,13 @@ class BarnDoorTests(unittest.TestCase):
         self.assertEqual(picked, {"select.nick_strip_lights_diy_scene": "Real Rainbow",
                                   "select.desk_lights_diy_scene": "New Rainbow"})
 
+    def test_stand_down_when_not_engaged_changes_nothing(self) -> None:
+        theme.choose("mark85")
+        reply = tools.execute_tool("barn_door_protocol", {"action": "stand_down"})
+        self.assertIn("isn't engaged", reply)
+        self.ha.assert_not_called()  # no stale snapshot, no effects, no automation
+        self.assertEqual(theme.current()["theme"], "mark85")  # not thrown back to Arc
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -198,6 +198,22 @@ class VolumeTests(unittest.TestCase):
         room_volume.prepare(datetime(2026, 1, 2, 8))
         self.assertEqual(self.sets, ["30%", "70%"])  # 69% remembered as level 7
 
+    def test_wake_ring_uses_the_alarm_level_then_restores(self) -> None:
+        room_volume.prepare(datetime(2026, 1, 1, 23))  # night: 30%, day remembered as 7
+        self.assertEqual(self.sets, ["30%"])
+        room_volume.ring_alarm(datetime(2026, 1, 2, 5))  # still quiet hours: alarm level anyway
+        room_volume.ring_alarm(datetime(2026, 1, 2, 5, 1))  # not re-applied every beep
+        self.assertEqual(self.sets, ["30%", "80%"])
+        room_volume.prepare(datetime(2026, 1, 2, 5, 30))
+        self.assertEqual(self.sets[-1], "30%")  # back to the night level afterwards
+
+    def test_wake_ring_by_day_without_a_stored_day_level(self) -> None:
+        with patch.dict(os.environ, {"ROOM_ALARM_VOLUME": "9"}):
+            room_volume.ring_alarm(datetime(2026, 1, 2, 8))
+        self.assertEqual(self.sets, ["90%"])
+        room_volume.prepare(datetime(2026, 1, 2, 8, 30))
+        self.assertEqual(self.sets[-1], "70%")  # the level it was at before the ring
+
     def test_levels_use_the_loudness_matched_scale(self) -> None:
         patch.stopall()
         run = Mock(return_value=Mock(returncode=0, stdout=""))
