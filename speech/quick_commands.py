@@ -27,6 +27,10 @@ _LEVEL = re.compile(r"^(?:set|dim|turn|put|make)?\s*(.+?)\s+(?:to|at)\s+(\d{1,3}
 _TV = re.compile(r"^(?:tv|telly|television)$")
 # Any of these means "lock the room camera off now" (said to the room voice).
 _KILL_CAMERA = re.compile(r"\b(?:kill|stop|disable|shut (?:off|down)|turn off)\b.*\bcamera\b|\bcamera\b.*\boff\b")
+# "start light sync", "light sync off", "stop the light sync" (brain/light_sync.py).
+_LIGHT_SYNC = re.compile(r"^(?:(?P<verb>start|stop|begin|end|resume|turn on|turn off|switch on|switch off|"
+                         r"enable|disable|cancel|kill)\s+)?lights?\s?sync(?:\s+(?P<tail>on|off))?$")
+_LIGHT_SYNC_ON = {"start", "begin", "resume", "turn on", "switch on", "enable", "on"}
 _SCENE_VERBS = re.compile(r"^(?:run|start|activate|set|turn on|do|it's|its|time for)\s+")
 
 
@@ -76,6 +80,16 @@ def run(text: str) -> QuickResult | None:
     text = normalize(text)
     if not text or len(text.split()) > 8:
         return None
+    sync = _LIGHT_SYNC.match(text)
+    if sync and (sync["verb"] or sync["tail"]):
+        from brain import light_sync
+        if (sync["tail"] or sync["verb"]) in _LIGHT_SYNC_ON:
+            ok, _ = light_sync.controller.start()
+            # Can't (no track, nothing playing): the conversation says why.
+            return QuickResult(True, "light sync on") if ok else None
+        light_sync.controller.stop()
+        return QuickResult(True, "light sync off")
+
     scenes = status_hub.home_scenes().get("scenes", [])
     scene = _match_scene(text, scenes)
     if scene:

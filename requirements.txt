@@ -13,6 +13,10 @@ openwakeword>=0.6.0
 sounddevice>=0.4.6
 numpy>=1.24
 
+# Light sync track builds (brain/light_tracks.py): a bundled ffmpeg binary,
+# since the Surface has none on PATH
+imageio-ffmpeg>=0.5
+
 # Spotify (Premium required for playback control)
 spotipy>=2.23.0
 

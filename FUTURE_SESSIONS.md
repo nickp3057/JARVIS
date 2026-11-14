@@ -134,6 +134,30 @@ See JARVIS.md Recently Shipped.
 - [ ] The investing review skips Thanksgiving (2026-11-26).
 - [ ] Yearly chore: add the 2028 NYSE holidays to `_NYSE_HOLIDAYS` in `brain/investing.py` before 2028.
 
+### Light sync (2026-11-14): check
+
+Built into Core, the iPad and JARVIS TV (see JARVIS.md **Light sync**); nothing deployed or tried live.
+One-time on the Surface, after pulling and before restarting Core:
+`cd ~/jarvis && .venv/bin/pip install imageio-ffmpeg && .venv/bin/python -m app.client_tokens grant nicks-room-tv playback:write`
+- [ ] "Hey Jarvis, create a light sync for Cars 2": the build starts, the iPad's Light sync menu shows "Building… N%", and a push says it's ready. Note how long it took on the Surface (the Mac took ~3 min with VideoToolbox; the Surface is CPU only). If it's too slow or Core feels sluggish meanwhile, lower `LIGHT_SYNC_BUILD_THREADS`.
+- [ ] Movie scene on, play Cars 2 on the TV: the strip, desk lights and lamp follow within a second; the fan ring stops following the strip (its automation is paused).
+- [ ] Pause holds the colour; resume picks up (one strip blip on resume is expected); a seek catches up within ~1 s.
+- [ ] Stop playback: the lights go back to the Movie scene (no strip stuck in streaming mode) and the fan automation is back on.
+- [ ] A film with no light sync in movie mode: nothing changes.
+- [ ] Barn Door mid-film: everything goes red at once (strips included); stand down: the sync comes back.
+- [ ] iPad menu: Stop, Start, Subtle / Medium / Intense (feel the difference), Auto off then on, "Make a light sync for <film>" on a film without one.
+- [ ] A flashing scene stays gentle (flash limiter: at most 3 big jumps a second).
+- [ ] "Start light sync" / "stop light sync" by voice.
+- [ ] Restart Core mid-film: the strips are released (they shouldn't stay frozen on a colour).
+- [ ] TV 9.7 deployed: `adb logcat -s TvHomePlayback` shows no 403s after the grant, and Core uses the TV clock (`GET /api/lightsync` film.source = "tv"). If the TV's Plex session has no numeric media id, Core matches by title (Plex sessions or the track index).
+- [ ] If two Plex players are ever playing films at once, set `LIGHT_SYNC_PLEX_PLAYER` to the room TV's player name.
+
+Remaining prototype open items (moved from `~/Developer/projects/light-sync/README.md`):
+- [ ] **Fan ring** (`light.nicks_fan`, Tuya, cloud): about 1-2 updates a second with ~0.5 s lag; send only bigger shifts, colour only (never white), through HA.
+- [ ] **Strip knocked back to its rainbow** by something external (the Movie scene, `automation.fan_light_follows_strip` or the Govee cloud): light sync now pauses the automation and re-takes on hard cuts; check the HA logbook if it still happens.
+- [ ] **Re-encode the HEVC 10-bit films** that stutter on the TCL (Realtek decoder hands frames back out of order; ~185 of 240 frames dropped). Try a lossless fix of the ordering first, then HEVC 10-bit without B-pyramid at the same bitrate, then H.264. Test a 2-min clip on both TVs first.
+- [ ] **Delete the test video** from the NAS when done: `media/movies/Light Sync Test (2026)/`.
+
 ## Nick's stated goal
 
 Make JARVIS the ever-learning, ever-changing, self-adjusting, self-healing

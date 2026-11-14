@@ -888,3 +888,39 @@ struct HostBattery: Decodable, Equatable {
         }
     }
 }
+
+// MARK: - Light sync (GET /api/lightsync)
+
+/// The room lights following the film on the TV (Core's brain/light_sync.py).
+struct LightSyncState: Decodable, Equatable {
+    struct Film: Decodable, Equatable {
+        let ratingKey: String?
+        let title: String
+        let state: String
+        enum CodingKeys: String, CodingKey { case ratingKey = "rating_key", title, state }
+    }
+
+    struct Build: Decodable, Equatable {
+        let title: String
+        let percent: Int
+    }
+
+    let enabled: Bool
+    let auto: Bool
+    let intensity: String
+    let running: Bool
+    let paused: Bool
+    let film: Film?
+    let hasTrack: Bool
+    let building: Build?
+    let reason: String
+    /// JARVIS's answer to a start or stop (POST only).
+    let message: String?
+
+    enum CodingKeys: String, CodingKey {
+        case enabled, auto, intensity, running, paused, film, building, reason, message
+        case hasTrack = "has_track"
+    }
+
+    static let intensities = ["subtle", "medium", "intense"]
+}

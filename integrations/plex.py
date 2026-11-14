@@ -148,3 +148,91 @@ def next_up(title: str) -> tuple[bool, dict[str, Any] | str]:
         return False, f"Plex has no episodes of {match.get('title')}, sir."
     pick = next((e for e in episodes if not e.get("viewCount")), episodes[0])
     return True, {"key": pick["ratingKey"], "label": _episode_label(pick), "server": server}
+
+
+# --- Light sync (brain/light_tracks.py, brain/light_sync.py) -----------------
+
+
+def _movie_record(item: dict[str, Any]) -> dict[str, Any]:
+    """ratingKey, title, year, duration and the first media Part's key."""
+    part_key = ""
+    for media in item.get("Media") or []:
+        for part in (media or {}).get("Part") or []:
+            if part.get("key"):
+                part_key = str(part["key"])
+                break
+        if part_key:
+            break
+    return {"rating_key": str(item.get("ratingKey") or ""), "title": str(item.get("title") or ""),
+            "year": item.get("year"), "duration_ms": int(item.get("duration") or 0), "part_key": part_key}
+
+
+def _title_key(text: Any) -> str:
+    """"The Hunger Games" and "hunger games" match; so do "&" and "and"."""
+    words = _norm(text).replace(":", " ").replace("-", " ").split()
+    if words and words[0] in ("the", "a", "an"):
+        words = words[1:]
+    return " ".join(words)
+
+
+def movie(rating_key: str) -> tuple[bool, dict[str, Any] | str]:
+    """One movie's metadata with its media Part key (to read the file over HTTP)."""
+    ok, payload = _get(f"/library/metadata/{rating_key}")
+    if not ok:
+        return False, str(payload)
+    items = ((payload or {}).get("MediaContainer") or {}).get("Metadata") or []
+    if not items or items[0].get("type") != "movie":
+        return False, "That isn't a movie on Plex."
+    record = _movie_record(items[0])
+    if not record["part_key"]:
+        return False, f"Plex has no file for {record['title'] or 'that film'}."
+    return True, record
+
+
+def find_movie(title: str, year: int | None = None) -> tuple[bool, dict[str, Any] | str]:
+    """The Plex movie ``title`` names, best match first: the exact title
+    (ignoring a leading "The"), else one that starts with it, else Plex's
+    first movie hit. ``(False, reason)`` when there is none."""
+    ok, payload = _get("/hubs/search", {"query": title, "limit": 10})
+    if not ok:
+        return False, str(payload)
+    found = [m for hub in ((payload or {}).get("MediaContainer") or {}).get("Hub") or []
+             for m in hub.get("Metadata") or [] if m.get("type") == "movie"]
+    if year:
+        found = [m for m in found if not m.get("year") or abs(int(m["year"]) - int(year)) <= 1] or found
+    if not found:
+        return False, f"I can't find a film called {title} on Plex, sir."
+    wanted = _title_key(title)
+    match = (next((m for m in found if _title_key(m.get("title")) == wanted), None)
+             or next((m for m in found if _title_key(m.get("title")).startswith(wanted)), None)
+             or found[0])
+    return movie(str(match.get("ratingKey")))
+
+
+def part_url(part_key: str) -> str:
+    """The media file's URL on Plex, token included. Never log it."""
+    url, token = _config()
+    return f"{url}{part_key}?X-Plex-Token={token}"
+
+
+def sessions() -> tuple[bool, list[dict[str, Any]] | str]:
+    """Everything playing on Plex right now with its player: ratingKey,
+    title, type, viewOffset (ms), state (playing / paused / buffering) and
+    the player's title, product and machineIdentifier."""
+    ok, payload = _get("/status/sessions")
+    if not ok:
+        return False, str(payload)
+    out: list[dict[str, Any]] = []
+    for item in ((payload or {}).get("MediaContainer") or {}).get("Metadata") or []:
+        if not isinstance(item, dict):
+            continue
+        player = item.get("Player") or {}
+        out.append({
+            "rating_key": str(item.get("ratingKey") or ""), "title": str(item.get("title") or ""),
+            "year": item.get("year"), "type": str(item.get("type") or ""),
+            "view_offset_ms": int(item.get("viewOffset") or 0), "duration_ms": int(item.get("duration") or 0),
+            "state": str(player.get("state") or ""),
+            "player": {"title": str(player.get("title") or ""), "product": str(player.get("product") or ""),
+                       "machine_id": str(player.get("machineIdentifier") or "")},
+        })
+    return True, out

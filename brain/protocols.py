@@ -67,6 +67,10 @@ def _ids(key: str, default: str) -> list[str]:
 
 def engage() -> str:
     colour, off = _ids("BARN_DOOR_LIGHTS", _COLOUR), _ids("BARN_DOOR_OFF", _OFF)
+    # Light sync streams to the strips, which ignore HA (so the red) until
+    # released: let go first. It comes back on its own after stand-down.
+    from brain import light_sync
+    light_sync.release_for_barn_door()
     first = theme.current()["theme"] != "barnDoor"  # engaging twice must not snapshot the red
     home_assistant.call_service("automation", "turn_off", _FOLLOW)  # no rainbow ring mid-alert
     if first:

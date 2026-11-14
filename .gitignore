@@ -26,6 +26,8 @@ memory/client_tokens.json
 memory/schwab_token.json
 memory/theme.json
 memory/barn_door_effects.json
+memory/light_sync.json
+memory/light_tracks/
 tv/launcher/out/
 mac/JarvisMac/.build/
 tv/launcher/src/com/tvhome/Config.java

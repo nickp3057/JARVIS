@@ -463,9 +463,10 @@ struct JarvisAPIClient {
     /// calls `onChange` with Core's change counter for each `home` event.
     /// `onChange(seq, theme)`: every pulse carries the shared theme too.
     /// `look` moves with any theme pick or Experimenting switch on Core.
-    func streamHome(onChange: @escaping @MainActor (Int, String?, Double?, Bool?) -> Void) async throws {
-        // `camera` (is the iPad's lens wanted) is nil from a Core that predates it.
-        struct Pulse: Decodable { let seq: Int; let theme: String?; let look: Double?; let camera: Bool? }
+    func streamHome(onChange: @escaping @MainActor (Int, String?, Double?, Bool?, Int?) -> Void) async throws {
+        // `camera` (is the iPad's lens wanted) and `lightsync` (light sync's
+        // revision) are nil from a Core that predates them.
+        struct Pulse: Decodable { let seq: Int; let theme: String?; let look: Double?; let camera: Bool?; let lightsync: Int? }
         var request = request(path: "api/home/stream")
         request.timeoutInterval = 60  // Core sends a keep-alive every 15 s
         request.setValue("text/event-stream", forHTTPHeaderField: "Accept")
@@ -476,7 +477,7 @@ struct JarvisAPIClient {
                 try Task.checkCancellation()
                 guard line.hasPrefix("data: "), let data = line.dropFirst(6).data(using: .utf8),
                       let pulse = try? JSONDecoder().decode(Pulse.self, from: data) else { continue }
-                await onChange(pulse.seq, pulse.theme, pulse.look, pulse.camera)
+                await onChange(pulse.seq, pulse.theme, pulse.look, pulse.camera, pulse.lightsync)
             }
         } catch let error as URLError {
             throw JarvisAPIError.transport(error)
@@ -1209,6 +1210,28 @@ struct JarvisAPIClient {
     func setRoomNightVolume(_ level: Int) async throws -> RoomVolume {
         struct Body: Encodable { let level: Int }
         return try await postJSON(RoomVolume.self, path: "api/room/volume/night", body: Body(level: level))
+    }
+
+    // MARK: - Light sync
+
+    func lightSync() async throws -> LightSyncState {
+        try await getJSON(LightSyncState.self, path: "api/lightsync")
+    }
+
+    /// Any of: "start" / "stop", an intensity, the auto-in-movie-mode switch.
+    func setLightSync(action: String? = nil, intensity: String? = nil, auto: Bool? = nil) async throws -> LightSyncState {
+        struct Body: Encodable { let action: String?; let intensity: String?; let auto: Bool? }
+        return try await postJSON(LightSyncState.self, path: "api/lightsync",
+                                  body: Body(action: action, intensity: intensity, auto: auto))
+    }
+
+    /// Make a light sync for one film (Plex's ratingKey); Core alerts when it's ready.
+    func buildLightSync(ratingKey: String) async throws -> LightSyncState {
+        struct Body: Encodable {
+            let ratingKey: String
+            enum CodingKeys: String, CodingKey { case ratingKey = "rating_key" }
+        }
+        return try await postJSON(LightSyncState.self, path: "api/lightsync/build", body: Body(ratingKey: ratingKey))
     }
 
     func homeScenes() async throws -> HomeScenes {

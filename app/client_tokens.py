@@ -12,6 +12,8 @@ full access. Every other client gets its own token here, limited to scopes:
                    the TV's Settings page. Nothing else.
 - ``wake:write``   I'm up on the TV's wake screen (``POST /api/wake/awake``),
                    which also turns on the good-morning lights.
+- ``playback:write`` the TV's Plex position for light sync
+                   (``POST /api/tv/playback``). Nothing else.
 
 Only a SHA-256 of each token is stored (``memory/client_tokens.json``,
 gitignored); the token itself is printed once at creation. Manage from the
@@ -33,7 +35,7 @@ import sys
 import threading
 import time
 
-SCOPES = frozenset({"events:read", "status:read", "chat", "settings:write", "wake:write"})
+SCOPES = frozenset({"events:read", "status:read", "chat", "settings:write", "wake:write", "playback:write"})
 _FILE = Path(__file__).resolve().parents[1] / "memory" / "client_tokens.json"
 _lock = threading.Lock()
 

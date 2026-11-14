@@ -852,6 +852,7 @@ private struct MovieModeView: View {
                         model.toggle(bedroom, to: !on)
                     }
                 }
+                lightSyncMenu
                 wide("TV remote", symbol: "appletvremote.gen4", action: showRemote)
             }
         }
@@ -859,6 +860,62 @@ private struct MovieModeView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color.black.opacity(0.82).ignoresSafeArea())
         .sensoryFeedback(.impact(weight: .light), trigger: tick)
+        .onAppear { model.wantsLightSync = true }
+        .onDisappear { model.wantsLightSync = false }
+        // The home stream says when light sync changes; this is the fallback.
+        .task {
+            while !Task.isCancelled {
+                await model.refreshLightSync()
+                try? await Task.sleep(for: .seconds(model.homeStreamLive ? 30 : 5))
+            }
+        }
+    }
+
+    /// Light sync: start/stop, intensity, a track for this film, auto in movie mode.
+    private var lightSyncMenu: some View {
+        let state = model.lightSync.value
+        let running = state?.running == true
+        return Menu {
+            if let state {
+                if running {
+                    Button { model.setLightSync(action: "stop") } label: { Label("Stop", systemImage: "stop.fill") }
+                } else {
+                    Button { model.setLightSync(action: "start") } label: { Label("Start", systemImage: "play.fill") }
+                        .disabled(!state.hasTrack)
+                }
+                Section("Intensity") {
+                    ForEach(LightSyncState.intensities, id: \.self) { level in
+                        Button { model.setLightSync(intensity: level) } label: {
+                            if state.intensity == level {
+                                Label(level.capitalized, systemImage: "checkmark")
+                            } else {
+                                Text(level.capitalized)
+                            }
+                        }
+                    }
+                }
+                if let build = state.building {
+                    Button {} label: { Text("Building… \(build.percent)%") }.disabled(true)
+                } else if let film = state.film, !state.hasTrack, let key = film.ratingKey {
+                    Button { model.buildLightSync(ratingKey: key) } label: {
+                        Label("Make a light sync for \(film.title)", systemImage: "wand.and.stars")
+                    }
+                }
+                Toggle("Auto in movie mode", isOn: Binding(get: { state.auto },
+                                                           set: { model.setLightSync(auto: $0) }))
+            } else {
+                Button {} label: { Text("Light sync isn't answering") }.disabled(true)
+            }
+        } label: {
+            Label(running ? "Light sync on" : "Light sync", systemImage: "sparkles")
+                .font(.headline)
+                .frame(maxWidth: .infinity, minHeight: 56)
+                .foregroundStyle(running ? JarvisTheme.cyan.opacity(0.8) : .white.opacity(0.7))
+                .background(Color.white.opacity(0.06), in: .rect(cornerRadius: 16))
+        }
+        .menuStyle(.button)
+        .buttonStyle(CockpitButtonStyle())
+        .accessibilityLabel(running ? "Light sync, on" : "Light sync")
     }
 
     private func control(_ symbol: String, _ label: String, key: String,

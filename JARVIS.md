@@ -37,7 +37,7 @@ Pearson-Stark-Jarvis/
 ├── app/
 │   ├── main.py              Entry point. GUI / text / voice / server modes
 │   ├── companion_voice.py   Live transcript WebSocket, release-to-commit, streamed text/PCM
-│   ├── client_tokens.py     Scoped per-client tokens (events:read, status:read, chat, settings:write, wake:write) + CLI (create/grant/list/revoke); hashes in memory/client_tokens.json
+│   ├── client_tokens.py     Scoped per-client tokens (events:read, status:read, chat, settings:write, wake:write, playback:write) + CLI (create/grant/list/revoke); hashes in memory/client_tokens.json
 │   └── server.py            Authenticated HTTP bridge for the iOS companion (+ /api/clients/events SSE)
 │
 ├── mac/JarvisMac/           JARVIS for Mac: native SwiftUI client (Chat, Home, Alerts, Donna); SwiftPM, build.sh installs ~/Applications/JARVIS.app
@@ -57,6 +57,8 @@ Pearson-Stark-Jarvis/
 │   ├── memory_proposals.py  Reviewable staging for low-confidence inferred facts
 │   ├── habits.py            Usage-pattern log + derived "what you've noticed" digest
 │   ├── knowledge_vault.py   Authorized Obsidian search, profile mirror, capture + journal
+│   ├── light_tracks.py      Light sync tracks: one colour per 0.1 s of a film (ffmpeg over Plex HTTP), built one at a time on request; memory/light_tracks/
+│   ├── light_sync.py        Light sync player: Govee LAN razer stream to the strips, lamp colorwc, flash limiter, intensity, TV/Plex position clock, movie-mode arming
 │   ├── local_model.py       Optional OpenAI-compatible conversational fallback
 │   ├── maintenance.py       Recurring chores: countdowns + completion log (SQLite)
 │   ├── shopping.py          Shopping list over a saved-item catalog with photos (SQLite)
@@ -105,7 +107,7 @@ Pearson-Stark-Jarvis/
 │   ├── sonarr.py            find_series (lookup) / add_series (confirm-gated)
 │   ├── nas_host.py          NAS host-health snapshot (containers, RAID, SMART, volumes, temps): debounced alerts + incident-report lines
 │   ├── media_doctor.py      Traces one title request→arr→indexer→qBit→import→Plex; names the stalled stage; fixes via confirm_gate
-│   ├── plex.py              Minimal Plex client (title search + library rescan) for the media doctor
+│   ├── plex.py              Minimal Plex client (title search + library rescan) for the media doctor; movie/part lookup + sessions for light sync
 │   ├── schwab.py            Charles Schwab: OAuth (7-day login), holdings every 30 s, live prices over the streamer, place_order (only brain/trading.py calls it)
 │   └── spotify.py           Spotipy wrapper: play/pause/skip/volume/transfer/now-playing
 │
@@ -322,6 +324,21 @@ RMS envelope from ElevenLabs audio drives the orb in real time using a monotonic
   Rainbow") *are* in HA, as `select.<light>_diy_scene` dropdowns from the
   `govee` integration: a `BARN_DOOR_EFFECTS` entry keyed by that select is
   restored with `select.select_option`, and the pick showing at engage wins.
+
+### Light sync *(new 2026-11-14)*
+- `create_light_sync(title?, rebuild?)` — "create a light sync for Hunger
+  Games": finds the film on Plex (`plex.find_movie`, a leading "The"
+  ignored; no title = the film on the TV now) and builds its light track in
+  the background (`brain/light_tracks.py`, one build at a time, progress in
+  %). An info alert (pushed) says when it's ready; a failure alerts too. An
+  existing track is reported, not rebuilt, unless `rebuild`.
+- `light_sync(action, intensity?)` — `start` (the film playing now, movie
+  mode or not), `stop` (hand the room back to the Movie scene), `status`,
+  `list`; `intensity` subtle / medium / intense.
+- Voice quick command (room mic, no model): "start light sync", "stop light
+  sync", "light sync on/off" (`speech/quick_commands.py`). A start that can't
+  happen (no track, nothing playing) goes to the conversation so JARVIS says why.
+- See **Light sync** below for how it works.
 
 ### Voice ID *(new)*
 - `voice_id(action)` — Nick's voiceprint for the room mic (`brain/speaker_id.py`):
@@ -1121,6 +1138,17 @@ BARN_DOOR_EFFECTS=light.nick_strip_lights=Rainbow-A,light.desk_lights_2=Rainbow 
 #   Govee DIY scenes (Nick's own rainbows) go by their dropdown instead:
 #   BARN_DOOR_EFFECTS=select.nick_strip_lights_diy_scene=Real Rainbow,select.desk_lights_diy_scene=New Rainbow   (Nick's picks)
 TV_REMOTE_ENTITY=remote.nick_s_room_tv   # HA Android TV Remote entity for Nick's room TV
+LIGHT_SYNC=1                # light sync master switch (its monitor starts only when on; restart after turning it on)
+LIGHT_SYNC_STRIPS=10.0.0.125,10.0.0.221   # Govee razer-stream lights (strip H618E, desk H618A), LAN UDP 4003
+LIGHT_SYNC_LAMP=10.0.0.164  # Govee lamp (H6004), colorwc; blank = no lamp
+LIGHT_SYNC_SEGMENTS=15      # strip segments in the razer frame
+LIGHT_SYNC_LEAD_MS=0        # lights ahead of the picture (negative = later); measured 0-33 ms with 0
+LIGHT_SYNC_BLEND_MS=80      # fade between colours at Medium (Subtle x2.5, Intense x0.6)
+LIGHT_SYNC_LAMP_LEAD_MS=150 # the lamp reads ahead (it fades by itself)
+LIGHT_SYNC_STRIP_LEVEL=0.35 # strip/desk brightness at Medium (Subtle x0.6, Intense x1.6, max 1)
+LIGHT_SYNC_LAMP_LEVEL=0.6   # lamp brightness at Medium
+LIGHT_SYNC_PLEX_PLAYER=     # the room TV's Plex player (title, product or machineIdentifier); blank = the only movie playing
+LIGHT_SYNC_BUILD_THREADS=4  # ffmpeg decode threads for a track build (runs at nice 10)
 TV_MEDIA_PLAYERS=media_player.nicks_room_tv,media_player.nicks_room_tv_2,media_player.nick_s_room_tv,media_player.nicks_room_group,media_player.nick_s_room_display   # on/off for these goes to the remote
 SCHWAB_POLL_SECONDS=30      # holdings/cash refresh in market hours (prices stream live regardless)
 JARVIS_THEME=arc            # arc | hotRod | malibu | crimson | mark85 | spiderMan | mcqueen | experimenting (markIII/graphite/stealth retired): default look until someone picks one on the phone or TV (then memory/theme.json via /api/theme)
@@ -1285,6 +1313,7 @@ there, so edit files with a `sudo python3` one-shot or vi.
 
 ## Recently Shipped
 
+- **Light sync for movies (2026-11-14, companion 6.32 / 274, TV 9.7).** The room lights follow the film on the TV, built into Core from the light-sync prototype: `brain/light_tracks.py` (tracks on request: "create a light sync for Hunger Games", read over Plex HTTP with imageio-ffmpeg, alert when ready), `brain/light_sync.py` (Govee LAN razer stream + lamp, flash limiter, Subtle/Medium/Intense, TV/Plex clock, movie-mode arming, Barn Door release), runtime monitor `_light_sync_loop`, tools `create_light_sync` / `light_sync`, voice quick command, `GET/POST /api/lightsync`, `POST /api/lightsync/build`, `POST /api/tv/playback` (new client scope `playback:write`), the iPad movie screen's Light sync menu, and JARVIS TV's `PlaybackReport` (Plex's media session to Core). See **Light sync**. Tests: `tests/test_light_sync.py`. Not tried live: anything with real lights, a real build on the Surface, the TV report.
 - **Money and voice-gate safety fixes (2026-11-14).** From a review of the trading and voice paths: (1) the phone's hold-to-talk is spoken style only and stays in its own session; only `speech/room_voice.py` passes `room=True` to `runtime.respond` / `respond_streaming`, so phone proposals no longer land in the room session. (2) A Schwab timeout or connection reset after sending is never "refused, nothing was bought": `place_order` raises `OrderOutcomeUnknown`, the order is journaled `unknown` and counted toward the day cap, a matching order is looked up (`schwab.recent_orders`) and Nick is told to check before retrying; a missing Location header finds the id the same way instead of journaling "?". (3) While a "yes" is armed in the room, "cancel" / "never mind" / "forget it" / "nothing" reaches the confirm gate instead of the stop quick answer, a yes or code goes to the model turn, and any other utterance disarms it (`confirm_gate.reply_kind`). (4) Money by room voice needs a positive voiceprint match: `voice_trust.may_move_money`, `MONEY_TOOLS` (`place_trade`, `decide_investment`) and money proposals (`propose(..., money=True)`) held for the app when voice ID is off or nothing is enrolled. (5) The cash-only check counts only this account's orders, only the filled part of open sells, and subtracts open buys. (6) A Schwab hub hiccup while logged out keeps `required_since`, so no second "Schwab needs you" alert. (7) `speaker_id` uses an RLock (enrolment with no model deadlocked). (8) A guest's goodnight skips the alarm question, a guest's good morning isn't the routine, and a guest can't end the wake-up ring. (9) `confirm_gate`'s docstring describes `act` vs `propose`. Tests: `tests/test_money_voice_safety.py`, `tests/test_trading.py`. Not tried live: a real Schwab timeout, and voice ID on with a guest in the room.
 - **Reliability pass (2026-11-14).** Fixes from a code review, each with a regression test. Barn Door: `stand_down` does nothing unless Barn Door is engaged (theme `barnDoor`), so it no longer replays an old room snapshot or drops the current theme. Monitors: device watch, home poll/websocket snapshot, calendar, Schwab, email triage, weather, downloads and the dead-man ping now catch and log a failed pass instead of silently ending their thread; interval settings read through `_env_float` (a garbled value falls back to the default). Email triage holds its state lock only around load/mutate/save (Gmail and model calls run outside it, decisions are re-checked against fresh state, so `restore_email` and unsubscribes no longer wait minutes); the action log rotates to 90 days / 20k lines atomically. Temporary 4K: a film already in the 4K Radarr before the request is marked `adopted` and expiry only stops tracking it (never deletes its files; entries without the field are treated as JARVIS-added, as before); an expiry delete waits while Plex is playing that film, or while Plex can't be asked, for at most 12 h past expiry (`plex.playing_movies`); one bad entry no longer aborts the pass. Wake alarm: a snooze lives in its own `snooze` key (no longer overwrites a pending one-off; old files read fine) and every read-modify-write holds the lock. Room: the wake-up backup ring plays at `ROOM_ALARM_VOLUME` (8) instead of possibly the night level; `room_volume` saves atomically. Investing: no review/drop check/playground on NYSE holidays (built-in 2026-2027 list in `brain/investing.py`, extend yearly); a job that fails without doing anything is un-stamped and may retry once the same day (a playground session that already traded never re-runs). Memory bounds: reflector recent-turn buffers and the agent's per-session tool context keep the newest 50 sessions; runtime reminder/calendar/proactive dedupe keys are capped. Read-live: ElevenLabs key/voice/model/speed and `WHISPER_MODEL`/`DEVICE`/`COMPUTE_TYPE`/`BEAM_SIZE` are read per use (a changed Whisper model reloads on the next utterance).
 - **Local Piper voice behind one setting (2026-11-14).** Core-side wiring for the Bettany voice being trained on Nick's PC: `TTS_PROVIDER=piper` + `PIPER_VOICE_MODEL=<path>.onnx` makes a local Piper voice JARVIS's main voice, on the room speaker and the phone, with ElevenLabs as the fallback; nothing changes while `TTS_PROVIDER` is unset/`elevenlabs`. `speech/piper_voice.py` loads `PiperVoice` once in-process and caches it by path (the old fallback ran `python -m piper` and reloaded the model every line), supports piper-tts 1.2.x (`synthesize_stream_raw`) and 1.3+ (`synthesize` + `SynthesisConfig`), and reads the knobs `PIPER_LENGTH_SCALE`, `PIPER_NOISE_SCALE`, `PIPER_NOISE_W`, `PIPER_SPEAKER_ID` live. Room: `tts._stream_piper` pipes each sentence's PCM into `aplay -t raw` at the model's own rate as soon as it is synthesized (Linux; `TTS_STREAM_PLAYBACK=0` and the GUI orb use a whole-clip WAV instead); barge-in, hush and `stop_playback` stop it like the ElevenLabs stream, `cache=True`/`"auto"` lines get their own cache entries per model and knobs, and audio from the fallback voice is never cached under Piper's key. Phone: `remote_voice.pcm_stream` sends the same voice, resampled to 22.05 kHz if needed. If Piper can't speak a line (piper-tts missing, model or config missing, synthesis error before the first audio) the line goes to ElevenLabs and the reason is logged once (`Piper voice unavailable, using the fallback voice: ...`); a failure mid-sentence is never re-spoken in another voice. Each line logs `4. TTS first audio (Piper stream): N ms` at INFO. Test by ear: `python -m speech.tts --say "Good evening, sir." --provider piper --model voices/en_GB-alan-medium.onnx` (prints ms to first audio; `--wav out.wav` writes a file instead). The ElevenLabs-mode Piper fallback also tries the in-process voice first, then the old CLI. piper-tts is not in `requirements.txt` and not in the Mac venv; install it on the Surface (`.venv/bin/pip install piper-tts`). Not done: the optional light EQ (hook noted in `piper_voice.py`). Tests: `tests/test_piper_voice.py`.
@@ -2850,6 +2879,73 @@ mac/JarvisMac/build.sh --open
 
 ---
 
+## Light sync
+
+The room lights follow the film on the TV: the Govee strip and desk lights
+(LAN "razer" streaming, UDP 4003, 30 frames a second), and the lamp
+(`colorwc`, at most 5 a second, only when its colour moves). Ported from the
+prototype in `~/Developer/projects/light-sync` (2026-11-09).
+
+- **Tracks, on request only** (`brain/light_tracks.py`). "Create a light sync
+  for X" reads the film's file over HTTP from Plex (the media Part URL with
+  the token, never logged; the Surface has no NAS mount) through ffmpeg from
+  `imageio-ffmpeg` (`shutil.which("ffmpeg")` as fallback), `-hwaccel auto`,
+  10 fps scaled to 64x27, no audio/subtitles, nice 10. Each 0.1 s becomes one
+  colour: the biggest vivid hue region (18 hue bins, neighbours count half),
+  warm white when nothing is vivid, brightness from each pixel's brightest
+  channel (luma made blue scenes black). Stored as
+  `memory/light_tracks/<ratingKey>.npy` (uint8 Nx3, written atomically) plus
+  `index.json`. One build at a time, progress %, cancellable; alerts when
+  ready or failed. Prototype: Cars 2 (106 min) took ~3 min on the Mac with
+  VideoToolbox and came to 190 KB; the Surface decodes on the CPU, so expect
+  longer.
+- **When it runs** (`brain/light_sync.py`, runtime monitor
+  `_light_sync_loop`, ~1 s while armed, 5 s otherwise). Movie mode = the
+  room's current scene is `scene.movie` (the same `current` as
+  `/api/home/scenes`, which the iPad uses). In movie mode, a film with a
+  track on the room TV's Plex starts the sync (auto switch on); no track,
+  nothing happens. Playback stopping, a film with no track, the end of movie
+  mode or Barn Door release the strips (DISABLE) and, while movie mode is
+  still on (and not for Barn Door), re-run `scene.movie`. Pause holds the
+  colour. Barn Door wins: `protocols.engage` releases the strips before it
+  turns them red, and the sync comes back after stand-down if it still
+  applies. A manual start (iPad, tool, voice) syncs the playing film even
+  outside movie mode, until that film ends; a manual stop holds for that film.
+  While syncing, HA's `automation.fan_light_follows_strip` is paused (as Barn
+  Door does) and turned back on afterwards (unless Barn Door is up; its
+  stand-down does it). Core shutting down releases the strips.
+- **Position**, best first: JARVIS TV's report (`POST /api/tv/playback`,
+  scope `playback:write`: Plex's media session, every second while playing,
+  every 5 s paused, on every change; fresh for 3 s, 15 s when paused), else
+  Plex `/status/sessions` for `LIGHT_SYNC_PLEX_PLAYER` (else the only movie
+  playing), polled ~1 s while armed; Plex's coarse viewOffset only re-anchors
+  the clock when it disagrees by more than 2 s.
+- **Rules from the prototype, kept:** the razer ENABLE blips the strip for one
+  frame, so it's re-sent only on a hard cut (at most every 20 s) or after a
+  resume. The strips stay in streaming mode, ignoring HA, until they get
+  DISABLE (`bb 00 01 b1 00` + xor, `uwABsQAL`); every stop path sends it 3x
+  (stop, player crash, Barn Door, shutdown, atexit). Measured with a camera
+  and a flash test video: strip vs TV within 0-33 ms at lead 0; the lamp
+  starts on the same frame but fades ~0.1 s up / ~0.4 s down, hence the
+  150 ms lamp lead.
+- **Flash limiter** (new): colour may change fast, but at most 3 big
+  brightness jumps (a one-direction move of more than 25% of full) in any
+  second, 2 at Subtle; over budget a run is held to a small step, keeping the hue.
+- **Intensity** (`memory/light_sync.json`, with the auto switch; the iPad
+  sets both): Medium = the prototype's tuned values (strip 0.35, desk 0.35,
+  lamp 0.6, blend 80 ms); Subtle dimmer and softer; Intense brighter and snappier.
+- **API** (companion token): `GET /api/lightsync` (enabled, auto, intensity,
+  running, paused, movie_mode, film, has_track, building {title, percent},
+  tracks, reason), `POST /api/lightsync {action: start|stop, intensity, auto}`
+  (returns the state + `message`), `POST /api/lightsync/build {title |
+  rating_key, rebuild}`. `/api/home/stream` events carry `lightsync` (a
+  revision) so the iPad refetches when it moves.
+- **iPad**: the movie screen's bottom row has a Light sync menu between
+  Bedroom light and TV remote: Start / Stop, Subtle / Medium / Intense
+  (checkmarked), "Make a light sync for <film>" when the playing film has
+  none ("Building… N%" while one builds), Auto in movie mode.
+- Not yet: the fan ring (Tuya, cloud, slow), see FUTURE_SESSIONS.md.
+
 ## JARVIS TV
 
 Full working notes: `tv/README.md` (also on the TV at `/sdcard/JARVIS_TV.md`).
@@ -2873,10 +2969,11 @@ TV=10.0.0.46:5555 tv/provision.sh         # Nick, at home: scoped token + Core U
   constructors javac 24 writes for inner (non-static) classes, so nested
   classes in the launcher are static.
 - The token is `nicks-room-tv` with `events:read status:read chat
-  settings:write wake:write`: it can read, talk to JARVIS (his confirmation rules
-  apply), set the shared theme and press I'm up (good-morning lights), nothing
+  settings:write wake:write playback:write`: it can read, talk to JARVIS (his confirmation rules
+  apply), set the shared theme, press I'm up (good-morning lights) and report
+  Plex's position for light sync (9.7, `PlaybackReport`), nothing
   else. Add a scope without re-provisioning:
-  `.venv/bin/python -m app.client_tokens grant nicks-room-tv wake:write`. Until provisioned, the footer reads "NOT LINKED
+  `.venv/bin/python -m app.client_tokens grant nicks-room-tv playback:write`. Until provisioned, the footer reads "NOT LINKED
   TO CORE".
 - TCL quirks: reinstalling resets `appops APP_AUTO_START` (deploy.sh re-applies
   it); the firmware restores some removed apps every boot (BootCleanup removes

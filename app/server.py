@@ -1278,14 +1278,18 @@ async def home_stream(request: Request, _: None = _status_read) -> StreamingResp
     iPad refetch /api/theme at once (their 10 s poll pauses while this
     stream is up). ``camera`` is whether the iPad's lens is wanted
     (brain/camera.py): the iPad follows it here instead of asking
-    /api/camera/status every 1.5 s, and starts or stops within a beat."""
+    /api/camera/status every 1.5 s, and starts or stops within a beat.
+    ``lightsync`` moves whenever light sync's state does (running, the film,
+    intensity, a build's progress): the iPad's movie screen refetches
+    /api/lightsync then."""
     await asyncio.to_thread(runtime)  # the HA live feed runs on the runtime
     from brain import camera, theme
 
     def pulse() -> dict[str, object]:
+        from brain import light_sync
         shared = theme.current()
         return {"seq": status_hub.home_seq(), "theme": shared["theme"], "look": shared["revision"],
-                "camera": camera.wanted()}
+                "camera": camera.wanted(), "lightsync": light_sync.controller.revision()}
 
     async def events():
         state = pulse()
@@ -1530,6 +1534,93 @@ def home_scene_activate(request: SceneRequest, _: None = Depends(authorize)) -> 
         return status_hub.activate_scene(request.entity_id, toggle=request.toggle)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+# --- Light sync (brain/light_sync.py, brain/light_tracks.py) ----------------
+
+
+def _lightsync_state() -> dict[str, object]:
+    from brain import light_sync
+    sync = light_sync.controller
+    if not sync.armed() and not sync.clock.tv_fresh() and sync.now() - sync.clock.plex_polled_at > 3:
+        sync.poll_plex()  # the monitor isn't asking Plex: name the film for the menu now
+    return sync.status()
+
+
+@app.get("/api/lightsync")
+def lightsync_get(_: None = Depends(authorize)) -> dict[str, object]:
+    """The iPad's Light sync menu: auto, intensity, running, the film on the
+    TV and whether it has a track, the build in progress, every track."""
+    return _lightsync_state()
+
+
+class LightSyncRequest(BaseModel):
+    action: str | None = Field(default=None, pattern="^(start|stop)$")
+    intensity: str | None = Field(default=None, pattern="^(subtle|medium|intense)$")
+    auto: bool | None = None
+
+
+@app.post("/api/lightsync")
+def lightsync_set(request: LightSyncRequest, _: None = Depends(authorize)) -> dict[str, object]:
+    """Start / stop, intensity, and the auto-in-movie-mode switch. ``message``
+    is JARVIS's answer to a start or stop (why it didn't, when it didn't)."""
+    from brain import light_sync
+    sync = light_sync.controller
+    if request.action is None and request.intensity is None and request.auto is None:
+        raise HTTPException(status_code=422, detail="Send an action, intensity or auto.")
+    message = ""
+    if request.intensity is not None:
+        sync.set_intensity(request.intensity)
+    if request.auto is not None:
+        sync.set_auto(request.auto)
+    if request.action == "start":
+        message = sync.start()[1]
+    elif request.action == "stop":
+        message = sync.stop()[1]
+    return {**_lightsync_state(), "message": message}
+
+
+class LightSyncBuildRequest(BaseModel):
+    title: str | None = Field(default=None, min_length=1, max_length=200)
+    rating_key: str | None = Field(default=None, pattern=r"^\d{1,12}$")
+    rebuild: bool = False
+
+
+@app.post("/api/lightsync/build")
+def lightsync_build(request: LightSyncBuildRequest, _: None = Depends(authorize)) -> dict[str, object]:
+    """Make one film's light track in the background (an alert says when it's ready)."""
+    from brain import light_tracks
+    from integrations import plex
+    if not (request.title or request.rating_key):
+        raise HTTPException(status_code=422, detail="Send a title or rating_key.")
+    ok, film = plex.movie(request.rating_key) if request.rating_key else plex.find_movie(request.title or "")
+    if not ok:
+        return {**_lightsync_state(), "started": False, "message": str(film)}
+    started, message = light_tracks.start_build(film, rebuild=request.rebuild)
+    return {**_lightsync_state(), "started": started, "message": message}
+
+
+class TVPlaybackReport(BaseModel):
+    package: str = Field(default="", max_length=120)
+    state: str = Field(pattern="^(playing|paused|buffering|stopped)$")
+    position_ms: int = Field(ge=0, le=48 * 3600 * 1000)
+    speed: float = Field(default=1.0, ge=0, le=4)
+    title: str = Field(default="", max_length=300)
+    rating_key: str | None = Field(default=None, max_length=40)
+
+
+@app.post("/api/tv/playback")
+def tv_playback(report: TVPlaybackReport, _: None = Depends(require_scope("playback:write"))) -> dict[str, object]:
+    """The room TV's Plex position (JARVIS TV, every second while playing and on
+    every change), advanced to when it was sent; Core stamps the arrival.
+    Only Plex counts: another app's media session is ignored."""
+    if report.package and report.package != "com.plexapp.android":
+        return {"ok": True, "used": False}
+    from brain import light_sync
+    key = report.rating_key if report.rating_key and report.rating_key.isdigit() else ""
+    light_sync.controller.tv_report(state=report.state, position_ms=report.position_ms, speed=report.speed,
+                                    title=report.title, rating_key=key)
+    return {"ok": True, "used": True}
 
 
 # --- Quick actions ----------------------------------------------------------

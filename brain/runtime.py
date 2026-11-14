@@ -222,6 +222,10 @@ class JarvisRuntime:
         from brain import self_repair
         self_repair.set_notifier(lambda title, detail, severity: self.raise_alert(
             "repair", title, detail, source="self-repair", severity=severity))
+        from brain import light_tracks
+        light_tracks.set_notifier(lambda title, detail, severity: self.raise_alert(
+            "light_sync", title, detail, source="light-sync", severity=severity,
+            dedupe_key=f"light_sync:{title}:{detail}"))
         log.info("Runtime online. brain=%s", self.brain_label)
         self.record_event(
             kind="system",
@@ -322,6 +326,9 @@ class JarvisRuntime:
         if _monitor_on("TEMP_4K_MONITOR_ENABLED") and temp_4k.configured() and not getattr(self, "_temp_4k_started", False):
             self._temp_4k_started = True
             threading.Thread(target=self._temp_4k_monitor_loop, daemon=True).start()
+        if _monitor_on("LIGHT_SYNC") and not getattr(self, "_light_sync_started", False):
+            self._light_sync_started = True
+            threading.Thread(target=self._light_sync_loop, daemon=True).start()
         if os.getenv("JARVIS_HEALTHCHECKS_URL", "").strip() and not self._deadman_started:
             self._deadman_started = True
             threading.Thread(target=self._deadman_loop, daemon=True).start()
@@ -485,6 +492,22 @@ class JarvisRuntime:
             if self._stop_monitors.wait(_env_float("TEMP_4K_INTERVAL_S", 300.0, 30.0)):
                 break
 
+    def _light_sync_loop(self) -> None:
+        """Light sync (brain/light_sync.py): in movie mode, a film with a light
+        track on the room TV's Plex syncs the strips, desk lights and lamp;
+        everything else (stop, no track, movie mode over, Barn Door) hands the
+        room back. About once a second while armed, every 5 s otherwise.
+        ``LIGHT_SYNC=0`` keeps it from starting (restart after changing it)."""
+        from brain import light_sync
+        while not self._stop_monitors.is_set():
+            try:
+                delay = light_sync.monitor_pass()
+            except Exception:  # noqa: BLE001 - a bad pass must not end the loop
+                log.exception("Light sync pass failed")
+                delay = 5.0
+            if self._stop_monitors.wait(delay):
+                break
+
     def _nas_host_monitor_loop(self) -> None:
         """Containers, RAID, SMART, volumes and temperatures from the NAS's
         host-health snapshot, read through the read-only status key.
@@ -552,6 +575,8 @@ class JarvisRuntime:
     def stop_monitors(self) -> None:
         """Ask background monitors to stop."""
         self._stop_monitors.set()
+        from brain import light_sync
+        light_sync.shutdown()  # the strips stay in streaming mode until told
         from integrations import schwab
         schwab.linked_event.set()  # its monitor waits on this, not on _stop_monitors
         memory_extractor.remove_listener(self._on_memory_change)

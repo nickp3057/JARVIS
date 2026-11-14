@@ -38,6 +38,11 @@ final class HubViewModel: ObservableObject {
     /// Schwab, read-only. Polled every tick: Core streams prices, so it moves.
     @Published var portfolio = Section<Portfolio>()
     @Published var scenes = Section<HomeScenes>()
+    /// Light sync, for the iPad's movie screen (fetched while it shows, and
+    /// whenever the home stream says it changed).
+    @Published var lightSync = Section<LightSyncState>()
+    /// The movie screen is showing: only then is light sync worth fetching.
+    var wantsLightSync = false
     /// Weather and the agenda, for the Mac's Desk (fetched only while it shows).
     @Published var glance = Section<Glance>()
     var wantsGlance = false
@@ -431,6 +436,48 @@ final class HubViewModel: ObservableObject {
         }
     }
 
+    // MARK: - Light sync
+
+    private var lastLightSyncRevision: Int?
+
+    func refreshLightSync() async {
+        await load(\.lightSync) { try await $0.lightSync() }
+    }
+
+    private func lightSyncChanged(_ revision: Int?) {
+        guard let revision, revision != lastLightSyncRevision else { return }
+        lastLightSyncRevision = revision
+        guard wantsLightSync else { return }
+        Task { await refreshLightSync() }
+    }
+
+    /// Start / stop, intensity or the auto switch; Core's answer replaces the state.
+    func setLightSync(action: String? = nil, intensity: String? = nil, auto: Bool? = nil) {
+        Task {
+            do {
+                let state = try await client().setLightSync(action: action, intensity: intensity, auto: auto)
+                lightSync.value = state
+                if let message = state.message, !message.isEmpty, action == "start", !state.running {
+                    actionError = message
+                }
+            } catch {
+                actionError = "Light sync didn't answer: \(error.localizedDescription)"
+            }
+        }
+    }
+
+    func buildLightSync(ratingKey: String) {
+        Task {
+            do {
+                let state = try await client().buildLightSync(ratingKey: ratingKey)
+                lightSync.value = state
+                if state.building == nil, let message = state.message, !message.isEmpty { actionError = message }
+            } catch {
+                actionError = "Light sync didn't answer: \(error.localizedDescription)"
+            }
+        }
+    }
+
     // MARK: - Shopping list
 
     /// An older Core without /api/shopping leaves this nil (the tile hides).
@@ -744,8 +791,9 @@ final class HubViewModel: ObservableObject {
             while !Task.isCancelled {
                 guard let client = try? self?.client() else { return }
                 self?.lastHomeSeq = nil  // a reconnect's first event may hide a missed change
-                try? await client.streamHome { [weak self] seq, theme, look, camera in
+                try? await client.streamHome { [weak self] seq, theme, look, camera, lightsync in
                     self?.homeChanged(seq, theme: theme, look: look, camera: camera)
+                    self?.lightSyncChanged(lightsync)
                 }
                 self?.homeStreamLive = false
                 self?.cameraWanted = nil

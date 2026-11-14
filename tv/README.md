@@ -27,7 +27,8 @@ every deploy, so edit the repo copy, not the TV's.
 - **Data**: JARVIS Core on the Optiplex (`http://10.0.0.81:8000`, DHCP too;
   the TV rescans its /24 if Core moves). `GET /api/glance` every minute and the
   live alert stream `GET /api/clients/events` (SSE). Token `nicks-room-tv`,
-  scopes `events:read status:read chat` (never the admin token). Set by
+  scopes `events:read status:read chat settings:write wake:write
+  playback:write` (never the admin token). Set by
   `tv/provision.sh` (run by Nick: SSH writes to the Optiplex need him).
 - **Theme** (`ThemeStream`): follows Core's `/api/home/stream`, whose events
   carry the shared theme, so Barn Door turns the screen red at once (the 5 s
@@ -44,6 +45,14 @@ every deploy, so edit the repo copy, not the TV's.
   logcat, sends the rest to Core `POST /chat`, shows the reply as a banner
   (read aloud only if turned on in Settings), and backs out of any Google app
   the Assistant opened. Other speech that names a Plex title opens it in Plex.
+- **Light sync** (`PlaybackReport`, 9.7): started by `RemoteBridgeService`,
+  it watches Plex's media session (same MediaListener grant as Music:
+  active-sessions listener + `MediaController.Callback`) and posts
+  `POST /api/tv/playback` {package, state, position_ms advanced to the send
+  time, speed, title, rating_key if the session's media id is numeric} on
+  every change, every 1 s while playing and every 5 s while paused; "stopped"
+  once when Plex goes. Core's light sync uses it as its clock. A 401/403 (token
+  without `playback:write`) backs off 5 min, Core down 30 s; no spam.
 - **Music** (`Music`, `MediaListener`): Spotify's media session (read and
   controlled via an enabled NotificationListener; no Spotify API keys).
 - **Wake-up** (`Wake`, `WakeActivity`): Core keeps a weekly schedule (its

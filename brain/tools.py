@@ -745,6 +745,63 @@ def _tool_barn_door_protocol(args: dict[str, Any]) -> str:
     return protocols.engage()
 
 
+def _tool_create_light_sync(args: dict[str, Any]) -> str:
+    """Build one film's light track in the background (brain/light_tracks.py)."""
+    from brain import light_sync, light_tracks
+    from integrations import plex
+    if not plex.is_configured():
+        return "I can't reach Plex to find the film, sir (PLEX_URL / PLEX_TOKEN aren't set)."
+    title = str(args.get("title") or "").strip()
+    if title:
+        ok, film = plex.find_movie(title)
+    else:  # "make one for this": the film on the TV now
+        light_sync.controller.poll_plex()
+        playing = light_sync.controller.clock.current()
+        if playing is None or not playing.rating_key:
+            return "Which film, sir? Nothing's playing on the TV."
+        ok, film = plex.movie(playing.rating_key)
+    if not ok:
+        return str(film)
+    _, message = light_tracks.start_build(film, rebuild=bool(args.get("rebuild")))
+    return message
+
+
+def _tool_light_sync(args: dict[str, Any]) -> str:
+    """Start, stop, check or list light sync; optionally set the intensity."""
+    from brain import light_sync, light_tracks
+    sync = light_sync.controller
+    action = str(args.get("action") or "status").lower()
+    said = []
+    intensity = str(args.get("intensity") or "").strip().lower()
+    if intensity:
+        try:
+            sync.set_intensity(intensity)
+        except ValueError as exc:
+            return f"{exc}, sir. Nothing was changed."
+        said.append(f"Intensity set to {intensity}.")
+    if action == "start":
+        said.append(sync.start()[1])
+    elif action == "stop":
+        said.append(sync.stop()[1])
+    elif action == "list":
+        tracks = light_tracks.listing()
+        said.append("Light syncs ready: " + "; ".join(
+            f"{t.get('title')} ({t.get('year')})" if t.get("year") else str(t.get("title")) for t in tracks)
+            + "." if tracks else "There are no light syncs yet, sir.")
+    elif not said or action == "status":
+        state = sync.status()
+        parts = [f"Light sync is {'running for ' + str(state['running_title']) if state['running'] else 'off'}"
+                 f"{' (paused)' if state['paused'] else ''}, intensity {state['intensity']}, "
+                 f"auto in movie mode {'on' if state['auto'] else 'off'}."]
+        if not state["running"] and state["reason"]:
+            parts.append(state["reason"])
+        if state["building"]:
+            b = state["building"]
+            parts.append(f"Building {b['title']}: {b['percent']}%.")
+        said.append(" ".join(parts))
+    return " ".join(said)
+
+
 def _tool_voice_id(args: dict[str, Any]) -> str:
     from brain import speaker_id
     action = str(args.get("action", "status")).lower()
@@ -2230,6 +2287,40 @@ _CUSTOM_TOOLS: list[dict[str, Any]] = [
             "properties": {"action": {"type": "string", "enum": ["engage", "stand_down"]}},
         },
     },
+    # --- Light sync ------------------------------------------------------
+    {
+        "name": "create_light_sync",
+        "description": (
+            "Make a light sync for one film on Plex ('create a light sync for Hunger Games'): JARVIS "
+            "reads the film in the background (a few minutes to half an hour) and alerts Nick when it's "
+            "ready. After that the room lights follow that film whenever he plays it in movie mode. "
+            "Omit title for the film playing on the TV now. If it already has one, say so; rebuild only "
+            "when he asks to make it again."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "title": {"type": "string", "description": "The film's title, e.g. 'The Hunger Games'."},
+                "rebuild": {"type": "boolean", "description": "Make it again even if one exists."},
+            },
+        },
+    },
+    {
+        "name": "light_sync",
+        "description": (
+            "Light sync: the strip, desk lights and lamp follow the film on the room TV. It starts by "
+            "itself in movie mode for films that have a light sync. start: sync the film playing now "
+            "(even outside movie mode); stop: hand the lights back to the Movie scene; status; list: "
+            "which films have one. intensity (subtle / medium / intense) can go with any action."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "action": {"type": "string", "enum": ["start", "stop", "status", "list"]},
+                "intensity": {"type": "string", "enum": ["subtle", "medium", "intense"]},
+            },
+        },
+    },
     # --- Voice ID ---------------------------------------------------------
     {
         "name": "voice_id",
@@ -3032,6 +3123,8 @@ _DISPATCH: dict[str, Callable[[dict[str, Any]], str]] = {
     "kill_camera": _tool_kill_camera,
     "barn_door_protocol": _tool_barn_door_protocol,
     "voice_id": _tool_voice_id,
+    "create_light_sync": _tool_create_light_sync,
+    "light_sync": _tool_light_sync,
     "cancel_wake_up": _tool_cancel_wake_up,
     "watch_price": _tool_watch_price,
     "list_price_watches": _tool_list_price_watches,

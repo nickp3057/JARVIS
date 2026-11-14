@@ -117,10 +117,12 @@ class MonitorSwitchTests(unittest.TestCase):
 
     def test_defaults_and_switches(self) -> None:
         with patch.dict(os.environ, {"HOME_MONITOR_ENABLED": "true", "WEATHER_MONITOR_ENABLED": "off",
-                                     "PRICE_WATCH_MONITOR_ENABLED": "0", "JARVIS_HEALTHCHECKS_URL": ""}):
+                                     "PRICE_WATCH_MONITOR_ENABLED": "0", "JARVIS_HEALTHCHECKS_URL": "",
+                                     "LIGHT_SYNC": "1"}):
             self.rt.start_monitors()
             self.rt.start_monitors()  # a second call starts nothing twice
-        self.assertEqual(sorted(self.started), ["_home_monitor_entry", "_wake_monitor_loop", "_watch_monitor_loop"])
+        self.assertEqual(sorted(self.started), ["_home_monitor_entry", "_light_sync_loop", "_wake_monitor_loop",
+                                                "_watch_monitor_loop"])
 
     def test_configured_integrations_get_their_monitors(self) -> None:
         patch("integrations.google_calendar.is_configured", return_value=True).start()
@@ -130,7 +132,7 @@ class MonitorSwitchTests(unittest.TestCase):
         patch("integrations.temp_4k.configured", return_value=True).start()
         with patch.dict(os.environ, {"HOME_MONITOR_ENABLED": "no", "WEATHER_MONITOR_ENABLED": "no",
                                      "PRICE_WATCH_MONITOR_ENABLED": "no", "WATCH_MONITOR_ENABLED": "no",
-                                     "JARVIS_HEALTHCHECKS_URL": "https://hc"}):
+                                     "JARVIS_HEALTHCHECKS_URL": "https://hc", "LIGHT_SYNC": "0"}):
             self.rt.start_monitors()
         self.assertEqual(sorted(self.started), ["_calendar_monitor_loop", "_deadman_loop",
                                                 "_download_monitor_loop", "_email_triage_loop",
