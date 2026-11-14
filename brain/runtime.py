@@ -525,12 +525,15 @@ class JarvisRuntime:
         if callable(warm):
             warm()
 
-    def respond(self, user_input: str, *, spoken: bool = False) -> str:
+    def respond(self, user_input: str, *, spoken: bool = False, room: bool = False) -> str:
         """Run one conversational turn through the best available brain.
-        ``spoken``: the reply goes to a speaker (the room voice), so short."""
+        ``spoken``: the reply goes to a speaker, so short (style only).
+        ``room``: the turn belongs to the room voice's own conversation; only
+        ``speech/room_voice.py`` passes it (the phone's hold-to-talk is
+        spoken but stays in its own session, with its own proposals)."""
         task_id = self.start_task("Reasoning", user_input.strip())
         with self._turn_lock:
-            if spoken:
+            if room:
                 if not session_exists(self.room_session_id):
                     self.room_session_id = start_new_session()
                 self.agent.switch_session(self.room_session_id)
@@ -553,12 +556,13 @@ class JarvisRuntime:
             )
         return reply
 
-    def respond_streaming(self, user_input: str, *, spoken: bool = False) -> Iterator[str]:
+    def respond_streaming(self, user_input: str, *, spoken: bool = False,
+                          room: bool = False) -> Iterator[str]:
         """Streaming twin of respond() that yields reply fragments for TTS."""
         task_id = self.start_task("Reasoning", user_input.strip())
         try:
             with self._turn_lock:
-                if spoken:  # the room voice's own conversation, as in respond()
+                if room:  # the room voice's own conversation, as in respond()
                     if not session_exists(self.room_session_id):
                         self.room_session_id = start_new_session()
                     self.agent.switch_session(self.room_session_id)
@@ -611,6 +615,8 @@ class JarvisRuntime:
             token = request_context.set(request_id)
             try:
                 self.agent.switch_session(session_id)
+                # Spoken style only: the caller's session (the phone's hold-to-talk),
+                # never the room voice's, so its confirm-gate proposals stay here.
                 yield from self.respond_streaming(user_input, **({"spoken": True} if spoken else {}))
             finally:
                 request_context.reset(token)

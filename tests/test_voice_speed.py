@@ -140,7 +140,7 @@ class RoomVoiceSpeedTests(unittest.TestCase):
                 patch.object(quick_commands, "run", return_value=None), \
                 patch("brain.voice_shortcuts.lookup", return_value=None):
             runtime = Mock(last_used_tools=False)
-            runtime.respond.side_effect = lambda text, spoken: seen.append(voice_trust.current().name) or "Done, sir."
+            runtime.respond.side_effect = lambda text, spoken, room: seen.append(voice_trust.current().name) or "Done, sir."
             self.voice(SlowCloud(), runtime)._handle(self.audio)
         self.assertEqual(order, ["id done first"])
         self.assertEqual(seen, ["guest"])  # the verdict still gates the turn
@@ -153,7 +153,7 @@ class RoomVoiceSpeedTests(unittest.TestCase):
                 patch("brain.voice_shortcuts.lookup", return_value=None), \
                 self.assertLogs("jarvis.speech.room_voice", level="ERROR"):
             runtime = Mock(last_used_tools=False)
-            runtime.respond.side_effect = lambda text, spoken: seen.append(voice_trust.current().verified) or "Hello."
+            runtime.respond.side_effect = lambda text, spoken, room: seen.append(voice_trust.current().verified) or "Hello."
             final = Mock(transcribe=Mock(return_value="what's the plan"))
             self.voice(final, runtime)._handle(self.audio)
         self.assertEqual(seen, [False])

@@ -1,8 +1,17 @@
-"""Session-bound, human-only approval for side-effecting fixes.
+"""Session-bound, human-only approval for side-effecting actions.
 
-Same rules as the arr restart gate in ``brain.arr_stack`` (which keeps its own
-tuned implementation): a tool may only *propose* an action; it runs only after
-a message Nick himself sends.
+Two entry points:
+
+- ``act``: an action Nick asked for in this turn (most tools since
+  2026-11-04). It runs at once when the speaker is trusted
+  (``brain.voice_trust``: an authenticated channel, or a room voice that
+  counts as Nick); for a guest voice it falls back to ``propose``.
+- ``propose``: an action that must wait for Nick's own next message, used
+  for fixes JARVIS suggests on its own and for every real-money order
+  (``brain.trading``, ``money=True``). Same rules as the arr restart gate in
+  ``brain.arr_stack`` (which keeps its own tuned implementation).
+
+Rules for proposals:
 
 - Several open proposals per session, each with its own code, valid for
   ``_TTL_S``. A turn that stages two fixes keeps both codes alive.
@@ -19,9 +28,14 @@ a message Nick himself sends.
   often keep it.
 - The proposal is consumed before the action runs, so a failure or a
   repeated "yes" can never run it twice.
+- A money proposal (``money=True``) is approved only where
+  ``voice_trust.may_move_money()``: the app, or a room voice that matched
+  Nick's voiceprint. "Voice ID off" isn't enough; the order stays open
+  for the app.
 
 ``conversation_action`` runs on the original user text at the agent boundary,
-never on tool arguments, so the model cannot approve its own proposal.
+never on tool arguments, so the model cannot approve its own proposal; a
+guest's message only disarms (``brain/agent._arr_stack_action``).
 """
 from __future__ import annotations
 
@@ -42,7 +56,8 @@ _WAKE_RE = re.compile(r"^(?:(?:hey|hi|ok|okay)[ ,]+)?jarvis[ ,.!]*")
 _YES = frozenset({"yes", "y", "yeah", "yep", "yup", "yes please", "yes sir", "yes do it", "do it",
                   "go", "go ahead", "proceed", "ok", "okay", "approve", "approved",
                   "approve both", "approve all", "yes to both", "both", "do both"})
-_CANCEL = frozenset({"cancel", "no", "nope", "nevermind", "never mind", "not now"})
+_CANCEL = frozenset({"cancel", "no", "nope", "nevermind", "never mind", "not now", "forget it", "nothing",
+                     "stop", "don't", "dont", "no thanks", "no thank you", "cancel it", "cancel that"})
 _DENY_WORDS = frozenset({"deny", "decline", "reject", "cancel"})
 
 
@@ -51,6 +66,7 @@ class Proposal(NamedTuple):
     code: str
     description: str
     run: Callable[[], str]
+    money: bool = False
 
 
 _lock = threading.Lock()
@@ -71,8 +87,9 @@ def _live(session_id: str, now: float) -> dict[str, Proposal]:
     return _pending.get(session_id, {})
 
 
-def propose(session_id: str | None, description: str, run: Callable[[], str]) -> str:
-    """Open a proposal for this session; return the prompt for Nick."""
+def propose(session_id: str | None, description: str, run: Callable[[], str], *, money: bool = False) -> str:
+    """Open a proposal for this session; return the prompt for Nick.
+    ``money``: a real order; only ``voice_trust.may_move_money`` approves it."""
     if not session_id:
         return "Refused: a conversation session is required to approve fixes, sir."
     with _lock:
@@ -86,7 +103,7 @@ def propose(session_id: str | None, description: str, run: Callable[[], str]) ->
         code = f"{secrets.randbelow(10000):04d}"
         while code in live:
             code = f"{secrets.randbelow(10000):04d}"
-        live[code] = Proposal(now, code, description, run)
+        live[code] = Proposal(now, code, description, run, money)
         _pending[session_id] = live
         armed = [c for c in _armed.get(session_id, []) if c in live]
         _armed[session_id] = armed + [code]
@@ -117,6 +134,21 @@ def awaiting_yes(session_id: str | None) -> bool:
     with _lock:
         live = _live(session_id, time.monotonic())
         return any(code in live for code in _armed.get(session_id, []))
+
+
+def reply_kind(text: str) -> str | None:
+    """How ``conversation_action`` would read this message while a "yes" is
+    armed: "yes", "cancel", "codes" ("approve 1631" / "deny 1631") or None
+    (anything else, which only disarms). For front ends with their own fast
+    paths (the room voice), so an answer to a proposal reaches the gate."""
+    normalized = _normalize(text)
+    if normalized == "cancel fix" or normalized in _CANCEL:
+        return "cancel"
+    if normalized in _YES:
+        return "yes"
+    if _codes(normalized) is not None or _denied(normalized) is not None:
+        return "codes"
+    return None
 
 
 def pending_code(session_id: str | None) -> str | None:
@@ -210,16 +242,25 @@ def conversation_action(text: str, session_id: str, *, handled: bool = False) ->
             return None
         codes = [c for c in armed if c in live]
     unknown = [c for c in codes if c not in live]
+    from brain import voice_trust
+    held = [] if voice_trust.may_move_money() else [c for c in codes if c in live and live[c].money]
+    if held:  # a real order heard on an unconfirmed room voice: it stays open for the app
+        log.info("Money approval needs the app or a voiceprint match for session %s (%s)",
+                 session_id, voice_trust.current().reason)
     chosen: list[Proposal] = []
     with _lock:
         current = _pending.get(session_id, {})
         for code in dict.fromkeys(codes):
+            if code in held:
+                continue
             proposal = current.pop(code, None)
             if proposal is not None and live.get(code) is proposal:
                 chosen.append(proposal)
         if not current:
             _pending.pop(session_id, None)
     replies = [_run(p, session_id) for p in chosen]
+    if held:
+        replies.append(voice_trust.MONEY_REFUSAL_LINE + " Nothing was sent to Schwab.")
     if unknown:
         still = [p for c, p in live.items() if c not in codes]
         hint = " ".join(f'Reply "approve {p.code}" to {p.description}.' for p in still)

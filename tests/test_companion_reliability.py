@@ -113,13 +113,13 @@ class CompanionReliabilityTests(unittest.TestCase):
                 patch.object(core.agent, "_after_turn"):
             core.respond_in_session(self.session, "phone question")
             confirm_gate.propose(self.session, "phone action", lambda: actions.append("phone") or "done")
-            self.assertEqual(core.respond("yes", spoken=True), "Room answer")
+            self.assertEqual(core.respond("yes", spoken=True, room=True), "Room answer")
             self.assertEqual(actions, [])
             self.assertEqual(history.load_session_messages(core.room_session_id)[0]["content"], "yes")
             self.assertEqual(core.respond_in_session(self.session, "yes"), "done")
             self.assertEqual(actions, ["phone"])
             confirm_gate.propose(core.room_session_id, "room action", lambda: actions.append("room") or "room done")
-            self.assertEqual(core.respond("yes", spoken=True), "room done")
+            self.assertEqual(core.respond("yes", spoken=True, room=True), "room done")
             self.assertEqual(actions, ["phone", "room"])
 
     def test_paused_and_stopped_torrents_remain_available_to_resume(self):

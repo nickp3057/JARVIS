@@ -1,7 +1,9 @@
 """Real Schwab orders (brain/trading.py) and the chat Approve/Deny path."""
 import os
 import tempfile
+import time
 import unittest
+from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import patch
 
@@ -11,6 +13,10 @@ from brain import confirm_gate, investing, trading
 from integrations import schwab
 
 SESSION = "s-trade"
+
+
+def _schwab_time(ts):
+    return datetime.fromtimestamp(ts, timezone.utc).strftime("%Y-%m-%dT%H:%M:%S+0000")
 
 
 def _account(cash=0.26, trade_cash=None, **held):
@@ -30,12 +36,14 @@ class TradingTests(unittest.TestCase):
                        "NVDA": {"last": 20.0, "type": "EQUITY"}, "SPY240C": {"last": 1.0, "type": "OPTION"}}
         self.placed = []
         self.open = []
+        self.recent = []
         for p in (
             patch.object(trading, "_FILE", Path(tmp.name) / "trades.json"),
             patch.object(investing, "_STATE_FILE", Path(tmp.name) / "investing.json"),
             patch.object(schwab, "accounts_by_number", side_effect=lambda: {"1234": self.account}),
             patch.object(schwab, "quotes", side_effect=lambda syms: {s: self.prices[s] for s in syms if s in self.prices}),
             patch.object(schwab, "open_orders", side_effect=lambda days=7: list(self.open)),
+            patch.object(schwab, "recent_orders", side_effect=lambda days=7: list(self.recent)),
             patch.object(schwab, "refresh_accounts", return_value=None),
             patch.object(schwab, "place_order", side_effect=self._place),
             patch.object(schwab, "order_status", return_value={"status": "WORKING", "filled": 0, "price": None, "why": ""}),
@@ -79,12 +87,6 @@ class TradingTests(unittest.TestCase):
         self.assertTrue(reply.startswith("Denied: sell 1 share"))
         self.assertEqual([a["code"] for a in confirm_gate.pending(SESSION)], [second])
         self.assertEqual(self.placed, [])
-
-    def test_buy_is_cash_only_but_counts_a_sell_in_flight(self):
-        self.prices["VOO"]["last"] = 26.0
-        self.assertIn("only $0.26 is available", trading.stage(SESSION, "VOO", "buy", 27.0))
-        self.open = [{"symbol": "SPCX", "side": "sell", "quantity": 1, "status": "WORKING", "entered": ""}]
-        self.assertIn("buy 1 share of VOO", trading.stage(SESSION, "VOO", "buy", 27.0))
 
     def test_caps_kill_switch_and_asset_types(self):
         self.account["trade_cash"] = 10_000
@@ -142,6 +144,73 @@ class TradingTests(unittest.TestCase):
         p = investing.find_proposal("P1")
         self.assertEqual((p["status"], p["order_id"]), ("ordered", "1001"))
         self.assertIn("already sent to Schwab", investing.stage_order("P1", SESSION))
+
+
+    # 2026-11-14 review: only cash that is really there, and a lost answer is never "refused".
+    def test_buy_is_cash_only_but_counts_a_sell_in_flight(self):
+        self.prices["VOO"]["last"] = 26.0
+        self.assertIn("only $0.26 is available", trading.stage(SESSION, "VOO", "buy", 27.0))
+        sell = {"symbol": "SPCX", "side": "sell", "quantity": 1, "filled": 0, "status": "WORKING",
+                "account": "1234", "price": 25.77}
+        self.open = [sell]  # an unfilled DAY limit sell may never fill: not cash
+        self.assertIn("only $0.26 is available", trading.stage(SESSION, "VOO", "buy", 27.0))
+        self.open = [{**sell, "filled": 1, "account": "9999"}]  # another account on the login
+        self.assertIn("only $0.26 is available", trading.stage(SESSION, "VOO", "buy", 27.0))
+        self.open = [{**sell, "filled": 1}]  # filled, this account: counts
+        self.assertIn("buy 1 share of VOO", trading.stage(SESSION, "VOO", "buy", 27.0))
+
+    def test_open_buys_reduce_the_cash(self):
+        self.account["trade_cash"] = 30.0
+        self.prices["VOO"]["last"] = 26.0
+        self.open = [{"symbol": "NVDA", "side": "buy", "quantity": 1, "filled": 0, "status": "WORKING",
+                      "account": "1234", "price": 20.0}]
+        self.assertIn("only $10.00 is available", trading.stage(SESSION, "VOO", "buy", 27.0))
+
+    def test_timeout_after_sending_is_unknown_not_refused(self):
+        trading.stage(SESSION, "SPCX", "sell", 27.0)
+        self.recent = [{"id": "777", "account": "1234", "symbol": "SPCX", "side": "sell", "quantity": 1.0,
+                        "status": "WORKING", "entered_at": _schwab_time(time.time())}]
+        with patch.object(schwab, "place_order", side_effect=schwab.OrderOutcomeUnknown("read timed out")):
+            reply = confirm_gate.conversation_action("yes", SESSION)
+        self.assertNotIn("refused", reply)
+        self.assertIn("can't say whether it went through", reply)
+        self.assertIn("777", reply)
+        self.assertIn("check the Schwab app", reply)
+        journal = trading._load()
+        self.assertEqual((journal[0]["status"], journal[0]["id"]), ("unknown", "777"))
+        self.assertAlmostEqual(trading.spent_today(), 25.77)  # counts toward the daily cap
+        self.assertIn("outcome unknown", trading.describe())
+
+    def test_timeout_with_no_match_still_journals(self):
+        trading.stage(SESSION, "SPCX", "sell", 27.0)
+        with patch.object(schwab, "place_order", side_effect=schwab.OrderOutcomeUnknown("reset")):
+            reply = confirm_gate.conversation_action("yes", SESSION)
+        self.assertIn("may still have gone through", reply)
+        self.assertEqual(trading._load()[0]["status"], "unknown")
+        self.assertAlmostEqual(trading.spent_today(), 25.77)
+
+    def test_http_error_is_refused_and_not_counted(self):
+        trading.stage(SESSION, "SPCX", "sell", 27.0)
+        with patch.object(schwab, "place_order", side_effect=RuntimeError("Schwab refused the order: HTTP 400")):
+            reply = confirm_gate.conversation_action("yes", SESSION)
+        self.assertIn("Schwab refused it", reply)
+        self.assertEqual(trading.spent_today(), 0)
+
+    def test_missing_location_finds_the_order_id(self):
+        trading.stage(SESSION, "SPCX", "sell", 27.0)
+        self.recent = [
+            {"id": "old", "account": "1234", "symbol": "SPCX", "side": "sell", "quantity": 1.0,
+             "status": "FILLED", "entered_at": _schwab_time(time.time() - 3600)},
+            {"id": "888", "account": "1234", "symbol": "SPCX", "side": "sell", "quantity": 1.0,
+             "status": "WORKING", "entered_at": _schwab_time(time.time())},
+        ]
+        with patch.object(schwab, "place_order", return_value="") as place, \
+                patch.object(schwab, "order_status", return_value={"status": "WORKING"}) as status:
+            reply = confirm_gate.conversation_action("yes", SESSION)
+        place.assert_called_once()
+        status.assert_called_once_with("1234", "888")
+        self.assertIn("Order 888", reply)
+        self.assertEqual(trading._load()[0]["id"], "888")
 
 
 class ApprovalsRouteTests(unittest.TestCase):
