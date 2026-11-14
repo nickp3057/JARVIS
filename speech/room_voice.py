@@ -276,7 +276,7 @@ class RoomVoice:
             # Wake-up backup (brain/wake_alarm.py): the TV didn't come on.
             if now >= self._next_ring:
                 self._next_ring = now + 3.5
-                room_volume.prepare(datetime.now().replace(hour=12))  # day volume: it's an alarm
+                room_volume.ring_alarm()  # ROOM_ALARM_VOLUME, never the night level
                 room_sounds.play("alarm")
         if self._ringing_since is not None:
             if not self._alarming() or now - self._ringing_since > _seconds("ROOM_ALARM_RING_S", 120):

@@ -351,5 +351,23 @@ class PosixPlaybackTests(unittest.TestCase):
             self.assertFalse(tts._play_async_and_wait(Path("/nope/missing.wav"), None))
 
 
+class LiveElevenLabsSettingsTests(unittest.TestCase):
+    def test_key_voice_and_model_follow_env_edits(self) -> None:
+        env = {"ELEVENLABS_API_KEY": "", "ELEVENLABS_VOICE_ID": "", "ELEVENLABS_MODEL": ""}
+        with patch.dict(os.environ, env):
+            self.assertFalse(tts._elevenlabs_configured())
+            # update_setting writes .env and os.environ; no restart needed.
+            os.environ.update(ELEVENLABS_API_KEY="k2", ELEVENLABS_VOICE_ID="v2", ELEVENLABS_MODEL="eleven_v3")
+            self.assertTrue(tts._elevenlabs_configured())
+            url, request = tts._elevenlabs_request("Good evening.")
+        self.assertTrue(url.endswith("/v2"))
+        self.assertEqual(request["headers"]["xi-api-key"], "k2")
+        self.assertEqual(request["json"]["model_id"], "eleven_v3")
+
+    def test_garbled_speed_falls_back(self) -> None:
+        with patch.dict(os.environ, {"ELEVENLABS_SPEED": "fast"}):
+            self.assertEqual(tts._eleven_speed(), tts.ELEVENLABS_SPEED)
+
+
 if __name__ == "__main__":
     unittest.main()

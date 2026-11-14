@@ -125,6 +125,7 @@ _PSEUDO_CALL_RE = re.compile(r"\[\s*call(?:s|ed|ing)?\s+[a-z_]+\b[^\]]*\]", re.I
 _PSEUDO_CALL_NUDGE = ("(JARVIS runtime: your last reply wrote a tool call out as text, so nothing "
                       "ran and Nick heard nothing. Make the real tool call now, then reply.)")
 _HISTORY_KEEP_TURNS = 20
+_TOOL_CONTEXT_SESSIONS = 50  # sessions whose last tool results are kept for follow-ups
 
 
 def _rejected_server_tool(exc: Exception) -> str | None:
@@ -353,6 +354,8 @@ class JarvisAgent:
         # Set after each respond() call: True if any custom tool was invoked
         # this turn. Voice runner reads this to decide follow-up window length.
         self.last_used_tools: bool = False
+        # Per session, newest last; capped at _TOOL_CONTEXT_SESSIONS so a
+        # long-running server (one session per phone conversation) doesn't grow.
         self._recent_tool_context: dict[str, str] = {}
         # Tools executed during the most recent turn, for background learning.
         self._last_turn_tools: list[tuple[str, dict[str, Any]]] = []
@@ -801,7 +804,11 @@ class JarvisAgent:
         self._last_turn_tools = [(str(e["tool"]), dict(e["input"])) for e in entries]
         self._last_turn_results = [(str(e["tool"]), str(e.get("result") or "")[:600]) for e in entries]
         if entries:
-            self._recent_tool_context[self._session_id] = json.dumps(entries, ensure_ascii=False)[:6000]
+            store = self._recent_tool_context
+            store.pop(self._session_id, None)  # re-insert: newest last (plain dicts keep order too)
+            store[self._session_id] = json.dumps(entries, ensure_ascii=False)[:6000]
+            while len(store) > _TOOL_CONTEXT_SESSIONS:
+                store.pop(next(iter(store)))  # the least recently used session
 
     def _after_turn(self, user_input: str, reply: str) -> None:
         """Hand the finished turn to background learning (habits + memory).

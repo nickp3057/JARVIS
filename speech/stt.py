@@ -28,10 +28,28 @@ from jarvis_logger import get_logger
 
 log = get_logger(__name__)
 
-WHISPER_MODEL_SIZE = os.getenv("WHISPER_MODEL", "small.en")
-WHISPER_DEVICE = os.getenv("WHISPER_DEVICE", "cpu")
-WHISPER_COMPUTE_TYPE = os.getenv("WHISPER_COMPUTE_TYPE", "int8")
-WHISPER_BEAM_SIZE = int(os.getenv("WHISPER_BEAM_SIZE", "1"))
+# Whisper settings are read live (CLAUDE.md: .env edits apply without a
+# restart). A changed WHISPER_MODEL / DEVICE / COMPUTE_TYPE reloads the model
+# on the next utterance; an unchanged one reuses the loaded model.
+
+
+def _whisper_model_size() -> str:
+    return os.getenv("WHISPER_MODEL", "").strip() or "small.en"
+
+
+def _whisper_device() -> str:
+    return os.getenv("WHISPER_DEVICE", "").strip() or "cpu"
+
+
+def _whisper_compute_type() -> str:
+    return os.getenv("WHISPER_COMPUTE_TYPE", "").strip() or "int8"
+
+
+def _whisper_beam_size() -> int:
+    try:
+        return max(1, int(os.getenv("WHISPER_BEAM_SIZE", "") or 1))
+    except ValueError:
+        return 1
 
 
 def _temperature_fallback() -> bool:
@@ -127,8 +145,12 @@ class Transcriber:
 
     def __init__(self, model_size: str | None = None) -> None:
         self._model: Any | None = None
-        # The room voice runs a tiny model for live captions beside the main one.
-        self._model_size = model_size or WHISPER_MODEL_SIZE
+        # (size, device, compute type) of the loaded model; None with a model
+        # set means one was handed in (tests) and is kept as is.
+        self._loaded_key: tuple[str, str, str] | None = None
+        # The room voice runs a tiny model for live captions beside the main
+        # one; that size is fixed. The main one follows WHISPER_MODEL live.
+        self._fixed_size = model_size
         # Only the main transcriber goes to the cloud; live captions stay local.
         self._cloud_ok = model_size is None
         # Words Whisper should expect (the room's lights and scenes): a short
@@ -136,22 +158,19 @@ class Transcriber:
         # overrides; "off" disables.
         self.prompt = ""
 
+    @property
+    def _model_size(self) -> str:
+        return self._fixed_size or _whisper_model_size()
+
     def _ensure_loaded(self) -> None:
-        if self._model is not None:
+        key = (self._model_size, _whisper_device(), _whisper_compute_type())
+        if self._model is not None and self._loaded_key in (None, key):
             return
         from faster_whisper import WhisperModel  # local import = cheap module load
 
-        log.info(
-            "Loading Whisper model %s on %s (%s)",
-            self._model_size,
-            WHISPER_DEVICE,
-            WHISPER_COMPUTE_TYPE,
-        )
-        self._model = WhisperModel(
-            self._model_size,
-            device=WHISPER_DEVICE,
-            compute_type=WHISPER_COMPUTE_TYPE,
-        )
+        log.info("Loading Whisper model %s on %s (%s)", *key)
+        model = WhisperModel(key[0], device=key[1], compute_type=key[2])
+        self._model, self._loaded_key = model, key
 
     def transcribe(self, audio: np.ndarray, sample_rate: int = 16000) -> str:
         """Transcribe an int16 or float32 numpy audio buffer to text."""
@@ -195,7 +214,7 @@ class Transcriber:
             segments, _info = self._model.transcribe(
                 audio_f32,
                 language="en",
-                beam_size=WHISPER_BEAM_SIZE,
+                beam_size=_whisper_beam_size(),
                 vad_filter=False,
                 initial_prompt=self._initial_prompt(),
                 **_decode_options(),
@@ -209,7 +228,7 @@ class Transcriber:
         # Per-utterance timing so latency can be measured on the real host.
         log.info(
             "STT %.2fs for %.1fs of audio (%s, %s)",
-            time.monotonic() - started, audio_f32.size / 16000.0, self._model_size, WHISPER_COMPUTE_TYPE,
+            time.monotonic() - started, audio_f32.size / 16000.0, self._model_size, _whisper_compute_type(),
         )
         return text
 

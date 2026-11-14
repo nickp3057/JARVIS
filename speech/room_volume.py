@@ -100,9 +100,39 @@ def _load() -> dict[str, Any]:
 def _save(data: dict[str, Any]) -> None:
     try:
         _FILE.parent.mkdir(parents=True, exist_ok=True)
-        _FILE.write_text(json.dumps(data))
+        tmp = _FILE.with_suffix(".json.tmp")
+        tmp.write_text(json.dumps(data))
+        tmp.replace(_FILE)  # atomic: a crash never leaves half a file
     except OSError:
         log.warning("Could not save %s", _FILE, exc_info=True)
+
+
+def _alarm_default() -> int:
+    try:
+        return max(0, min(10, int(float(os.getenv("ROOM_ALARM_VOLUME", "8") or 8))))
+    except ValueError:
+        return 8
+
+
+def ring_alarm(now: datetime | None = None) -> int:
+    """Wake-up backup ring: the speaker at ``ROOM_ALARM_VOLUME`` (8) whatever
+    the hour, never the night level. The next ``prepare()`` puts this time
+    of day's level back (the day level is remembered first if none is stored
+    yet, so the morning doesn't stay at alarm volume)."""
+    target = _alarm_default()
+    with _lock:
+        data = _load()
+        mode = _mode(now)
+        if data.get("applied") == ["alarm", target]:
+            return target
+        if mode == "day" and data.get("day") is None:
+            current = _read_level()
+            if current is not None:
+                data["day"] = current
+        _apply(target)
+        data["applied"] = ["alarm", target]
+        _save(data)
+    return target
 
 
 def _night_default() -> int:

@@ -184,5 +184,14 @@ class ReflectorTests(_TmpStore):
                                                  background=False))
 
 
+class RecentBufferCapTests(_TmpStore):
+    def test_recent_turns_keep_only_the_newest_sessions(self) -> None:
+        for i in range(reflector._MAX_SESSIONS + 10):
+            reflector.observe_turn(None, f"session-{i}", "lights off", "Done.", background=False)
+        self.assertEqual(len(reflector._recent), reflector._MAX_SESSIONS)
+        self.assertNotIn("session-0", reflector._recent)
+        self.assertIn(f"session-{reflector._MAX_SESSIONS + 9}", reflector._recent)
+
+
 if __name__ == "__main__":
     unittest.main()

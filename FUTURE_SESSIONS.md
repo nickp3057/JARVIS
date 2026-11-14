@@ -171,6 +171,10 @@ Nick is getting a free iPad mini from work. Plan: it **replaces the Google Nest 
 - **Phase 2, the mini as a voice satellite:** the app listens for "Hey JARVIS" on device while it's on screen (iOS only allows the mic in the foreground, fine for a plugged-in panel), streams the utterance to Core (`/chat/stream` or a new room-voice endpoint), and plays the reply on the mini's speaker. **Arbitration:** when the desk mic and the mini both hear the wake word within ~1 s, Core lets the louder/closer one answer and the other stays quiet (compare wake scores or RMS). Reuse the room voice's interrupt (tap to stop) and night volume. Decide whether replies to the mini also play on the desk speaker (probably not).
 - **Open questions for Nick:** does the mini replace the Hub's alarm (needs a reliable wake-up sound with the app in front, or use iOS Clock)? Should the door iPad also become a satellite? Wake-word model on iOS: openWakeWord ported to Core ML vs. Apple's on-device speech recognition watching for the phrase.
 
+### Reliability pass (2026-11-14, Core only): check
+
+See JARVIS.md Recently Shipped. Live checks after deploy: (1) the Michael (2026) temp-4K entry (expires Mon Nov 16 23:24) still removes on time, and waits if it's playing on Plex; (2) a wake-up backup ring is at alarm loudness (`ROOM_ALARM_VOLUME`, 8) and the room goes back to its normal level after; snooze while a one-off alarm is set keeps the one-off; (3) "stand down" with Barn Door off just says so; (4) the investing review skips Thanksgiving (2026-11-26). Yearly chore: add 2028 NYSE holidays to `_NYSE_HOLIDAYS` in `brain/investing.py` before 2028.
+
 ### Speed pass (2026-11-09, 5.98 / build 241): check
 Full audit and fixes in JARVIS.md "Recently Shipped" (5.98). Tested and timed
 against the real services, but **not deployed and never played on the

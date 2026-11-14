@@ -9,7 +9,7 @@ widgets reach directly into lower-level modules.
 from __future__ import annotations
 
 import time
-from collections import deque
+from collections import OrderedDict, deque
 from dataclasses import dataclass
 from datetime import datetime
 import os
@@ -120,6 +120,42 @@ def _monitor_on(name: str) -> bool:
     """A monitor's on/off switch in .env; monitors are on unless switched off."""
     return os.getenv(name, "true").strip().lower() in ("1", "true", "yes", "on")
 
+
+def _env_float(name: str, default: float, minimum: float | None = None) -> float:
+    """A number from .env, read live. A blank or garbled value (say one
+    update_setting wrote) falls back to the default instead of raising
+    inside a monitor thread."""
+    raw = os.getenv(name, "")
+    try:
+        value = float(raw) if raw.strip() else float(default)
+    except (TypeError, ValueError):
+        log.warning("%s=%r isn't a number; using %s", name, raw, default)
+        value = float(default)
+    if value != value or value in (float("inf"), float("-inf")):  # NaN / inf
+        value = float(default)
+    return max(minimum, value) if minimum is not None else value
+
+
+class _BoundedKeys:
+    """A set that forgets its oldest keys past ``limit``: dedupe memory for
+    long-running monitors without growing forever."""
+
+    def __init__(self, limit: int = 500) -> None:
+        self._keys: OrderedDict[str, None] = OrderedDict()
+        self._limit = limit
+
+    def __contains__(self, key: object) -> bool:
+        return key in self._keys
+
+    def __len__(self) -> int:
+        return len(self._keys)
+
+    def add(self, key: str) -> None:
+        self._keys[key] = None
+        self._keys.move_to_end(key)
+        while len(self._keys) > self._limit:
+            self._keys.popitem(last=False)
+
 class JarvisRuntime:
     """Coordinates JARVIS subsystems behind one stable interface."""
 
@@ -131,12 +167,12 @@ class JarvisRuntime:
         self._turn_lock = RLock()
         self._events: deque[RuntimeEvent] = deque(maxlen=100)
         self._tasks: dict[int, RuntimeTask] = {}
-        self._reminder_event_ids: set[str] = set()
+        self._reminder_event_ids = _BoundedKeys(500)  # dedupe only; old ids drop off
         self._pending_announcements: deque[str] = deque(maxlen=50)
         self._next_announce_id = 1
         self._calendar_monitor_started = False
         self._calendar_monitor_failed = False
-        self._calendar_alert_keys: set[str] = set()
+        self._calendar_alert_keys = _BoundedKeys(500)
         self._next_event_id = 1
         self._next_task_id = 1
         self._launch_briefing_claimed = False
@@ -171,7 +207,7 @@ class JarvisRuntime:
             error="Waiting for Home Assistant",
         )
         self._home_event_last_seen: dict[str, float] = {}
-        self._proactive_notice_keys: set[str] = set()
+        self._proactive_notice_keys = _BoundedKeys(200)
         self._weather_snapshot = WeatherSnapshot(
             online=False,
             error="Waiting for weather monitor",
@@ -397,32 +433,39 @@ class JarvisRuntime:
         down_since: dict[str, float] = {}
         alerted: set[str] = set()
         while not self._stop_monitors.is_set():
-            watched = _watched_devices()
-            grace = float(os.getenv("DEVICE_OFFLINE_ALERT_MIN", "10")) * 60
-            success, payload = get_states()
-            if success and isinstance(payload, list):
-                states = {str(e.get("entity_id")): e for e in payload if isinstance(e, dict)}
-                now = time.time()
-                for entity_id in watched:
-                    entity = states.get(entity_id)
-                    name = str(((entity or {}).get("attributes") or {}).get("friendly_name") or _friendly_entity_name(entity_id))
-                    offline = entity is None or str(entity.get("state", "")).lower() in {"unavailable", "unknown"}
-                    if offline:
-                        down_since.setdefault(entity_id, now)
-                        if entity_id not in alerted and now - down_since[entity_id] >= grace:
-                            alerted.add(entity_id)
-                            minutes = int((now - down_since[entity_id]) // 60)
-                            self.raise_alert("device_offline", f"{name} offline",
-                                             f"{name} has been unavailable in Home Assistant for {minutes} minutes.",
-                                             source="home", context={"entity_id": entity_id})
-                    else:
-                        down_since.pop(entity_id, None)
-                        if entity_id in alerted:
-                            alerted.discard(entity_id)
-                            self.raise_alert("device_online", f"{name} back online", f"{name} is reachable again.",
-                                             source="home", severity="info", push=False)
-            if self._stop_monitors.wait(float(os.getenv("DEVICE_WATCH_INTERVAL_S", "60"))):
+            try:
+                self._device_watch_pass(down_since, alerted)
+            except Exception:  # noqa: BLE001 - a bad pass must not end the loop
+                log.exception("Device watch pass failed")
+            if self._stop_monitors.wait(_env_float("DEVICE_WATCH_INTERVAL_S", 60.0, 5.0)):
                 break
+
+    def _device_watch_pass(self, down_since: dict[str, float], alerted: set[str]) -> None:
+        watched = _watched_devices()
+        grace = _env_float("DEVICE_OFFLINE_ALERT_MIN", 10.0, 0.0) * 60
+        success, payload = get_states()
+        if not (success and isinstance(payload, list)):
+            return
+        states = {str(e.get("entity_id")): e for e in payload if isinstance(e, dict)}
+        now = time.time()
+        for entity_id in watched:
+            entity = states.get(entity_id)
+            name = str(((entity or {}).get("attributes") or {}).get("friendly_name") or _friendly_entity_name(entity_id))
+            offline = entity is None or str(entity.get("state", "")).lower() in {"unavailable", "unknown"}
+            if offline:
+                down_since.setdefault(entity_id, now)
+                if entity_id not in alerted and now - down_since[entity_id] >= grace:
+                    alerted.add(entity_id)
+                    minutes = int((now - down_since[entity_id]) // 60)
+                    self.raise_alert("device_offline", f"{name} offline",
+                                     f"{name} has been unavailable in Home Assistant for {minutes} minutes.",
+                                     source="home", context={"entity_id": entity_id})
+            else:
+                down_since.pop(entity_id, None)
+                if entity_id in alerted:
+                    alerted.discard(entity_id)
+                    self.raise_alert("device_online", f"{name} back online", f"{name} is reachable again.",
+                                     source="home", severity="info", push=False)
 
     def _temp_4k_monitor_loop(self) -> None:
         """Temporary 4K movies (integrations/temp_4k.py): say when one is
@@ -439,11 +482,7 @@ class JarvisRuntime:
                 temp_4k.tick(alert)
             except Exception as exc:  # noqa: BLE001 - a bad pass must not end the loop
                 log.warning("Temp 4K monitor pass failed: %s", exc)
-            try:
-                interval = float(os.getenv("TEMP_4K_INTERVAL_S", "300"))
-            except ValueError:
-                interval = 300.0
-            if self._stop_monitors.wait(max(30.0, interval)):
+            if self._stop_monitors.wait(_env_float("TEMP_4K_INTERVAL_S", 300.0, 30.0)):
                 break
 
     def _nas_host_monitor_loop(self) -> None:
@@ -496,7 +535,11 @@ class JarvisRuntime:
             monitor_ok = not arr_enabled or (
                 alive and self._arr_last_cycle > 0 and time.monotonic() - self._arr_last_cycle < stale_after
             )
-            ok = monitor_ok and nas_stack.ping_deadman()
+            try:
+                ok = monitor_ok and nas_stack.ping_deadman()
+            except Exception:  # noqa: BLE001 - a failed ping is just a missed ping
+                log.exception("Dead-man ping failed")
+                ok = False
             if not ok and not failed:
                 why = "arr monitor stalled" if not monitor_ok else "Healthchecks ping failed"
                 log.warning("Dead-man heartbeat not delivered: %s", why)
@@ -844,7 +887,7 @@ class JarvisRuntime:
         )
 
     def _home_monitor_loop(self) -> None:
-        interval = float(os.getenv("HOME_MONITOR_INTERVAL_S", "20.0"))
+        interval = _env_float("HOME_MONITOR_INTERVAL_S", 20.0, 1.0)
         watched_domains = {
             domain.strip()
             for domain in os.getenv(
@@ -856,74 +899,78 @@ class JarvisRuntime:
         previous: dict[str, str] | None = None
 
         while not self._stop_monitors.is_set():
-            success, payload = get_states()
-            if not success:
-                with self._lock:
-                    self._home_snapshot = HomeSnapshot(
-                        online=False,
-                        updated_at=time.time(),
-                        entity_count=0,
-                        domains={},
-                        error=str(payload),
-                    )
-                if not self._home_monitor_failed:
-                    self._home_monitor_failed = True
-                    self.record_event(
-                        kind="monitor",
-                        source="home",
-                        title="Home monitor offline",
-                        detail=str(payload),
-                    )
-                if self._stop_monitors.wait(interval):
-                    break
-                continue
+            try:
+                previous = self._home_poll_pass(previous, watched_domains)
+            except Exception:  # noqa: BLE001 - a bad pass must not end the loop
+                log.exception("Home monitor pass failed")
+            if self._stop_monitors.wait(interval):
+                break
 
-            self._home_monitor_failed = False
-            self._mark_home_monitor_healthy()
-            current: dict[str, str] = {}
-            entities_by_domain: dict[str, list[dict[str, Any]]] = {}
-            for entity in payload:
-                entity_id = entity.get("entity_id", "")
-                domain = entity_id.split(".", 1)[0] if "." in entity_id else ""
-                if domain not in watched_domains:
-                    continue
-                state = str(entity.get("state", "unknown"))
-                current[entity_id] = state
-                entities_by_domain.setdefault(domain, []).append(entity)
-
-            snapshot = _build_home_snapshot(entities_by_domain)
+    def _home_poll_pass(self, previous: dict[str, str] | None,
+                        watched_domains: set[str]) -> dict[str, str] | None:
+        """One REST poll of Home Assistant; returns the state map for next time."""
+        success, payload = get_states()
+        if not success:
             with self._lock:
-                self._home_snapshot = snapshot
-
-            if previous is None:
-                previous = current
+                self._home_snapshot = HomeSnapshot(
+                    online=False,
+                    updated_at=time.time(),
+                    entity_count=0,
+                    domains={},
+                    error=str(payload),
+                )
+            if not self._home_monitor_failed:
+                self._home_monitor_failed = True
                 self.record_event(
                     kind="monitor",
                     source="home",
-                    title="Home monitor online",
-                    detail=f"Watching {len(current)} entities",
+                    title="Home monitor offline",
+                    detail=str(payload),
                 )
-                self._evaluate_home_proactive_rules(snapshot)
-                if self._stop_monitors.wait(interval):
-                    break
-                continue
+            return previous
 
-            for entity_id, state in current.items():
-                old_state = previous.get(entity_id)
-                if old_state is None or old_state == state:
-                    continue
-                if not self._should_record_home_change(entity_id, old_state, state):
-                    continue
-                self.record_event(
-                    kind="home",
-                    source="home",
-                    title=_friendly_entity_name(entity_id),
-                    detail=f"{old_state} -> {state}",
-                )
-            self._evaluate_home_proactive_rules(snapshot)
+        self._home_monitor_failed = False
+        self._mark_home_monitor_healthy()
+        current: dict[str, str] = {}
+        entities_by_domain: dict[str, list[dict[str, Any]]] = {}
+        for entity in payload:
+            entity_id = entity.get("entity_id", "")
+            domain = entity_id.split(".", 1)[0] if "." in entity_id else ""
+            if domain not in watched_domains:
+                continue
+            state = str(entity.get("state", "unknown"))
+            current[entity_id] = state
+            entities_by_domain.setdefault(domain, []).append(entity)
+
+        snapshot = _build_home_snapshot(entities_by_domain)
+        with self._lock:
+            self._home_snapshot = snapshot
+
+        if previous is None:
             previous = current
-            if self._stop_monitors.wait(interval):
-                break
+            self.record_event(
+                kind="monitor",
+                source="home",
+                title="Home monitor online",
+                detail=f"Watching {len(current)} entities",
+            )
+            self._evaluate_home_proactive_rules(snapshot)
+            return current
+
+        for entity_id, state in current.items():
+            old_state = previous.get(entity_id)
+            if old_state is None or old_state == state:
+                continue
+            if not self._should_record_home_change(entity_id, old_state, state):
+                continue
+            self.record_event(
+                kind="home",
+                source="home",
+                title=_friendly_entity_name(entity_id),
+                detail=f"{old_state} -> {state}",
+            )
+        self._evaluate_home_proactive_rules(snapshot)
+        return current
 
     def _home_monitor_entry(self) -> None:
         transport = os.getenv("HOME_MONITOR_TRANSPORT", "websocket").strip().lower()
@@ -934,7 +981,7 @@ class JarvisRuntime:
 
     def _home_websocket_monitor_loop(self) -> None:
         """Maintain a live HA state subscription, reconnecting after outages."""
-        retry_s = float(os.getenv("HOME_MONITOR_RECONNECT_S", "5.0"))
+        retry_s = _env_float("HOME_MONITOR_RECONNECT_S", 5.0, 1.0)
         watched_domains = {
             domain.strip()
             for domain in os.getenv(
@@ -947,19 +994,23 @@ class JarvisRuntime:
         ever_connected = False
 
         while not self._stop_monitors.is_set():
-            success, payload = get_states()
+            try:
+                success, payload = get_states()
+                if success:
+                    entities = {
+                        str(entity.get("entity_id")): entity
+                        for entity in payload
+                        if str(entity.get("entity_id", "")).split(".", 1)[0] in watched_domains
+                    }
+                    self._update_home_snapshot_from_entities(entities)
+            except Exception as exc:  # noqa: BLE001 - an odd payload must not end the loop
+                log.exception("Home monitor snapshot failed")
+                success, payload = False, exc
             if not success:
                 self._set_home_monitor_offline(str(payload))
                 if self._stop_monitors.wait(retry_s):
                     break
                 continue
-
-            entities = {
-                str(entity.get("entity_id")): entity
-                for entity in payload
-                if str(entity.get("entity_id", "")).split(".", 1)[0] in watched_domains
-            }
-            self._update_home_snapshot_from_entities(entities)
 
             def _connected() -> None:
                 nonlocal ever_connected
@@ -1074,7 +1125,7 @@ class JarvisRuntime:
         if old_state.lower() in noisy_states or state.lower() in noisy_states:
             return False
 
-        cooldown_s = float(os.getenv("HOME_EVENT_COOLDOWN_S", "5.0"))
+        cooldown_s = _env_float("HOME_EVENT_COOLDOWN_S", 5.0, 0.0)
         key = f"{entity_id}:{old_state}->{state}"
         now = time.time()
         if now - self._home_event_last_seen.get(key, 0) < cooldown_s:
@@ -1104,8 +1155,8 @@ class JarvisRuntime:
         if lights is None:
             return
 
-        late_hour = int(os.getenv("HOME_LATE_LIGHTS_HOUR", "23"))
-        threshold = int(os.getenv("HOME_LATE_LIGHTS_THRESHOLD", "4"))
+        late_hour = int(_env_float("HOME_LATE_LIGHTS_HOUR", 23))
+        threshold = int(_env_float("HOME_LATE_LIGHTS_THRESHOLD", 4))
         now = datetime.now()
         if now.hour < late_hour or lights.on_count < threshold:
             return
@@ -1122,8 +1173,8 @@ class JarvisRuntime:
         )
 
     def _calendar_monitor_loop(self) -> None:
-        interval = float(os.getenv("CALENDAR_MONITOR_INTERVAL_S", "120.0"))
-        lead = float(os.getenv("CALENDAR_ALERT_LEAD_MIN", "10.0"))
+        interval = _env_float("CALENDAR_MONITOR_INTERVAL_S", 120.0, 10.0)
+        lead = _env_float("CALENDAR_ALERT_LEAD_MIN", 10.0, 0.0)
         try:
             from integrations.google_calendar import upcoming_within
         except Exception:  # noqa: BLE001
@@ -1135,24 +1186,30 @@ class JarvisRuntime:
             except Exception:  # noqa: BLE001
                 soon = []
             for event in soon:
-                key = event.get("id") or f"{event.get('summary')}:{event.get('start')}"
-                if key in self._calendar_alert_keys:
-                    continue
-                self._calendar_alert_keys.add(key)
-                mins = int(event.get("minutes_until", 0))
-                if mins <= 0:
-                    when = "right now"
-                elif mins == 1:
-                    when = "in one minute"
-                else:
-                    when = f"in {mins} minutes"
-                self.announce(
-                    f"{event.get('summary', 'a meeting')} {when}",
-                    source="calendar",
-                    title="Upcoming meeting",
-                )
+                try:
+                    self._calendar_alert(event)
+                except Exception:  # noqa: BLE001 - one odd event must not end the loop
+                    log.exception("Calendar alert failed")
             if self._stop_monitors.wait(interval):
                 break
+
+    def _calendar_alert(self, event: dict[str, Any]) -> None:
+        key = event.get("id") or f"{event.get('summary')}:{event.get('start')}"
+        if key in self._calendar_alert_keys:
+            return
+        self._calendar_alert_keys.add(key)
+        mins = int(event.get("minutes_until", 0) or 0)
+        if mins <= 0:
+            when = "right now"
+        elif mins == 1:
+            when = "in one minute"
+        else:
+            when = f"in {mins} minutes"
+        self.announce(
+            f"{event.get('summary', 'a meeting')} {when}",
+            source="calendar",
+            title="Upcoming meeting",
+        )
 
     def _wake_monitor_loop(self) -> None:
         """At the wake-up alarm's time, tell the TV (brain/wake_alarm.py).
@@ -1190,38 +1247,45 @@ class JarvisRuntime:
         from integrations import schwab
         warned: set[str] = set()
         while not self._stop_monitors.is_set():
-            warning = schwab.login_warning()
-            expires = schwab.login_expires_at()
-            if warning and f"{warning}@{expires}" not in warned:
-                warned.add(f"{warning}@{expires}")
-                detail = ("Schwab's weekly login runs out " + schwab.expires_text(expires) + "."
-                          if warning == "soon" else
-                          "Schwab ended the login early; the portfolio is frozen." if schwab.login_revoked()
-                          else "Schwab's weekly login ran out; the portfolio is frozen.")
-                self.raise_alert("schwab_login", "Schwab needs you",
-                                 detail + (" Log in on the Schwab hub (" + schwab.login_page()
-                                           + "); that one login covers Coopa Trada too." if schwab.borrowing()
-                                           else " Open JARVIS > Settings > Charles Schwab > Log in."),
-                                 source="schwab", severity="warning")
-            if schwab.linked():
-                try:
-                    schwab.refresh_accounts()
-                    schwab.refresh_yesterday()
-                except Exception as exc:  # noqa: BLE001
-                    log.warning("Schwab refresh failed: %s", exc)
-                    schwab.set_error(str(exc)[:200])
             try:
-                interval = max(10.0, float(os.getenv("SCHWAB_POLL_SECONDS", "30")))
-            except ValueError:
-                interval = 30.0
+                self._schwab_pass(warned)
+            except Exception:  # noqa: BLE001 - e.g. a token file missing a field
+                log.exception("Schwab monitor pass failed")
+            interval = _env_float("SCHWAB_POLL_SECONDS", 30.0, 10.0)
             # Slow down only once there's something to show; a fresh login
             # (linked_event) cuts the wait short either way.
-            if not schwab.market_open() and schwab.has_accounts():
-                interval = 600.0
+            try:
+                if not schwab.market_open() and schwab.has_accounts():
+                    interval = 600.0
+            except Exception:  # noqa: BLE001
+                log.exception("Schwab market-hours check failed")
             schwab.linked_event.wait(interval)
             schwab.linked_event.clear()
             if self._stop_monitors.is_set():
                 break
+
+    def _schwab_pass(self, warned: set[str]) -> None:
+        from integrations import schwab
+        warning = schwab.login_warning()
+        expires = schwab.login_expires_at()
+        if warning and f"{warning}@{expires}" not in warned:
+            warned.add(f"{warning}@{expires}")
+            detail = ("Schwab's weekly login runs out " + schwab.expires_text(expires) + "."
+                      if warning == "soon" else
+                      "Schwab ended the login early; the portfolio is frozen." if schwab.login_revoked()
+                      else "Schwab's weekly login ran out; the portfolio is frozen.")
+            self.raise_alert("schwab_login", "Schwab needs you",
+                             detail + (" Log in on the Schwab hub (" + schwab.login_page()
+                                       + "); that one login covers Coopa Trada too." if schwab.borrowing()
+                                       else " Open JARVIS > Settings > Charles Schwab > Log in."),
+                             source="schwab", severity="warning")
+        if schwab.linked():
+            try:
+                schwab.refresh_accounts()
+                schwab.refresh_yesterday()
+            except Exception as exc:  # noqa: BLE001
+                log.warning("Schwab refresh failed: %s", exc)
+                schwab.set_error(str(exc)[:200])
 
     def _investing_loop(self) -> None:
         """The investing subagents (brain/investing.py), checked every 5
@@ -1267,7 +1331,7 @@ class JarvisRuntime:
 
     def _price_monitor_loop(self) -> None:
         """Periodically refresh explicitly saved public product pages."""
-        interval = max(300.0, float(os.getenv("PRICE_WATCH_INTERVAL_S", "21600") or 21600))
+        interval = _env_float("PRICE_WATCH_INTERVAL_S", 21600.0, 300.0)
         try:
             from brain.price_watch import check_price_watches
         except Exception:  # noqa: BLE001
@@ -1307,7 +1371,7 @@ class JarvisRuntime:
                 self.run_watch_checks()
             except Exception:  # noqa: BLE001 - a bad pass never kills the monitor
                 log.exception("Watch monitor pass failed")
-            interval = max(60.0, float(os.getenv("WATCH_POLL_S", "300") or 300))
+            interval = _env_float("WATCH_POLL_S", 300.0, 60.0)
             if self._stop_monitors.wait(interval):
                 break
 
@@ -1362,20 +1426,30 @@ class JarvisRuntime:
         if self._stop_monitors.wait(60):  # let startup settle first
             return
         while not self._stop_monitors.is_set():
-            if gmail.is_linked() and _monitor_on("EMAIL_TRIAGE_ENABLED"):
-                # The job's finish_task records the summary in the inbox.
-                subagents.run_job("email_triage", "Sorting your inbox", email_triage.triage)
-            interval = max(120.0, float(os.getenv("EMAIL_TRIAGE_INTERVAL_S", "900") or 900))
+            try:
+                if gmail.is_linked() and _monitor_on("EMAIL_TRIAGE_ENABLED"):
+                    # The job's finish_task records the summary in the inbox.
+                    subagents.run_job("email_triage", "Sorting your inbox", email_triage.triage)
+            except Exception:  # noqa: BLE001 - a bad pass must not end the loop
+                log.exception("Email triage pass failed")
+            interval = _env_float("EMAIL_TRIAGE_INTERVAL_S", 900.0, 120.0)
             if self._stop_monitors.wait(interval):
                 break
 
     def _weather_monitor_loop(self) -> None:
-        interval = float(os.getenv("WEATHER_MONITOR_INTERVAL_S", "1800.0"))
+        interval = _env_float("WEATHER_MONITOR_INTERVAL_S", 1800.0, 60.0)
         previous_temp: int | None = None
         failures = 0
 
         while not self._stop_monitors.is_set():
-            snapshot = get_weather_snapshot()
+            try:
+                snapshot = get_weather_snapshot()
+            except Exception:  # noqa: BLE001 - a bad fetch must not end the loop
+                log.exception("Weather monitor pass failed")
+                failures += 1
+                if self._stop_monitors.wait(min(interval, 30.0 * 2 ** (failures - 1))):
+                    break
+                continue
             with self._lock:
                 self._weather_snapshot = snapshot
 
@@ -1426,7 +1500,7 @@ class JarvisRuntime:
         """Watch qBittorrent for completions and download errors."""
         from integrations.qbittorrent import download_snapshot
 
-        interval = float(os.getenv("QBITTORRENT_MONITOR_INTERVAL_S", "30.0"))
+        interval = _env_float("QBITTORRENT_MONITOR_INTERVAL_S", 30.0, 5.0)
         announce_completions = os.getenv(
             "QBITTORRENT_ANNOUNCE_COMPLETIONS", "true",
         ).strip().lower() in ("1", "true", "yes", "on")
@@ -1441,85 +1515,92 @@ class JarvisRuntime:
         stalled: set[str] = set()
 
         while not self._stop_monitors.is_set():
-            success, result = download_snapshot()
-            if not success:
-                if not self._download_monitor_failed and not self._in_startup_grace():
-                    self._download_monitor_failed = True
-                    self.record_event(
-                        kind="monitor",
-                        source="downloads",
-                        title="Download monitor offline",
-                        detail=str(result),
-                    )
-                if self._stop_monitors.wait(interval):
-                    break
-                continue
-
-            current = {
-                str(item.get("hash", "")): item
-                for item in result
-                if item.get("hash")
-            }
-            if previous is None or self._download_monitor_failed:
-                self.record_event(
-                    kind="monitor",
-                    source="downloads",
-                    title="Download monitor online",
-                    detail=f"Watching {len(current)} torrents",
-                )
-            self._download_monitor_failed = False
-
-            if previous is not None:
-                for torrent_hash, item in current.items():
-                    old = previous.get(torrent_hash)
-                    if old is None:
-                        continue
-                    old_progress = float(old.get("progress", 0) or 0)
-                    progress = float(item.get("progress", 0) or 0)
-                    name = str(item.get("name", "Download"))
-                    if old_progress < 1 <= progress:
-                        if announce_completions:
-                            # Spoken: "Iron Man has finished downloading, sir", not the release name;
-                            # episodes wait to be announced together per show.
-                            line = batcher.completed(name)
-                            if line:
-                                self.announce(line, source="downloads", title="Download complete")
-                        else:
-                            self.record_event(
-                                kind="download",
-                                source="downloads",
-                                title="Download complete",
-                                detail=name,
-                            )
-                    state = str(item.get("state", "")).lower()
-                    old_state = str(old.get("state", "")).lower()
-                    if "error" in state and "error" not in old_state:
-                        self.raise_alert("download_error", "Download error", name, source="downloads",
-                                         context={"torrent_hash": str(torrent_hash).lower(),
-                                                  "name": str(name)[:200]})
-                for line in batcher.flush(current.values()):
-                    self.announce(line, source="downloads", title="Download complete")
-            now = time.time()
-            for torrent_hash, item in current.items():
-                if float(item.get("progress", 0) or 0) >= 1:
-                    stalled.discard(torrent_hash)
-                    continue
-                why = no_progress_stall(item, now)
-                if why is None:
-                    stalled.discard(torrent_hash)
-                elif torrent_hash not in stalled:
-                    stalled.add(torrent_hash)
-                    staged = self._stage_download_retry(torrent_hash, why)
-                    self.raise_alert("download_stalled", "Download stalled",
-                                     f"{item.get('name', 'Download')}: {why} "
-                                     + ("A retry is ready in Repairs." if staged else "Ask me to diagnose it."),
-                                     source="downloads",
-                                     context={"torrent_hash": torrent_hash, "name": str(item.get("name", ""))[:200]})
-            stalled &= set(current)
-            previous = current
+            try:
+                previous = self._download_pass(previous, stalled, batcher, announce_completions,
+                                               download_snapshot, no_progress_stall)
+            except Exception:  # noqa: BLE001 - an odd torrent record must not end the loop
+                log.exception("Download monitor pass failed")
             if self._stop_monitors.wait(interval):
                 break
 
+    def _download_pass(self, previous: dict[str, dict[str, Any]] | None, stalled: set[str], batcher: Any,
+                       announce_completions: bool, download_snapshot: Any,
+                       no_progress_stall: Any) -> dict[str, dict[str, Any]] | None:
+        """One qBittorrent poll; returns the torrent map for next time."""
+        success, result = download_snapshot()
+        if not success:
+            if not self._download_monitor_failed and not self._in_startup_grace():
+                self._download_monitor_failed = True
+                self.record_event(
+                    kind="monitor",
+                    source="downloads",
+                    title="Download monitor offline",
+                    detail=str(result),
+                )
+            return previous
+
+        current = {
+            str(item.get("hash", "")): item
+            for item in result
+            if item.get("hash")
+        }
+        if previous is None or self._download_monitor_failed:
+            self.record_event(
+                kind="monitor",
+                source="downloads",
+                title="Download monitor online",
+                detail=f"Watching {len(current)} torrents",
+            )
+        self._download_monitor_failed = False
+
+        if previous is not None:
+            for torrent_hash, item in current.items():
+                old = previous.get(torrent_hash)
+                if old is None:
+                    continue
+                old_progress = float(old.get("progress", 0) or 0)
+                progress = float(item.get("progress", 0) or 0)
+                name = str(item.get("name", "Download"))
+                if old_progress < 1 <= progress:
+                    if announce_completions:
+                        # Spoken: "Iron Man has finished downloading, sir", not the release name;
+                        # episodes wait to be announced together per show.
+                        line = batcher.completed(name)
+                        if line:
+                            self.announce(line, source="downloads", title="Download complete")
+                    else:
+                        self.record_event(
+                            kind="download",
+                            source="downloads",
+                            title="Download complete",
+                            detail=name,
+                        )
+                state = str(item.get("state", "")).lower()
+                old_state = str(old.get("state", "")).lower()
+                if "error" in state and "error" not in old_state:
+                    self.raise_alert("download_error", "Download error", name, source="downloads",
+                                     context={"torrent_hash": str(torrent_hash).lower(),
+                                              "name": str(name)[:200]})
+            for line in batcher.flush(current.values()):
+                self.announce(line, source="downloads", title="Download complete")
+        now = time.time()
+        for torrent_hash, item in current.items():
+            if float(item.get("progress", 0) or 0) >= 1:
+                stalled.discard(torrent_hash)
+                continue
+            why = no_progress_stall(item, now)
+            if why is None:
+                stalled.discard(torrent_hash)
+            elif torrent_hash not in stalled:
+                stalled.add(torrent_hash)
+                staged = self._stage_download_retry(torrent_hash, why)
+                self.raise_alert("download_stalled", "Download stalled",
+                                 f"{item.get('name', 'Download')}: {why} "
+                                 + ("A retry is ready in Repairs." if staged else "Ask me to diagnose it."),
+                                 source="downloads",
+                                 context={"torrent_hash": torrent_hash, "name": str(item.get("name", ""))[:200]})
+        stalled &= set(current)
+        return current
 
     def _stage_download_retry(self, torrent_hash: str, why: str) -> bool:
         """Stage (never run) a one-tap retry for the arr item behind a stalled

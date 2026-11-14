@@ -2221,7 +2221,8 @@ _CUSTOM_TOOLS: list[dict[str, Any]] = [
         "description": (
             "Barn Door Protocol (Tony's lockdown; also 'lockdown', 'red alert'): every light in "
             "Nick's room, the fan's LEDs included, goes red and the phone and TV go to a full red "
-            "theme. stand_down puts the lights and theme back exactly as they were. Engage "
+            "theme. stand_down puts the lights and theme back exactly as they were (only while "
+            "Barn Door is engaged; otherwise it changes nothing and says so). Engage "
             "straight away when he says it; it's harmless and fully reversible."
         ),
         "input_schema": {
