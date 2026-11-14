@@ -120,9 +120,6 @@ v1 shipped 2026-10-27 and is the TV's home screen (JARVIS.md "JARVIS TV"). Open:
 
 ### Loose ends and small debt
 
-- [ ] Add the Surface's extra packages to `requirements.txt` (distro, httpcore, httptools, httpx, pathvalidate, piper-tts, pyee, uvloop, watchfiles).
-- [ ] `ios/install.sh` prints ✓ even when a device's install fails (the echo runs after the `&&` chain); make it print ✗.
-- [ ] Document `/api/camera/leave` and `/api/device/battery` in JARVIS.md.
 - [ ] Time-sensitive wake push: Nick accepts the updated Program License Agreement at developer.apple.com, then add `com.apple.developer.usernotifications.time-sensitive` to `JarvisCompanion.entitlements`. Until then Focus/Sleep can hold the wake-up push.
 - [ ] Room voice: start speaking the first sentence of long answers sooner (skipped: spoken replies are one sentence).
 - [ ] Reminders only fire while something pops them (room voice in server mode); a Core without the room voice never sends them.

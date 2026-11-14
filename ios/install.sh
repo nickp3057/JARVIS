@@ -38,9 +38,12 @@ EOF
 # All devices at once: each install runs in the background.
 while IFS=$'\t' read -r id name; do
   (
-    xcrun devicectl device install app --device "$id" "$app" >/dev/null &&
-    xcrun devicectl device process launch --device "$id" "$bundle_id" >/dev/null 2>&1
-    echo "✓ $name"
+    if xcrun devicectl device install app --device "$id" "$app" >/dev/null; then
+      xcrun devicectl device process launch --device "$id" "$bundle_id" >/dev/null 2>&1
+      echo "✓ $name"
+    else
+      echo "✗ $name (install failed)"
+    fi
   ) &
 done <<< "$devices"
 wait

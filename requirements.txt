@@ -26,7 +26,8 @@ google-auth-httplib2>=0.2.0
 
 # iOS companion API
 fastapi>=0.115.0
-uvicorn>=0.30.0
+uvicorn[standard]>=0.30.0  # standard pulls httptools, uvloop, watchfiles (what the Surface runs)
+httpx>=0.27  # APNs push, traffic tap, Anthropic client
 websockets>=12.0  # live companion voice transport (uvicorn's WebSocket backend)
 # APNs push to the companion (HTTP/2 for httpx; the JWT is signed with the
 # already-present cryptography package)
@@ -38,3 +39,6 @@ playwright>=1.48
 
 # Voice ID (brain/speaker_id.py): Nick's voiceprint for the room mic
 sherpa-onnx>=1.10
+
+# Optional: local Piper voice (TTS_PROVIDER=piper, speech/piper_voice.py)
+piper-tts>=1.2
