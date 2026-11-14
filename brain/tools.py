@@ -956,6 +956,44 @@ def _tool_remove_price_watch(args: dict[str, Any]) -> str:
     )
 
 
+def _tool_watch_for(args: dict[str, Any]) -> str:
+    from brain import subagents, watches
+
+    try:
+        item = watches.add_watch(
+            str(args.get("query") or ""), str(args.get("done_when") or ""),
+            label=str(args.get("label") or ""), cadence=str(args.get("cadence") or ""),
+            not_before=args.get("not_before"), expires_in_days=args.get("expires_in_days"),
+        )
+    except ValueError as exc:
+        return f"Tool error: {exc}"
+    runtime = subagents.attached_runtime()
+    if not item.not_before and runtime is not None and hasattr(runtime, "run_watch_checks"):
+        # First look now, in the background (it may already have happened).
+        import threading
+
+        threading.Thread(target=runtime.run_watch_checks, kwargs={"force_id": item.id},
+                         daemon=True, name="watch-first-check").start()
+    start = f"starting {watches.when(item.not_before)}" if item.not_before else "first look now"
+    return (f"Watching ({item.id}): {item.label}. Done when {item.done_when}. "
+            f"Checking {watches.describe_cadence(item)}, {start}, until {watches.when(item.expires_at)}. "
+            "I'll alert Nick's phone and the room when it happens.")
+
+
+def _tool_list_watches(_: dict[str, Any]) -> str:
+    from brain.watches import describe_watches
+    return describe_watches()
+
+
+def _tool_cancel_watch(args: dict[str, Any]) -> str:
+    from brain.watches import cancel_watch
+    key = str(args.get("watch") or args.get("watch_id") or "").strip()
+    item = cancel_watch(key)
+    if item is None:
+        return f"No single active watch matches '{key}'. Call list_watches for the ids."
+    return f"Stopped watching for {item.label} ({item.id})."
+
+
 def _tool_check_prices(_: dict[str, Any]) -> str:
     from brain.price_watch import check_price_watches, describe_price_watches
     check_price_watches()
@@ -2437,6 +2475,44 @@ _CUSTOM_TOOLS: list[dict[str, Any]] = [
             "required": ["watch_id"],
         },
     },
+    # --- "Let me know when X happens" watches (background subagent) -----
+    {
+        "name": "watch_for",
+        "description": (
+            "Watch the web for something to happen and alert Nick (phone, TV, room) when it does: "
+            "'tell me when the AP rankings are out', 'let me know when the PS5 restock happens', "
+            "'tell me when Michael 2 gets a release date'. A background agent web-searches on a "
+            "cadence until the done_when condition is met or the watch expires. Use this instead of "
+            "a timed reminder for anything that depends on the outside world. If you know when it "
+            "usually drops (e.g. the AP poll on Sunday around midday), set not_before."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "What to web-search, specific (e.g. 'AP Top 25 college football poll week 12 2026')."},
+                "done_when": {"type": "string", "description": "The condition that ends the watch, and what to report (e.g. 'the week 12 AP poll is published; say where BYU is ranked')."},
+                "label": {"type": "string", "description": "Short name, e.g. 'AP poll week 12'."},
+                "cadence": {"type": "string", "description": "Nick's words if he gave any: 'hourly', 'every morning', 'twice a day', 'every 3 hours'. Empty = every 6 hours."},
+                "not_before": {"type": "string", "description": "Optional ISO local date-time before which there's no point checking (a known drop time), e.g. 2026-11-16T11:30."},
+                "expires_in_days": {"type": "number", "minimum": 0.04, "maximum": 365, "description": "Give up after this many days (default 14)."},
+            },
+            "required": ["query", "done_when"],
+        },
+    },
+    {
+        "name": "list_watches",
+        "description": "List what JARVIS is watching the web for (ids, cadence, next check, last finding) and recently finished watches.",
+        "input_schema": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "cancel_watch",
+        "description": "Stop a 'let me know when' watch by its id from list_watches, or by a word from its name.",
+        "input_schema": {
+            "type": "object",
+            "properties": {"watch": {"type": "string", "description": "Watch id (e.g. w1a2b3c) or a word from its label."}},
+            "required": ["watch"],
+        },
+    },
     # --- Email triage (background subagent) ------------------------------
     {
         "name": "sort_inbox",
@@ -2960,6 +3036,9 @@ _DISPATCH: dict[str, Callable[[dict[str, Any]], str]] = {
     "list_price_watches": _tool_list_price_watches,
     "check_prices": _tool_check_prices,
     "remove_price_watch": _tool_remove_price_watch,
+    "watch_for": _tool_watch_for,
+    "list_watches": _tool_list_watches,
+    "cancel_watch": _tool_cancel_watch,
     "sort_inbox": _tool_sort_inbox,
     "email_triage_report": _tool_email_triage_report,
     "email_unsubscribe_list": _tool_email_unsubscribe_list,

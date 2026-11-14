@@ -129,14 +129,14 @@ Nick's running to-do list for the project. When one ships, move it to
 `JARVIS.md` "Recently Shipped" and delete it here. Newest asks at the bottom
 of each group.
 
-### His own voice: a local Piper voice trained on Paul Bettany (planned 2026-11-10, nothing built)
+### His own voice: a local Piper voice trained on Paul Bettany (planned 2026-11-10; Core wiring built 2026-11-14, training in progress)
 
 Nick wants JARVIS to sound like Paul Bettany's JARVIS, for his own room only (never shared or published), and to stop paying ElevenLabs. Never clone it on ElevenLabs: their terms forbid cloning a voice without consent, and a ban would take STT with it. Chosen route: **plan B, fine-tune a Piper voice**; RVC voice conversion (plan A) is the fallback if Piper sounds too flat, built from the same dataset.
 
 - **Training box:** Nick's Windows PC (RTX 3060 12 GB), only while training; WSL2 + CUDA, since Piper training on plain Windows is painful. Check where Piper's training code lives now (rhasspy/piper was archived; the successor repo moved) before writing setup steps.
 - **Audio, mostly automatic:** the Plex library already has Iron Man (2008), Iron Man 2, Iron Man 3 and Avengers: Age of Ultron (NAS `/volume2/data/media/movies`). Missing and worth adding: The Avengers (2012), WandaVision (Vision is close to JARVIS), Civil War, Infinity War. Interviews would add his everyday voice, but weight the set toward the calm JARVIS delivery.
 - **Dataset script (to write, runs on the PC):** take the 5.1 **center channel** (mostly dialogue) with ffmpeg → vocal isolation (Demucs) → Whisper large-v3 with timestamps → 2–12 s clips → speaker embeddings with the TitaNet model voice ID already uses (`models/speaker/nemo_en_titanet_small.onnx`, `brain/speaker_id.py`) → keep clips close to a few seed clips Nick confirms by ear (~10 minutes of his time) → LJSpeech-style `wavs/` + `metadata.csv`. Drop overlaps, music-heavy and heavily processed lines. Target 15–60 min of clean speech; fine-tune from a British male Piper checkpoint (en_GB medium) so less audio is needed. One night of training.
-- **Core wiring (Mac, behind a setting):** `TTS_PROVIDER=piper` + `PIPER_VOICE_MODEL` path; load `PiperVoice` once in-process (today's fallback shells out to `python -m piper` and reloads the model every line) and stream raw PCM into `aplay -t raw` like `_stream_elevenlabs`; works with the TTS cache, room streaming, barge-in/hush; also `speech/remote_voice.py` so the phone voice matches; ElevenLabs becomes the fallback. Optional light EQ for the film's digital sheen. `length_scale`/`noise_scale` as `.env` knobs.
+- [x] **Core wiring: shipped 2026-11-14** (JARVIS.md "Local Piper voice behind one setting"): swapping the trained voice in is `TTS_PROVIDER=piper` + `PIPER_VOICE_MODEL=/path/bettany.onnx` (with `piper-tts` installed in the Surface venv). Still open: the optional light EQ (hook noted in `speech/piper_voice.py`), and measuring first-audio latency on the Surface (`python -m speech.tts --say ...` prints it). Original plan: `TTS_PROVIDER=piper` + `PIPER_VOICE_MODEL` path; load `PiperVoice` once in-process (today's fallback shells out to `python -m piper` and reloads the model every line) and stream raw PCM into `aplay -t raw` like `_stream_elevenlabs`; works with the TTS cache, room streaming, barge-in/hush; also `speech/remote_voice.py` so the phone voice matches; ElevenLabs becomes the fallback. Optional light EQ for the film's digital sheen. `length_scale`/`noise_scale` as `.env` knobs.
 - **Latency:** comparable to the streamed ElevenLabs path (~170 ms to first audio) and never depends on the internet; measure on the Surface.
 - **Dropping ElevenLabs entirely** would also mean `STT_PROVIDER=local` (Whisper small.en on the Surface); measure it against Scribe's ~0.5 s before switching.
 
@@ -742,18 +742,15 @@ Little things mentioned along the way, roughly smallest first:
   (needs HA linked to Google Home; not checked).
 - [ ] TV LED under the screen still flashing overnight? If so, close the SSE
   stream on screen-off (plan above).
-- [ ] "Let me know when X happens" (asked 2026-11-08, e.g. "tell me when the
-  AP college rankings are out"). Today JARVIS has no web-event watcher (only
-  `watch_price`), so at best he sets a timed `add_reminder` around the
-  expected drop. Two steps, smallest first:
-  1. Due reminders also push to the phone: `_record_reminder_event` in
-     `brain/runtime.py` only calls `record_event` (spoken + inbox), never
-     `raise_alert`, so reminders never reach the phone/TV.
-  2. General `watch_for` tool: a durable watch (query + "done when" condition
-     + check cadence + expiry) run as a scheduled `brain/subagents.py` job
-     with web_search; when the condition is met it `raise_alert`s the answer
-     ("AP poll's out, BYU is #12") and retires the watch. Back it with its own
-     module like `brain/price_watch.py`; cap checks/day for cost.
+- [x] "Let me know when X happens" (asked 2026-11-08; shipped 2026-11-14, see
+  JARVIS.md "Let me know when watches"). Due reminders now push to the phone
+  and TV through `raise_alert`; `watch_for` / `list_watches` / `cancel_watch`
+  run durable web watches on the `watcher` subagent. Check at home: "tell me
+  when the AP poll is out" sets a sensible query, condition and `not_before`;
+  the phone buzzes once with the answer and the room says it once; a due
+  reminder buzzes the phone; the Agents page shows Watcher's cost. Loose end:
+  reminders only fire while something pops them (room voice in server mode);
+  a Core without the room voice never sends them.
 - [ ] 1337x: `switch_indexer_mirror` stack fix, and incident reports quoting
   the real HTTP / Cloudflare code (separate chat prompt written 2026-10-28).
 - [ ] NAS: allow-listed, confirm-gated "update one container" action.

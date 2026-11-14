@@ -196,6 +196,11 @@ def attach(runtime: Any) -> None:
     _runtime = runtime
 
 
+def attached_runtime() -> Any:
+    """The runtime ``attach`` registered, or None (tests, scripts)."""
+    return _runtime
+
+
 def is_running(name: str) -> bool:
     with _lock:
         job = _jobs.get(name)

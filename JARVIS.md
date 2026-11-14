@@ -20,7 +20,7 @@ The character never breaks. It calls Nick "sir", uses dry British wit, answers i
 | Local fallback | Optional OpenAI-compatible endpoint for tool-free conversation |
 | STT | faster-whisper (small.en model) |
 | Wake word | openWakeWord ("hey jarvis") |
-| TTS | ElevenLabs Flash v2.5 (Piper as fallback) |
+| TTS | ElevenLabs Flash v2.5 (Piper as fallback); `TTS_PROVIDER=piper` makes a local Piper voice primary |
 | UI | PyQt6 — custom QPainter orb, QTextEdit chat, status column |
 | Home control | Home Assistant REST API |
 | Media library | Radarr + Sonarr v3 REST API (movie / TV requests) |
@@ -67,6 +67,7 @@ Pearson-Stark-Jarvis/
 │   ├── price_watch.py       Guarded public-page price checks + durable targets
 │   ├── subagents.py         Background subagents: focused tool loop + one-at-a-time jobs in the task lane
 │   ├── email_triage.py      Email subagent: trash noise, file missionary mail, keep the rest, unsubscribe list
+│   ├── watches.py           "Let me know when X happens": durable web watches checked by the watcher subagent
 │   ├── investing.py         Investing subagents: target weights, daily advisor, crash watch, paper playground
 │   ├── trading.py           Real Schwab orders: sizes them, enforces caps/cash-only/stocks+ETFs, waits for Nick's Approve
 │   ├── agent_roster.py      Who works for JARVIS: the agents behind GET /api/agents and the companion's Agents map
@@ -112,7 +113,9 @@ Pearson-Stark-Jarvis/
 │   ├── audio.py             MicStream rolling buffer, record_until_silence, rms()
 │   ├── chime.py             Activation chime playback
 │   ├── stt.py               faster-whisper Transcriber
-│   ├── tts.py               ElevenLabs TTS with RMS envelope computation
+│   ├── tts.py               ElevenLabs TTS with RMS envelope computation; `python -m speech.tts --say "..."` to test a voice by ear
+│   ├── piper_voice.py       Local Piper voice (TTS_PROVIDER=piper): model loaded once in-process, PIPER_* knobs, piper-tts 1.2/1.3 APIs
+│   ├── remote_voice.py      Per-request PCM for the phone's voice (ElevenLabs or Piper, 22.05 kHz)
 │   ├── cloud_http.py        one kept-alive HTTPS session for the speech clouds (STT + TTS), warmed by the wake word
 │   ├── voice_loop.py        Headless voice loop (--voice mode)
 │   └── wake.py              openWakeWord WakeDetector
@@ -297,6 +300,11 @@ RMS envelope from ElevenLabs audio drives the orb in real time using a monotonic
 - `list_reminders` / `complete_reminder(id)` / `delete_reminder(id)`
 - `todays_agenda` — Google Calendar schedule for the rest of today
 - `next_event` — the next upcoming calendar event
+- A due reminder is spoken in the room as before and also goes on the alert
+  bus (`runtime.raise_alert`, kind `reminder`, severity info, push): it buzzes
+  the phone and shows on the TV, without joining Needs attention. One inbox
+  line, spoken once (only the room voice / voice loop / GUI that popped it
+  speaks). Timers stay in the room.
 
 ### Barn Door Protocol *(new)*
 - `barn_door_protocol(action?)` — "Barn Door Protocol" / "lockdown": HA
@@ -450,6 +458,28 @@ RMS envelope from ElevenLabs audio drives the orb in real time using a monotonic
 - `watch_price(url, label?, target_price?)` — monitor structured price metadata
   on an exact public product URL; private/local destinations are rejected
 - `list_price_watches` / `check_prices` / `remove_price_watch(id)`
+
+### "Let me know when" watches (background subagent) *(new 2026-11-14)*
+"Tell me when the AP rankings are out", "let me know when the PS5 restock
+happens", "tell me when Michael 2 gets a release date". A watch
+(`brain/watches.py`, stored in `memory/watches.json`) is a search query, a
+"done when" condition, a cadence and an expiry. The runtime's watch monitor
+looks every `WATCH_POLL_S` (300 s) and, when a watch is due, runs one
+`watch_check` job: the `watcher` subagent (cheap model, `WATCH_MODEL`,
+default `auto:haiku`, plus the web_search server tool, up to
+`WATCH_SEARCHES_PER_CHECK` searches) answers with a JSON verdict. Met: an
+info alert with push (`raise_alert`, kind `watch`: phone + TV), spoken in the
+room too unless `WATCH_ANNOUNCE=false`, and the watch retires. Expired: a quiet
+inbox note. Cadence words: hourly, every N hours/minutes (floor
+`WATCH_MIN_INTERVAL_MIN`, 30), twice a day, daily, every morning/evening/night,
+every day at 9 pm, weekly; default every 6 h. The first check runs right away
+unless the model sets `not_before` (a known drop time). Costs are capped by
+`WATCH_MAX_CHECKS_PER_DAY` (12, all watches) and `WATCH_MAX_CHECKS_PER_WATCH`
+(4 per watch per day); every call lands in the usage ledger as `watcher`
+(Agents map: Watcher).
+- `watch_for(query, done_when, label?, cadence?, not_before?, expires_in_days?)`
+- `list_watches` — active watches (next check, last finding) + recently finished
+- `cancel_watch(watch)` — by id or a word from the name (voice-locked to Nick)
 
 ### Email (background subagent) *(new)*
 The email sorter is JARVIS's first subagent (`brain/subagents.py`,
@@ -902,6 +932,12 @@ HUMOR_PERCENT=30           # 0-100
 ADDRESS=sir                # how JARVIS addresses Nick
 ELEVENLABS_SPEED=1.155     # TTS speed; clamped to 0.7–1.2 in speech/tts.py (code default 1.05)
 ELEVENLABS_MODEL=eleven_flash_v2_5  # TTS model (read once at startup; restart after changing)
+TTS_PROVIDER=elevenlabs     # piper = the local Piper voice speaks first (room + phone), ElevenLabs is the fallback for any line it can't say; read live
+PIPER_VOICE_MODEL=          # .onnx path (its .onnx.json beside it): absolute, relative to the repo, or a bare name in voices/ (e.g. en_GB-alan-medium). Empty: the fallback uses voices/en_US-ryan-high
+PIPER_LENGTH_SCALE=         # empty = the model's default; >1 slower, <1 faster (e.g. 0.95)
+PIPER_NOISE_SCALE=          # empty = model default (~0.667); lower is flatter, higher more expressive
+PIPER_NOISE_W=              # empty = model default (~0.8); phoneme-length variation
+PIPER_SPEAKER_ID=           # multi-speaker models only
 TTS_STREAM_PLAYBACK=1       # Linux: ElevenLabs audio plays through aplay as it downloads (first word ~0.2 s sooner on short lines, ~0.75 s on long ones); 0 = wait for the whole clip as before
 DEFAULT_LOCATION=Herriman, Utah
 ANTHROPIC_MODEL=auto        # empty/auto = newest Haiku (Models API, checked daily); auto:sonnet; or a full id to pin
@@ -914,6 +950,16 @@ PRICE_WATCH_MONITOR_ENABLED=true # periodically refresh saved product URLs
 PRICE_WATCH_INTERVAL_S=21600     # six hours; minimum five minutes
 PRICE_WATCH_DROP_PERCENT=5       # alert after this percentage decrease
 PRICE_WATCH_TIMEOUT_S=15
+WATCH_MONITOR_ENABLED=true      # "let me know when" watches (brain/watches.py)
+WATCH_POLL_S=300                # how often the monitor looks for due watches (min 60)
+WATCH_MAX_CHECKS_PER_DAY=12     # web-search checks per day across all watches
+WATCH_MAX_CHECKS_PER_WATCH=4    # checks per day for any one watch
+WATCH_DEFAULT_CADENCE_HOURS=6   # when Nick doesn't say how often
+WATCH_MIN_INTERVAL_MIN=30       # fastest allowed cadence
+WATCH_DEFAULT_EXPIRY_DAYS=14    # a watch gives up quietly after this
+WATCH_SEARCHES_PER_CHECK=3      # web_search max_uses per check
+WATCH_MODEL=                    # model id or auto:<family>; default auto:haiku
+WATCH_ANNOUNCE=true             # also say a found watch in the room
 
 # Voice tuning
 WAKE_THRESHOLD=0.6         # wake score 0-1 (higher = harder to wake; was 0.5, raised to cut false triggers)
@@ -1217,6 +1263,8 @@ there, so edit files with a `sudo python3` one-shot or vi.
 
 ## Recently Shipped
 
+- **Local Piper voice behind one setting (2026-11-14).** Core-side wiring for the Bettany voice being trained on Nick's PC: `TTS_PROVIDER=piper` + `PIPER_VOICE_MODEL=<path>.onnx` makes a local Piper voice JARVIS's main voice, on the room speaker and the phone, with ElevenLabs as the fallback; nothing changes while `TTS_PROVIDER` is unset/`elevenlabs`. `speech/piper_voice.py` loads `PiperVoice` once in-process and caches it by path (the old fallback ran `python -m piper` and reloaded the model every line), supports piper-tts 1.2.x (`synthesize_stream_raw`) and 1.3+ (`synthesize` + `SynthesisConfig`), and reads the knobs `PIPER_LENGTH_SCALE`, `PIPER_NOISE_SCALE`, `PIPER_NOISE_W`, `PIPER_SPEAKER_ID` live. Room: `tts._stream_piper` pipes each sentence's PCM into `aplay -t raw` at the model's own rate as soon as it is synthesized (Linux; `TTS_STREAM_PLAYBACK=0` and the GUI orb use a whole-clip WAV instead); barge-in, hush and `stop_playback` stop it like the ElevenLabs stream, `cache=True`/`"auto"` lines get their own cache entries per model and knobs, and audio from the fallback voice is never cached under Piper's key. Phone: `remote_voice.pcm_stream` sends the same voice, resampled to 22.05 kHz if needed. If Piper can't speak a line (piper-tts missing, model or config missing, synthesis error before the first audio) the line goes to ElevenLabs and the reason is logged once (`Piper voice unavailable, using the fallback voice: ...`); a failure mid-sentence is never re-spoken in another voice. Each line logs `4. TTS first audio (Piper stream): N ms` at INFO. Test by ear: `python -m speech.tts --say "Good evening, sir." --provider piper --model voices/en_GB-alan-medium.onnx` (prints ms to first audio; `--wav out.wav` writes a file instead). The ElevenLabs-mode Piper fallback also tries the in-process voice first, then the old CLI. piper-tts is not in `requirements.txt` and not in the Mac venv; install it on the Surface (`.venv/bin/pip install piper-tts`). Not done: the optional light EQ (hook noted in `piper_voice.py`). Tests: `tests/test_piper_voice.py`.
+- **"Let me know when X happens" + reminders on the phone (2026-11-14).** Due reminders now also go through `runtime.raise_alert` (kind `reminder`, info, push), so they buzz the phone and show on the TV; still spoken once in the room and one inbox line (`raise_alert` gained `inbox_kind` / `speakable`; announcements are no longer logged twice). New `watch_for` / `list_watches` / `cancel_watch` tools and `brain/watches.py`: durable web watches (query, done-when condition, cadence, optional not-before, expiry) checked by the new `watcher` subagent (cheap model + web_search) from a runtime monitor; met watches alert with the answer and retire, expired ones leave a quiet note; checks capped per day and per watch. Watcher on the Agents map; settings `WATCH_*`. Tests: `tests/test_watches.py`. Not run against the live API yet.
 - **Answer screens in the reply panel, bigger (companion 6.26 / build 268, TV 9.6, 2026-11-14).** Nick's notes after the first run: on the iPad's Room tab the card now shows inside JARVIS's reply panel under the reply (the panel stays up while the card does) rather than floating over the screen; the phone and other tabs keep the floating panel. Every size is roughly doubled (`AnswerCardContent(k:)`, 1 on iPad, 0.72 on phone; the current temperature is 110 pt), the TV card is 760 dp wide with text 1.45x, and cards clear after 45 s instead of 60.
 - **Goodnight that always runs, weather card by voice (companion 6.25 / build 267, 2026-11-14).** `goodnight.is_goodnight` now also matches "good night" wrapped in filler and mishearings of Jarvis ("Hey Jarvis, good night", "Thank you, Jervis. Good night", "I said good night", "Hey drivers, good night"), the room-log transcripts that used to fall through to the plain Goodnight scene or a model reply; anything else in the sentence still goes to the conversation. The room voice's weather quick answer puts the `weather_today` card up in the background (`quick_answers._put_weather_on_screen`), since that path never reaches the model's `show_screen`.
 - **Answer screens (companion, TV 9.5, 2026-11-13).** "What's the weather?" puts a weather readout on the iPad's Room tab, the phone and the room TV, like JARVIS putting it up on the nearest display. Trigger: the model calls the new `show_screen(card)` tool (instead of `get_weather` / `todays_agenda` / `list_timers`) only when Nick asks for something with a visual shape; the tool description carries the rule, so the persona block is untouched. `brain/answer_cards.py` builds the card once (one builder per type), publishes it with `event_bus.publish_card`, and returns the spoken facts plus a note to keep the reply short. Cards are the bus's second event kind: own ids and 20-card history, never pushed to the phone, never on Needs attention, 45 s `ttl_s`. `GET /api/clients/events` (scope `events:read`, so the TV's existing token works) sends them as `event: card` frames with no `id:` line (Last-Event-ID only tracks alerts) and replays unexpired cards on connect; `?only=cards` streams just cards (the companion). Cards so far: `weather_today` (`brain/weather.get_weather_today`: the same Open-Meteo call with `hourly=temperature_2m,precipitation_probability,weather_code,is_day`, sunrise/sunset, gusts; hours from now to midnight, 8-18 of them; times as Unix seconds, conditions as one word: clear/partly/cloudy/fog/drizzle/rain/snow/storm), `calendar_day` (rest of today, `allow_interactive=False`) and `timers` (remaining seconds; clients count down). Companion: `AnswerCardPresenter` follows the card stream while the app is active and `AnswerCardOverlay` (RootView, over every tab, under Donna) shows the newest card in the panel style of the current palette; on the iPad's Room tab the card sits inside JARVIS's reply panel (`RoomDialogue`, under the reply) instead, and the overlay stays away (`AnswerCardPresenter.inlineHost`, set with the voice's inline host); tap or wait 45 s to clear it. TV: `AlertStream` routes `event: card` to `AnswerCard` (right side, over any app, no focus, fade only), screen on only. A new card type is one builder plus one renderer per client (`AnswerCard.swift` payload + view, `AnswerCard.java`).

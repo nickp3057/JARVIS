@@ -5,6 +5,15 @@ configurable speed.
 Fallback: **Piper** (local) - offline-safe; used automatically if ElevenLabs
 is unconfigured, fails, or the network drops.
 
+``TTS_PROVIDER=piper`` swaps the order: a local Piper voice
+(``PIPER_VOICE_MODEL``, loaded once in-process by ``speech/piper_voice.py``)
+speaks first, streamed into aplay sentence by sentence, and ElevenLabs is the
+fallback for any line Piper can't say.
+
+Try a voice by ear: ``python -m speech.tts --say "Good evening, sir."``
+(``--provider piper --model voices/en_GB-alan-medium.onnx`` to pick one,
+``--wav out.wav`` to write a file instead of playing).
+
 Playback is **interruptible**: ``speak(text, interrupt_event=...)`` plays
 asynchronously and watches the supplied threading.Event. If something else
 sets the event mid-playback, the audio is purged and the function returns.
@@ -31,7 +40,7 @@ import requests
 from dotenv import load_dotenv
 
 from jarvis_logger import get_logger
-from speech import cloud_http
+from speech import cloud_http, piper_voice
 
 load_dotenv()
 
@@ -45,7 +54,12 @@ _OUTPUT_FILE = _PROJECT_ROOT / "jarvis_output.wav"
 
 # --- Engine config ----------------------------------------------------------
 
-PIPER_VOICE_MODEL = "en_US-ryan-high"
+# The old fallback's stock voice (voices/en_US-ryan-high.onnx); used when
+# PIPER_VOICE_MODEL is empty. With it set, the fallback uses that model too.
+PIPER_VOICE_MODEL = piper_voice.FALLBACK_VOICE
+
+# Milliseconds from the start of the last line to its first sound (CLI, logs).
+last_first_audio_ms: float | None = None
 
 ELEVENLABS_API_KEY = os.getenv("ELEVENLABS_API_KEY", "")
 ELEVENLABS_VOICE_ID = os.getenv("ELEVENLABS_VOICE_ID", "")
@@ -183,8 +197,7 @@ def _stream_elevenlabs(text: str, interrupt_event: threading.Event | None) -> by
                 if not chunk:
                     continue
                 if not pcm:
-                    log.debug("4. TTS first audio (ElevenLabs stream): %.0f ms",
-                              (time.perf_counter() - started) * 1000)
+                    _note_first_audio("ElevenLabs stream", started, level=10)
                 if (interrupt_event is not None and interrupt_event.is_set()) or proc.poll() is not None:
                     break
                 proc.stdin.write(chunk)  # type: ignore[union-attr]
@@ -226,9 +239,146 @@ def _stream_elevenlabs(text: str, interrupt_event: threading.Event | None) -> by
     return bytes(pcm) if complete else b""
 
 
+def _note_first_audio(engine: str, started: float, level: int = 20) -> None:
+    """Record (and log) how long this line took to make its first sound."""
+    global last_first_audio_ms
+    last_first_audio_ms = (time.perf_counter() - started) * 1000
+    log.log(level, "4. TTS first audio (%s): %.0f ms", engine, last_first_audio_ms)
+
+
+# --- Piper as the main voice (TTS_PROVIDER=piper) ----------------------------
+
+def _piper_stream_enabled() -> bool:
+    if os.getenv("TTS_STREAM_PLAYBACK", "1").strip().lower() in ("0", "off", "false", "no"):
+        return False
+    return sys.platform.startswith("linux") and shutil.which("aplay") is not None
+
+
+def _stream_piper(text: str, interrupt_event: threading.Event | None,
+                  cache_to: Path | None = None) -> bytes | None:
+    """Speak ``text`` with the local Piper voice, piping each sentence into
+    aplay as soon as it is synthesized.
+
+    Same contract as ``_stream_elevenlabs``: the audio that was played (b""
+    when it was stopped or cut short), or None when nothing was heard and the
+    caller should try another way."""
+    started = time.perf_counter()
+    try:
+        rate, chunks = piper_voice.open_stream(text)
+        first = next(chunks, b"")
+    except piper_voice.PiperUnavailable as exc:
+        piper_voice.warn_once(str(exc))
+        return None
+    except Exception as exc:  # noqa: BLE001 - onnxruntime errors vary
+        piper_voice.warn_once(f"synthesis failed: {exc}")
+        return None
+    if not first:
+        piper_voice.warn_once("synthesis produced no audio")
+        return None
+    if interrupt_event is not None and interrupt_event.is_set():
+        return b""
+
+    try:
+        proc = subprocess.Popen(
+            ["aplay", "-q", *alsa_device_args(), "-t", "raw", "-f", "S16_LE",
+             "-r", str(rate), "-c", "1", "-"],
+            stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
+        )
+    except Exception:  # noqa: BLE001 - no aplay, bad device: the whole-clip path reports it
+        log.debug("Could not start aplay for Piper speech", exc_info=True)
+        return None
+    _note_first_audio("Piper stream", started)
+
+    global _current_player
+    with _player_lock:
+        _current_player = proc
+    pcm = bytearray()
+    complete = False
+    try:
+        try:
+            chunk: bytes | None = first
+            while chunk is not None:
+                if (interrupt_event is not None and interrupt_event.is_set()) or proc.poll() is not None:
+                    break
+                proc.stdin.write(chunk)  # type: ignore[union-attr]
+                pcm += chunk
+                chunk = next(chunks, None)
+            else:
+                complete = True
+        except OSError:
+            pass  # aplay went away mid-write: stop_playback, or it failed (checked below)
+        except Exception as exc:  # noqa: BLE001 - synthesis died mid-line; never repeat it
+            log.warning("Piper synthesis failed after %d bytes: %s", len(pcm), exc)
+        finally:
+            try:
+                proc.stdin.close()  # type: ignore[union-attr]
+            except OSError:
+                pass
+        while proc.poll() is None:
+            if interrupt_event is not None and interrupt_event.is_set():
+                proc.terminate()
+                proc.wait(timeout=2)
+                log.info("TTS interrupted by event.")
+                break
+            time.sleep(0.04)
+    finally:
+        with _player_lock:
+            if _current_player is proc:
+                _current_player = None
+    stopped = (proc.returncode or 0) < 0 or (interrupt_event is not None and interrupt_event.is_set())
+    if stopped:
+        return b""
+    if proc.returncode:
+        stderr = proc.stderr.read().decode(errors="replace") if proc.stderr else ""
+        log.warning("Streamed Piper playback failed (exit %s): %s", proc.returncode, stderr.strip())
+        return None
+    if complete and cache_to is not None:
+        _store_pcm_in_cache(bytes(pcm), cache_to, rate)
+    return bytes(pcm) if complete else b""
+
+
+def _speak_piper(
+    text: str,
+    interrupt_event: threading.Event | None,
+    on_envelope: Callable[[list[float], float], None] | None,
+    cached: Path | None,
+) -> bool:
+    """Say ``text`` with the Piper voice. False means it couldn't (the caller
+    falls back to ElevenLabs); the reason is logged once."""
+    if on_envelope is None and _piper_stream_enabled():
+        if _stream_piper(text, interrupt_event, cached) is not None:
+            return True
+    started = time.perf_counter()
+    try:
+        piper_voice.write_wav(text, _OUTPUT_FILE)
+    except piper_voice.PiperUnavailable as exc:
+        piper_voice.warn_once(str(exc))
+        return False
+    except Exception as exc:  # noqa: BLE001
+        piper_voice.warn_once(f"synthesis failed: {exc}")
+        return False
+    if cached is not None:
+        _store_in_cache(cached)
+    _emit_envelope(on_envelope)
+    _note_first_audio("Piper", started)
+    _play_async_and_wait(_OUTPUT_FILE, interrupt_event)
+    return True
+
+
 # --- Piper (fallback) -------------------------------------------------------
 
 def _synthesize_piper(text: str) -> bool:
+    """Whole-clip Piper into the output WAV, when ElevenLabs couldn't speak.
+    Uses the in-process voice (PIPER_VOICE_MODEL, else the stock Ryan voice)
+    and falls back to the old ``python -m piper`` run, which can download
+    the stock voice if it's missing."""
+    try:
+        piper_voice.write_wav(text, _OUTPUT_FILE, default_model=PIPER_VOICE_MODEL)
+        return True
+    except piper_voice.PiperUnavailable as exc:
+        log.debug("In-process Piper unavailable (%s); trying the piper CLI.", exc)
+    except Exception:  # noqa: BLE001
+        log.debug("In-process Piper failed; trying the piper CLI.", exc_info=True)
     command = [
         sys.executable, "-m", "piper",
         "--data-dir", str(_VOICE_DIR),
@@ -383,6 +533,11 @@ _CACHE_MAX_FILES = 200
 
 def _cache_path(text: str) -> Path:
     import hashlib
+    if piper_voice.selected():  # its own entries: a new model or knob re-synthesizes
+        knobs = piper_voice.settings()
+        key = "|".join(("piper", str(piper_voice.model_path()),
+                        *(str(knobs[name]) for name in sorted(knobs)), text.strip()))
+        return _CACHE_DIR / f"{hashlib.sha1(key.encode()).hexdigest()[:20]}.wav"
     speed = os.getenv("ELEVENLABS_SPEED", str(ELEVENLABS_SPEED))
     key = "|".join((ELEVENLABS_VOICE_ID, ELEVENLABS_MODEL, speed, text.strip()))
     return _CACHE_DIR / f"{hashlib.sha1(key.encode()).hexdigest()[:20]}.wav"
@@ -415,11 +570,11 @@ def _said_before(text: str) -> bool:
         return counts[key] >= 2
 
 
-def _store_pcm_in_cache(pcm: bytes, path: Path) -> None:
+def _store_pcm_in_cache(pcm: bytes, path: Path, sample_rate: int = _ELEVENLABS_SAMPLE_RATE) -> None:
     """Keep a line that was streamed (there is no output file to copy)."""
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
-        _wrap_pcm_as_wav(pcm, path, _ELEVENLABS_SAMPLE_RATE)
+        _wrap_pcm_as_wav(pcm, path, sample_rate)
         _trim_cache(path.parent)
     except OSError:
         log.debug("TTS cache write failed", exc_info=True)
@@ -474,6 +629,11 @@ def speak(
         _play_async_and_wait(cached, interrupt_event)  # no synthesis: starts at once
         return
 
+    if piper_voice.selected():
+        if _speak_piper(text, interrupt_event, on_envelope, cached):
+            return
+        cached = None  # the fallback voice must not fill Piper's cache entries
+
     if on_envelope is None and _stream_playback_enabled():
         played = _stream_elevenlabs(text, interrupt_event)
         if played is not None:
@@ -494,15 +654,19 @@ def speak(
         log.error("All TTS engines failed; staying silent.")
         return
 
-    if on_envelope is not None:
-        try:
-            envelope = compute_rms_envelope(_OUTPUT_FILE, fps=30)
-            if envelope:
-                on_envelope(envelope, 1.0 / 30)
-        except Exception:  # noqa: BLE001
-            log.debug("on_envelope callback raised; skipping.")
-
+    _emit_envelope(on_envelope)
     _play_async_and_wait(_OUTPUT_FILE, interrupt_event)
+
+
+def _emit_envelope(on_envelope: Callable[[list[float], float], None] | None) -> None:
+    if on_envelope is None:
+        return
+    try:
+        envelope = compute_rms_envelope(_OUTPUT_FILE, fps=30)
+        if envelope:
+            on_envelope(envelope, 1.0 / 30)
+    except Exception:  # noqa: BLE001
+        log.debug("on_envelope callback raised; skipping.")
 
 
 
@@ -620,3 +784,53 @@ def _play_posix_blocking(wav_path: Path, interrupt_event: threading.Event | None
         log.error("Audio playback failed (exit %s): %s", proc.returncode, stderr.strip())
         return False
     return True
+
+
+# --- Try a voice by ear -------------------------------------------------------
+
+def _main(argv: list[str] | None = None) -> int:
+    import argparse
+
+    parser = argparse.ArgumentParser(
+        prog="python -m speech.tts",
+        description="Speak one line through JARVIS's voice (room speaker) and report the time to first audio.")
+    parser.add_argument("--say", required=True, help="the line to speak")
+    parser.add_argument("--provider", choices=("piper", "elevenlabs"), help="overrides TTS_PROVIDER for this run")
+    parser.add_argument("--model", help="overrides PIPER_VOICE_MODEL for this run (.onnx path or voice name)")
+    parser.add_argument("--wav", help="write Piper's audio to this WAV instead of playing it")
+    args = parser.parse_args(argv)
+    if args.provider:
+        os.environ["TTS_PROVIDER"] = args.provider
+    if args.model:
+        os.environ["PIPER_VOICE_MODEL"] = args.model
+
+    if args.wav:
+        path = piper_voice.model_path(PIPER_VOICE_MODEL)
+        try:
+            if path is not None:
+                piper_voice.load(path)  # load time is reported separately from synthesis
+            started = time.perf_counter()
+            rate = piper_voice.write_wav(args.say, Path(args.wav), default_model=PIPER_VOICE_MODEL)
+        except piper_voice.PiperUnavailable as exc:
+            print(f"Piper unavailable: {exc}")
+            return 1
+        print(f"Wrote {args.wav} ({rate} Hz) in {(time.perf_counter() - started) * 1000:.0f} ms")
+        return 0
+
+    if piper_voice.selected():
+        path = piper_voice.model_path()
+        if path is not None:
+            try:
+                piper_voice.load(path)  # warm, so the number below is per-line latency
+            except piper_voice.PiperUnavailable as exc:
+                print(f"Piper unavailable ({exc}); the fallback voice will speak.")
+    speak(args.say)
+    if last_first_audio_ms is None:
+        print("No first-audio time recorded (a cached line, or ElevenLabs' whole-clip path).")
+    else:
+        print(f"First audio after {last_first_audio_ms:.0f} ms")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(_main())

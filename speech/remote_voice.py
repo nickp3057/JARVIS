@@ -2,6 +2,11 @@
 
 ElevenLabs streams PCM as it is generated. Piper is a bounded local fallback
 using a private temporary WAV, so concurrent room/phone speech cannot collide.
+
+With ``TTS_PROVIDER=piper`` the phone hears the same in-process Piper voice
+as the room (``speech/piper_voice.py``), resampled to 22.05 kHz if the model
+runs at another rate; ElevenLabs is then the fallback, used only when Piper
+fails before its first audio (a sentence is never restarted in another voice).
 """
 from __future__ import annotations
 
@@ -16,11 +21,46 @@ from collections.abc import Iterator
 
 import requests
 
+from speech import piper_voice
+
 SAMPLE_RATE = 22050
 CHUNK_BYTES = 4096
 
 
 def pcm_stream(text: str, stopped: threading.Event, previous_text: str = "") -> Iterator[bytes]:
+    if piper_voice.selected():
+        try:
+            rate, chunks = piper_voice.open_stream(text)
+            first = next(chunks, b"")
+            if not first:
+                raise piper_voice.PiperUnavailable("synthesis produced no audio")
+        except Exception as exc:  # noqa: BLE001 - PiperUnavailable or an onnxruntime error
+            piper_voice.warn_once(str(exc))
+        else:
+            yield from _local_voice(first, chunks, rate, stopped)
+            return
+    yield from _elevenlabs_then_piper(text, stopped, previous_text)
+
+
+def _local_voice(first: bytes, chunks: Iterator[bytes], rate: int,
+                 stopped: threading.Event) -> Iterator[bytes]:
+    """The in-process Piper voice, in CHUNK_BYTES-sized 22.05 kHz pieces."""
+    chunk: bytes | None = first
+    try:
+        while chunk is not None:
+            if stopped.is_set():
+                return
+            pcm = piper_voice.resample_pcm16(chunk, rate, SAMPLE_RATE)
+            for start in range(0, len(pcm), CHUNK_BYTES):
+                if stopped.is_set():
+                    return
+                yield pcm[start:start + CHUNK_BYTES]
+            chunk = next(chunks, None)
+    except Exception:  # noqa: BLE001 - synthesis died mid-sentence
+        raise RuntimeError("The voice stream was interrupted") from None
+
+
+def _elevenlabs_then_piper(text: str, stopped: threading.Event, previous_text: str) -> Iterator[bytes]:
     key = os.getenv("ELEVENLABS_API_KEY", "").strip()
     voice = os.getenv("ELEVENLABS_VOICE_ID", "").strip()
     sent = False
@@ -61,6 +101,14 @@ def pcm_stream(text: str, stopped: threading.Event, previous_text: str = "") -> 
 
 
 def _piper(text: str, stopped: threading.Event) -> Iterator[bytes]:
+    try:  # the in-process voice first: no model reload, no temporary file
+        rate, chunks = piper_voice.open_stream(text, default_model=piper_voice.FALLBACK_VOICE)
+        first = next(chunks, b"")
+    except Exception:  # noqa: BLE001 - not installed / no model: the piper CLI below
+        first = b""
+    if first:
+        yield from _local_voice(first, chunks, rate, stopped)
+        return
     voice_dir = Path(__file__).resolve().parents[1] / "voices"
     with tempfile.TemporaryDirectory(prefix="jarvis-phone-voice-") as directory:
         path = Path(directory) / "speech.wav"

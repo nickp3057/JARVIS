@@ -22,7 +22,7 @@ from brain.agent import JarvisAgent
 from brain.history import load_session_messages, session_exists, request_context, begin_companion_request, delete_session, start_new_session
 from brain.memory import list_facts
 from brain.timers import Timer, active_timers, pop_expired
-from brain.reminders import active_reminders, pop_due_reminders as _pop_due_reminders
+from brain.reminders import Reminder, active_reminders, pop_due_reminders as _pop_due_reminders
 from brain.weather import WeatherSnapshot, get_weather_snapshot
 from integrations.home_assistant import get_states, listen_state_changes
 from jarvis_logger import get_logger
@@ -265,6 +265,10 @@ class JarvisRuntime:
             self._price_monitor_started = True
             threading.Thread(target=self._price_monitor_loop, daemon=True).start()
 
+        if _monitor_on("WATCH_MONITOR_ENABLED") and not getattr(self, "_watch_monitor_started", False):
+            self._watch_monitor_started = True
+            threading.Thread(target=self._watch_monitor_loop, daemon=True).start()
+
         from integrations import gmail
         if _monitor_on("EMAIL_TRIAGE_ENABLED") and gmail.is_configured() and not self._email_monitor_started:
             self._email_monitor_started = True
@@ -357,10 +361,13 @@ class JarvisRuntime:
 
     def raise_alert(self, kind: str, title: str, detail: str, *, source: str, severity: str = "warning",
                     push: bool = True, dedupe_key: str | None = None, cooldown_s: float = 0.0,
-                    context: dict | None = None, **grouping) -> None:
+                    context: dict | None = None, inbox_kind: str = "alert", speakable: bool = False,
+                    **grouping) -> None:
         """Inbox event plus bus alert: the one call for a new proactive alert.
-        ``grouping`` (thread_id, collapse_id, passive, category) goes to the phone push."""
-        self.record_event(kind="alert", source=source, title=title, detail=detail)
+        ``grouping`` (thread_id, collapse_id, passive, category) goes to the phone push.
+        ``inbox_kind`` / ``speakable`` shape the one inbox event (a due reminder
+        stays a "reminder"); neither speaks: only the room/voice front ends do."""
+        self.record_event(kind=inbox_kind, source=source, title=title, detail=detail, speakable=speakable)
         event_bus.publish(kind, title, detail, source=source, severity=severity, push=push,
                           dedupe_key=dedupe_key, cooldown_s=cooldown_s, context=context, **grouping)
 
@@ -739,20 +746,38 @@ class JarvisRuntime:
             self._record_reminder_event(item)
         return due
 
-    def announce(self, text: str, *, source: str = "runtime", title: str = "Announcement") -> None:
-        """Queue a free-form line to be spoken proactively and log it."""
+    def announce(self, text: str, *, source: str = "runtime", title: str = "Announcement",
+                 record: bool = True) -> None:
+        """Queue a free-form line to be spoken proactively and log it
+        (``record=False`` when the caller already put it in the inbox)."""
         text = (text or "").strip()
         if not text:
             return
         with self._lock:
             self._pending_announcements.append(text)
-        self.record_event(kind="notice", source=source, title=title, detail=text, speakable=True)
+        if record:
+            self.record_event(kind="notice", source=source, title=title, detail=text, speakable=True)
 
     def _record_reminder_event(self, timer: Timer) -> None:
+        """Inbox (and, for a reminder, phone/TV) record of something due.
+
+        Speaking stays with whoever popped it (room voice, voice loop, GUI):
+        neither path here speaks, so the room hears it once. A reminder also
+        goes on the event bus as an info alert with push, so it buzzes the
+        phone and shows on the TV without joining "Needs attention".
+        Announcements were already logged by ``announce``."""
+        if isinstance(timer, SpokenAnnouncement):
+            return
         with self._lock:
             if timer.id in self._reminder_event_ids:
                 return
             self._reminder_event_ids.add(timer.id)
+        if isinstance(timer, Reminder):
+            self.raise_alert(
+                "reminder", "Reminder", timer.message, source="reminders", severity="info", push=True,
+                inbox_kind="reminder", speakable=True, thread_id="reminder", collapse_id=f"reminder-{timer.id}",
+            )
+            return
         self.record_event(
             kind="reminder",
             source="timers",
@@ -1268,6 +1293,62 @@ class JarvisRuntime:
                 )
             if self._stop_monitors.wait(interval):
                 break
+
+    def _watch_monitor_loop(self) -> None:
+        """"Let me know when X happens": check due watches (``brain/watches.py``).
+
+        Every WATCH_POLL_S (300) it looks for due or expired watches; when
+        there is work it runs one ``watch_check`` subagent job (task lane, no
+        spoken summary). Met watches alert; expired ones leave a quiet note."""
+        if self._stop_monitors.wait(90):  # let startup (and the network) settle first
+            return
+        while not self._stop_monitors.is_set():
+            try:
+                self.run_watch_checks()
+            except Exception:  # noqa: BLE001 - a bad pass never kills the monitor
+                log.exception("Watch monitor pass failed")
+            interval = max(60.0, float(os.getenv("WATCH_POLL_S", "300") or 300))
+            if self._stop_monitors.wait(interval):
+                break
+
+    def run_watch_checks(self, *, force_id: str = "", client: Any = None) -> str | None:
+        """One pass over the watches as a subagent job; None when nothing was due
+        (or a pass is already running). Delivers each outcome itself."""
+        from brain import subagents, watches
+
+        if not _monitor_on("WATCH_MONITOR_ENABLED") and not force_id:
+            return None
+        if not force_id and watches.due_count() == 0:
+            return None
+
+        def work() -> str:
+            outcomes = watches.check_due(force_id=force_id, client=client)
+            for outcome in outcomes:
+                self._deliver_watch_outcome(outcome)
+            met = [o["watch"].label for o in outcomes if o["event"] == "met"]
+            expired = [o["watch"].label for o in outcomes if o["event"] == "expired"]
+            parts = [f"Found: {', '.join(met)}"] if met else []
+            parts += [f"Expired: {', '.join(expired)}"] if expired else []
+            return "; ".join(parts) or "Checked; nothing yet."
+
+        job = subagents.run_job("watch_check", "Checking your watches", work)
+        return job.summary if job else None
+
+    def _deliver_watch_outcome(self, outcome: dict[str, Any]) -> None:
+        watch, answer = outcome["watch"], (outcome.get("answer") or "").strip()
+        if outcome["event"] == "met":
+            self.raise_alert("watch", watch.label[:80], answer or watch.done_when, source="watcher",
+                             severity="info", push=True, inbox_kind="alert", speakable=True,
+                             thread_id="watch", collapse_id=f"watch-{watch.id}",
+                             context={"watch_id": watch.id})
+            if _monitor_on("WATCH_ANNOUNCE"):
+                self.announce(answer or f"{watch.label}: it's happened, sir.", source="watcher",
+                              title=watch.label, record=False)
+            return
+        note = f"Stopped watching for {watch.label}: it expired with nothing found."
+        if answer:
+            note += f" Last check: {answer}"
+        self.record_event(kind="notice", source="watcher", title="Watch expired", detail=note[:500])
 
     def _email_triage_loop(self) -> None:
         """Sort new Gmail every EMAIL_TRIAGE_INTERVAL_S once Gmail is linked.

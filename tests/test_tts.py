@@ -93,6 +93,9 @@ class SynthesisTests(unittest.TestCase):
             self.assertFalse(tts._synthesize_elevenlabs("x"))
 
     def test_piper_failures_are_logged(self) -> None:
+        # The in-process voice is out (no piper-tts / no model), so the piper CLI runs.
+        patch.object(tts.piper_voice, "write_wav",
+                     side_effect=tts.piper_voice.PiperUnavailable("not installed")).start()
         for error in (FileNotFoundError(), subprocess.CalledProcessError(1, "piper", stderr=b"no voice")):
             with patch.object(tts.subprocess, "run", side_effect=error), \
                     self.assertLogs("jarvis.speech.tts", level="ERROR"):

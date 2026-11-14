@@ -212,6 +212,43 @@ SETTINGS_SCHEMA: dict[str, dict[str, Any]] = {
         "description": "Most money JARVIS's Schwab orders may move in one market day (buys and sells together).",
     },
 
+    # --- "Let me know when" watches (brain/watches.py) ---
+    "WATCH_MONITOR_ENABLED": {
+        "type": "bool",
+        "description": "Whether the watcher checks 'let me know when X happens' watches in the background.",
+    },
+    "WATCH_ANNOUNCE": {
+        "type": "bool",
+        "description": "Also say a found watch out loud in the room (the phone/TV alert happens either way).",
+    },
+    "WATCH_MAX_CHECKS_PER_DAY": {
+        "type": "int",
+        "min": 0,
+        "max": 500,
+        "description": "Web-search checks per day across all watches (cost cap).",
+    },
+    "WATCH_MAX_CHECKS_PER_WATCH": {
+        "type": "int",
+        "min": 1,
+        "max": 100,
+        "description": "Web-search checks per day for any one watch.",
+    },
+    "WATCH_DEFAULT_CADENCE_HOURS": {
+        "type": "float",
+        "min": 0.5,
+        "max": 168.0,
+        "description": "Hours between checks when Nick doesn't say how often.",
+    },
+    "WATCH_DEFAULT_EXPIRY_DAYS": {
+        "type": "float",
+        "min": 0.04,
+        "max": 365.0,
+        "description": "Days a watch lasts before it gives up quietly.",
+    },
+    "WATCH_MODEL": {
+        "type": "string",
+        "description": "Model for the watcher subagent: a model id or auto:haiku / auto:sonnet.",
+    },
     # --- Email triage subagent ---
     "EMAIL_TRIAGE_ENABLED": {
         "type": "bool",

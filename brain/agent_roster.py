@@ -59,6 +59,17 @@ def _investing_needs() -> int:
     return len(investing.pending_proposals())
 
 
+def _watch_state() -> tuple[bool, str]:
+    from brain import watches
+
+    if not _on("WATCH_MONITOR_ENABLED"):
+        return False, "Switched off (WATCH_MONITOR_ENABLED)."
+    count = len(watches.active_watches())
+    if not count:
+        return True, "Nothing to watch right now."
+    return True, f"Watching for {count} thing{'s' if count != 1 else ''}."
+
+
 # id, kind, name, role, SF Symbol, schedule, job/spec-name prefixes ("a|b"), state() -> (on, note), needs_you() -> count
 _AGENTS: list[dict[str, Any]] = [
     {"id": "memory", "kind": "helper", "name": "Memory keeper", "symbol": "brain.head.profile",
@@ -79,6 +90,10 @@ _AGENTS: list[dict[str, Any]] = [
     {"id": "email", "kind": "subagent", "name": "Email sorter", "symbol": "envelope.badge",
      "role": "Trashes junk, files missionary letters, keeps anything important.",
      "schedule": "Every 15 minutes", "jobs": "email_triage", "state": _email_state},
+    {"id": "watcher", "kind": "subagent", "name": "Watcher", "symbol": "binoculars",
+     "role": "Web-searches for things you asked to hear about ('tell me when the AP poll is out') and alerts you when they happen.",
+     "schedule": "Each watch's cadence (every 6 h by default)", "jobs": "watch_check|watcher",
+     "state": _watch_state},
     {"id": "advisor", "kind": "subagent", "name": "Portfolio advisor", "symbol": "chart.pie",
      "role": "Keeps your main Schwab account on its target weights and proposes trades for your OK.",
      "schedule": "Each market day, 10:30 AM ET", "jobs": "investing_review|investing_suggest",

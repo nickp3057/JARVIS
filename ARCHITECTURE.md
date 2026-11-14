@@ -182,7 +182,9 @@ Near-term responsibilities:
      every choice themselves (the model picks, the handler permits), and
      untrusted input (email text) is fenced as data, so a confused or
      prompt-injected model can only pick among safe, reversible actions.
-     First user: email triage (`brain/email_triage.py`). New background jobs
+     First user: email triage (`brain/email_triage.py`); the watcher
+     (`brain/watches.py`, "let me know when X happens") adds the web_search
+     server tool and a JSON verdict instead of handler tools. New background jobs
      that need the model belong here, not in a monitor's own ad hoc loop.
 
 5. Presence
@@ -384,6 +386,14 @@ runtime knows, the more JARVIS feels like one mind instead of several scripts.
   and is clamped to at least five minutes.
 - `PRICE_WATCH_DROP_PERCENT`: decrease threshold for a one-time transition alert,
   defaults to 5 percent.
+- `WATCH_MONITOR_ENABLED`: true/false, defaults to true. Every `WATCH_POLL_S`
+  (300) the monitor runs one `watch_check` job when a watch is due or expired
+  (none while the daily caps `WATCH_MAX_CHECKS_PER_DAY` / `WATCH_MAX_CHECKS_PER_WATCH`
+  are used up). A met watch is a `raise_alert` (kind `watch`, info, push) plus a
+  room announcement (`WATCH_ANNOUNCE`); an expired one a quiet inbox notice.
+- Due reminders: `pop_due_reminders` hands them to the room voice / voice loop /
+  GUI to speak and also raises them on the bus (kind `reminder`, info, push) so
+  the phone and TV get them; the inbox gets one line.
 - `EMAIL_TRIAGE_ENABLED`: true/false, defaults to true; the thread starts when
   `GOOGLE_CREDENTIALS_FILE` is set and idles until `integrations.gmail --auth`
   has saved a token. Each pass runs the email subagent as a quiet job (task
