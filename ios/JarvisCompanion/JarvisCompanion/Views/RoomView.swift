@@ -59,6 +59,7 @@ struct RoomView: View {
     @State fileprivate var movieTouches = 0
     @Environment(\.cameraWatching) fileprivate var cameraWatching
     @ObservedObject private var voice = VoicePresence.shared
+    @ObservedObject private var cards = AnswerCardPresenter.shared
     @ObservedObject private var wakeRinging = WakeRinging.shared
     @StateObject private var holds = HoldSuppressor()
     @StateObject private var dragger = LevelDragger()
@@ -284,7 +285,9 @@ struct RoomView: View {
 
     /// "Hey JARVIS" (or an announcement) is on: the conversation takes the
     /// lights' place and the reactor grows a little.
-    private var talking: Bool { voice.showing && !RootView.isMac }
+    /// The reply panel is up while JARVIS talks, and while an answer screen
+    /// ("what's the weather?") sits inside it.
+    private var talking: Bool { (voice.showing || cards.current != nil) && !RootView.isMac }
 
     /// Something's over the panel, so the voice uses its own overlay window.
     private var covered: Bool {
@@ -1098,6 +1101,7 @@ private struct RoomVoiceHost: ViewModifier {
             .onDisappear { onScreen = false }
             .onChange(of: onScreen && !covered && scenePhase == .active && !RootView.isMac, initial: true) { _, inline in
                 voice.setInlineHost(inline)
+                AnswerCardPresenter.shared.setInlineHost(inline)
             }
     }
 }

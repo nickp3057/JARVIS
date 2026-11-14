@@ -195,8 +195,11 @@ struct VoiceOverlayView: View {
 /// stop him and put it away (`VoicePresence.hush`).
 struct RoomDialogue: View {
     @ObservedObject var presence: VoicePresence
+    /// An answer screen shows under the reply, in this same panel.
+    @ObservedObject private var cards = AnswerCardPresenter.shared
 
     private var state: VoiceState { presence.state }
+    private var card: AnswerCard? { cards.current }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 22) {
@@ -208,29 +211,38 @@ struct RoomDialogue: View {
                     .font(.headline)
                     .foregroundStyle(state.phase == "error" ? JarvisTheme.amber : JarvisTheme.cyan)
             }
-            if !state.transcript.isEmpty {
+            if !state.transcript.isEmpty, card == nil || presence.showing {
                 VStack(alignment: .leading, spacing: 6) {
                     Text("You").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
                     Text(state.transcript)
-                        .font(.system(size: state.reply.isEmpty ? 38 : 26, weight: .medium, design: .rounded))
+                        .font(.system(size: state.reply.isEmpty ? 38 : card == nil ? 26 : 20, weight: .medium, design: .rounded))
                         .foregroundStyle(.white.opacity(state.reply.isEmpty ? 1 : 0.7))
                         .lineLimit(4)
                         .animation(nil, value: state.transcript)
                 }
             }
-            if !state.reply.isEmpty {
+            if !state.reply.isEmpty, card == nil || presence.showing {
                 Text(state.reply)
-                    .font(.system(size: 42, weight: .regular, design: .rounded))
+                    .font(.system(size: card == nil ? 42 : 30, weight: .regular, design: .rounded))
                     .foregroundStyle(.white)
-                    .lineLimit(8)
+                    .lineLimit(card == nil ? 8 : 3)
                     .minimumScaleFactor(0.5)
+            }
+            if let card {
+                AnswerCardContent(card: card)
+                    .id(card.id)
+                    .transition(.opacity)
             }
             Spacer(minLength: 0)
         }
         .multilineTextAlignment(.leading)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .contentShape(Rectangle())
-        .onTapGesture { presence.hush() }
+        .animation(.easeInOut(duration: 0.35), value: card?.id)
+        .onTapGesture {
+            presence.hush()
+            cards.dismiss()
+        }
         .accessibilityElement(children: .combine)
         .accessibilityAddTraits(.updatesFrequently)
         .accessibilityHint("Tap to stop JARVIS and put it away")

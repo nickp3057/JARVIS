@@ -197,7 +197,7 @@ class CardBusTests(unittest.TestCase):
         self.assertTrue(second.startswith("event: card\ndata: "))
         self.assertNotIn("id:", second.split("data: ")[0])
         body = json.loads(second.split("data: ", 1)[1])
-        self.assertEqual((body["card"], body["data"]["temp_f"], body["ttl_s"]), ("weather_today", 54, 60.0))
+        self.assertEqual((body["card"], body["data"]["temp_f"], body["ttl_s"]), ("weather_today", 54, 45.0))
         self.assertEqual(event_bus._card_subscribers, {})
 
     def test_cards_only_stream_skips_alerts_and_replays_live_cards(self) -> None:

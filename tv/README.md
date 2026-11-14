@@ -37,7 +37,7 @@ every deploy, so edit the repo copy, not the TV's.
 - **Answer screens** (`AnswerCard`, 9.5): `event: card` frames on the same
   stream (Core's `brain/answer_cards.py`: weather_today, calendar_day,
   timers) draw a readout on the right of the screen over any app, without
-  focus, in the current theme; it fades out after the card's minute and a
+  focus, in the current theme; it fades out after the card's 45 s and a
   new card replaces it. Screen on only; unknown card types are skipped.
 - **Voice** (`Voice`, via `RemoteBridgeService`): "Jarvis, ..." on the remote
   mic. The Assistant hears it too; the launcher reads its transcript from

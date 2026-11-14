@@ -31,7 +31,9 @@ import java.util.Locale;
  */
 final class AnswerCard {
     private static final Handler MAIN = new Handler(Looper.getMainLooper());
-    private static final int WIDTH_DP = 540;
+    private static final int WIDTH_DP = 760;
+    /** Every text size is scaled up so the readout carries across the room. */
+    private static final float TEXT_SCALE = 1.45f;
     private static View current;
     /** Ticks the timers card's countdowns once a second while it's up. */
     private static Runnable ticker;
@@ -219,7 +221,7 @@ final class AnswerCard {
             String when = e.optBoolean("all_day") ? "All day"
                     : clock.format(new Date((long) (e.optDouble("start_at") * 1000)));
             TextView time = label(c, when, 15, t.accent);
-            line.addView(time, new LinearLayout.LayoutParams(px(d, 96), LinearLayout.LayoutParams.WRAP_CONTENT));
+            line.addView(time, new LinearLayout.LayoutParams(px(d, 140), LinearLayout.LayoutParams.WRAP_CONTENT));
             LinearLayout text = column(c);
             TextView head = label(c, e.optString("title"), 17, t.text);
             head.setMaxLines(2);
@@ -329,7 +331,7 @@ final class AnswerCard {
     private static TextView label(Context c, String text, int sp, int color) {
         TextView t = new TextView(c);
         t.setText(text);
-        t.setTextSize(sp);
+        t.setTextSize(sp * TEXT_SCALE);
         t.setTextColor(color);
         return t;
     }

@@ -257,7 +257,7 @@ def is_cleared(alert: Alert) -> bool:
 
 # --- Answer cards -------------------------------------------------------------
 
-CARD_TTL_S = 60.0
+CARD_TTL_S = 45.0
 
 
 @dataclass(frozen=True)
