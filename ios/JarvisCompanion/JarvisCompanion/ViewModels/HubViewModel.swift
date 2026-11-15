@@ -451,14 +451,21 @@ final class HubViewModel: ObservableObject {
         Task { await refreshLightSync() }
     }
 
-    /// Start / stop, intensity or the auto switch; Core's answer replaces the state.
-    func setLightSync(action: String? = nil, intensity: String? = nil, auto: Bool? = nil) {
+    /// Start / stop, intensity, the auto switch, a timing nudge or reset, or
+    /// calibration on / Done; Core's answer replaces the state.
+    func setLightSync(action: String? = nil, intensity: String? = nil, auto: Bool? = nil,
+                      nudgeMs: Int? = nil, resetOffset: Bool? = nil, calibrate: Bool? = nil) {
         Task {
             do {
-                let state = try await client().setLightSync(action: action, intensity: intensity, auto: auto)
+                let state = try await client().setLightSync(action: action, intensity: intensity, auto: auto,
+                                                            nudgeMs: nudgeMs, resetOffset: resetOffset,
+                                                            calibrate: calibrate)
                 lightSync.value = state
                 if let message = state.message, !message.isEmpty, action == "start", !state.running {
                     actionError = message
+                }
+                if let message = state.message, !message.isEmpty, calibrate == true, state.calibrating == nil {
+                    actionError = message  // why calibration couldn't start
                 }
             } catch {
                 actionError = "Light sync didn't answer: \(error.localizedDescription)"

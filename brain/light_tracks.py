@@ -7,15 +7,20 @@ white when nothing on screen is vivid. Brightness follows each pixel's
 brightest channel, not luma: luma counts pure blue as ~7% bright, so blue
 scenes came out black.
 
-Tracks are built on request, one film at a time ("make a light sync for
-Hunger Games"), never for the whole library. The Surface (Core's host) has
+Tracks are built on request ("make a light sync for Hunger Games"), never
+for the whole library. Asking for several films queues them (FIFO, one
+ffmpeg at a time); the queue lives in ``memory/light_tracks/queue.json``
+so a Core restart resumes it, and the build that was interrupted starts
+again from scratch. The Surface (Core's host) has
 no NAS mount and no system ffmpeg, so the file is read over HTTP from Plex
 (the media Part's URL with the token, never logged) and ffmpeg comes from
 the ``imageio-ffmpeg`` package (``shutil.which("ffmpeg")`` as a fallback).
 
 Storage: ``memory/light_tracks/<plex ratingKey>.npy`` (uint8, N x 3) and
 ``memory/light_tracks/index.json`` ({ratingKey: title, year, frames,
-built_at}). The .npy is written atomically.
+built_at, offset_ms}). The .npy is written atomically. ``offset_ms`` is the
+film's own timing nudge for light sync (positive = lights earlier); a
+rebuild keeps it.
 """
 from __future__ import annotations
 
@@ -43,8 +48,12 @@ _LUMA = np.array([.2126, .7152, .0722], np.float32)
 _DIR = Path(__file__).resolve().parents[1] / "memory" / "light_tracks"
 _lock = threading.RLock()
 
-# The one build that may run: {"rating_key", "title", "year", "percent", "started_at", "proc"}.
+# The one build that may run: {"rating_key", "title", "year", "percent", "started_at", "proc", "film"}.
 _build: dict[str, Any] | None = None
+# Films waiting their turn, oldest first: {"film": plex.movie record, "rebuild", "quiet"}.
+_queue: list[dict[str, Any]] = []
+_stopping = False  # Core is shutting down: keep the interrupted build in the queue file
+OFFSET_LIMIT_MS = 2000
 _cancel = threading.Event()
 _notifier: Callable[[str, str, str], None] | None = None
 _listeners: list[Callable[[], None]] = []
@@ -169,11 +178,52 @@ def save(rating_key: str, track: np.ndarray, title: str, year: Any = None) -> No
             pass
         if not isinstance(data, dict):
             data = {}
-        data[rating_key] = {"title": title, "year": year, "frames": int(len(track)), "built_at": time.time()}
-        tmp_index = _DIR / "index.json.tmp"
-        tmp_index.write_text(json.dumps(data, indent=2))
-        tmp_index.replace(_index_file())
+        old = data.get(rating_key) if isinstance(data.get(rating_key), dict) else {}
+        data[rating_key] = {"title": title, "year": year, "frames": int(len(track)), "built_at": time.time(),
+                            "offset_ms": clamp_offset(old.get("offset_ms", 0))}
+        _write_index(data)
     _changed()
+
+
+def _write_index(data: dict[str, Any]) -> None:
+    tmp_index = _DIR / "index.json.tmp"
+    tmp_index.write_text(json.dumps(data, indent=2))
+    tmp_index.replace(_index_file())
+
+
+def clamp_offset(value: Any) -> int:
+    """A timing offset in ms, whole, within +/-``OFFSET_LIMIT_MS`` (junk is 0)."""
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return 0
+    if number != number or number in (float("inf"), float("-inf")):
+        return 0
+    return int(round(max(-OFFSET_LIMIT_MS, min(OFFSET_LIMIT_MS, number))))
+
+
+def film_offset(rating_key: str | None) -> int:
+    """This film's own light-sync timing nudge in ms (0 when none or no track)."""
+    if not rating_key:
+        return 0
+    return clamp_offset((get(str(rating_key)) or {}).get("offset_ms", 0))
+
+
+def set_film_offset(rating_key: str, offset_ms: Any) -> int | None:
+    """Store a film's timing nudge (clamped); None when the film has no track."""
+    rating_key = str(rating_key)
+    value = clamp_offset(offset_ms)
+    with _lock:
+        try:
+            data = json.loads(_index_file().read_text())
+        except (OSError, ValueError):
+            return None
+        if not isinstance(data, dict) or not isinstance(data.get(rating_key), dict):
+            return None
+        data[rating_key]["offset_ms"] = value
+        _write_index(data)
+    _changed()
+    return value
 
 
 # --- Building one ------------------------------------------------------------
@@ -239,7 +289,64 @@ def building() -> dict[str, Any] | None:
         return {k: _build[k] for k in ("rating_key", "title", "year", "percent")}
 
 
+def queue() -> list[dict[str, Any]]:
+    """The films waiting their turn, next first: [{rating_key, title, year}]."""
+    with _lock:
+        return [{"rating_key": str(e["film"].get("rating_key")), "title": str(e["film"].get("title") or ""),
+                 "year": e["film"].get("year")} for e in _queue]
+
+
+def pending(rating_key: str | None) -> bool:
+    """Building or queued."""
+    key = str(rating_key or "")
+    with _lock:
+        return bool(key) and ((_build is not None and _build["rating_key"] == key)
+                              or any(str(e["film"].get("rating_key")) == key for e in _queue))
+
+
+_QUEUE_FIELDS = ("rating_key", "title", "year", "duration_ms", "part_key")
+
+
+def _queue_file() -> Path:
+    return _DIR / "queue.json"
+
+
+def _persist() -> None:
+    """The queue on disk (the build in progress first); call with ``_lock`` held."""
+    entries = []
+    if _build is not None and _build.get("entry"):
+        entries.append(_build["entry"])
+    entries += _queue
+    rows = [{"film": {k: e["film"].get(k) for k in _QUEUE_FIELDS}, "rebuild": bool(e.get("rebuild")),
+             "quiet": bool(e.get("quiet"))} for e in entries]
+    try:
+        _DIR.mkdir(parents=True, exist_ok=True)
+        tmp = _DIR / "queue.json.tmp"
+        tmp.write_text(json.dumps(rows, indent=2))
+        tmp.replace(_queue_file())
+    except OSError as exc:
+        log.error("Could not save the light track queue: %s", exc)
+
+
+_ORDINALS = ("first", "second", "third", "fourth", "fifth", "sixth", "seventh", "eighth", "ninth", "tenth")
+
+
+def _place(position: int) -> str:
+    """1 -> "first in line"; 12 -> "number 12 in line"."""
+    return f"{_ORDINALS[position - 1]} in line" if 1 <= position <= len(_ORDINALS) else f"number {position} in line"
+
+
+def _position(rating_key: str) -> int:
+    """1-based place in line counting the build in progress; 0 if absent. ``_lock`` held."""
+    ahead = 1 if _build is not None else 0
+    for i, entry in enumerate(_queue):
+        if str(entry["film"].get("rating_key")) == rating_key:
+            return ahead + i + 1
+    return 0
+
+
 def cancel_build() -> bool:
+    """Stop the build in progress (the next one in the queue starts)."""
     with _lock:
         if _build is None:
             return False
@@ -253,31 +360,141 @@ def cancel_build() -> bool:
     return True
 
 
-def start_build(film: dict[str, Any], *, rebuild: bool = False) -> tuple[bool, str]:
-    """Build ``film``'s track in the background (a ``plex.movie`` record).
-    False with the reason when it can't start (one is building, it exists)."""
-    global _build
+def cancel(rating_key: str | None = None, *, everything: bool = False) -> list[str]:
+    """Cancel one film (queued or building) or everything; the titles cancelled."""
+    key = str(rating_key or "")
+    titles: list[str] = []
+    with _lock:
+        keep = []
+        for entry in _queue:
+            if everything or str(entry["film"].get("rating_key")) == key:
+                titles.append(str(entry["film"].get("title") or "that film"))
+            else:
+                keep.append(entry)
+        _queue[:] = keep
+        current = _build is not None and (everything or _build["rating_key"] == key)
+        if current:
+            titles.insert(0, str(_build["title"]))
+        _persist()
+    if current:
+        cancel_build()
+    if titles:
+        _changed()
+    return titles
+
+
+def start_build(film: dict[str, Any], *, rebuild: bool = False, front: bool = False,
+                quiet: bool = False) -> tuple[bool, str]:
+    """Build ``film``'s track in the background (a ``plex.movie`` record), or
+    queue it behind the one building. ``front`` jumps the queue (the
+    calibration clip); ``quiet`` skips the "ready" push (failures still
+    alert). False with the reason when it isn't added (no file, already has
+    a track, already queued)."""
     key, title = str(film.get("rating_key") or ""), str(film.get("title") or "that film")
     if not key or not film.get("part_key"):
         return False, f"Plex has no file for {title}, sir."
     if has_track(key) and not rebuild:
         return False, f"{title} already has a light sync, sir. Say rebuild if you want it made again."
-    exe = ffmpeg_exe()
-    if not exe:
+    if not ffmpeg_exe():
         return False, ("I can't build light syncs here, sir: there's no ffmpeg. "
                        "Installing imageio-ffmpeg in Core's venv fixes it.")
+    entry = {"film": dict(film), "rebuild": bool(rebuild), "quiet": bool(quiet)}
     with _lock:
-        if _build is not None:
-            return False, f"I'm still building {_build['title']} ({_build['percent']}%), sir. One at a time."
-        _cancel.clear()
-        _build = {"rating_key": key, "title": title, "year": film.get("year"), "percent": 0,
-                  "started_at": time.time(), "proc": None}
-    threading.Thread(target=_run_build, args=(film, exe), daemon=True, name="light-track-build").start()
+        if _build is not None and _build["rating_key"] == key:
+            return False, f"I'm already building {title} ({_build['percent']}%), sir."
+        place = _position(key)
+        if place:
+            if not front or place <= 2:
+                return False, f"{title} is already in the queue, sir: {_place(place)}."
+            _queue[:] = [e for e in _queue if str(e["film"].get("rating_key")) != key]
+        if front:
+            _queue.insert(0, entry)
+        else:
+            _queue.append(entry)
+        place = _position(key)
+        _persist()
+    started = _pump()
     _changed()
-    return True, f"Building the light sync for {title}, sir. I'll let you know when it's ready."
+    if started == key:
+        return True, f"Building the light sync for {title}, sir. I'll let you know when it's ready."
+    return True, f"Queued {title}, sir: {_place(place)}."
 
 
-def _run_build(film: dict[str, Any], exe: str) -> None:
+def resume() -> int:
+    """Core started: pick the queue back up from ``queue.json`` (the build
+    that was interrupted starts again from scratch). The number queued."""
+    try:
+        rows = json.loads(_queue_file().read_text())
+    except (OSError, ValueError):
+        return 0
+    if not isinstance(rows, list):
+        return 0
+    added = 0
+    with _lock:
+        known = {str(e["film"].get("rating_key")) for e in _queue}
+        if _build is not None:
+            known.add(_build["rating_key"])
+        for row in rows:
+            film = row.get("film") if isinstance(row, dict) else None
+            if not isinstance(film, dict) or not film.get("rating_key") or not film.get("part_key"):
+                continue
+            key = str(film["rating_key"])
+            if key in known or (has_track(key) and not row.get("rebuild")):
+                continue
+            known.add(key)
+            _queue.append({"film": film, "rebuild": bool(row.get("rebuild")), "quiet": bool(row.get("quiet"))})
+            added += 1
+        _persist()
+    if added:
+        log.info("Light track queue resumed: %d film(s)", added)
+        _pump()
+        _changed()
+    return added
+
+
+def _pump() -> str | None:
+    """Start the next queued build if none is running; its ratingKey, else None."""
+    global _build
+    if _stopping:
+        return None
+    exe = ffmpeg_exe()
+    if not exe:
+        return None
+    with _lock:
+        while _build is None and _queue:
+            entry = _queue.pop(0)
+            film = entry["film"]
+            key = str(film.get("rating_key"))
+            if has_track(key) and not entry.get("rebuild"):
+                continue  # built meanwhile
+            _cancel.clear()
+            _build = {"rating_key": key, "title": str(film.get("title") or "that film"), "year": film.get("year"),
+                      "percent": 0, "started_at": time.time(), "proc": None, "entry": entry}
+            _persist()
+            threading.Thread(target=_run_build, args=(film, exe, bool(entry.get("quiet"))), daemon=True,
+                             name="light-track-build").start()
+            return key
+        _persist()
+    return None
+
+
+def shutdown() -> None:
+    """Core is stopping: end ffmpeg but keep the build in the queue file, so
+    the next start builds it again."""
+    global _stopping
+    _stopping = True
+    with _lock:
+        proc = _build.get("proc") if _build is not None else None
+        if _build is not None:
+            _cancel.set()
+    if proc is not None:
+        try:
+            proc.terminate()
+        except OSError:
+            pass
+
+
+def _run_build(film: dict[str, Any], exe: str, quiet: bool = False) -> None:
     global _build
     from integrations import plex
     key, title = str(film["rating_key"]), str(film.get("title") or "that film")
@@ -334,8 +551,9 @@ def _run_build(film: dict[str, Any], exe: str) -> None:
         save(key, track, title, film.get("year"))
         minutes = (time.monotonic() - started) / 60
         log.info("Light track for %s: %d frames in %.1f min", title, len(track), minutes)
-        _notify("Light sync ready", f"The light sync for {title} is ready, sir. "
-                "It'll run on its own when you play it in movie mode.", "info")
+        if not quiet:
+            _notify("Light sync ready", f"The light sync for {title} is ready, sir. "
+                    "It'll run on its own when you play it in movie mode.", "info")
     except Exception as exc:  # noqa: BLE001 - a build must never take Core down
         log.exception("Light track for %s crashed", title)
         _notify("Light sync failed", f"I couldn't build the light sync for {title}, sir ({type(exc).__name__}).",
@@ -343,7 +561,11 @@ def _run_build(film: dict[str, Any], exe: str) -> None:
     finally:
         with _lock:
             _build = None
-        _cancel.clear()
+            if not _stopping:
+                _persist()  # at shutdown the file keeps it, so the next start builds it again
+        if not _stopping:
+            _cancel.clear()
+            _pump()
         _changed()
 
 

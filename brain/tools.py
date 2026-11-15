@@ -746,28 +746,83 @@ def _tool_barn_door_protocol(args: dict[str, Any]) -> str:
 
 
 def _tool_create_light_sync(args: dict[str, Any]) -> str:
-    """Build one film's light track in the background (brain/light_tracks.py)."""
+    """Build (or queue) light tracks for one film, several, or a whole series
+    (brain/light_tracks.py: one ffmpeg at a time, FIFO)."""
     from brain import light_sync, light_tracks
     from integrations import plex
     if not plex.is_configured():
         return "I can't reach Plex to find the film, sir (PLEX_URL / PLEX_TOKEN aren't set)."
-    title = str(args.get("title") or "").strip()
-    if title:
+    rebuild = bool(args.get("rebuild"))
+    titles = [str(t).strip() for t in (args.get("titles") or []) if str(t).strip()]
+    if str(args.get("title") or "").strip():
+        titles.insert(0, str(args["title"]).strip())
+    series = str(args.get("series") or "").strip()
+    films: list[dict[str, Any]] = []
+    missing: list[str] = []
+    if series:
+        ok, found = plex.search_movies(series)
+        if ok:
+            films.extend(found)
+        else:
+            missing.append(str(found))
+    for title in titles:
         ok, film = plex.find_movie(title)
-    else:  # "make one for this": the film on the TV now
+        if ok:
+            films.append(film)
+        else:
+            missing.append(str(film))
+    if not titles and not series:  # "make one for this": the film on the TV now
         light_sync.controller.poll_plex()
         playing = light_sync.controller.clock.current()
         if playing is None or not playing.rating_key:
             return "Which film, sir? Nothing's playing on the TV."
         ok, film = plex.movie(playing.rating_key)
-    if not ok:
-        return str(film)
-    _, message = light_tracks.start_build(film, rebuild=bool(args.get("rebuild")))
-    return message
+        if not ok:
+            return str(film)
+        films.append(film)
+    seen: set[str] = set()
+    films = [f for f in films if not (f["rating_key"] in seen or seen.add(f["rating_key"]))]
+    if len(films) == 1 and not missing:
+        return light_tracks.start_build(films[0], rebuild=rebuild)[1]
+    building, queued, have, other = None, [], [], []
+    for film in films:
+        added, message = light_tracks.start_build(film, rebuild=rebuild)
+        if added and message.startswith("Building"):
+            building = film["title"]
+        elif added:
+            queued.append(film["title"])
+        elif "already has a light sync" in message:
+            have.append(film["title"])
+        else:
+            other.append(message)
+    said = []
+    if building:
+        said.append(f"Building {building} now, sir.")
+    if queued:
+        said.append(("Queued " if not building else "Queued after it: ") + ", ".join(queued) + ".")
+    if building or queued:
+        said.append("One at a time; I'll tell you as each is ready.")
+    if have:
+        said.append("Already done: " + ", ".join(have) + " (say rebuild to make them again).")
+    said.extend(other)
+    said.extend(missing)
+    return " ".join(said) or "Nothing to build, sir."
+
+
+def _queue_said() -> str:
+    from brain import light_tracks
+    parts = []
+    b = light_tracks.building()
+    if b:
+        parts.append(f"Building {b['title']}: {b['percent']}%.")
+    waiting = light_tracks.queue()
+    if waiting:
+        parts.append("Queued next: " + ", ".join(q["title"] for q in waiting) + ".")
+    return " ".join(parts)
 
 
 def _tool_light_sync(args: dict[str, Any]) -> str:
-    """Start, stop, check or list light sync; optionally set the intensity."""
+    """Start, stop, check, list, nudge, calibrate or cancel builds; optionally set the intensity."""
     from brain import light_sync, light_tracks
     sync = light_sync.controller
     action = str(args.get("action") or "status").lower()
@@ -779,25 +834,66 @@ def _tool_light_sync(args: dict[str, Any]) -> str:
         except ValueError as exc:
             return f"{exc}, sir. Nothing was changed."
         said.append(f"Intensity set to {intensity}.")
+    scope = str(args.get("scope") or "").strip().lower() or None
     if action == "start":
         said.append(sync.start()[1])
-    elif action == "stop":
-        said.append(sync.stop()[1])
+    elif action in ("stop", "done"):
+        said.append(sync.end_calibration()[1] if action == "done" and sync.calibration else sync.stop()[1])
+    elif action == "calibrate":
+        said.append(sync.calibrate()[1])
+    elif action == "nudge":
+        direction = str(args.get("direction") or "").strip().lower()
+        raw = args.get("ms")
+        try:
+            ms = float(raw) if raw not in (None, "") else None
+        except (TypeError, ValueError):
+            ms = None
+        if direction in ("earlier", "later"):
+            ms = abs(ms if ms is not None else 50.0) * (1 if direction == "earlier" else -1)
+        if ms is None:
+            return "Earlier or later, sir, and by how much?"
+        said.append(sync.nudge(ms, scope)[1])
+    elif action == "reset_timing":
+        said.append(sync.reset_offset(scope)[1])
+    elif action == "cancel_build":
+        title = str(args.get("title") or "").strip()
+        if title:
+            from integrations.plex import _title_key
+            match = [q for q in ([light_tracks.building()] if light_tracks.building() else []) + light_tracks.queue()
+                     if _title_key(title) and _title_key(title) in _title_key(q["title"])]
+            if not match:
+                return f"{title} isn't building or queued, sir."
+            cancelled = light_tracks.cancel(match[0]["rating_key"])
+        else:
+            cancelled = light_tracks.cancel(everything=True)
+        said.append("Cancelled: " + ", ".join(cancelled) + "." if cancelled else "Nothing was building, sir.")
     elif action == "list":
         tracks = light_tracks.listing()
         said.append("Light syncs ready: " + "; ".join(
             f"{t.get('title')} ({t.get('year')})" if t.get("year") else str(t.get("title")) for t in tracks)
             + "." if tracks else "There are no light syncs yet, sir.")
+        if _queue_said():
+            said.append(_queue_said())
     elif not said or action == "status":
         state = sync.status()
         parts = [f"Light sync is {'running for ' + str(state['running_title']) if state['running'] else 'off'}"
                  f"{' (paused)' if state['paused'] else ''}, intensity {state['intensity']}, "
                  f"auto in movie mode {'on' if state['auto'] else 'off'}."]
+        if state.get("calibrating"):
+            parts.append(f"Calibrating with {state['calibrating']['title']}.")
         if not state["running"] and state["reason"]:
             parts.append(state["reason"])
+        offset = state.get("offset") or {}
+        if offset:
+            timing = f"Timing: global {offset.get('global_ms', 0)} ms"
+            if offset.get("film_title"):
+                timing += f", {offset['film_title']} {offset.get('film_ms', 0)} ms"
+            parts.append(timing + " (positive = lights earlier).")
         if state["building"]:
             b = state["building"]
             parts.append(f"Building {b['title']}: {b['percent']}%.")
+        if state.get("queue"):
+            parts.append("Queued next: " + ", ".join(q["title"] for q in state["queue"]) + ".")
         said.append(" ".join(parts))
     return " ".join(said)
 
@@ -2291,16 +2387,22 @@ _CUSTOM_TOOLS: list[dict[str, Any]] = [
     {
         "name": "create_light_sync",
         "description": (
-            "Make a light sync for one film on Plex ('create a light sync for Hunger Games'): JARVIS "
-            "reads the film in the background (a few minutes to half an hour) and alerts Nick when it's "
-            "ready. After that the room lights follow that film whenever he plays it in movie mode. "
-            "Omit title for the film playing on the TV now. If it already has one, say so; rebuild only "
-            "when he asks to make it again."
+            "Make light syncs for films on Plex ('create a light sync for Hunger Games', 'make light syncs "
+            "for all the Hunger Games movies'): JARVIS reads each film in the background (a few minutes to "
+            "half an hour each, one at a time, the rest queued) and alerts Nick as each is ready. After that "
+            "the room lights follow that film whenever he plays it in movie mode. One film: title. Several: "
+            "titles (resolve the list yourself, e.g. every film in a series). series searches Plex for "
+            "every film whose title contains it ('Hunger Games') when you don't know the exact titles. "
+            "Omit all three for the film playing on the TV now. Films that already have one are reported, "
+            "not rebuilt, unless rebuild."
         ),
         "input_schema": {
             "type": "object",
             "properties": {
-                "title": {"type": "string", "description": "The film's title, e.g. 'The Hunger Games'."},
+                "title": {"type": "string", "description": "One film's title, e.g. 'The Hunger Games'."},
+                "titles": {"type": "array", "items": {"type": "string"},
+                           "description": "Several films, built in this order."},
+                "series": {"type": "string", "description": "Every Plex film whose title contains this."},
                 "rebuild": {"type": "boolean", "description": "Make it again even if one exists."},
             },
         },
@@ -2310,14 +2412,25 @@ _CUSTOM_TOOLS: list[dict[str, Any]] = [
         "description": (
             "Light sync: the strip, desk lights and lamp follow the film on the room TV. It starts by "
             "itself in movie mode for films that have a light sync. start: sync the film playing now "
-            "(even outside movie mode); stop: hand the lights back to the Movie scene; status; list: "
-            "which films have one. intensity (subtle / medium / intense) can go with any action."
+            "(even outside movie mode); stop: hand the lights back to the Movie scene (also ends "
+            "calibration); status (incl. builds in progress and the queue); list: which films have one; "
+            "cancel_build: a queued/building film by title, or every build without one. "
+            "nudge: move the timing. 'Lights are late' / 'nudge forward' / 'ahead' = direction earlier; "
+            "'lights are early' = later; ms is the amount (default 50). scope film (the film syncing, the "
+            "default) or global (every film); while calibrating it's global. reset_timing: back to 0. "
+            "calibrate: play the flash test clip on the TV and sync it so Nick can nudge by eye; done: "
+            "finish calibrating. intensity (subtle / medium / intense) can go with any action."
         ),
         "input_schema": {
             "type": "object",
             "properties": {
-                "action": {"type": "string", "enum": ["start", "stop", "status", "list"]},
+                "action": {"type": "string", "enum": ["start", "stop", "status", "list", "nudge", "reset_timing",
+                                                      "calibrate", "done", "cancel_build"]},
                 "intensity": {"type": "string", "enum": ["subtle", "medium", "intense"]},
+                "direction": {"type": "string", "enum": ["earlier", "later"]},
+                "ms": {"type": "number", "description": "Nudge amount in ms (signed if no direction: + = earlier)."},
+                "scope": {"type": "string", "enum": ["film", "global"]},
+                "title": {"type": "string", "description": "cancel_build: which film."},
             },
         },
     },

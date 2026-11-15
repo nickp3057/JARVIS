@@ -905,6 +905,33 @@ struct LightSyncState: Decodable, Equatable {
         let percent: Int
     }
 
+    /// A film waiting its turn to be built (Core builds one at a time).
+    struct Queued: Decodable, Equatable, Identifiable {
+        let ratingKey: String
+        let title: String
+        var id: String { ratingKey }
+        enum CodingKeys: String, CodingKey { case ratingKey = "rating_key", title }
+    }
+
+    /// Timing, ms, positive = lights earlier. Effective = global + film.
+    struct Offset: Decodable, Equatable {
+        let globalMs: Int
+        let filmMs: Int
+        let effectiveMs: Int
+        let filmTitle: String?
+        let stepMs: Int
+        enum CodingKeys: String, CodingKey {
+            case globalMs = "global_ms", filmMs = "film_ms", effectiveMs = "effective_ms"
+            case filmTitle = "film_title", stepMs = "step_ms"
+        }
+    }
+
+    /// Calibrating with the flash test clip ("building" its track, then "playing").
+    struct Calibration: Decodable, Equatable {
+        let title: String
+        let phase: String
+    }
+
     let enabled: Bool
     let auto: Bool
     let intensity: String
@@ -913,14 +940,23 @@ struct LightSyncState: Decodable, Equatable {
     let film: Film?
     let hasTrack: Bool
     let building: Build?
+    /// Older Cores send none of these three.
+    let queue: [Queued]?
+    let offset: Offset?
+    let calibrating: Calibration?
     let reason: String
     /// JARVIS's answer to a start or stop (POST only).
     let message: String?
 
     enum CodingKeys: String, CodingKey {
-        case enabled, auto, intensity, running, paused, film, building, reason, message
+        case enabled, auto, intensity, running, paused, film, building, queue, offset, calibrating, reason, message
         case hasTrack = "has_track"
     }
 
     static let intensities = ["subtle", "medium", "intense"]
+
+    /// "+25 ms", "0 ms", "-50 ms".
+    static func milliseconds(_ value: Int) -> String {
+        value > 0 ? "+\(value) ms" : "\(value) ms"
+    }
 }

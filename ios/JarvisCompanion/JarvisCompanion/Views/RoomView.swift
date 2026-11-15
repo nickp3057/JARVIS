@@ -845,6 +845,9 @@ private struct MovieModeView: View {
                 control("speaker.plus", "Volume up", key: "volume_up", repeats: true)
             }
             Spacer(minLength: 0)
+            if let state = model.lightSync.value, let calibration = state.calibrating {
+                calibrationPanel(state, calibration)
+            }
             HStack(spacing: 14) {
                 if let bedroom {
                     let on = model.pendingEntityStates[bedroom.entityID] ?? bedroom.isOn
@@ -871,17 +874,72 @@ private struct MovieModeView: View {
         }
     }
 
-    /// Light sync: start/stop, intensity, a track for this film, auto in movie mode.
+    /// Calibrating with the flash test clip: nudge the global timing by eye
+    /// (±25 ms a press), see where it stands, Done. Still and dim, like the
+    /// rest of the movie screen.
+    private func calibrationPanel(_ state: LightSyncState, _ calibration: LightSyncState.Calibration) -> some View {
+        let step = state.offset?.stepMs ?? 25
+        let building = calibration.phase == "building"
+        return VStack(spacing: 14) {
+            HStack {
+                Label(building ? "Calibrating · building the test track…" : "Calibrating · \(calibration.title)",
+                      systemImage: "slider.horizontal.below.rectangle")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(JarvisTheme.cyan.opacity(0.8))
+                Spacer()
+                Text("Global \(LightSyncState.milliseconds(state.offset?.globalMs ?? 0))")
+                    .font(.headline.monospacedDigit())
+                    .foregroundStyle(.white.opacity(0.75))
+                    .contentTransition(.numericText())
+                    .accessibilityLabel("Global timing \(state.offset?.globalMs ?? 0) milliseconds")
+            }
+            HStack(spacing: 14) {
+                wide("Lights earlier", symbol: "backward.frame") { nudge(step) }
+                wide("Lights later", symbol: "forward.frame") { nudge(-step) }
+                wide("Done", symbol: "checkmark") { model.setLightSync(calibrate: false) }
+            }
+        }
+        .padding(18)
+        .background(Color.white.opacity(0.04), in: .rect(cornerRadius: 20))
+        .overlay(RoundedRectangle(cornerRadius: 20).strokeBorder(JarvisTheme.cyan.opacity(0.2)))
+    }
+
+    private func nudge(_ ms: Int) {
+        tick += 1
+        model.setLightSync(nudgeMs: ms)
+    }
+
+    /// Light sync: start/stop, intensity, timing, a track for this film, the
+    /// build queue, calibration, auto in movie mode.
     private var lightSyncMenu: some View {
         let state = model.lightSync.value
         let running = state?.running == true
         return Menu {
             if let state {
-                if running {
+                if state.calibrating != nil {
+                    Button { model.setLightSync(calibrate: false) } label: {
+                        Label("Done calibrating", systemImage: "checkmark")
+                    }
+                } else if running {
                     Button { model.setLightSync(action: "stop") } label: { Label("Stop", systemImage: "stop.fill") }
                 } else {
                     Button { model.setLightSync(action: "start") } label: { Label("Start", systemImage: "play.fill") }
                         .disabled(!state.hasTrack)
+                }
+                if running, state.calibrating == nil, let offset = state.offset {
+                    let step = offset.stepMs
+                    Section("Timing · \(offset.filmTitle ?? "this film") \(LightSyncState.milliseconds(offset.filmMs))") {
+                        Button { model.setLightSync(nudgeMs: step) } label: {
+                            Label("Lights earlier (\(step) ms)", systemImage: "backward.frame")
+                        }
+                        Button { model.setLightSync(nudgeMs: -step) } label: {
+                            Label("Lights later (\(step) ms)", systemImage: "forward.frame")
+                        }
+                        Button { model.setLightSync(resetOffset: true) } label: {
+                            Label("Reset timing", systemImage: "arrow.counterclockwise")
+                        }
+                        .disabled(offset.filmMs == 0)
+                    }
                 }
                 Section("Intensity") {
                     ForEach(LightSyncState.intensities, id: \.self) { level in
@@ -894,11 +952,22 @@ private struct MovieModeView: View {
                         }
                     }
                 }
+                let queued = state.queue ?? []
                 if let build = state.building {
-                    Button {} label: { Text("Building… \(build.percent)%") }.disabled(true)
-                } else if let film = state.film, !state.hasTrack, let key = film.ratingKey {
+                    Button {} label: { Text("Building \(build.title)… \(build.percent)%") }.disabled(true)
+                }
+                ForEach(queued) { film in
+                    Button {} label: { Text("Next: \(film.title)") }.disabled(true)
+                }
+                if let film = state.film, !state.hasTrack, let key = film.ratingKey,
+                   state.building?.title != film.title, !queued.contains(where: { $0.ratingKey == key }) {
                     Button { model.buildLightSync(ratingKey: key) } label: {
                         Label("Make a light sync for \(film.title)", systemImage: "wand.and.stars")
+                    }
+                }
+                if state.calibrating == nil {
+                    Button { model.setLightSync(calibrate: true) } label: {
+                        Label("Calibrate…", systemImage: "slider.horizontal.below.rectangle")
                     }
                 }
                 Toggle("Auto in movie mode", isOn: Binding(get: { state.auto },

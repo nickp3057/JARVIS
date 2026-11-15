@@ -57,8 +57,8 @@ Pearson-Stark-Jarvis/
 │   ├── memory_proposals.py  Reviewable staging for low-confidence inferred facts
 │   ├── habits.py            Usage-pattern log + derived "what you've noticed" digest
 │   ├── knowledge_vault.py   Authorized Obsidian search, profile mirror, capture + journal
-│   ├── light_tracks.py      Light sync tracks: one colour per 0.1 s of a film (ffmpeg over Plex HTTP), built one at a time on request; memory/light_tracks/
-│   ├── light_sync.py        Light sync player: Govee LAN razer stream to the strips, lamp colorwc, flash limiter, intensity, TV/Plex position clock, movie-mode arming
+│   ├── light_tracks.py      Light sync tracks: one colour per 0.1 s of a film (ffmpeg over Plex HTTP), built on request through a FIFO queue (one ffmpeg at a time, resumes after a restart), per-film timing offsets; memory/light_tracks/
+│   ├── light_sync.py        Light sync player: Govee LAN razer stream to the strips, lamp colorwc, flash limiter, intensity, TV/Plex position clock, movie-mode arming, timing nudges (global + per film, live), calibration with the flash test clip
 │   ├── local_model.py       Optional OpenAI-compatible conversational fallback
 │   ├── maintenance.py       Recurring chores: countdowns + completion log (SQLite)
 │   ├── shopping.py          Shopping list over a saved-item catalog with photos (SQLite)
@@ -326,15 +326,26 @@ RMS envelope from ElevenLabs audio drives the orb in real time using a monotonic
   restored with `select.select_option`, and the pick showing at engage wins.
 
 ### Light sync *(new 2026-11-14)*
-- `create_light_sync(title?, rebuild?)` — "create a light sync for Hunger
-  Games": finds the film on Plex (`plex.find_movie`, a leading "The"
-  ignored; no title = the film on the TV now) and builds its light track in
-  the background (`brain/light_tracks.py`, one build at a time, progress in
-  %). An info alert (pushed) says when it's ready; a failure alerts too. An
-  existing track is reported, not rebuilt, unless `rebuild`.
-- `light_sync(action, intensity?)` — `start` (the film playing now, movie
-  mode or not), `stop` (hand the room back to the Movie scene), `status`,
-  `list`; `intensity` subtle / medium / intense.
+- `create_light_sync(title?, titles?, series?, rebuild?)` — "create a light
+  sync for Hunger Games", "make light syncs for all the Hunger Games movies":
+  finds each film on Plex (`plex.find_movie` per title, a leading "The"
+  ignored; `series` = every Plex film whose title contains it, oldest first,
+  via `plex.search_movies`; nothing = the film on the TV now) and builds its
+  light track in the background (`brain/light_tracks.py`): the first starts,
+  the rest queue ("Queued Catching Fire, sir: second in line."), one ffmpeg
+  at a time. One info alert (pushed) per finished film; a failure alerts
+  too. Films that already have a track (or are already building/queued) are
+  reported, not rebuilt, unless `rebuild`.
+- `light_sync(action, intensity?, direction?, ms?, scope?, title?)` — `start`
+  (the film playing now, movie mode or not), `stop` (hand the room back to
+  the Movie scene; ends calibration), `status` (incl. the build in progress
+  with % and the queue, and the timing), `list` (tracks + queue),
+  `nudge` ("lights are late" = `direction: earlier`, "early" = later, `ms`
+  default 50, or a signed `ms`, positive = earlier; `scope` film, the
+  default, or global; global while calibrating), `reset_timing`,
+  `calibrate` (play the flash test clip and sync it), `done` (end
+  calibration), `cancel_build` (`title`, or everything); `intensity`
+  subtle / medium / intense.
 - Voice quick command (room mic, no model): "start light sync", "stop light
   sync", "light sync on/off" (`speech/quick_commands.py`). A start that can't
   happen (no track, nothing playing) goes to the conversation so JARVIS says why.
@@ -1142,7 +1153,8 @@ LIGHT_SYNC=1                # light sync master switch (its monitor starts only 
 LIGHT_SYNC_STRIPS=10.0.0.125,10.0.0.221   # Govee razer-stream lights (strip H618E, desk H618A), LAN UDP 4003
 LIGHT_SYNC_LAMP=10.0.0.164  # Govee lamp (H6004), colorwc; blank = no lamp
 LIGHT_SYNC_SEGMENTS=15      # strip segments in the razer frame
-LIGHT_SYNC_LEAD_MS=0        # lights ahead of the picture (negative = later); measured 0-33 ms with 0
+LIGHT_SYNC_LEAD_MS=0        # initial global timing offset (ms, + = lights earlier) until nudged; then memory/light_sync.json wins
+LIGHT_SYNC_TEST_TITLE=Light Sync Test   # the Plex film used by light sync calibration (the flash test clip)
 LIGHT_SYNC_BLEND_MS=80      # fade between colours at Medium (Subtle x2.5, Intense x0.6)
 LIGHT_SYNC_LAMP_LEAD_MS=150 # the lamp reads ahead (it fades by itself)
 LIGHT_SYNC_STRIP_LEVEL=0.35 # strip/desk brightness at Medium (Subtle x0.6, Intense x1.6, max 1)
@@ -1313,6 +1325,7 @@ there, so edit files with a `sudo python3` one-shot or vi.
 
 ## Recently Shipped
 
+- **Light sync: build queue, timing nudges, calibration (2026-11-14, companion 6.34 / 276).** `brain/light_tracks.py` builds through a persisted FIFO queue (`memory/light_tracks/queue.json`, resumed at Core start, dedupe, cancel one/all, one push per film); `create_light_sync` takes `titles` / `series` ("all the Hunger Games movies"). Timing offset = global (`memory/light_sync.json`, default `LIGHT_SYNC_LEAD_MS`) + per film (track index), ±2000 ms, applied live; `light_sync` actions `nudge` / `reset_timing` / `calibrate` / `done` / `cancel_build`; `POST /api/lightsync` `nudge_ms` / `scope` / `reset_offset` / `calibrate`; `POST /api/lightsync/build {cancel}`. Calibration plays "Light Sync Test" (`LIGHT_SYNC_TEST_TITLE`) on the TV via `tv_remote.play_plex`, building its track first, and nudges the global offset. iPad Light sync menu: queue rows, Calibrate…, Lights earlier/later and Reset timing; calibration panel. Tests in `tests/test_light_sync.py`. Not tried live.
 - **Light sync for movies (2026-11-14, companion 6.32 / 274, TV 9.7).** The room lights follow the film on the TV, built into Core from the light-sync prototype: `brain/light_tracks.py` (tracks on request: "create a light sync for Hunger Games", read over Plex HTTP with imageio-ffmpeg, alert when ready), `brain/light_sync.py` (Govee LAN razer stream + lamp, flash limiter, Subtle/Medium/Intense, TV/Plex clock, movie-mode arming, Barn Door release), runtime monitor `_light_sync_loop`, tools `create_light_sync` / `light_sync`, voice quick command, `GET/POST /api/lightsync`, `POST /api/lightsync/build`, `POST /api/tv/playback` (new client scope `playback:write`), the iPad movie screen's Light sync menu, and JARVIS TV's `PlaybackReport` (Plex's media session to Core). See **Light sync**. Tests: `tests/test_light_sync.py`. Not tried live: anything with real lights, a real build on the Surface, the TV report.
 - **Money and voice-gate safety fixes (2026-11-14).** From a review of the trading and voice paths: (1) the phone's hold-to-talk is spoken style only and stays in its own session; only `speech/room_voice.py` passes `room=True` to `runtime.respond` / `respond_streaming`, so phone proposals no longer land in the room session. (2) A Schwab timeout or connection reset after sending is never "refused, nothing was bought": `place_order` raises `OrderOutcomeUnknown`, the order is journaled `unknown` and counted toward the day cap, a matching order is looked up (`schwab.recent_orders`) and Nick is told to check before retrying; a missing Location header finds the id the same way instead of journaling "?". (3) While a "yes" is armed in the room, "cancel" / "never mind" / "forget it" / "nothing" reaches the confirm gate instead of the stop quick answer, a yes or code goes to the model turn, and any other utterance disarms it (`confirm_gate.reply_kind`). (4) Money by room voice needs a positive voiceprint match: `voice_trust.may_move_money`, `MONEY_TOOLS` (`place_trade`, `decide_investment`) and money proposals (`propose(..., money=True)`) held for the app when voice ID is off or nothing is enrolled. (5) The cash-only check counts only this account's orders, only the filled part of open sells, and subtracts open buys. (6) A Schwab hub hiccup while logged out keeps `required_since`, so no second "Schwab needs you" alert. (7) `speaker_id` uses an RLock (enrolment with no model deadlocked). (8) A guest's goodnight skips the alarm question, a guest's good morning isn't the routine, and a guest can't end the wake-up ring. (9) `confirm_gate`'s docstring describes `act` vs `propose`. Tests: `tests/test_money_voice_safety.py`, `tests/test_trading.py`. Not tried live: a real Schwab timeout, and voice ID on with a guest in the room.
 - **Reliability pass (2026-11-14).** Fixes from a code review, each with a regression test. Barn Door: `stand_down` does nothing unless Barn Door is engaged (theme `barnDoor`), so it no longer replays an old room snapshot or drops the current theme. Monitors: device watch, home poll/websocket snapshot, calendar, Schwab, email triage, weather, downloads and the dead-man ping now catch and log a failed pass instead of silently ending their thread; interval settings read through `_env_float` (a garbled value falls back to the default). Email triage holds its state lock only around load/mutate/save (Gmail and model calls run outside it, decisions are re-checked against fresh state, so `restore_email` and unsubscribes no longer wait minutes); the action log rotates to 90 days / 20k lines atomically. Temporary 4K: a film already in the 4K Radarr before the request is marked `adopted` and expiry only stops tracking it (never deletes its files; entries without the field are treated as JARVIS-added, as before); an expiry delete waits while Plex is playing that film, or while Plex can't be asked, for at most 12 h past expiry (`plex.playing_movies`); one bad entry no longer aborts the pass. Wake alarm: a snooze lives in its own `snooze` key (no longer overwrites a pending one-off; old files read fine) and every read-modify-write holds the lock. Room: the wake-up backup ring plays at `ROOM_ALARM_VOLUME` (8) instead of possibly the night level; `room_volume` saves atomically. Investing: no review/drop check/playground on NYSE holidays (built-in 2026-2027 list in `brain/investing.py`, extend yearly); a job that fails without doing anything is un-stamped and may retry once the same day (a playground session that already traded never re-runs). Memory bounds: reflector recent-turn buffers and the agent's per-session tool context keep the newest 50 sessions; runtime reminder/calendar/proactive dedupe keys are capped. Read-live: ElevenLabs key/voice/model/speed and `WHISPER_MODEL`/`DEVICE`/`COMPUTE_TYPE`/`BEAM_SIZE` are read per use (a changed Whisper model reloads on the next utterance).
@@ -2896,8 +2909,13 @@ prototype in `~/Developer/projects/light-sync` (2026-11-09).
   warm white when nothing is vivid, brightness from each pixel's brightest
   channel (luma made blue scenes black). Stored as
   `memory/light_tracks/<ratingKey>.npy` (uint8 Nx3, written atomically) plus
-  `index.json`. One build at a time, progress %, cancellable; alerts when
-  ready or failed. Prototype: Cars 2 (106 min) took ~3 min on the Mac with
+  `index.json`. Asking for more films queues them (FIFO, still one ffmpeg
+  at a time; `memory/light_tracks/queue.json`, the build in progress first,
+  so a Core restart resumes the queue and the interrupted build starts again
+  from scratch; Core's shutdown ends ffmpeg). Deduped (already building,
+  already queued, already has a track unless rebuild); cancel one (building
+  or queued) or all. Progress %; one alert per finished film (the
+  calibration clip's is quiet), failures alert. Prototype: Cars 2 (106 min) took ~3 min on the Mac with
   VideoToolbox and came to 190 KB; the Surface decodes on the CPU, so expect
   longer.
 - **When it runs** (`brain/light_sync.py`, runtime monitor
@@ -2929,6 +2947,29 @@ prototype in `~/Developer/projects/light-sync` (2026-11-09).
   and a flash test video: strip vs TV within 0-33 ms at lead 0; the lamp
   starts on the same frame but fades ~0.1 s up / ~0.4 s down, hence the
   150 ms lamp lead.
+- **Timing** (new): effective offset = global (`memory/light_sync.json`
+  `offset_ms`; until first saved it's `LIGHT_SYNC_LEAD_MS`) + the film's own
+  (`offset_ms` in the track index, kept on a rebuild), positive = lights
+  earlier, each and the sum clamped to ±2000 ms. The player reads the
+  offset every frame, so a nudge lands at once. Nudges: iPad ±25 ms, tool
+  (default 50 ms), API `nudge_ms`; by default to the film syncing (or the
+  film on the TV with a track), to global while calibrating or when no such
+  film is on.
+- **Calibration** (new; Nick's idea): the NAS has the prototype's flash
+  test video as a Plex film, "Light Sync Test (2026)" (3 min of 0.5 s
+  red/green/blue/white flashes every 2 s; keep it, it's the calibration
+  clip). `light_sync calibrate` / `POST /api/lightsync {calibrate: true}` /
+  the iPad's "Calibrate…" find it on Plex (`LIGHT_SYNC_TEST_TITLE`), build
+  its track first if missing (ahead of the queue, no push), start it on the
+  TV (`tv_remote.play_plex` with `plex.server_id()`, as `play_on_tv` does;
+  Plex may resume where the clip was left), and sync it whatever the scene
+  and the auto switch (a manual start; no movie-mode rules). Nudges go to
+  the global offset. Done / stop (`end_calibration`) stops syncing, sends
+  the TV `MEDIA_STOP` (`tv_remote.stop_playback`) if the clip is still on,
+  and hands the room back as a stop does (Movie scene only if movie mode is
+  on). The clip ending on the TV ends calibration too; if it never shows up
+  within 90 s calibration gives up. Light sync never switches the room's
+  scene to Movie on its own (Nick plays films in Game Time too).
 - **Flash limiter** (new): colour may change fast, but at most 3 big
   brightness jumps (a one-direction move of more than 25% of full) in any
   second, 2 at Subtle; over budget a run is held to a small step, keeping the hue.
@@ -2936,15 +2977,24 @@ prototype in `~/Developer/projects/light-sync` (2026-11-09).
   sets both): Medium = the prototype's tuned values (strip 0.35, desk 0.35,
   lamp 0.6, blend 80 ms); Subtle dimmer and softer; Intense brighter and snappier.
 - **API** (companion token): `GET /api/lightsync` (enabled, auto, intensity,
-  running, paused, movie_mode, film, has_track, building {title, percent},
-  tracks, reason), `POST /api/lightsync {action: start|stop, intensity, auto}`
-  (returns the state + `message`), `POST /api/lightsync/build {title |
-  rating_key, rebuild}`. `/api/home/stream` events carry `lightsync` (a
+  running, paused, movie_mode, film, has_track, building {rating_key, title,
+  percent}, queue [{rating_key, title, year}], offset {global_ms, film_ms,
+  effective_ms, film_title, scope, step_ms, limit_ms}, calibrating {title,
+  phase: building|playing} or null, tracks, reason), `POST /api/lightsync
+  {action: start|stop, intensity, auto, nudge_ms (±2000), scope:
+  film|global, reset_offset, calibrate: true|false}` (returns the state +
+  `message`), `POST /api/lightsync/build {title | rating_key, rebuild}`
+  (starts or queues) or `{cancel: <ratingKey>|all}`. `/api/home/stream` events carry `lightsync` (a
   revision) so the iPad refetches when it moves.
 - **iPad**: the movie screen's bottom row has a Light sync menu between
   Bedroom light and TV remote: Start / Stop, Subtle / Medium / Intense
   (checkmarked), "Make a light sync for <film>" when the playing film has
-  none ("Building… N%" while one builds), Auto in movie mode.
+  none, "Building <film>… N%" and disabled "Next: <film>" rows for the
+  queue, "Calibrate…", Auto in movie mode. While a film syncs: a Timing
+  section (the film's offset) with Lights earlier / Lights later (±25 ms)
+  and Reset timing. While calibrating, a still panel above the bottom row:
+  Lights earlier / Lights later / Done and the global offset in ms (the
+  movie screen only shows in movie mode; voice nudges work anywhere).
 - Not yet: the fan ring (Tuya, cloud, slow), see FUTURE_SESSIONS.md.
 
 ## JARVIS TV

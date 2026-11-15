@@ -85,6 +85,11 @@ def press(key: str) -> tuple[bool, str]:
     return home_assistant.call_service("remote", "send_command", entity(), {"command": code})
 
 
+def stop_playback() -> tuple[bool, str]:
+    """Stop whatever is playing (the remote's MEDIA_STOP; Plex closes the player)."""
+    return home_assistant.call_service("remote", "send_command", entity(), {"command": "MEDIA_STOP"})
+
+
 def play_plex(rating_key: str | int, server: str | None) -> tuple[bool, str]:
     """Wake the TV and start a Plex item in the Plex app (a plex:// deep
     link sent as the remote's turn_on activity; Plex resumes where Nick

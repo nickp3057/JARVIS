@@ -151,12 +151,15 @@ One-time on the Surface, after pulling and before restarting Core:
 - [ ] Restart Core mid-film: the strips are released (they shouldn't stay frozen on a colour).
 - [ ] TV 9.7 deployed: `adb logcat -s TvHomePlayback` shows no 403s after the grant, and Core uses the TV clock (`GET /api/lightsync` film.source = "tv"). If the TV's Plex session has no numeric media id, Core matches by title (Plex sessions or the track index).
 - [ ] If two Plex players are ever playing films at once, set `LIGHT_SYNC_PLEX_PLAYER` to the room TV's player name.
+- [ ] **Calibrate once** with the test clip (companion 6.34): iPad movie screen › Light sync › Calibrate… (or "Jarvis, calibrate the light sync"). The clip starts on the TV (its track builds first if missing); nudge Lights earlier / later until the strip flashes with the picture, then Done. Check the TV actually starts the clip from the deep link and that Done stops it (`MEDIA_STOP`); if Plex resumes mid-clip that's fine (flashes repeat every 2 s). Note the global offset you settle on.
+- [ ] **Queue with 2-3 films**: "make light syncs for all the Hunger Games movies": the first builds, the rest say "Queued …, second in line"; the iPad menu shows "Building … N%" and "Next: …" rows; one push per film. Restart Core mid-build: the queue picks up again (the interrupted film from scratch).
+- [ ] Per-film nudge while a film syncs (menu Lights earlier / later, Reset timing; or "the lights are late"): lands within a frame, survives a restart.
 
 Remaining prototype open items (moved from `~/Developer/projects/light-sync/README.md`):
 - [ ] **Fan ring** (`light.nicks_fan`, Tuya, cloud): about 1-2 updates a second with ~0.5 s lag; send only bigger shifts, colour only (never white), through HA.
 - [ ] **Strip knocked back to its rainbow** by something external (the Movie scene, `automation.fan_light_follows_strip` or the Govee cloud): light sync now pauses the automation and re-takes on hard cuts; check the HA logbook if it still happens.
 - [ ] **Re-encode the HEVC 10-bit films** that stutter on the TCL (Realtek decoder hands frames back out of order; ~185 of 240 frames dropped). Try a lossless fix of the ordering first, then HEVC 10-bit without B-pyramid at the same bitrate, then H.264. Test a 2-min clip on both TVs first.
-- [ ] **Delete the test video** from the NAS when done: `media/movies/Light Sync Test (2026)/`.
+- Keep `media/movies/Light Sync Test (2026)/` on the NAS: it's the light sync calibration clip now (`LIGHT_SYNC_TEST_TITLE`).
 
 ## Nick's stated goal
 

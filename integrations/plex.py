@@ -118,6 +118,14 @@ def _episode_label(item: dict[str, Any]) -> str:
             f"episode {item.get('index')}, \"{item.get('title')}\"")
 
 
+def server_id() -> str | None:
+    """This Plex server's machineIdentifier (for the TV's plex:// deep link)."""
+    ok, ident = _get("/identity")
+    if not ok:
+        return None
+    return ((ident or {}).get("MediaContainer") or {}).get("machineIdentifier") or None
+
+
 def next_up(title: str) -> tuple[bool, dict[str, Any] | str]:
     """What "play <title>" should start: a show's On Deck episode (else its
     first unwatched one), or the movie itself. Plex resumes partly watched
@@ -214,6 +222,32 @@ def find_movie(title: str, year: int | None = None) -> tuple[bool, dict[str, Any
              or next((m for m in found if _title_key(m.get("title")).startswith(wanted)), None)
              or found[0])
     return movie(str(match.get("ratingKey")))
+
+
+def search_movies(query: str) -> tuple[bool, list[dict[str, Any]] | str]:
+    """Every Plex movie whose title contains ``query`` ("Hunger Games" -> the
+    whole series), oldest first, each a ``movie`` record. One search, then
+    one metadata read per film."""
+    ok, payload = _get("/hubs/search", {"query": query, "limit": 20})
+    if not ok:
+        return False, str(payload)
+    wanted = _title_key(query)
+    hits = [m for hub in ((payload or {}).get("MediaContainer") or {}).get("Hub") or []
+            for m in hub.get("Metadata") or []
+            if m.get("type") == "movie" and wanted and wanted in _title_key(m.get("title"))]
+    seen: set[str] = set()
+    films: list[dict[str, Any]] = []
+    for hit in sorted(hits, key=lambda m: (int(m.get("year") or 9999), str(m.get("title") or ""))):
+        key = str(hit.get("ratingKey") or "")
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        found, record = movie(key)
+        if found:
+            films.append(record)
+    if not films:
+        return False, f"I can't find any films matching {query} on Plex, sir."
+    return True, films
 
 
 def part_url(part_key: str) -> str:

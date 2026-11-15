@@ -1558,41 +1558,65 @@ class LightSyncRequest(BaseModel):
     action: str | None = Field(default=None, pattern="^(start|stop)$")
     intensity: str | None = Field(default=None, pattern="^(subtle|medium|intense)$")
     auto: bool | None = None
+    nudge_ms: int | None = Field(default=None, ge=-2000, le=2000)
+    scope: str | None = Field(default=None, pattern="^(film|global)$")
+    reset_offset: bool | None = None
+    calibrate: bool | None = None
 
 
 @app.post("/api/lightsync")
 def lightsync_set(request: LightSyncRequest, _: None = Depends(authorize)) -> dict[str, object]:
-    """Start / stop, intensity, and the auto-in-movie-mode switch. ``message``
-    is JARVIS's answer to a start or stop (why it didn't, when it didn't)."""
+    """Start / stop, intensity, the auto-in-movie-mode switch, timing nudges
+    (``nudge_ms``, positive = lights earlier: the film syncing, or global
+    while calibrating or with ``scope``), ``reset_offset`` and calibration
+    (``calibrate: true`` plays the test clip, ``false`` is Done). ``message``
+    is JARVIS's answer (why it didn't, when it didn't)."""
     from brain import light_sync
     sync = light_sync.controller
-    if request.action is None and request.intensity is None and request.auto is None:
-        raise HTTPException(status_code=422, detail="Send an action, intensity or auto.")
-    message = ""
+    if all(v is None for v in (request.action, request.intensity, request.auto, request.nudge_ms,
+                               request.reset_offset, request.calibrate)):
+        raise HTTPException(status_code=422, detail="Send an action, intensity, auto, nudge_ms, reset_offset or calibrate.")
+    messages = []
     if request.intensity is not None:
         sync.set_intensity(request.intensity)
     if request.auto is not None:
         sync.set_auto(request.auto)
+    if request.calibrate is True:
+        messages.append(sync.calibrate()[1])
+    elif request.calibrate is False:
+        messages.append(sync.end_calibration()[1])
+    if request.reset_offset:
+        messages.append(sync.reset_offset(request.scope)[1])
+    if request.nudge_ms:
+        messages.append(sync.nudge(request.nudge_ms, request.scope)[1])
     if request.action == "start":
-        message = sync.start()[1]
+        messages.append(sync.start()[1])
     elif request.action == "stop":
-        message = sync.stop()[1]
-    return {**_lightsync_state(), "message": message}
+        messages.append(sync.stop()[1])
+    return {**_lightsync_state(), "message": " ".join(m for m in messages if m)}
 
 
 class LightSyncBuildRequest(BaseModel):
     title: str | None = Field(default=None, min_length=1, max_length=200)
     rating_key: str | None = Field(default=None, pattern=r"^\d{1,12}$")
     rebuild: bool = False
+    cancel: str | None = Field(default=None, pattern=r"^(all|\d{1,12})$")
 
 
 @app.post("/api/lightsync/build")
 def lightsync_build(request: LightSyncBuildRequest, _: None = Depends(authorize)) -> dict[str, object]:
-    """Make one film's light track in the background (an alert says when it's ready)."""
+    """Make one film's light track in the background, or queue it behind the
+    one building (an alert says as each is ready). ``cancel``: a ratingKey
+    (building or queued) or ``all``."""
     from brain import light_tracks
     from integrations import plex
+    if request.cancel:
+        cancelled = (light_tracks.cancel(everything=True) if request.cancel == "all"
+                     else light_tracks.cancel(request.cancel))
+        message = ("Cancelled " + ", ".join(cancelled) + ", sir.") if cancelled else "Nothing to cancel, sir."
+        return {**_lightsync_state(), "started": False, "message": message}
     if not (request.title or request.rating_key):
-        raise HTTPException(status_code=422, detail="Send a title or rating_key.")
+        raise HTTPException(status_code=422, detail="Send a title, rating_key or cancel.")
     ok, film = plex.movie(request.rating_key) if request.rating_key else plex.find_movie(request.title or "")
     if not ok:
         return {**_lightsync_state(), "started": False, "message": str(film)}

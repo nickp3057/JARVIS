@@ -28,6 +28,15 @@ New in JARVIS:
   /api/tv/playback``) while it is fresh, else Plex's ``/status/sessions`` for
   the room TV's player (``LIGHT_SYNC_PLEX_PLAYER``, else the only movie
   playing), interpolated between readings.
+- **Timing**: the effective offset is the global offset (``memory/light_sync.json``,
+  first defaulting to ``LIGHT_SYNC_LEAD_MS``) plus the film's own (the track
+  index), positive = lights earlier, each clamped to +/-2000 ms. A nudge
+  reaches the running player at once (``Player.lead_ms``).
+- **Calibration**: ``calibrate`` plays the flash test clip (``LIGHT_SYNC_TEST_TITLE``,
+  building its track first, ahead of the queue) on the TV through
+  ``tv_remote.play_plex`` and syncs it whatever the scene; nudges go to the
+  global offset; ``end_calibration`` (Done / stop) stops the clip and hands
+  the room back as a stop does.
 - **When**: in movie mode (the room's current scene is ``scene.movie``), a film
   with a track starts the sync on its own; no track, nothing happens. Stop,
   a film without a track, the end of movie mode or Barn Door release the
@@ -72,6 +81,8 @@ PLEX_FRESH_S = 10.0
 PLEX_REANCHOR_S = 2.0     # Plex's viewOffset is coarse: only jump to it when it disagrees this much
 MOVIE_SCENE = "scene.movie"
 INTENSITIES = ("subtle", "medium", "intense")
+OFFSET_STEP_MS = 25           # the iPad's "Lights earlier / later" step
+CALIBRATION_START_S = 90.0    # the clip has this long to show up on the TV before calibration gives up
 # level multiplier, blend multiplier, big jumps allowed per second
 _PRESETS = {"subtle": (0.6, 2.5, 2), "medium": (1.0, 1.0, 3), "intense": (1.6, 0.6, 3)}
 
@@ -127,9 +138,15 @@ def tuning(intensity: str = "medium") -> Tuning:
     )
 
 
+def _default_offset() -> int:
+    """The global offset before Nick ever nudges it: ``LIGHT_SYNC_LEAD_MS``."""
+    return light_tracks.clamp_offset(_num("LIGHT_SYNC_LEAD_MS", 0))
+
+
 def load_state() -> dict[str, Any]:
-    """{"auto": bool, "intensity": str}, defaults when the file is missing or bad."""
-    state = {"auto": True, "intensity": "medium"}
+    """{"auto": bool, "intensity": str, "offset_ms": int}, defaults when the
+    file is missing or bad (``offset_ms`` from ``LIGHT_SYNC_LEAD_MS`` until saved)."""
+    state = {"auto": True, "intensity": "medium", "offset_ms": _default_offset()}
     try:
         data = json.loads(_STATE_FILE.read_text())
     except (OSError, ValueError):
@@ -139,6 +156,8 @@ def load_state() -> dict[str, Any]:
             state["auto"] = data["auto"]
         if data.get("intensity") in INTENSITIES:
             state["intensity"] = data["intensity"]
+        if isinstance(data.get("offset_ms"), (int, float)) and not isinstance(data.get("offset_ms"), bool):
+            state["offset_ms"] = light_tracks.clamp_offset(data["offset_ms"])
     return state
 
 
@@ -146,7 +165,10 @@ def save_state(state: dict[str, Any]) -> None:
     try:
         _STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
         tmp = _STATE_FILE.with_suffix(".json.tmp")
-        tmp.write_text(json.dumps({"auto": bool(state["auto"]), "intensity": state["intensity"]}))
+        body = {"auto": bool(state["auto"]), "intensity": state["intensity"]}
+        if "offset_ms" in state:
+            body["offset_ms"] = light_tracks.clamp_offset(state["offset_ms"])
+        tmp.write_text(json.dumps(body))
         tmp.replace(_STATE_FILE)
     except OSError as exc:
         log.error("Could not save light sync state: %s", exc)
@@ -379,8 +401,11 @@ class Player:
 
     def __init__(self, track: np.ndarray, rating_key: str, clock: Callable[[], tuple[float, float] | None],
                  tune: Callable[[], Tuning], sender: GoveeLan, *, now: Callable[[], float] = time.monotonic,
-                 on_exit: Callable[["Player"], None] | None = None) -> None:
+                 on_exit: Callable[["Player"], None] | None = None, lead_ms: float | None = None) -> None:
         self.track = np.asarray(track, np.float32)
+        # The timing offset (ms, positive = lights earlier), read every frame so
+        # a nudge lands at once; None = the tuning's LIGHT_SYNC_LEAD_MS.
+        self.lead_ms = lead_ms
         self.rating_key = rating_key
         self.clock, self.tune, self.sender, self.now = clock, tune, sender, now
         self.on_exit = on_exit
@@ -456,7 +481,8 @@ class Player:
             was_moving = moving
             if not moving and now - sent_at < 0.2:
                 continue  # paused: hold the colour, a few refreshes a second is plenty
-            f = (pos + tune.lead_ms / 1000) * light_tracks.FPS
+            lead = tune.lead_ms if self.lead_ms is None else self.lead_ms
+            f = (pos + lead / 1000) * light_tracks.FPS
             i = int(f)
             if not 0 <= i < frames - 1:
                 continue
@@ -516,6 +542,9 @@ class LightSync:
         self.movie_mode = False
         self.barn_door = False
         self.reason = ""
+        # Calibrating with the flash test clip: {rating_key, title, phase
+        # ("building" | "playing"), since (monotonic), seen (on the TV yet)}.
+        self.calibration: dict[str, Any] | None = None
         self._lock = threading.RLock()
         self._revision = 0
         self._sender: GoveeLan | None = None
@@ -534,7 +563,8 @@ class LightSync:
 
     def armed(self) -> bool:
         """Worth asking Plex every second: movie mode, a manual start, or running."""
-        return enabled() and (self.movie_mode or self.manual_key is not None or self.session is not None)
+        return enabled() and (self.movie_mode or self.manual_key is not None or self.session is not None
+                              or self.calibration is not None)
 
     def poll_plex(self) -> None:
         from integrations import plex
@@ -565,6 +595,7 @@ class LightSync:
             self.movie_mode, self.barn_door = movie_mode, barn_door
             pb = self.clock.current()
             film = pb.rating_key if pb else None
+            self._calibration_tick(film)
             if self.manual_key and self.manual_key != film:
                 self.manual_key = None  # the film it was started for has ended or changed
             if self.suppressed_key and self.suppressed_key != film:
@@ -582,11 +613,14 @@ class LightSync:
         if not enabled():
             return False, "Light sync is switched off (LIGHT_SYNC)."
         if pb is None or not pb.rating_key:
-            return False, "Nothing is playing on the TV."
+            return False, "Calibrating: waiting for the test clip." if self.calibration \
+                else "Nothing is playing on the TV."
         if not light_tracks.has_track(pb.rating_key):
             return False, f"{pb.title or 'This film'} has no light sync yet."
         if self.barn_door:
             return False, "Barn Door has the lights."
+        if self.calibration and self.calibration["rating_key"] == pb.rating_key:
+            return True, ""  # a manual start: whatever the scene, auto or not
         if self.manual_key == pb.rating_key:
             return True, ""
         if self.suppressed_key == pb.rating_key:
@@ -615,7 +649,7 @@ class LightSync:
             return now_pb.position(self.now()), now_pb.speed if now_pb.moving else 0.0
 
         player = Player(track, key, clock, lambda: tuning(load_state()["intensity"]), self._sender,
-                        now=self.now, on_exit=self._player_exited)
+                        now=self.now, on_exit=self._player_exited, lead_ms=self.effective_offset(key))
         session = _Session(key, title, player)
         session.paused_follow = _pause_follow()
         self.session = session
@@ -669,6 +703,8 @@ class LightSync:
         return True, f"Light sync on for {title}, sir."
 
     def stop(self) -> tuple[bool, str]:
+        if self.calibration is not None:
+            return self.end_calibration()
         with self._lock:
             self.manual_key = None
             if self.session is None:
@@ -693,6 +729,203 @@ class LightSync:
         state["auto"] = bool(auto)
         save_state(state)
         self.bump()
+
+    # -- timing
+    def global_offset(self) -> int:
+        return int(load_state()["offset_ms"])
+
+    def effective_offset(self, rating_key: str | None) -> int:
+        """Global + this film's offset (ms, positive = lights earlier), clamped."""
+        return light_tracks.clamp_offset(self.global_offset() + light_tracks.film_offset(rating_key))
+
+    def _target_film(self) -> tuple[str, str] | None:
+        """(ratingKey, title) a film-scope nudge applies to: the film syncing,
+        else the one on the TV if it has a track."""
+        session = self.session
+        if session is not None:
+            return session.rating_key, session.title
+        pb = self.clock.current()
+        if pb is not None and pb.rating_key and light_tracks.has_track(pb.rating_key):
+            meta = light_tracks.get(pb.rating_key) or {}
+            return pb.rating_key, pb.title or str(meta.get("title") or "the film")
+        return None
+
+    def _apply_offset(self) -> None:
+        """Hand the running player its new offset (it reads it every frame)."""
+        session = self.session
+        if session is not None:
+            session.player.lead_ms = self.effective_offset(session.rating_key)
+        self.bump()
+
+    def _resolve_scope(self, scope: str | None) -> str:
+        scope = (scope or "").strip().lower()
+        if scope in ("film", "global"):
+            return scope
+        return "global" if self.calibration is not None or self._target_film() is None else "film"
+
+    def nudge(self, ms: float, scope: str | None = None) -> tuple[bool, str]:
+        """Move the lights' timing by ``ms`` (positive = earlier). ``scope``
+        film (the film syncing) or global; by default the film, or global
+        while calibrating or when no film with a track is on."""
+        try:
+            ms = float(ms)
+        except (TypeError, ValueError):
+            return False, "How far, sir? Give me a number of milliseconds."
+        if not math.isfinite(ms) or abs(ms) < 0.5:
+            return False, "How far, sir? Give me a number of milliseconds."
+        with self._lock:
+            scope = self._resolve_scope(scope)
+            if scope == "film":
+                target = self._target_film()
+                if target is None:
+                    return False, "There's no film with a light sync on, sir. Say globally to move the default timing."
+                key, title = target
+                before = light_tracks.film_offset(key)
+                after = light_tracks.set_film_offset(key, before + ms)
+                if after is None:
+                    return False, f"{title} has no light sync to adjust, sir."
+                self._apply_offset()
+                return True, self._offset_said(after - before, f"for {title}", after, key)
+            state = load_state()
+            before = int(state["offset_ms"])
+            state["offset_ms"] = light_tracks.clamp_offset(before + ms)
+            save_state(state)
+            self._apply_offset()
+            return True, self._offset_said(state["offset_ms"] - before, "globally", state["offset_ms"], None)
+
+    def reset_offset(self, scope: str | None = None) -> tuple[bool, str]:
+        """Back to 0: the film's offset, or the global one while calibrating."""
+        with self._lock:
+            scope = self._resolve_scope(scope)
+            if scope == "film":
+                target = self._target_film()
+                if target is None:
+                    return False, "There's no film with a light sync on, sir."
+                light_tracks.set_film_offset(target[0], 0)
+                self._apply_offset()
+                return True, f"Timing for {target[1]} reset, sir. The global offset is {_ms(self.global_offset())}."
+            state = load_state()
+            state["offset_ms"] = 0
+            save_state(state)
+            self._apply_offset()
+            return True, "Global light timing reset to 0 ms, sir."
+
+    def _offset_said(self, moved: float, where: str, now_ms: int, key: str | None) -> str:
+        if moved == 0:
+            edge = "earlier" if now_ms > 0 else "later"
+            return f"That's as far {edge} as I'll go {where}, sir: {_ms(now_ms)}."
+        way = "earlier" if moved > 0 else "later"
+        said = f"Lights {abs(int(round(moved)))} ms {way} {where}, sir: now {_ms(now_ms)}"
+        if key is not None and self.global_offset():
+            said += f" (effective {_ms(self.effective_offset(key))})"
+        return said + "."
+
+    def offsets(self) -> dict[str, Any]:
+        target = self._target_film()
+        film_ms = light_tracks.film_offset(target[0]) if target else 0
+        return {"global_ms": self.global_offset(), "film_ms": film_ms,
+                "effective_ms": self.effective_offset(target[0] if target else None),
+                "film_title": target[1] if target else None,
+                "scope": self._resolve_scope(None), "step_ms": OFFSET_STEP_MS,
+                "limit_ms": light_tracks.OFFSET_LIMIT_MS}
+
+    # -- calibration
+    def calibrate(self) -> tuple[bool, str]:
+        """Play the flash test clip on the TV and sync it, whatever the
+        scene; nudges go to the global offset until Done."""
+        from integrations import plex
+        if not enabled():
+            return False, "Light sync is switched off in my settings, sir (LIGHT_SYNC)."
+        if _barn_door_engaged():
+            return False, "Barn Door has the lights, sir. Stand down first."
+        if not plex.is_configured():
+            return False, "I can't reach Plex to find the test clip, sir (PLEX_URL / PLEX_TOKEN aren't set)."
+        title = test_title()
+        ok, film = plex.find_movie(title)
+        if not ok or not isinstance(film, dict):
+            return False, f"I can't find the calibration clip ({title}) on Plex, sir."
+        key, name = str(film["rating_key"]), str(film.get("title") or title)
+        with self._lock:
+            if self.session is not None and self.session.rating_key != key:
+                self.manual_key = None
+                self._stop_session(restore=False)  # the clip takes the lights next
+            self.calibration = {"rating_key": key, "title": name, "phase": "building", "since": self.now(),
+                                "seen": False}
+            self.suppressed_key = None
+            self.bump()
+        if not light_tracks.has_track(key):
+            # Ahead of the queue (or moved up if it was already waiting).
+            started, message = light_tracks.start_build(film, front=True, quiet=True)
+            if not started and not light_tracks.pending(key):
+                with self._lock:
+                    self.calibration = None
+                    self.bump()
+                return False, message
+            return True, ("Building the calibration track first, sir; it's a short clip. I'll start it on the TV "
+                          "the moment it's ready.")
+        return self._play_calibration()
+
+    def _play_calibration(self) -> tuple[bool, str]:
+        from integrations import plex, tv_remote
+        calibration = self.calibration
+        if calibration is None:
+            return False, "Calibration isn't on, sir."
+        sent, detail = tv_remote.play_plex(calibration["rating_key"], plex.server_id())
+        with self._lock:
+            if not sent:
+                self.calibration = None
+                self.bump()
+                log.warning("Light sync calibration: the TV didn't take the clip: %s", detail)
+                return False, f"The TV didn't take the test clip, sir: {detail}"
+            calibration.update(phase="playing", since=self.now(), seen=False)
+            self.bump()
+        return True, (f"Calibrating, sir: {calibration['title']} is starting on the TV. Watch the flashes and "
+                      "tell me if the lights are early or late; I'll move the global timing. Say done when they match.")
+
+    def _calibration_tick(self, film: str | None) -> None:
+        """Called from ``tick`` (lock held): the clip's track is ready -> play
+        it; it ended on the TV (or never started) -> calibration is over."""
+        calibration = self.calibration
+        if calibration is None:
+            return
+        key = calibration["rating_key"]
+        if calibration["phase"] == "building":
+            if light_tracks.has_track(key):
+                self._play_calibration()
+            elif not light_tracks.pending(key):
+                log.warning("Light sync calibration: the test clip's track didn't build")
+                self.calibration, self.reason = None, "The calibration track didn't build."
+                self.bump()
+            return
+        if film == key:
+            calibration["seen"] = True
+        elif calibration["seen"] or self.now() - calibration["since"] > CALIBRATION_START_S:
+            log.info("Light sync calibration over (%s)", "clip ended" if calibration["seen"] else "clip never started")
+            self.calibration = None
+            self.bump()
+
+    def end_calibration(self) -> tuple[bool, str]:
+        """Done: stop syncing, stop the clip if it's still on, hand the room back."""
+        with self._lock:
+            calibration, self.calibration = self.calibration, None
+            if calibration is None:
+                return False, "I'm not calibrating, sir."
+            pb = self.clock.current()
+            on_tv = pb is not None and pb.rating_key == calibration["rating_key"] and pb.state != "stopped"
+            if self.manual_key == calibration["rating_key"]:
+                self.manual_key = None
+            if on_tv:
+                self.suppressed_key = calibration["rating_key"]  # no auto restart on the clip's last seconds
+            if self.session is not None and self.session.rating_key == calibration["rating_key"]:
+                self._stop_session(restore=True)
+            self.bump()
+        if on_tv:
+            from integrations import tv_remote
+            try:
+                tv_remote.stop_playback()
+            except Exception:  # noqa: BLE001 - the lights are already handed back
+                log.warning("Light sync couldn't stop the test clip", exc_info=True)
+        return True, f"Calibration done, sir. The global timing is {_ms(self.global_offset())}."
 
     def release_for_barn_door(self) -> None:
         """Barn Door is engaging: let go of the strips now (not at the next
@@ -733,10 +966,24 @@ class LightSync:
             "film": film,
             "has_track": bool(pb and light_tracks.has_track(pb.rating_key)),
             "building": light_tracks.building(),
+            "queue": light_tracks.queue(),
             "tracks": light_tracks.listing(),
+            "offset": self.offsets(),
+            "calibrating": ({"title": self.calibration["title"], "phase": self.calibration["phase"]}
+                            if self.calibration else None),
             "reason": "" if session else self.reason,
             "revision": self._revision,
         }
+
+
+def test_title() -> str:
+    """``LIGHT_SYNC_TEST_TITLE``: the flash test clip on Plex used to calibrate."""
+    return os.getenv("LIGHT_SYNC_TEST_TITLE", "").strip() or "Light Sync Test"
+
+
+def _ms(value: float) -> str:
+    value = int(round(value))
+    return f"+{value} ms" if value > 0 else f"{value} ms"
 
 
 # --- Home Assistant and the room ----------------------------------------------

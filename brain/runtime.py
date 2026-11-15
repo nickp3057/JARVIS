@@ -497,8 +497,13 @@ class JarvisRuntime:
         track on the room TV's Plex syncs the strips, desk lights and lamp;
         everything else (stop, no track, movie mode over, Barn Door) hands the
         room back. About once a second while armed, every 5 s otherwise.
-        ``LIGHT_SYNC=0`` keeps it from starting (restart after changing it)."""
-        from brain import light_sync
+        ``LIGHT_SYNC=0`` keeps it from starting (restart after changing it).
+        First it picks up the light track build queue a restart interrupted."""
+        from brain import light_sync, light_tracks
+        try:
+            light_tracks.resume()
+        except Exception:  # noqa: BLE001 - a bad queue file must not stop the sync
+            log.exception("Light track queue couldn't resume")
         while not self._stop_monitors.is_set():
             try:
                 delay = light_sync.monitor_pass()
@@ -577,6 +582,8 @@ class JarvisRuntime:
         self._stop_monitors.set()
         from brain import light_sync
         light_sync.shutdown()  # the strips stay in streaming mode until told
+        from brain import light_tracks
+        light_tracks.shutdown()  # ffmpeg ends; the build stays queued for the next start
         from integrations import schwab
         schwab.linked_event.set()  # its monitor waits on this, not on _stop_monitors
         memory_extractor.remove_listener(self._on_memory_change)

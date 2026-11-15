@@ -61,6 +61,9 @@ class TrackStoreDir(unittest.TestCase):
         s = patch.object(light_sync, "_STATE_FILE", Path(tmp.name) / "light_sync.json")
         s.start()
         self.addCleanup(s.stop)
+        light_tracks._queue.clear()
+        light_tracks._stopping = False
+        self.addCleanup(light_tracks._queue.clear)
 
 
 class FrameColourTests(unittest.TestCase):
@@ -146,7 +149,7 @@ class _FakeProc:
         self.terminated = True
 
 
-class BuildTests(TrackStoreDir):
+class BuildBase(TrackStoreDir):
     FILM = {"rating_key": "7", "title": "Cars 2", "year": 2011, "duration_ms": 2000, "part_key": "/library/parts/9/f.mkv"}
 
     def setUp(self) -> None:
@@ -166,6 +169,8 @@ class BuildTests(TrackStoreDir):
             time.sleep(0.01)
         self.fail("build never finished")
 
+
+class BuildTests(BuildBase):
     def test_builds_saves_and_alerts_ready(self) -> None:
         proc = _FakeProc(_frame((0, 0, 255)) * 20)
         with patch.object(light_tracks.subprocess, "Popen", return_value=proc) as popen:
@@ -189,7 +194,7 @@ class BuildTests(TrackStoreDir):
         self.assertIn("sir", self.notes[-1][1])
         self.assertNotIn("sekrit", " ".join(logs.output))
 
-    def test_existing_track_and_one_at_a_time(self) -> None:
+    def test_existing_track_and_a_second_film_queues(self) -> None:
         light_tracks.save("7", np.zeros((5, 3), np.uint8), "Cars 2")
         ok, message = light_tracks.start_build(self.FILM)
         self.assertFalse(ok)
@@ -205,10 +210,10 @@ class BuildTests(TrackStoreDir):
         with patch.object(light_tracks.subprocess, "Popen", return_value=Slow()):
             self.assertTrue(light_tracks.start_build(self.FILM, rebuild=True)[0])
             ok, message = light_tracks.start_build({**self.FILM, "rating_key": "8", "title": "Up"})
-            self.assertFalse(ok)
-            self.assertIn("One at a time", message)
+            self.assertTrue(ok)
+            self.assertEqual(message, "Queued Up, sir: second in line.")
             self.assertEqual(light_tracks.building()["title"], "Cars 2")
-            self.assertTrue(light_tracks.cancel_build())
+            self.assertEqual(light_tracks.cancel(everything=True), ["Cars 2", "Up"])
             gate.set()
             self._wait()
         self.assertEqual(self.notes, [])  # a cancel says nothing
@@ -423,8 +428,9 @@ class PlayerTests(unittest.TestCase):
 class FakePlayer:
     instances = []
 
-    def __init__(self, track, rating_key, clock, tune, sender, now=None, on_exit=None):  # noqa: ANN001
+    def __init__(self, track, rating_key, clock, tune, sender, now=None, on_exit=None, lead_ms=None):  # noqa: ANN001
         self.rating_key, self.started, self.stopped = rating_key, False, False
+        self.lead_ms = lead_ms
         self._stop = threading.Event()
         FakePlayer.instances.append(self)
 
@@ -436,7 +442,7 @@ class FakePlayer:
         self._stop.set()
 
 
-class ControllerTests(TrackStoreDir):
+class ControllerBase(TrackStoreDir):
     def setUp(self) -> None:
         super().setUp()
         FakePlayer.instances = []
@@ -452,7 +458,7 @@ class ControllerTests(TrackStoreDir):
                   patch.object(light_sync, "_resume_follow", side_effect=lambda: self.follow.append("on")),
                   patch.object(light_sync, "_barn_door_engaged", side_effect=lambda: self.barn),
                   patch.object(light_sync, "_movie_mode", return_value=False),
-                  patch.dict(os.environ, {"LIGHT_SYNC": "1"})):
+                  patch.dict(os.environ, {"LIGHT_SYNC": "1", "LIGHT_SYNC_LEAD_MS": "", "LIGHT_SYNC_TEST_TITLE": ""})):
             p.start()
             self.addCleanup(p.stop)
 
@@ -463,6 +469,8 @@ class ControllerTests(TrackStoreDir):
         self.barn = barn
         self.sync.tick(movie_mode=movie, barn_door=barn)
 
+
+class ControllerTests(ControllerBase):
     def test_movie_mode_with_a_track_starts_and_pause_holds(self) -> None:
         self.play()
         self.tick()
@@ -575,11 +583,11 @@ class ControllerTests(TrackStoreDir):
         self.assertFalse(self.sync.running)
 
     def test_state_file_round_trip_and_revision(self) -> None:
-        self.assertEqual(light_sync.load_state(), {"auto": True, "intensity": "medium"})
+        self.assertEqual(light_sync.load_state(), {"auto": True, "intensity": "medium", "offset_ms": 0})
         before = self.sync.revision()
         self.sync.set_intensity("Subtle")
         self.sync.set_auto(False)
-        self.assertEqual(light_sync.load_state(), {"auto": False, "intensity": "subtle"})
+        self.assertEqual(light_sync.load_state(), {"auto": False, "intensity": "subtle", "offset_ms": 0})
         self.assertGreater(self.sync.revision(), before)
         with self.assertRaises(ValueError):
             self.sync.set_intensity("blinding")
@@ -653,7 +661,7 @@ class ToolAndVoiceTests(TrackStoreDir):
             self.assertIsNone(quick_commands.run("light sync on"))  # the conversation explains why
 
 
-class ApiTests(TrackStoreDir):
+class ApiBase(TrackStoreDir):
     def setUp(self) -> None:
         super().setUp()
         tmp = tempfile.TemporaryDirectory()
@@ -672,6 +680,8 @@ class ApiTests(TrackStoreDir):
         self.addCleanup(self.client.close)
         self.admin = {"Authorization": "Bearer admin"}
 
+
+class ApiTests(ApiBase):
     def test_get_and_set(self) -> None:
         self.assertEqual(self.client.get("/api/lightsync").status_code, 401)
         state = self.client.get("/api/lightsync", headers=self.admin).json()
@@ -740,3 +750,401 @@ class PlexMovieRecordTests(unittest.TestCase):
         from integrations import plex
         item = {"ratingKey": 8, "title": "Cars 2", "Media": [{"Part": [{"key": "/library/parts/1/file.mp4"}]}]}
         self.assertEqual(plex._movie_record(item)["part_key"], "/library/parts/1/file.mp4")
+
+
+# --- Build queue, timing nudges, calibration (2026-11-14) -------------------
+
+class _GatedProc(_FakeProc):
+    """ffmpeg that hands over its frames only once ``gate`` is set."""
+
+    def __init__(self, gate: threading.Event, frames: int = 20) -> None:
+        super().__init__(_frame((0, 0, 255)) * frames)
+        data = self.stdout
+
+        class Out:
+            def read(self, n):  # noqa: ANN001
+                gate.wait(5)
+                return data.read(n)
+
+        self.stdout = Out()
+
+
+class QueueTests(BuildBase):
+    def film(self, key: str, title: str) -> dict:
+        return {**self.FILM, "rating_key": key, "title": title, "part_key": f"/library/parts/{key}/f.mkv"}
+
+    def _wait_all(self) -> None:
+        for _ in range(500):
+            if light_tracks.building() is None and not light_tracks.queue():
+                return
+            time.sleep(0.01)
+        self.fail("queue never drained")
+
+    def _popen(self, gate: threading.Event, order: list):
+        def make(command, **_):  # noqa: ANN001
+            url = next(c for c in command if c.startswith("http"))
+            order.append(url.split("/library/parts/")[1].split("/")[0])
+            return _GatedProc(gate) if len(order) == 1 else _FakeProc(_frame((0, 0, 255)) * 20)
+        return make
+
+    def _saved_queue(self) -> list:
+        import json
+        return [row["film"]["rating_key"] for row in json.loads((self.dir / "queue.json").read_text())]
+
+    def test_fifo_order_dedupe_and_one_push_per_film(self) -> None:
+        gate, order = threading.Event(), []
+        with patch.object(light_tracks.subprocess, "Popen", side_effect=self._popen(gate, order)):
+            ok, said = light_tracks.start_build(self.film("1", "The Hunger Games"))
+            self.assertTrue(ok)
+            self.assertIn("Building the light sync for The Hunger Games", said)
+            self.assertEqual(light_tracks.start_build(self.film("2", "Catching Fire"))[1],
+                             "Queued Catching Fire, sir: second in line.")
+            self.assertEqual(light_tracks.start_build(self.film("3", "Mockingjay"))[1],
+                             "Queued Mockingjay, sir: third in line.")
+            self.assertEqual([q["title"] for q in light_tracks.queue()], ["Catching Fire", "Mockingjay"])
+            self.assertEqual(self._saved_queue(), ["1", "2", "3"])
+            ok, said = light_tracks.start_build(self.film("1", "The Hunger Games"))
+            self.assertFalse(ok)
+            self.assertIn("already building", said)
+            ok, said = light_tracks.start_build(self.film("3", "Mockingjay"))
+            self.assertFalse(ok)
+            self.assertIn("already in the queue, sir: third in line", said)
+            self.assertTrue(light_tracks.pending("3"))
+            gate.set()
+            self._wait_all()
+        self.assertEqual(order, ["1", "2", "3"])
+        self.assertTrue(all(light_tracks.has_track(k) for k in "123"))
+        self.assertEqual([n[0] for n in self.notes], ["Light sync ready"] * 3)
+        self.assertEqual(self._saved_queue(), [])
+        self.assertIn("already has a light sync", light_tracks.start_build(self.film("2", "Catching Fire"))[1])
+
+    def test_cancel_one_or_all_and_front_of_queue(self) -> None:
+        gate, order = threading.Event(), []
+        with patch.object(light_tracks.subprocess, "Popen", side_effect=self._popen(gate, order)):
+            light_tracks.start_build(self.film("1", "A"))
+            light_tracks.start_build(self.film("2", "B"))
+            light_tracks.start_build(self.film("3", "C"))
+            self.assertEqual(light_tracks.start_build(self.film("9", "Test"), front=True, quiet=True)[1],
+                             "Queued Test, sir: second in line.")
+            self.assertEqual([q["rating_key"] for q in light_tracks.queue()], ["9", "2", "3"])
+            # Already waiting further back: moved up front.
+            self.assertTrue(light_tracks.start_build(self.film("3", "C"), front=True)[0])
+            self.assertEqual([q["rating_key"] for q in light_tracks.queue()], ["3", "9", "2"])
+            self.assertEqual(light_tracks.cancel("2"), ["B"])
+            self.assertEqual(light_tracks.cancel("nope"), [])
+            self.assertEqual(self._saved_queue(), ["1", "3", "9"])
+            self.assertEqual(light_tracks.cancel(everything=True), ["A", "C", "Test"])
+            gate.set()
+            self._wait_all()
+        self.assertEqual(order, ["1"])
+        self.assertEqual(self.notes, [])
+        self.assertEqual(self._saved_queue(), [])
+
+    def test_quiet_build_skips_the_ready_push(self) -> None:
+        with patch.object(light_tracks.subprocess, "Popen", return_value=_FakeProc(_frame((0, 0, 255)) * 20)):
+            light_tracks.start_build(self.FILM, quiet=True)
+            self._wait()
+        self.assertTrue(light_tracks.has_track("7"))
+        self.assertEqual(self.notes, [])
+
+    def test_restart_resumes_and_the_interrupted_build_starts_again(self) -> None:
+        gate, order = threading.Event(), []
+        with patch.object(light_tracks.subprocess, "Popen", side_effect=self._popen(gate, order)):
+            light_tracks.start_build(self.film("1", "A"))
+            light_tracks.start_build(self.film("2", "B"))
+            light_tracks.shutdown()  # Core stopping mid-build
+            gate.set()
+            self._wait()
+        self.assertFalse(light_tracks.has_track("1"))
+        self.assertEqual(self._saved_queue(), ["1", "2"])
+        # A fresh Core: nothing in memory, the file says what's left.
+        light_tracks._queue.clear()
+        light_tracks._stopping = False
+        order.clear()
+        with patch.object(light_tracks.subprocess, "Popen", side_effect=lambda c, **_: (
+                order.append(next(x for x in c if x.startswith("http")).split("/parts/")[1][0]),
+                _FakeProc(_frame((0, 0, 255)) * 20))[1]):
+            self.assertEqual(light_tracks.resume(), 2)
+            self._wait_all()
+        self.assertEqual(order, ["1", "2"])
+        self.assertTrue(light_tracks.has_track("1") and light_tracks.has_track("2"))
+        self.assertEqual(light_tracks.resume(), 0)  # drained
+
+    def test_resume_skips_junk_and_films_that_have_tracks(self) -> None:
+        import json
+        light_tracks.save("1", np.zeros((5, 3), np.uint8), "A")
+        self.dir.mkdir(parents=True, exist_ok=True)
+        (self.dir / "queue.json").write_text(json.dumps([{"film": self.film("1", "A")}, {"film": {"title": "x"}}, 7]))
+        self.assertEqual(light_tracks.resume(), 0)
+        (self.dir / "queue.json").write_text("{bad")
+        self.assertEqual(light_tracks.resume(), 0)
+
+
+class OffsetTests(ControllerBase):
+    def test_offset_math_default_from_env_and_clamp(self) -> None:
+        with patch.dict(os.environ, {"LIGHT_SYNC_LEAD_MS": "40"}):
+            self.assertEqual(light_sync.load_state()["offset_ms"], 40)
+            self.assertEqual(self.sync.effective_offset("1"), 40)
+            ok, said = self.sync.nudge(25, "global")
+            self.assertTrue(ok)
+            self.assertIn("now +65 ms", said)
+        with patch.dict(os.environ, {"LIGHT_SYNC_LEAD_MS": "999"}):
+            self.assertEqual(self.sync.global_offset(), 65)  # saved wins over the .env default
+        self.assertEqual(light_tracks.set_film_offset("1", -15), -15)
+        self.assertEqual(self.sync.effective_offset("1"), 50)
+        self.assertEqual(light_tracks.set_film_offset("1", 9999), 2000)
+        self.assertEqual(self.sync.effective_offset("1"), 2000)  # 65 + 2000, clamped
+        self.assertIsNone(light_tracks.set_film_offset("404", 10))
+        self.assertEqual(light_tracks.clamp_offset("junk"), 0)
+        self.assertEqual(light_tracks.clamp_offset(float("nan")), 0)
+        self.sync.nudge(5000, "global")
+        self.assertEqual(self.sync.global_offset(), 2000)
+        self.assertIn("as far earlier", self.sync.nudge(25, "global")[1])
+        self.assertFalse(self.sync.nudge(0)[0])
+
+    def test_nudges_reach_the_running_player_at_once(self) -> None:
+        self.play()
+        self.tick()
+        player = FakePlayer.instances[0]
+        self.assertEqual(player.lead_ms, 0)
+        ok, said = self.sync.nudge(50)  # default: the film syncing
+        self.assertTrue(ok)
+        self.assertIn("for Up", said)
+        self.assertEqual((light_tracks.film_offset("1"), self.sync.global_offset(), player.lead_ms), (50, 0, 50))
+        self.sync.nudge(-25, "global")
+        self.assertEqual(player.lead_ms, 25)
+        self.assertEqual(self.sync.status()["offset"]["film_ms"], 50)
+        self.assertEqual(self.sync.status()["offset"]["effective_ms"], 25)
+        self.sync.reset_offset()
+        self.assertEqual((light_tracks.film_offset("1"), player.lead_ms), (0, -25))
+        # A rebuild keeps the film's offset.
+        self.sync.nudge(75)
+        light_tracks.save("1", np.zeros((100, 3), np.uint8), "Up")
+        self.assertEqual(light_tracks.film_offset("1"), 75)
+
+    def test_no_film_means_global_unless_film_asked_for(self) -> None:
+        self.assertFalse(self.sync.nudge(25, "film")[0])
+        self.assertTrue(self.sync.nudge(25)[0])
+        self.assertEqual(self.sync.global_offset(), 25)
+
+
+class LivePlayerOffsetTests(unittest.TestCase):
+    def test_player_reads_lead_every_frame(self) -> None:
+        sender = FakeSender()
+        track = np.array([[200, 0, 0]] * 100 + [[0, 0, 200]] * 100, np.uint8)
+        player = light_sync.Player(track, "1", lambda: (9.5, 0.0), _tune, sender, lead_ms=0)
+        player.start()
+        time.sleep(0.4)
+        before = [e for e in sender.log if e[0] == "strip"][-1][2]
+        player.lead_ms = 1000  # one second later in the film: blue
+        time.sleep(0.6)
+        player.stop()
+        after = [e for e in sender.log if e[0] == "strip"][-1][2]
+        self.assertGreater(before[0], before[2])
+        self.assertGreater(after[2], after[0])
+
+
+class CalibrationTests(ControllerBase):
+    TEST = {"rating_key": "50", "title": "Light Sync Test", "year": 2026, "duration_ms": 180000, "part_key": "/p/50"}
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.play_plex = Mock(return_value=(True, "ok"))
+        self.stop_tv = Mock(return_value=(True, "ok"))
+        self.find = Mock(return_value=(True, dict(self.TEST)))
+        for p in (patch("integrations.plex.is_configured", return_value=True),
+                  patch("integrations.plex.find_movie", self.find),
+                  patch("integrations.plex.server_id", return_value="srv"),
+                  patch("integrations.tv_remote.play_plex", self.play_plex),
+                  patch("integrations.tv_remote.stop_playback", self.stop_tv)):
+            p.start()
+            self.addCleanup(p.stop)
+
+    def test_builds_the_test_track_first_then_plays_and_syncs_in_any_scene(self) -> None:
+        with patch.object(light_tracks, "start_build", return_value=(True, "Building")) as build, \
+                patch.object(light_tracks, "pending", return_value=True):
+            ok, said = self.sync.calibrate()
+            self.assertTrue(ok)
+            self.assertIn("calibration track first", said)
+            build.assert_called_once_with(self.TEST, front=True, quiet=True)
+            self.find.assert_called_once_with("Light Sync Test")
+            self.tick(movie=False)
+            self.play_plex.assert_not_called()
+            self.assertEqual(self.sync.status()["calibrating"]["phase"], "building")
+        light_tracks.save("50", np.zeros((1800, 3), np.uint8), "Light Sync Test")
+        self.sync.set_auto(False)  # calibration is a manual start: auto doesn't matter
+        self.tick(movie=False)  # Game Time, say
+        self.play_plex.assert_called_once_with("50", "srv")
+        self.play(key="50", title="Light Sync Test")
+        self.tick(movie=False)
+        self.assertTrue(self.sync.running)
+        self.assertTrue(self.sync.armed())
+        # Nudges go to the global offset while calibrating.
+        ok, said = self.sync.nudge(25)
+        self.assertIn("globally", said)
+        self.assertEqual((self.sync.global_offset(), light_tracks.film_offset("50")), (25, 0))
+        self.assertEqual(FakePlayer.instances[0].lead_ms, 25)
+        self.assertEqual(self.sync.status()["offset"]["scope"], "global")
+        ok, said = self.sync.end_calibration()
+        self.assertTrue(ok)
+        self.assertIn("+25 ms", said)
+        self.stop_tv.assert_called_once()
+        self.assertFalse(self.sync.running)
+        self.assertTrue(FakePlayer.instances[0].stopped)
+        self.assertEqual(self.restored, [])  # not in movie mode: the room isn't touched
+        self.tick(movie=False)
+        self.assertFalse(self.sync.running)  # the clip's last seconds don't restart it
+
+    def test_with_a_track_it_plays_at_once_and_done_restores_movie_scene(self) -> None:
+        light_tracks.save("50", np.zeros((1800, 3), np.uint8), "Light Sync Test")
+        self.play()
+        self.tick()  # Up is syncing in movie mode
+        ok, said = self.sync.calibrate()
+        self.assertTrue(ok, said)
+        self.assertIn("Calibrating", said)
+        self.assertTrue(FakePlayer.instances[0].stopped)  # Up let go for the clip
+        self.play_plex.assert_called_once_with("50", "srv")
+        self.play(key="50", title="Light Sync Test")
+        self.tick()
+        self.assertEqual(self.sync.session.rating_key, "50")
+        ok, _ = self.sync.stop()  # stop = Done while calibrating
+        self.assertTrue(ok)
+        self.assertIsNone(self.sync.calibration)
+        self.assertEqual(self.restored, [1])
+        self.stop_tv.assert_called_once()
+
+    def test_clip_ending_or_never_starting_ends_calibration(self) -> None:
+        light_tracks.save("50", np.zeros((1800, 3), np.uint8), "Light Sync Test")
+        self.sync.calibrate()
+        self.play(key="50", title="Light Sync Test")
+        self.tick(movie=False)
+        self.play(key="50", title="Light Sync Test", state="stopped")
+        self.tick(movie=False)
+        self.assertIsNone(self.sync.calibration)
+        self.assertFalse(self.sync.running)
+        self.sync.calibrate()
+        self.t += light_sync.CALIBRATION_START_S + 1
+        self.tick(movie=False)
+        self.assertIsNone(self.sync.calibration)
+        self.assertFalse(self.sync.end_calibration()[0])
+
+    def test_refusals(self) -> None:
+        self.barn = True
+        self.assertIn("Barn Door", self.sync.calibrate()[1])
+        self.barn = False
+        self.find.return_value = (False, "nope")
+        with patch.dict(os.environ, {"LIGHT_SYNC_TEST_TITLE": "Flashes"}):
+            ok, said = self.sync.calibrate()
+        self.assertFalse(ok)
+        self.assertIn("Flashes", said)
+        self.find.return_value = (True, dict(self.TEST))
+        light_tracks.save("50", np.zeros((1800, 3), np.uint8), "Light Sync Test")
+        self.play_plex.return_value = (False, "HA down")
+        ok, said = self.sync.calibrate()
+        self.assertFalse(ok)
+        self.assertIn("HA down", said)
+        self.assertIsNone(self.sync.calibration)
+
+
+class QueueToolAndApiTests(ApiBase):
+    def test_api_nudge_reset_calibrate_and_queue(self) -> None:
+        with patch.object(self.sync, "nudge", return_value=(True, "Lights 25 ms earlier")) as nudge:
+            body = self.client.post("/api/lightsync", headers=self.admin, json={"nudge_ms": 25}).json()
+        nudge.assert_called_once_with(25, None)
+        self.assertIn("earlier", body["message"])
+        self.assertEqual(body["offset"]["step_ms"], 25)
+        self.assertEqual(self.client.post("/api/lightsync", headers=self.admin,
+                                          json={"nudge_ms": 2500}).status_code, 422)
+        with patch.object(self.sync, "reset_offset", return_value=(True, "reset")) as reset:
+            self.client.post("/api/lightsync", headers=self.admin, json={"reset_offset": True, "scope": "global"})
+        reset.assert_called_once_with("global")
+        with patch.object(self.sync, "calibrate", return_value=(True, "Calibrating")) as cal, \
+                patch.object(self.sync, "end_calibration", return_value=(True, "Done")) as done:
+            self.assertEqual(self.client.post("/api/lightsync", headers=self.admin,
+                                              json={"calibrate": True}).json()["message"], "Calibrating")
+            self.client.post("/api/lightsync", headers=self.admin, json={"calibrate": False})
+        cal.assert_called_once()
+        done.assert_called_once()
+        with patch.object(light_tracks, "queue", return_value=[{"rating_key": "2", "title": "B", "year": None}]), \
+                patch.object(light_tracks, "building", return_value={"rating_key": "1", "title": "A", "year": None,
+                                                                      "percent": 40}):
+            state = self.client.get("/api/lightsync", headers=self.admin).json()
+        self.assertEqual(state["queue"][0]["title"], "B")
+        self.assertEqual(state["building"]["percent"], 40)
+        self.assertIsNone(state["calibrating"])
+        with patch.object(light_tracks, "cancel", return_value=["A", "B"]) as cancel:
+            body = self.client.post("/api/lightsync/build", headers=self.admin, json={"cancel": "all"}).json()
+        cancel.assert_called_once_with(everything=True)
+        self.assertIn("A, B", body["message"])
+
+    def test_create_light_sync_takes_several_titles_or_a_series(self) -> None:
+        films = {t: {"rating_key": k, "title": t, "duration_ms": 1, "part_key": "/p"}
+                 for k, t in (("1", "The Hunger Games"), ("2", "Catching Fire"), ("3", "Mockingjay"))}
+        answers = iter([(True, "Building the light sync for The Hunger Games, sir."),
+                        (True, "Queued Catching Fire, sir: second in line."),
+                        (False, "Mockingjay already has a light sync, sir.")])
+        with patch("integrations.plex.is_configured", return_value=True), \
+                patch("integrations.plex.find_movie", side_effect=lambda t: (True, films[t])) as find, \
+                patch.object(light_tracks, "start_build", side_effect=lambda f, rebuild: next(answers)) as build:
+            said = tools.execute_tool("create_light_sync", {"titles": list(films)})
+        self.assertEqual([c.args[0] for c in find.call_args_list], list(films))
+        self.assertEqual(build.call_count, 3)
+        self.assertIn("Building The Hunger Games now", said)
+        self.assertIn("Catching Fire", said)
+        self.assertIn("Already done: Mockingjay", said)
+        with patch("integrations.plex.is_configured", return_value=True), \
+                patch("integrations.plex.search_movies", return_value=(True, list(films.values()))) as search, \
+                patch.object(light_tracks, "start_build", return_value=(True, "Queued x")) as build:
+            said = tools.execute_tool("create_light_sync", {"series": "Hunger Games"})
+        search.assert_called_once_with("Hunger Games")
+        self.assertEqual(build.call_count, 3)
+        self.assertIn("Queued The Hunger Games, Catching Fire, Mockingjay", said)
+
+    def test_light_sync_tool_nudge_calibrate_done_and_cancel(self) -> None:
+        sync = Mock()
+        sync.calibration = {"title": "Light Sync Test"}
+        sync.nudge.return_value = (True, "nudged")
+        sync.calibrate.return_value = (True, "Calibrating")
+        sync.end_calibration.return_value = (True, "Calibration done")
+        sync.reset_offset.return_value = (True, "reset")
+        with patch.object(light_sync, "controller", sync):
+            tools.execute_tool("light_sync", {"action": "nudge", "direction": "later", "ms": 25})
+            sync.nudge.assert_called_with(-25.0, None)
+            tools.execute_tool("light_sync", {"action": "nudge", "direction": "earlier", "scope": "global"})
+            sync.nudge.assert_called_with(50.0, "global")
+            tools.execute_tool("light_sync", {"action": "nudge", "ms": -75})
+            sync.nudge.assert_called_with(-75.0, None)
+            self.assertIn("Earlier or later", tools.execute_tool("light_sync", {"action": "nudge"}))
+            self.assertEqual(tools.execute_tool("light_sync", {"action": "calibrate"}), "Calibrating")
+            self.assertEqual(tools.execute_tool("light_sync", {"action": "done"}), "Calibration done")
+            tools.execute_tool("light_sync", {"action": "reset_timing", "scope": "film"})
+            sync.reset_offset.assert_called_with("film")
+        with patch.object(light_tracks, "building", return_value={"rating_key": "1", "title": "A", "percent": 10}), \
+                patch.object(light_tracks, "queue", return_value=[{"rating_key": "2", "title": "Catching Fire"}]), \
+                patch.object(light_tracks, "cancel", return_value=["Catching Fire"]) as cancel:
+            self.assertIn("Queued next: Catching Fire", tools.execute_tool("light_sync", {"action": "list"}))
+            self.assertIn("Cancelled: Catching Fire",
+                          tools.execute_tool("light_sync", {"action": "cancel_build", "title": "catching fire"}))
+            cancel.assert_called_with("2")
+            tools.execute_tool("light_sync", {"action": "cancel_build"})
+            cancel.assert_called_with(everything=True)
+        state = self.sync.status()
+        self.assertIn("queue", state)
+        status = tools.execute_tool("light_sync", {"action": "status"})
+        self.assertIn("Timing: global 0 ms", status)
+
+
+class PlexSearchTests(unittest.TestCase):
+    def test_search_movies_keeps_the_series_in_order(self) -> None:
+        from integrations import plex
+        hits = {"MediaContainer": {"Hub": [{"Metadata": [
+            {"type": "movie", "ratingKey": 3, "title": "The Hunger Games: Mockingjay - Part 1", "year": 2014},
+            {"type": "movie", "ratingKey": 1, "title": "The Hunger Games", "year": 2012},
+            {"type": "show", "ratingKey": 8, "title": "Hunger Games Show"},
+            {"type": "movie", "ratingKey": 9, "title": "Gladiator", "year": 2000},
+        ]}]}}
+        with patch.object(plex, "_get", return_value=(True, hits)), \
+                patch.object(plex, "movie", side_effect=lambda k: (True, {"rating_key": k})):
+            ok, films = plex.search_movies("Hunger Games")
+        self.assertTrue(ok)
+        self.assertEqual([f["rating_key"] for f in films], ["1", "3"])
