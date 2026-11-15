@@ -2999,6 +2999,16 @@ prototype in `~/Developer/projects/light-sync` (2026-11-09).
   {lamp_nudge_ms}`. Known bug: calibration's `tv_remote.play_plex` deep link
   is ignored while Plex is already open on its home screen (Nick started the
   clip by hand); fix by sending Home first.
+- **Lamp is a bulb (H6004)** (2026-11-15): it can't stream like the strips,
+  and its firmware fades every `colorwc` (~0.1 s up, ~0.4 s down; the LAN API
+  has no transition setting), so it will always look softer than the strips.
+  Hard cuts (a change over `CUT`) go to it after 0.1 s instead of waiting the
+  usual 0.2 s, so flashes land with less jitter; the head start covers the rest.
+- **No glow on the test clip** (2026-11-15): the builder's 8% warm-white floor
+  (`frame_colour`'s `0.08 +`) kept the room grey between calibration flashes
+  (brighter at Intense). `without_glow` blacks out every frame at or under the
+  floor (`GLOW_MAX` 22) on the calibration clip only (by the calibration's
+  ratingKey or `LIGHT_SYNC_TEST_TITLE`); films keep their glow.
 - **Restarts don't lose builds:** systemd stops ffmpeg with Core (exit 255,
   no error text), often before Core's shutdown hook runs; `killed_from_outside`
   spots that, keeps the film at the front of the queue with no "failed" push,

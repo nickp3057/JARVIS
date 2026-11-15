@@ -248,6 +248,19 @@ def steady_track(track: np.ndarray, frames: int = STEADY_FRAMES, jump: float = S
     return out.clip(0, 255).astype(np.uint8)
 
 
+# The builder never lets a frame go below an 8% warm-white glow (so a black
+# film scene isn't a dark room). On the calibration clip that glow just reads
+# as grey between the flashes: there the lights go dark instead.
+GLOW_MAX = 22  # the glow floor is 0.08 * 255 ~ 20 per channel
+
+
+def without_glow(track: np.ndarray) -> np.ndarray:
+    """``track`` with every glow-floor-or-darker frame set to black."""
+    out = np.array(track, copy=True)
+    out[out.max(1) <= GLOW_MAX] = 0
+    return out
+
+
 def razer_packet(raw: list[int]) -> str:
     """A razer payload with its xor checksum, base64 for the ``pt`` field."""
     x = 0
@@ -581,7 +594,11 @@ class Player:
                 lf = f + tune.lamp_lead_ms / 1000 * light_tracks.FPS
                 li = min(max(int(lf), 0), frames - 2)
                 lrgb = (self.track[li] + (self.track[li + 1] - self.track[li]) * (lf - li)).clip(0, 255)
-                if now - lamp_last > 0.2 and (lamp_sent is None or float(np.abs(lrgb - lamp_sent).max()) > 6):
+                # A hard cut goes at once (0.1 s since the last command, so the
+                # bulb isn't flooded); anything else waits its 0.2 s turn.
+                change = 1e9 if lamp_sent is None else float(np.abs(lrgb - lamp_sent).max())
+                gap = 0.1 if change > CUT else 0.2
+                if now - lamp_last > gap and change > 6:
                     shown = lamp_limiter.apply(lrgb, now)
                     self.sender.lamp(tune.lamp, [int(v * tune.lamp_level) for v in shown])
                     lamp_last, lamp_sent = now, lrgb
@@ -710,10 +727,13 @@ class LightSync:
             self.reason = "The light track couldn't be read."
             return
         track = steady_track(track)
+        meta = light_tracks.get(pb.rating_key) or {}
+        if (self.calibration and self.calibration["rating_key"] == pb.rating_key) \
+                or _same_title(str(meta.get("title") or pb.title or ""), test_title()):
+            track = without_glow(track)  # flashes from black: no grey between them
         if self._sender is None:
             self._sender = self.sender_factory()
         key = pb.rating_key
-        meta = light_tracks.get(key) or {}
         title = pb.title or meta.get("title") or "the film"
 
         def clock() -> tuple[float, float] | None:

@@ -1234,6 +1234,14 @@ class PlexSearchTests(unittest.TestCase):
         self.assertEqual([f["rating_key"] for f in films], ["1", "3"])
 
 
+class WithoutGlowTests(unittest.TestCase):
+    def test_test_clip_goes_dark_between_flashes(self) -> None:
+        from brain.light_sync import without_glow
+        glow, red, dim_blue = [20, 17, 14], [255, 0, 0], [10, 30, 60]
+        out = without_glow(np.array([glow, red, glow, dim_blue], np.uint8))
+        self.assertEqual(out.tolist(), [[0, 0, 0], red, [0, 0, 0], dim_blue])
+
+
 class SteadyTrackTests(unittest.TestCase):
     BLUE = [23, 41, 57]
     GREY = [57, 48, 40]  # the warm-white fallback, dim
