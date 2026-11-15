@@ -98,10 +98,16 @@ class FrameColourTests(unittest.TestCase):
         cancel.set()
         self.assertEqual(len(light_tracks.analyze_stream(io.BytesIO(data), cancel=cancel)), 0)
 
+    def test_ffmpeg_hwaccel_only_when_asked(self) -> None:
+        with patch.dict(os.environ, {"LIGHT_SYNC_HWACCEL": "vaapi"}):
+            command = light_tracks.ffmpeg_command("ffmpeg", "/tmp/film.mkv")
+        self.assertEqual(command[command.index("-hwaccel") + 1], "vaapi")
+        self.assertLess(command.index("-hwaccel"), command.index("-i"))
+
     def test_ffmpeg_command_reads_http_decodes_at_10fps_without_audio(self) -> None:
         command = light_tracks.ffmpeg_command("ffmpeg", "http://plex/library/parts/1/file.mkv?X-Plex-Token=t")
         joined = " ".join(command)
-        self.assertIn("-hwaccel auto", joined)
+        self.assertNotIn("-hwaccel", command)  # CUDA probe aborts ffmpeg on the Surface
         self.assertIn("fps=10,scale=64:27:flags=area", joined)
         self.assertIn("-reconnect 1", joined)
         for flag in ("-an", "-sn", "-pix_fmt"):

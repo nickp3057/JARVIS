@@ -1163,6 +1163,7 @@ LIGHT_SYNC_STRIP_LEVEL=0.35 # strip/desk brightness at Medium (Subtle x0.6, Inte
 LIGHT_SYNC_LAMP_LEVEL=0.6   # lamp brightness at Medium
 LIGHT_SYNC_PLEX_PLAYER=     # the room TV's Plex player (title, product or machineIdentifier); blank = the only movie playing
 LIGHT_SYNC_BUILD_THREADS=4  # ffmpeg decode threads for a track build (runs at nice 10)
+LIGHT_SYNC_HWACCEL=          # blank = software decode; e.g. vaapi to try the GPU (auto aborted on the Surface)
 TV_MEDIA_PLAYERS=media_player.nicks_room_tv,media_player.nicks_room_tv_2,media_player.nick_s_room_tv,media_player.nicks_room_group,media_player.nick_s_room_display   # on/off for these goes to the remote
 SCHWAB_POLL_SECONDS=30      # holdings/cash refresh in market hours (prices stream live regardless)
 JARVIS_THEME=arc            # arc | hotRod | malibu | crimson | mark85 | spiderMan | mcqueen | experimenting (markIII/graphite/stealth retired): default look until someone picks one on the phone or TV (then memory/theme.json via /api/theme)
@@ -2909,7 +2910,9 @@ prototype in `~/Developer/projects/light-sync` (2026-11-09).
   for X" reads the film's file over HTTP from Plex (the media Part URL with
   the token, never logged; the Surface has no NAS mount; the smallest version,
   so a 1080p copy is read over a 4K one) through ffmpeg from
-  `imageio-ffmpeg` (`shutil.which("ffmpeg")` as fallback), `-hwaccel auto`,
+  `imageio-ffmpeg` (`shutil.which("ffmpeg")` as fallback), software decode
+  (`-hwaccel auto` aborted on the Surface probing for CUDA; `LIGHT_SYNC_HWACCEL`
+  opts in, e.g. `vaapi`),
   10 fps scaled to 64x27, no audio/subtitles, nice 10. Each 0.1 s becomes one
   colour: the biggest vivid hue region (18 hue bins, neighbours count half),
   warm white when nothing is vivid, brightness from each pixel's brightest

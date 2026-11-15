@@ -271,9 +271,17 @@ def ffmpeg_exe() -> str | None:
 
 def ffmpeg_command(exe: str, source: str) -> list[str]:
     """Decode at 10 fps to 64x27 rgb24 on stdout. HTTP reconnects ride out a
-    Wi-Fi blip over a two-hour read; audio, subtitles and data are skipped."""
+    Wi-Fi blip over a two-hour read; audio, subtitles and data are skipped.
+    Software decode by default: ``-hwaccel auto`` makes imageio-ffmpeg's
+    build try CUDA first and abort (exit -6, "Cannot load libcuda.so.1") on
+    the Surface, which has no NVIDIA driver. ``LIGHT_SYNC_HWACCEL`` (e.g.
+    ``vaapi``, ``videotoolbox``) opts back in where it works."""
     threads = os.getenv("LIGHT_SYNC_BUILD_THREADS", "4").strip() or "4"
-    command = [exe, "-v", "error", "-nostdin", "-hwaccel", "auto", "-threads", threads]
+    command = [exe, "-v", "error", "-nostdin"]
+    hwaccel = os.getenv("LIGHT_SYNC_HWACCEL", "").strip()
+    if hwaccel:
+        command += ["-hwaccel", hwaccel]
+    command += ["-threads", threads]
     if source.startswith("http"):
         command += ["-reconnect", "1", "-reconnect_streamed", "1", "-reconnect_delay_max", "10"]
     return command + ["-i", source, "-an", "-sn", "-dn",
