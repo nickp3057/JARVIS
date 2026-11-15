@@ -23,8 +23,9 @@ Wire format (one socket per iPad):
 Speakers: everything the room voice says or plays goes to the desk speaker
 and every satellite at once (``play_everywhere``), from one synthesis, so
 the room hears one voice. ``SATELLITE_SYNC_MS`` lines them up: positive
-holds the desk back that long, negative holds the iPads back (default 0;
-the desk's aplay runs a 100 ms buffer, ``DESK_BUFFER_MS``). The iPad plays at
+holds the desk back that long, negative holds the iPads back (default 60:
+at 0 the iPads trailed the desk just enough to hear, 2026-11-15; the desk's
+aplay runs a 100 ms buffer, ``DESK_BUFFER_MS``). The iPad plays at
 the same loudness as the desk (``output_gain``: the desk's 0-10 level on
 ALSA's mapped curve, which is 60 dB wide, so amplitude = (level/10)^3).
 
@@ -293,7 +294,7 @@ def ring_all(name: str = "alarm", level: int | None = None) -> None:
 def _sync_seconds() -> float:
     """Desk-vs-iPad offset: > 0 the desk waits, < 0 the iPads wait (seconds)."""
     try:
-        return max(-1.0, min(1.0, float(os.getenv("SATELLITE_SYNC_MS", "0")) / 1000))
+        return max(-1.0, min(1.0, float(os.getenv("SATELLITE_SYNC_MS", "60")) / 1000))
     except ValueError:
         return 0.0
 

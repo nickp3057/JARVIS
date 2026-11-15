@@ -1,5 +1,6 @@
 """Voice satellites: an iPad lends the room voice its mic and speaker."""
 import json
+import os
 import tempfile
 import time
 import unittest
@@ -154,6 +155,13 @@ class EverywhereTests(unittest.TestCase):
         lead = b"\0\0" * int(22050 * 0.1)  # SATELLITE_SYNC_MS=100: the desk waits
         self.assertEqual(written, lead + clip)
         self.closed.assert_called_once_with(self.desk, False)
+
+    def test_default_sync_holds_the_desk_back_60_ms(self) -> None:
+        clip = b"\x01\x00" * 220
+        with patch.dict("os.environ", {}, clear=False):
+            os.environ.pop("SATELLITE_SYNC_MS", None)
+            satellites.play_everywhere([clip], 22050)
+        self.assertEqual(self.desk.stdin.getvalue(), b"\0\0" * int(22050 * 0.06) + clip)
 
     def test_negative_sync_holds_the_ipads_back(self) -> None:
         clip = b"\x01\x00" * 220

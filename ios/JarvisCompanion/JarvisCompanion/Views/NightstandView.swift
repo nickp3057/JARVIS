@@ -317,20 +317,23 @@ struct NightstandRoomSheet: View {
     }
 }
 
-/// "10:42" big and thin, with a small AM/PM after it so the digits get the
-/// room. One `Text`, so the whole line shrinks together to fit its space.
+/// "10:42" big, with a small AM/PM after it so the digits get the room. One
+/// `Text`, so the whole line shrinks together to fit its space. Nick wanted
+/// both clocks heavier (2026-11-15): semibold on the panel, heavy on the dark
+/// screen so it reads from bed at a low grey.
 struct NightstandTime: View {
     let date: Date
     let size: CGFloat
     var color: Color = .primary
+    var weight: Font.Weight = .semibold
 
     var body: some View {
         let digits = Text(date, format: .dateTime.hour(.defaultDigits(amPM: .omitted)).minute())
-            .font(.system(size: size, weight: .ultraLight, design: .rounded))
+            .font(.system(size: size, weight: weight, design: .rounded))
             .monospacedDigit()
         let meridiem = Self.meridiem(date)
         return (meridiem.isEmpty ? digits
-                : digits + Text(" " + meridiem).font(.system(size: size * 0.2, weight: .light, design: .rounded)))
+                : digits + Text(" " + meridiem).font(.system(size: size * 0.2, weight: weight, design: .rounded)))
             .foregroundStyle(color)
             .lineLimit(1)
             .minimumScaleFactor(0.3)
@@ -362,11 +365,11 @@ struct NightstandDarkClock: View {
                 VStack(spacing: geo.size.height * 0.03) {
                     NightstandTime(date: context.date,
                                    size: min(geo.size.width * 0.32, geo.size.height * 0.55),
-                                   color: Color(white: level))
+                                   color: Color(white: level), weight: .heavy)
                         .frame(maxWidth: geo.size.width)
                     if let alarm {
                         Label(alarm, systemImage: "alarm")
-                            .font(.system(size: min(30, geo.size.height * 0.045), weight: .light, design: .rounded))
+                            .font(.system(size: min(30, geo.size.height * 0.045), weight: .semibold, design: .rounded))
                             .foregroundStyle(Color(white: level * 0.7))
                             .monospacedDigit()
                     }
