@@ -13,7 +13,11 @@ Wire format (one socket per iPad):
 - iPad -> Core, binary: mic PCM, 16 kHz mono int16 little-endian, any size.
 - iPad -> Core, text: ``{"type": "bye", "reason": "..."}`` before it hangs
   up on an error (logged, so a drop says why); anything else is ignored.
-- Core -> iPad, text: ``{"type": "hello", "rate": 16000}`` on connect;
+- iPad -> Core, text: ``{"type": "volume", "level": 0-10}`` when Nick
+  presses its volume buttons: the room's level (desk and every iPad).
+- Core -> iPad, text: ``{"type": "hello", "rate": 16000, "level": 0-10}`` on
+  connect; ``{"type": "volume", "level": 0-10}`` whenever the room's level
+  changes (the iPad sets its own volume to level/10);
   ``{"type": "play", "rate": 22050, "gain": 0.4}`` before a clip,
   ``{"type": "end"}`` after it, ``{"type": "stop"}`` to cut it off now
   (barge-in, hush), ``{"type": "off"}`` when the room voice isn't running,
@@ -253,6 +257,28 @@ def output_gain(level: int | None = None) -> float:
     fraction = max(0, min(10, int(level))) / 10
     mapped = os.getenv("ROOM_VOLUME_MAPPED", "1").strip().lower() not in ("0", "off", "false", "no")
     return round(fraction ** 3 if mapped else fraction, 3)
+
+
+def broadcast_volume(level: int) -> None:
+    """Every iPad sets its own volume to the room's level (``{"type":
+    "volume", "level": 0-10}``), so the room is one volume knob while the
+    app is open; an iPad's volume buttons send the same message back."""
+    for sat in connected():
+        sat.send_json({"type": "volume", "level": int(level)})
+
+
+_linked = False
+
+
+def link_room_volume() -> None:
+    """Once: room volume changes (voice, the slider, quiet hours, an iPad's
+    buttons) go out to every iPad."""
+    global _linked
+    if _linked:
+        return
+    from speech import room_volume
+    room_volume.on_change(broadcast_volume)
+    _linked = True
 
 
 # --- the registry -------------------------------------------------------------

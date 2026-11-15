@@ -126,6 +126,13 @@ final class SatelliteVoice: ObservableObject {
         guard case .string(let first) = try await ws.receive() else { throw SatelliteError.audioStopped }
         let hello = Self.decode(first)
         if hello["type"] as? String == "off" { throw SatelliteError.roomVoiceOff }
+        // One volume knob for the room while the app is open (SatelliteVolumeLink).
+        let link = SatelliteVolumeLink.shared
+        link.start { level in
+            ws.send(.string(#"{"type":"volume","level":\#(level)}"#)) { _ in }
+        }
+        if let level = hello["level"] as? Int { link.apply(level: level) }
+        defer { link.stop() }
 
         let audio = SatelliteAudio()
         self.audio = audio
@@ -144,8 +151,10 @@ final class SatelliteVoice: ObservableObject {
                 switch json["type"] as? String {
                 case "play":
                     let trim = UserDefaults.standard.object(forKey: Self.trimKey) as? Double ?? 1
-                    audio.begin(rate: (json["rate"] as? Double) ?? 22050,
-                                gain: Float(((json["gain"] as? Double) ?? 1) * trim))
+                    let gain = link.clipVolume(gain: (json["gain"] as? Double) ?? 1)
+                    audio.begin(rate: (json["rate"] as? Double) ?? 22050, gain: Float(gain * trim))
+                case "volume":
+                    if let level = json["level"] as? Int { link.apply(level: level) }
                 case "stop":
                     audio.flush()
                 case "off":

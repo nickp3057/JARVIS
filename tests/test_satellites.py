@@ -343,3 +343,29 @@ class SatelliteSocketTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class RoomVolumeLinkTests(unittest.TestCase):
+    """One volume knob: room level changes go to every iPad."""
+
+    def test_level_change_reaches_every_ipad(self) -> None:
+        import tempfile
+        from pathlib import Path
+        from unittest import mock
+        from speech import room_volume, satellites
+        satellites.reset_for_tests()
+        self.addCleanup(satellites.reset_for_tests)
+        sent: dict[str, list] = {"bed": [], "door": []}
+        for name in sent:
+            satellites.register(name, sent[name].append)
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        with mock.patch.object(room_volume, "_FILE", Path(tmp.name) / "room_volume.json"), \
+                mock.patch.object(room_volume, "_apply"), \
+                mock.patch.object(room_volume, "_listeners", []):
+            satellites._linked = False  # noqa: SLF001
+            satellites.link_room_volume()
+            room_volume.set_level(3)
+        satellites._linked = False  # noqa: SLF001
+        for name, messages in sent.items():
+            self.assertIn('{"type": "volume", "level": 3}', messages, name)

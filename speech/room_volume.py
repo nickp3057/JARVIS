@@ -73,6 +73,24 @@ def _apply(level: int) -> None:
     _amixer("-q", "sset", _control(), f"{level * 10}%")
 
 
+# Told the new level whenever it changes (the iPads mirror it as their own
+# volume: speech/satellites.link_room_volume).
+_listeners: list[Any] = []
+
+
+def on_change(callback) -> None:  # noqa: ANN001 - callback(level: int) -> None
+    if callback not in _listeners:
+        _listeners.append(callback)
+
+
+def _notify(level: int) -> None:
+    for callback in list(_listeners):
+        try:
+            callback(int(level))
+        except Exception:  # noqa: BLE001 - a listener never breaks the speaker
+            log.debug("room volume listener failed", exc_info=True)
+
+
 def quiet_now(now: datetime | None = None) -> bool:
     """Inside ROOM_QUIET_HOURS ("22-7", wrapping midnight; "" = never)."""
     spec = os.getenv("ROOM_QUIET_HOURS", "22-7").strip()
@@ -170,6 +188,7 @@ def prepare(now: datetime | None = None) -> None:
         _apply(int(target))
         data["applied"] = [mode, target]
         _save(data)
+    _notify(int(target))
 
 
 def night_level() -> int:
@@ -202,6 +221,7 @@ def set_level(value: int, now: datetime | None = None) -> int:
         data["applied"] = [mode, value]
         _apply(value)
         _save(data)
+    _notify(value)
     return value
 
 

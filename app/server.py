@@ -259,11 +259,14 @@ async def voice_satellite(socket: WebSocket) -> None:
             await asyncio.sleep(20)
             send(json.dumps({"type": "ping"}))
 
+    from speech import room_volume
+    satellites.link_room_volume()
     sat = satellites.register(name, send)
     task = asyncio.create_task(writer())
     pinger = asyncio.create_task(keepalive())
     try:
-        sat.send_json({"type": "hello", "rate": 16000})
+        level = await asyncio.to_thread(room_volume.level)
+        sat.send_json({"type": "hello", "rate": 16000, **({"level": level} if level is not None else {})})
         while True:
             message = await socket.receive()
             if message.get("type") == "websocket.disconnect":
@@ -275,7 +278,12 @@ async def voice_satellite(socket: WebSocket) -> None:
                     note = json.loads(message["text"])
                 except ValueError:
                     continue
-                if isinstance(note, dict) and note.get("type") == "bye":
+                if isinstance(note, dict) and note.get("type") == "volume":
+                    try:  # the iPad's volume buttons: the whole room's level (every iPad follows)
+                        await asyncio.to_thread(room_volume.set_level, int(note.get("level")))
+                    except (TypeError, ValueError):
+                        pass
+                elif isinstance(note, dict) and note.get("type") == "bye":
                     log.info("Voice satellite %s hanging up: %s", name, str(note.get("reason", ""))[:200])
     except Exception as exc:  # noqa: BLE001 - a dropped socket ends the satellite, nothing else
         log.info("Voice satellite %s socket ended: %s", name, exc or type(exc).__name__)
