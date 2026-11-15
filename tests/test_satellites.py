@@ -141,6 +141,9 @@ class EverywhereTests(unittest.TestCase):
         self.closed = patch.object(satellites, "_close_desk").start()
         patch.object(room_volume, "level", return_value=8).start()
         patch.dict("os.environ", {"SATELLITE_SYNC_MS": "100"}).start()
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        patch.object(satellites, "_SYNC_FILE", Path(tmp.name) / "sync.json").start()
         self.addCleanup(patch.stopall)
 
     def kinds(self) -> list:
@@ -162,6 +165,16 @@ class EverywhereTests(unittest.TestCase):
             os.environ.pop("SATELLITE_SYNC_MS", None)
             satellites.play_everywhere([clip], 22050)
         self.assertEqual(self.desk.stdin.getvalue(), b"\0\0" * int(22050 * 0.06) + clip)
+
+    def test_saved_nudge_wins_over_env_and_resets(self) -> None:
+        self.assertEqual(satellites.sync_ms(), 100)
+        self.assertEqual(satellites.set_sync_ms(satellites.sync_ms() + 20), 120)
+        self.assertEqual(satellites.set_sync_ms(5000), 1000)  # clamped
+        clip = b"\x01\x00" * 220
+        satellites.set_sync_ms(80)
+        satellites.play_everywhere([clip], 22050)
+        self.assertEqual(self.desk.stdin.getvalue(), b"\0\0" * int(22050 * 0.08) + clip)
+        self.assertEqual(satellites.set_sync_ms(None), 100)  # back to .env
 
     def test_negative_sync_holds_the_ipads_back(self) -> None:
         clip = b"\x01\x00" * 220
@@ -289,6 +302,17 @@ class SatelliteSocketTests(unittest.TestCase):
                 return True
             time.sleep(0.02)
         return False
+
+    def test_sync_nudge_endpoint(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp, \
+                patch.object(satellites, "_SYNC_FILE", Path(tmp) / "sync.json"), \
+                patch.dict("os.environ", {"JARVIS_API_TOKEN": "t", "SATELLITE_SYNC_MS": "60"}):
+            self.assertEqual(self.client.get("/api/voice/satellites", headers=self.headers).json()["sync_ms"], 60)
+            got = self.client.post("/api/voice/satellites/sync", json={"nudge_ms": 20}, headers=self.headers)
+            self.assertEqual(got.json(), {"sync_ms": 80})
+            got = self.client.post("/api/voice/satellites/sync", json={"reset": True}, headers=self.headers)
+            self.assertEqual(got.json(), {"sync_ms": 60})
+            self.assertEqual(self.client.post("/api/voice/satellites/sync", json={"nudge_ms": 20}).status_code, 401)
 
     def test_mic_in_and_registry(self) -> None:
         with patch.dict("os.environ", {"JARVIS_API_TOKEN": "t", "ROOM_VOICE": "1"}):

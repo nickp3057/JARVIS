@@ -219,9 +219,15 @@ struct RootView: View {
         .task(id: scenePhase) {
             // An alarm going off (or snoozed) opens the alarm screen whenever the
             // app is open, push or no push; answered anywhere, it closes.
+            // The nightstand also keeps Core's next alarm and rings it itself
+            // if Core can't be reached by then (WakeRinging.checkBackup).
             guard scenePhase == .active, let client = try? JarvisAPIClient.make(from: settings) else { return }
             while !Task.isCancelled {
-                if let wake = try? await client.wakeSchedule() { wakeRinging.follow(wake.ringing) }
+                if let wake = try? await client.wakeSchedule() {
+                    wakeRinging.follow(wake.ringing)
+                    wakeRinging.coreAnswered(wake)
+                }
+                if Self.isPad, !Self.isMac, PadRole.current == .nightstand { wakeRinging.checkBackup() }
                 try? await Task.sleep(for: .seconds(wakeRinging.showing ? 5 : 15))
             }
         }

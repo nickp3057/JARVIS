@@ -148,6 +148,22 @@ class SpeakerIdTests(unittest.TestCase):
         with patch.object(speaker_id, "_load_extractor", return_value=None):
             self.assertFalse(speaker_id.identify(clip(True)).verified)  # model gone
 
+    def test_a_satellite_mic_gets_its_own_print(self) -> None:
+        self.enroll()  # the desk's print
+        self.assertFalse(speaker_id.identify(clip(False)).verified)
+        # Nick from bed sounds different to the model (the fake: a negative clip).
+        speaker_id.start_enrollment()
+        speaker_id.take_sample(clip(False), "bed")
+        speaker_id.take_sample(clip(False), "bed")
+        self.assertIn("this mic", speaker_id.take_sample(clip(False), "bed"))
+        self.assertTrue(speaker_id.identify(clip(False)).verified)  # the bed print matches
+        self.assertTrue(speaker_id.identify(clip(True)).verified)   # the desk print is kept
+        status = speaker_id.status_text()
+        self.assertIn("desk voiceprint", status)
+        self.assertIn("bed mic", status)
+        self.enroll()  # re-enrolling on the desk keeps the bed's print
+        self.assertTrue(speaker_id.identify(clip(False)).verified)
+
     def test_print_from_another_model_is_ignored(self) -> None:
         self.enroll()
         with patch.dict(os.environ, {"VOICE_ID_MODEL": "/models/other.onnx"}):

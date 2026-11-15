@@ -610,7 +610,8 @@ class RoomVoice:
         from speech import good_morning, goodnight, quick_answers, quick_commands
         voice_presence.update("thinking")
         if speaker_id.enrolling():  # "learn my voice": this sentence is a sample, not a command
-            said = speaker_id.take_sample(audio)
+            source = self._source  # the satellite that heard it gets its own print
+            said = speaker_id.take_sample(audio, getattr(source, "name", None) if source is not None else None)
             voice_presence.update("speaking", reply=said)
             self._speak(said)
             voice_presence.update("idle")

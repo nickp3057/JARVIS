@@ -288,9 +288,25 @@ async def voice_satellite(socket: WebSocket) -> None:
 
 @app.get("/api/voice/satellites")
 def voice_satellites(_: None = Depends(authorize)) -> dict[str, object]:
-    """Which iPads are lending the room voice their mic and speaker."""
+    """Which iPads are lending the room voice their mic and speaker, and the
+    desk-vs-iPad offset (``sync_ms``: > 0 the desk waits)."""
     from speech import satellites
-    return {"satellites": satellites.status()}
+    return {"satellites": satellites.status(), "sync_ms": satellites.sync_ms()}
+
+
+class SatelliteSyncRequest(BaseModel):
+    nudge_ms: float | None = Field(default=None, ge=-500, le=500)
+    reset: bool = False
+
+
+@app.post("/api/voice/satellites/sync")
+def voice_satellites_sync(request: SatelliteSyncRequest, _: None = Depends(authorize)) -> dict[str, object]:
+    """Desk earlier / later from the iPad: ``nudge_ms`` > 0 holds the desk
+    back more (the iPads trail), < 0 less; ``reset`` goes back to ``.env``."""
+    from speech import satellites
+    if request.reset:
+        return {"sync_ms": satellites.set_sync_ms(None)}
+    return {"sync_ms": satellites.set_sync_ms(satellites.sync_ms() + (request.nudge_ms or 0))}
 
 
 class RenameRequest(BaseModel):

@@ -888,6 +888,29 @@ struct JarvisAPIClient {
         _ = try await postJSON(Done.self, path: "api/schwab/finish", body: Body(redirectURL: redirect.absoluteString))
     }
 
+    // MARK: - Speaker sync (desk vs iPads)
+
+    private struct SyncReply: Decodable {
+        let syncMs: Int
+        enum CodingKeys: String, CodingKey { case syncMs = "sync_ms" }
+    }
+
+    /// How long the desk speaker waits for the iPads, in ms (< 0: the iPads wait).
+    func speakerSync() async throws -> Int {
+        try await getJSON(SyncReply.self, path: "api/voice/satellites").syncMs
+    }
+
+    /// Desk later (+) or earlier (-) by `nudge` ms; `reset` goes back to Core's default.
+    func nudgeSpeakerSync(_ nudge: Int, reset: Bool = false) async throws -> Int {
+        struct Body: Encodable {
+            let nudgeMs: Int
+            let reset: Bool
+            enum CodingKeys: String, CodingKey { case nudgeMs = "nudge_ms", reset }
+        }
+        return try await postJSON(SyncReply.self, path: "api/voice/satellites/sync",
+                                  body: Body(nudgeMs: nudge, reset: reset)).syncMs
+    }
+
     // MARK: - Wake-up schedule and shared theme
 
     func wakeSchedule() async throws -> WakeSchedule {

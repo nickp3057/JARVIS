@@ -20,6 +20,13 @@ phone app, arms ``start_enrollment``. The next ``VOICE_ID_SAMPLES`` (5) room
 commands are taken as samples instead of commands (``take_sample``), each
 answered with a count, with no wake word needed between them. Enrolling
 again replaces the old print.
+
+One print per mic (2026-11-15): the nightstand mini's mic scored Nick as a
+guest (0.44-0.53) against the print the desk mic made. Enrolling while a
+satellite is the exchange's mic (say the samples in bed, the mini answering)
+saves a print for that mic (``mics.<name>`` in the same file) and leaves the
+desk's alone; enrolling on the desk mic replaces the desk's and keeps the
+others. A command scores against every print and the best one counts.
 """
 from __future__ import annotations
 
@@ -136,26 +143,44 @@ def _load_print() -> dict[str, Any] | None:
     except (OSError, ValueError):
         log.exception("Voice ID: unreadable %s", _PRINT)
         return None
-    if data.get("model") != model_path().name or not data.get("centroid"):
+    if data.get("model") != model_path().name or not (data.get("centroid") or data.get("mics")):
         return None  # enrolled with another model: vectors aren't comparable
     return data
+
+
+def _prints(data: dict[str, Any]) -> list[tuple[str, np.ndarray]]:
+    """(mic, centroid) for every print: "desk" first, then each satellite's."""
+    out = []
+    if data.get("centroid"):
+        out.append(("desk", np.asarray(data["centroid"], dtype=np.float32)))
+    for mic, entry in sorted((data.get("mics") or {}).items()):
+        if isinstance(entry, dict) and entry.get("centroid"):
+            out.append((mic, np.asarray(entry["centroid"], dtype=np.float32)))
+    return out
 
 
 def enrolled() -> bool:
     return _load_print() is not None
 
 
-def _save_print(samples: list[np.ndarray]) -> None:
+def _save_print(samples: list[np.ndarray], mic: str | None = None) -> None:
+    """Save the desk's print (``mic`` None) or one satellite's, keeping the rest."""
     centroid = np.mean(samples, axis=0)
     centroid /= np.linalg.norm(centroid)
-    _PRINT.parent.mkdir(parents=True, exist_ok=True)
-    tmp = _PRINT.with_suffix(".tmp")
-    tmp.write_text(json.dumps({
-        "model": model_path().name,
+    entry = {
         "samples": len(samples),
         "centroid": [round(float(x), 6) for x in centroid],
         "enrolled_at": time.strftime("%Y-%m-%d %H:%M:%S"),
-    }))
+    }
+    data = _load_print() or {}
+    data["model"] = model_path().name
+    if mic is None:
+        data.update(entry)
+    else:
+        data.setdefault("mics", {})[mic] = entry
+    _PRINT.parent.mkdir(parents=True, exist_ok=True)
+    tmp = _PRINT.with_suffix(".tmp")
+    tmp.write_text(json.dumps(data))
     tmp.replace(_PRINT)
 
 
@@ -169,12 +194,19 @@ def reset() -> bool:
 
 # --- identify ------------------------------------------------------------------
 
-def score(audio: np.ndarray) -> float | None:
+def best_score(audio: np.ndarray) -> tuple[float, str] | None:
+    """The best match over every print, and which mic's print gave it."""
     data = _load_print()
     vector = embed(audio) if data else None
     if data is None or vector is None:
         return None
-    return float(vector @ np.asarray(data["centroid"], dtype=np.float32))
+    scored = [(float(vector @ centroid), mic) for mic, centroid in _prints(data)]
+    return max(scored) if scored else None
+
+
+def score(audio: np.ndarray) -> float | None:
+    best = best_score(audio)
+    return best[0] if best else None
 
 
 def identify(audio: np.ndarray) -> voice_trust.Speaker:
@@ -185,13 +217,15 @@ def identify(audio: np.ndarray) -> voice_trust.Speaker:
         return voice_trust.Speaker("nick", True, reason="voice ID off", room=True)
     if not enrolled():
         return voice_trust.Speaker("nick", True, reason="no voiceprint enrolled", room=True)
-    value = score(audio)
-    if value is None:
+    best = best_score(audio)
+    if best is None:
         reason = "clip too short" if np.asarray(audio).size < _SAMPLE_RATE * _MIN_SECONDS else "model unavailable"
         log.info("Voice ID: guest (%s)", reason)
         return voice_trust.guest(reason)
+    value, mic = best
     verdict = value >= _threshold()
-    log.info("Voice ID: %s (score %.2f, threshold %.2f)", "Nick" if verdict else "guest", value, _threshold())
+    log.info("Voice ID: %s (score %.2f on the %s print, threshold %.2f)", "Nick" if verdict else "guest",
+             value, mic, _threshold())
     if verdict:
         return voice_trust.Speaker("nick", True, score=value, reason="voiceprint match", room=True)
     return voice_trust.guest("voiceprint mismatch", score=value)
@@ -223,8 +257,10 @@ def enrolling() -> bool:
         return _enrolling is not None
 
 
-def take_sample(audio: np.ndarray) -> str:
-    """Use one room command as an enrolment sample; returns what to say."""
+def take_sample(audio: np.ndarray, mic: str | None = None) -> str:
+    """Use one room command as an enrolment sample; returns what to say.
+    ``mic``: the satellite that heard it (None = the desk). The first
+    sample's mic decides whose print this enrolment makes."""
     global _enrolling
     vector = embed(audio)
     with _lock:
@@ -236,21 +272,30 @@ def take_sample(audio: np.ndarray) -> str:
                 _enrolling = None
                 return "I can't learn voices yet, sir: the voice model isn't installed."
             return "That one was too short, sir. A full sentence, please."
+        if not state["samples"]:
+            state["mic"] = mic
         state["samples"].append(vector)
         left = state["needed"] - len(state["samples"])
         if left > 0:
             return f"Got it. {left} more."
-        samples, _enrolling = state["samples"], None
-    _save_print(samples)
-    log.info("Voice ID: enrolled from %d samples", len(samples))
+        samples, target, _enrolling = state["samples"], state.get("mic"), None
+    _save_print(samples, target)
+    log.info("Voice ID: enrolled the %s print from %d samples", target or "desk", len(samples))
+    if target:
+        return "Voiceprint saved for this mic, sir. I'll know it's you from here too."
     return "Voiceprint saved, sir. I'll know it's you."
 
 
 def status_text() -> str:
     parts = [f"Voice ID is {'on' if enabled() else 'off (VOICE_ID=0)'}."]
     data = _load_print()
-    parts.append(f"Nick's voiceprint: {data['samples']} samples, enrolled {data['enrolled_at']}."
-                 if data else "No voiceprint enrolled.")
+    if data:
+        if data.get("centroid"):
+            parts.append(f"Nick's desk voiceprint: {data['samples']} samples, enrolled {data['enrolled_at']}.")
+        for mic, entry in sorted((data.get("mics") or {}).items()):
+            parts.append(f"Voiceprint for the {mic} mic: {entry.get('samples')} samples, enrolled {entry.get('enrolled_at')}.")
+    else:
+        parts.append("No voiceprint enrolled.")
     if not available():
         parts.append(f"The speaker model isn't loaded (sherpa-onnx and {model_path().name} needed).")
     if enrolling():

@@ -47,6 +47,9 @@ python create_shortcut.py
 # JARVIS for Mac (native SwiftUI client: Chat, Home, Alerts, Donna; installs ~/Applications/JARVIS.app)
 mac/JarvisMac/build.sh --open
 
+# Deploy Core to the Surface from the Mac (push, fast-forward, restart, wait for /health)
+deploy/surface.sh             # one-time on the Surface first: sudo sh ~/jarvis/deploy/surface-setup.sh
+
 # JARVIS TV (Android launcher for the TCL TV; see JARVIS.md "JARVIS TV")
 TV=10.0.0.46:5555 tv/launcher/deploy.sh
 ```

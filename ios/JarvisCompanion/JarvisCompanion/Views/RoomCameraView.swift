@@ -4,7 +4,8 @@ import SwiftUI
 /// ~1.5 s (so the iPads keep their lenses on) and pulls each angle's newest
 /// frame about 8 times a second. Two angles: the door iPad (`door`) and the
 /// nightstand mini (`bed`), side by side in landscape, stacked in portrait;
-/// tap one to make it full screen, tap again (or Both) to go back.
+/// tap one (or pick it) to show it alone, centred; tap again (or Both) to go
+/// back. The controls sit under the pictures, never over them.
 /// Closing it stops the heartbeat, and the lenses go off within a few
 /// seconds. A Kill button (and "Jarvis, kill the camera") locks every lens
 /// off for five minutes. Barn Door engages with a slide (so it can't fire by
@@ -30,29 +31,47 @@ struct RoomCameraView: View {
         return live
     }
 
+    /// Close and the angle picker on top, the feeds in the middle, Barn Door
+    /// and Kill underneath: nothing sits on top of a picture any more.
     var body: some View {
-        ZStack {
-            Color.black.ignoresSafeArea()
-
-            if angles.isEmpty || status?.killed == true {
-                VStack(spacing: 14) {
-                    ProgressView().tint(.white)
-                    Text(waitingText).font(.subheadline).foregroundStyle(.white.opacity(0.7))
-                }
-            } else {
-                GeometryReader { geo in
-                    let wide = geo.size.width > geo.size.height
-                    let layout = wide ? AnyLayout(HStackLayout(spacing: 4)) : AnyLayout(VStackLayout(spacing: 4))
-                    layout {
-                        ForEach(angles, id: \.self) { angle in
-                            angleView(angle, labelled: (status?.lenses?.count ?? 1) > 1)
-                        }
-                    }
-                }
-                .ignoresSafeArea()
+        GeometryReader { screen in
+            let wide = screen.size.width > screen.size.height
+            VStack(spacing: 12) {
+                topBar
+                feeds(wide: wide)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .clipShape(.rect(cornerRadius: 12))
+                controls(wide: wide)
             }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 8)
+            .tint(.white)
+        }
+        .background(Color.black.ignoresSafeArea())
+        .task { await drive() }
+        // Closing the view tells Core at once, so the iPads' orbs go out
+        // within a frame instead of after the heartbeat lapses.
+        .onDisappear { let c = client; Task { _ = try? await c?.cameraLeave() } }
+    }
 
-            VStack {
+    @ViewBuilder
+    private func feeds(wide: Bool) -> some View {
+        if angles.isEmpty || status?.killed == true {
+            VStack(spacing: 14) {
+                ProgressView().tint(.white)
+                Text(waitingText).font(.subheadline).foregroundStyle(.white.opacity(0.7))
+            }
+        } else {
+            let layout = wide ? AnyLayout(HStackLayout(spacing: 4)) : AnyLayout(VStackLayout(spacing: 4))
+            layout {
+                ForEach(angles, id: \.self) { angle in
+                    angleView(angle, labelled: (status?.lenses?.count ?? 1) > 1)
+                }
+            }
+        }
+    }
+
+    private var topBar: some View {
                 HStack {
                     Button { dismiss() } label: {
                         Label("Close", systemImage: "xmark")
@@ -70,16 +89,6 @@ struct RoomCameraView: View {
                             .foregroundStyle(.black)
                     }
                 }
-                Spacer()
-                controls
-            }
-            .padding(20)
-            .tint(.white)
-        }
-        .task { await drive() }
-        // Closing the view tells Core at once, so the iPads' orbs go out
-        // within a frame instead of after the heartbeat lapses.
-        .onDisappear { let c = client; Task { _ = try? await c?.cameraLeave() } }
     }
 
     private static func title(_ lens: String) -> String {
@@ -108,13 +117,17 @@ struct RoomCameraView: View {
 
     /// One angle, fitted into its half (or the whole screen when it's solo).
     private func angleView(_ lens: String, labelled: Bool) -> some View {
-        ZStack(alignment: .bottomLeading) {
+        ZStack {
             Color.black
+            // Centred, so a single angle (Door or Bed picked) sits in the middle.
             if let image = frames[lens] {
                 Image(uiImage: image).resizable().aspectRatio(contentMode: .fit)
             } else {
-                ProgressView().tint(.white).frame(maxWidth: .infinity, maxHeight: .infinity)
+                ProgressView().tint(.white)
             }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .overlay(alignment: .bottomLeading) {
             if labelled {
                 Text(Self.title(lens))
                     .font(.caption.weight(.bold))
@@ -123,7 +136,6 @@ struct RoomCameraView: View {
                     .padding(10)
             }
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .contentShape(Rectangle())
         .onTapGesture {
             guard (status?.lenses?.count ?? 1) > 1 else { return }
@@ -139,8 +151,19 @@ struct RoomCameraView: View {
         return "Waking the camera…"
     }
 
-    private var controls: some View {
-        VStack(spacing: 14) {
+    /// Under the feeds: stacked in portrait, one row in landscape so the
+    /// pictures keep the height.
+    private func controls(wide: Bool) -> some View {
+        VStack(spacing: 8) {
+            let layout = wide ? AnyLayout(HStackLayout(spacing: 12)) : AnyLayout(VStackLayout(spacing: 12))
+            layout { barnDoorControl; killButton }
+            if let message {
+                Text(message).font(.footnote).foregroundStyle(.white.opacity(0.75))
+            }
+        }
+    }
+
+    @ViewBuilder private var barnDoorControl: some View {
             if barnDoorOn {
                 Button { barnDoorOn = false; Task { await setBarnDoor(false) } } label: {
                     Label("Stand down Barn Door", systemImage: "checkmark.shield")
@@ -155,7 +178,9 @@ struct RoomCameraView: View {
                     Task { await setBarnDoor(true) }
                 }
             }
+    }
 
+    private var killButton: some View {
             Button(role: .destructive) { Task { await kill() } } label: {
                 Label("Kill camera (5 min)", systemImage: "video.slash.fill")
                     .font(.headline)
@@ -163,10 +188,6 @@ struct RoomCameraView: View {
                     .background(.red.opacity(0.85), in: .rect(cornerRadius: 16))
                     .foregroundStyle(.white)
             }
-            if let message {
-                Text(message).font(.footnote).foregroundStyle(.white.opacity(0.75))
-            }
-        }
     }
 
     /// Heartbeat + frame pull (every live angle at once), until the view closes.

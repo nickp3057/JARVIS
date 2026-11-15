@@ -34,6 +34,10 @@ final class RoomCameraController: NSObject, ObservableObject {
     private var reportedBattery: (Float, Bool)?
     /// What Core's home stream last said about the lens; nil = not telling us.
     private var pushed: Bool?
+    /// Keeps the frames upright whichever way the iPad stands (the mini
+    /// sideways the other way round from the Air came out upside down).
+    private var rotation: AVCaptureDevice.RotationCoordinator?
+    private var rotationWatch: NSKeyValueObservation?
 
     /// Seconds until the next status check: slow only while the stream is
     /// reporting and the lens is off, so a stop is never left to a slow poll.
@@ -98,7 +102,30 @@ final class RoomCameraController: NSObject, ObservableObject {
         guard await ensureAuthorized() else { return }
         running = true
         watching = true
-        queue.async { [weak self] in self?.configureAndRun() }
+        if rotation == nil, let device = Self.frontCamera() {
+            let coordinator = AVCaptureDevice.RotationCoordinator(device: device, previewLayer: nil)
+            rotation = coordinator
+            rotationWatch = coordinator.observe(\.videoRotationAngleForHorizonLevelCapture, options: [.new]) { [weak self] c, _ in
+                let angle = c.videoRotationAngleForHorizonLevelCapture
+                self?.queue.async { self?.applyRotation(angle) }
+            }
+        }
+        let angle = rotation?.videoRotationAngleForHorizonLevelCapture
+        queue.async { [weak self] in
+            self?.configureAndRun()
+            if let angle { self?.applyRotation(angle) }
+        }
+    }
+
+    private nonisolated static func frontCamera() -> AVCaptureDevice? {
+        AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .front)
+    }
+
+    /// On `queue`: turn the frames to match how the iPad is standing.
+    private nonisolated func applyRotation(_ angle: CGFloat) {
+        guard let connection = output.connection(with: .video),
+              connection.isVideoRotationAngleSupported(angle) else { return }
+        connection.videoRotationAngle = angle
     }
 
     private func stop() {
@@ -126,7 +153,7 @@ final class RoomCameraController: NSObject, ObservableObject {
         if session.inputs.isEmpty {
             session.beginConfiguration()
             session.sessionPreset = .vga640x480  // small: it's a sentry view, not a recording
-            if let device = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .front),
+            if let device = Self.frontCamera(),
                let input = try? AVCaptureDeviceInput(device: device), session.canAddInput(input) {
                 session.addInput(input)
             }

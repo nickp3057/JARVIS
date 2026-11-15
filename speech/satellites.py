@@ -25,7 +25,10 @@ and every satellite at once (``play_everywhere``), from one synthesis, so
 the room hears one voice. ``SATELLITE_SYNC_MS`` lines them up: positive
 holds the desk back that long, negative holds the iPads back (default 60:
 at 0 the iPads trailed the desk just enough to hear, 2026-11-15; the desk's
-aplay runs a 100 ms buffer, ``DESK_BUFFER_MS``). The iPad plays at
+aplay runs a 100 ms buffer, ``DESK_BUFFER_MS``). Nick tunes it by ear from
+the iPad (Room settings › Mic and speaker › Desk earlier / later,
+``POST /api/voice/satellites/sync``): saved in ``memory/satellite_sync.json``,
+which wins over ``.env`` and applies from the next clip, no restart. The iPad plays at
 the same loudness as the desk (``output_gain``: the desk's 0-10 level on
 ALSA's mapped curve, which is 60 dB wide, so amplitude = (level/10)^3).
 
@@ -47,6 +50,7 @@ import threading
 import time
 import wave
 from collections.abc import Iterable
+from pathlib import Path
 
 import numpy as np
 
@@ -306,12 +310,42 @@ def ring_all(name: str = "alarm", level: int | None = None) -> None:
 
 # --- the whole room at once ----------------------------------------------------
 
+_SYNC_FILE = Path(__file__).resolve().parents[1] / "memory" / "satellite_sync.json"
+_SYNC_LIMIT_MS = 1000
+
+
+def sync_ms() -> int:
+    """Desk-vs-iPad offset in ms: > 0 the desk waits, < 0 the iPads wait.
+    The iPad's saved nudge if there is one, else ``SATELLITE_SYNC_MS`` (60)."""
+    try:
+        saved = json.loads(_SYNC_FILE.read_text()).get("sync_ms")
+        if isinstance(saved, (int, float)):
+            return int(max(-_SYNC_LIMIT_MS, min(_SYNC_LIMIT_MS, saved)))
+    except (OSError, ValueError, AttributeError):
+        pass
+    try:
+        return int(max(-_SYNC_LIMIT_MS, min(_SYNC_LIMIT_MS, float(os.getenv("SATELLITE_SYNC_MS", "60")))))
+    except ValueError:
+        return 0
+
+
+def set_sync_ms(value: float | None) -> int:
+    """Save the offset (None forgets it: back to ``.env``). Returns the live value."""
+    if value is None:
+        _SYNC_FILE.unlink(missing_ok=True)
+    else:
+        clamped = int(max(-_SYNC_LIMIT_MS, min(_SYNC_LIMIT_MS, round(value))))
+        _SYNC_FILE.parent.mkdir(parents=True, exist_ok=True)
+        tmp = _SYNC_FILE.with_suffix(".json.tmp")
+        tmp.write_text(json.dumps({"sync_ms": clamped}))
+        tmp.replace(_SYNC_FILE)
+    log.info("Speaker sync: desk %+d ms", sync_ms())
+    return sync_ms()
+
+
 def _sync_seconds() -> float:
     """Desk-vs-iPad offset: > 0 the desk waits, < 0 the iPads wait (seconds)."""
-    try:
-        return max(-1.0, min(1.0, float(os.getenv("SATELLITE_SYNC_MS", "60")) / 1000))
-    except ValueError:
-        return 0.0
+    return sync_ms() / 1000
 
 
 def _desk_buffer_us() -> int:

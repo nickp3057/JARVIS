@@ -908,7 +908,9 @@ def _tool_voice_id(args: dict[str, Any]) -> str:
         count = speaker_id.start_enrollment()
         return (f"Enrolment armed for 10 minutes. Nick says \"Hey JARVIS\" then any sentence, then {count - 1} "
                 "more sentences (no wake word needed between them), in his normal voice from where he "
-                "usually talks. Each one is counted out loud.")
+                "usually talks. Each one is counted out loud. Each mic keeps its own print: samples the "
+                "nightstand iPad answers (said from bed) make or replace the bed mic's print and leave the "
+                "desk's alone.")
     if action == "cancel":
         speaker_id.cancel_enrollment()
         return "Enrolment cancelled. The old voiceprint, if any, is unchanged."
@@ -2440,8 +2442,9 @@ _CUSTOM_TOOLS: list[dict[str, Any]] = [
         "description": (
             "Nick's voiceprint for the room mic (who may use locked tools like memory, settings and "
             "Barn Door by voice). status: is voice ID on and enrolled. enroll: learn Nick's voice from "
-            "his next few room-mic sentences (\"learn my voice\"). cancel: stop an enrolment. reset: "
-            "delete the voiceprint."
+            "his next few room-mic sentences (\"learn my voice\"); the mic that hears them (the desk, or an "
+            "iPad like the nightstand's) gets its own print. cancel: stop an enrolment. reset: "
+            "delete every voiceprint."
         ),
         "input_schema": {
             "type": "object",

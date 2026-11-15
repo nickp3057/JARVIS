@@ -202,6 +202,7 @@ struct RoomView: View {
         .sheet(isPresented: $showingRemote) { TVRemoteView() }
         .sheet(isPresented: $showingSettings) {
             RoomSettingsView(model: model, wakeLightChoices: wakeLightChoices)
+                .environmentObject(settings)
         }
         .sheet(isPresented: $showingWake) {
             NavigationStack { WakeScheduleView() }
@@ -1218,9 +1219,23 @@ private struct RoomSettingsView: View {
     @AppStorage(SatelliteVoice.settingKey) private var satelliteSetting = ""
     @AppStorage(SatelliteVoice.trimKey) private var satelliteTrim = 1.0
     @ObservedObject private var satellite = SatelliteVoice.shared
+    @EnvironmentObject private var settings: AppSettings
+    /// Core's desk-vs-iPad offset (ms, > 0 the desk waits); nil until read.
+    @State private var speakerSync: Int?
+    @State private var syncBusy = false
 
     private var favorites: [String] {
         favoriteScenes.split(separator: ",").map(String.init)
+    }
+
+    private func nudgeSync(_ ms: Int, reset: Bool = false) {
+        syncBusy = true
+        Task {
+            defer { syncBusy = false }
+            if let value = try? await JarvisAPIClient.make(from: settings).nudgeSpeakerSync(ms, reset: reset) {
+                speakerSync = value
+            }
+        }
     }
 
     var body: some View {
@@ -1249,11 +1264,25 @@ private struct RoomSettingsView: View {
                                 Slider(value: $satelliteTrim, in: 0.5...2, step: 0.05)
                                     .frame(maxWidth: 260)
                             }
+                            LabeledContent("Desk timing") {
+                                HStack(spacing: 14) {
+                                    Button("Earlier") { nudgeSync(-20) }
+                                    Text(speakerSync.map { $0 == 0 ? "together" : "waits \($0) ms" } ?? "…")
+                                        .monospacedDigit()
+                                        .foregroundStyle(.secondary)
+                                        .frame(minWidth: 110)
+                                    Button("Later") { nudgeSync(20) }
+                                }
+                                .buttonStyle(.bordered)
+                                .disabled(syncBusy || speakerSync == nil)
+                            }
+                            .contextMenu { Button("Reset to default") { nudgeSync(0, reset: true) } }
+                            .task { speakerSync = try? await JarvisAPIClient.make(from: settings).speakerSync() }
                         }
                     } header: {
                         Text("Mic and speaker")
                     } footer: {
-                        Text("\(satellite.status.text). This iPad hears \u{201C}Hey JARVIS\u{201D} for the room, and plays everything JARVIS says together with the desk speaker, at the same loudness. Keep this iPad's volume up and use Match the desk if it sounds louder or quieter than the desk. Works while the app is open.")
+                        Text("\(satellite.status.text). This iPad hears \u{201C}Hey JARVIS\u{201D} for the room, and plays everything JARVIS says together with the desk speaker, at the same loudness. Keep this iPad's volume up and use Match the desk if it sounds louder or quieter than the desk. If this iPad sounds behind the desk, press Desk timing › Later (20 ms a press); if the desk sounds behind, Earlier. Applies to the next thing JARVIS says, on every iPad; hold for Reset. Works while the app is open.")
                     }
                 }
                 Section("Screen") {
