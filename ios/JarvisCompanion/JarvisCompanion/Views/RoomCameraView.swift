@@ -75,7 +75,8 @@ struct RoomCameraView: View {
                 HStack {
                     Button { dismiss() } label: {
                         Label("Close", systemImage: "xmark")
-                            .font(.headline).padding(.horizontal, 16).padding(.vertical, 10)
+                            .labelStyle(.iconOnly)
+                            .font(.headline).padding(.horizontal, 14).padding(.vertical, 10)
                             .background(.ultraThinMaterial, in: .capsule)
                     }
                     Spacer()
@@ -106,7 +107,9 @@ struct RoomCameraView: View {
                 Button { withAnimation(.easeInOut(duration: 0.25)) { solo = lens } } label: {
                     Text(lens.map(Self.title) ?? "Both")
                         .font(.subheadline.weight(.semibold))
-                        .padding(.horizontal, 12).padding(.vertical, 8)
+                        .lineLimit(1)
+                        .fixedSize()  // "Both" was wrapping to "Bot / h" beside Close and LIVE
+                        .padding(.horizontal, 10).padding(.vertical, 8)
                         .background(solo == lens ? Color.white.opacity(0.25) : .clear, in: .capsule)
                 }
             }
