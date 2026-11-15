@@ -50,14 +50,16 @@ every deploy, so edit the repo copy, not the TV's.
   logcat, sends the rest to Core `POST /chat`, shows the reply as a banner
   (read aloud only if turned on in Settings), and backs out of any Google app
   the Assistant opened. Other speech that names a Plex title opens it in Plex.
-- **Light sync** (`PlaybackReport`, 9.7): started by `RemoteBridgeService`,
-  it watches Plex's media session (same MediaListener grant as Music:
-  active-sessions listener + `MediaController.Callback`) and posts
-  `POST /api/tv/playback` {package, state, position_ms advanced to the send
-  time, speed, title, rating_key if the session's media id is numeric} on
-  every change, every 1 s while playing and every 5 s while paused; "stopped"
-  once when Plex goes. Core's light sync uses it as its clock. A 401/403 (token
-  without `playback:write`) backs off 5 min, Core down 30 s; no spam.
+- **Light sync** (`PlaybackReport`, 9.9): the Core player uses a mapped TV
+  monotonic clock. It watches Plex's MediaSession, advances position to
+  elapsedRealtime and sends that timestamp, a process UUID, report sequence
+  and previous four-stamp exchange in `POST /api/tv/playback` (scope
+  `playback:write`). Three `GET /api/tv/clock` probes warm the pool and select
+  the initial lowest RTT. Successful responses are drained and closed without
+  disconnecting so HTTP sockets can be reused. Every change, 1s playing, 5s
+  paused/buffering. Core filters queueing jitter and slews small position
+  errors, never falls back to Plex timing while syncing. It releases the
+  lights on stale TV heartbeat. Failures retry after 1s; 401/403 back off 5min.
 - **Music** (`Music`, `MediaListener`): Spotify's media session (read and
   controlled via an enabled NotificationListener; no Spotify API keys).
 - **Wake-up** (`Wake`, `WakeActivity`): Core keeps a weekly schedule (its

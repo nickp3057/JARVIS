@@ -1670,10 +1670,12 @@ class LightSyncRequest(BaseModel):
     intensity: str | None = Field(default=None, pattern="^(subtle|medium|intense)$")
     auto: bool | None = None
     nudge_ms: int | None = Field(default=None, ge=-2000, le=2000)
-    scope: str | None = Field(default=None, pattern="^(film|global)$")
+    scope: str | None = Field(default=None, pattern="^(film|global|format)$")
     reset_offset: bool | None = None
     calibrate: bool | None = None
     lamp_nudge_ms: int | None = Field(default=None, ge=-1500, le=1500)
+    light_ip: str | None = Field(default=None, max_length=64)
+    light_nudge_ms: int | None = Field(default=None, ge=-2000, le=2000)
 
 
 @app.post("/api/lightsync")
@@ -1686,9 +1688,14 @@ def lightsync_set(request: LightSyncRequest, _: None = Depends(authorize)) -> di
     from brain import light_sync
     sync = light_sync.controller
     if all(v is None for v in (request.action, request.intensity, request.auto, request.nudge_ms,
-                               request.reset_offset, request.calibrate, request.lamp_nudge_ms)):
+                               request.reset_offset, request.calibrate, request.lamp_nudge_ms, request.light_nudge_ms)):
         raise HTTPException(status_code=422, detail="Send an action, intensity, auto, nudge_ms, reset_offset or calibrate.")
     messages = []
+    if request.light_nudge_ms is not None:
+        try:
+            sync.nudge_light(request.light_ip or "", request.light_nudge_ms)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
     if request.intensity is not None:
         sync.set_intensity(request.intensity)
     if request.auto is not None:
@@ -1738,6 +1745,20 @@ def lightsync_build(request: LightSyncBuildRequest, _: None = Depends(authorize)
     return {**_lightsync_state(), "started": started, "message": message}
 
 
+class TVClockExchange(BaseModel):
+    tv_send_ms: float = Field(ge=0, allow_inf_nan=False)
+    core_receive_ms: float = Field(ge=0, allow_inf_nan=False)
+    core_send_ms: float = Field(ge=0, allow_inf_nan=False)
+    tv_receive_ms: float = Field(ge=0, allow_inf_nan=False)
+
+
+@app.get("/api/tv/clock")
+def tv_clock(_: None = Depends(require_scope("playback:write"))) -> dict[str, float]:
+    """Monotonic clock exchange, never wall time. TV echoes all four stamps."""
+    received = time.monotonic() * 1000
+    return {"core_receive_ms": received, "core_send_ms": time.monotonic() * 1000}
+
+
 class TVPlaybackReport(BaseModel):
     package: str = Field(default="", max_length=120)
     state: str = Field(pattern="^(playing|paused|buffering|stopped)$")
@@ -1745,20 +1766,27 @@ class TVPlaybackReport(BaseModel):
     speed: float = Field(default=1.0, ge=0, le=4)
     title: str = Field(default="", max_length=300)
     rating_key: str | None = Field(default=None, max_length=40)
+    elapsed_ms: float | None = Field(default=None, ge=0, allow_inf_nan=False)
+    exchange: TVClockExchange | None = None
+    stream_id: str | None = Field(default=None, max_length=40)
+    report_id: int | None = Field(default=None, ge=0)
 
 
 @app.post("/api/tv/playback")
 def tv_playback(report: TVPlaybackReport, _: None = Depends(require_scope("playback:write"))) -> dict[str, object]:
     """The room TV's Plex position (JARVIS TV, every second while playing and on
-    every change), advanced to when it was sent; Core stamps the arrival.
+    every change), advanced to its elapsedRealtime timestamp and clock-mapped. Synchronized reports carry the previous four-stamp exchange.
     Only Plex counts: another app's media session is ignored."""
+    received = time.monotonic() * 1000
     if report.package and report.package != "com.plexapp.android":
         return {"ok": True, "used": False}
     from brain import light_sync
     key = report.rating_key if report.rating_key and report.rating_key.isdigit() else ""
     light_sync.controller.tv_report(state=report.state, position_ms=report.position_ms, speed=report.speed,
-                                    title=report.title, rating_key=key)
-    return {"ok": True, "used": True}
+                                    title=report.title, rating_key=key, elapsed_ms=report.elapsed_ms,
+                                    exchange=report.exchange.model_dump() if report.exchange else None,
+                                    stream_id=report.stream_id, report_id=report.report_id)
+    return {"ok": True, "used": True, "core_receive_ms": received, "core_send_ms": time.monotonic() * 1000}
 
 
 # --- Quick actions ----------------------------------------------------------

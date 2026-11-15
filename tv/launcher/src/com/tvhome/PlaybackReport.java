@@ -14,6 +14,8 @@ import android.util.Log;
 import org.json.JSONObject;
 
 import java.io.OutputStream;
+import java.io.InputStream;
+import java.io.ByteArrayOutputStream;
 import java.net.HttpURLConnection;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
@@ -23,16 +25,16 @@ import java.util.List;
  * token scope playback:write), on every playback change and every second
  * while playing (every 5 s while paused). Plex's media session is read
  * through MediaListener's grant, like Music. The position is advanced to the
- * moment of sending; Core stamps the arrival.
+ * moment of sending, timestamped with elapsedRealtime and a four-stamp clock exchange.
  *
  * A 403 (the token hasn't been granted playback:write yet) or a 401 backs off
- * quietly for 5 minutes; Core being down, 30 s. Never spams.
+ * quietly for 5 minutes; transient failures retry after 1 s. Never spams.
  */
 final class PlaybackReport {
     private static final String TAG = "TvHomePlayback";
     private static final String PLEX = "com.plexapp.android";
     private static final long PLAYING_MS = 1000, PAUSED_MS = 5000;
-    private static final long NOT_ALLOWED_BACKOFF_MS = 5 * 60 * 1000, DOWN_BACKOFF_MS = 30_000;
+    private static final long NOT_ALLOWED_BACKOFF_MS = 5 * 60 * 1000, DOWN_BACKOFF_MS = 1000;
 
     private static PlaybackReport instance;
 
@@ -44,6 +46,10 @@ final class PlaybackReport {
     private MediaController plex;
     private long blockedUntil;
     private String lastSent = "";
+    private JSONObject exchange;
+    private String clockBase = "";
+    private final String streamId = java.util.UUID.randomUUID().toString();
+    private long reportId;
 
     private PlaybackReport(Context c) {
         context = c.getApplicationContext();
@@ -126,6 +132,32 @@ final class PlaybackReport {
     private void send(PlaybackState state) {
         if (!Jarvis.provisioned(context)) return;
         String name = stateName(state);
+        if (!Jarvis.base(context).equals(clockBase)) exchange = null;
+        if (exchange == null && SystemClock.elapsedRealtime() >= blockedUntil) {
+            try {
+                // Warm the HTTP pool and choose the lowest RTT on Core before playback starts.
+                double bestRtt = Double.MAX_VALUE;
+                for (int i = 0; i < 3; i++) {
+                    long sent = SystemClock.elapsedRealtime();
+                    HttpURLConnection ping = Jarvis.open(Jarvis.base(context), "/api/tv/clock", Jarvis.token(context), 1500);
+                    int code = ping.getResponseCode();
+                    if (code == 401 || code == 403) {
+                        ping.disconnect();
+                        blockedUntil = SystemClock.elapsedRealtime() + NOT_ALLOWED_BACKOFF_MS;
+                        return;
+                    }
+                    JSONObject sample = readJson(ping);
+                    long received = SystemClock.elapsedRealtime();
+                    sample.put("tv_send_ms", sent).put("tv_receive_ms", received);
+                    double rtt = received - sent - (sample.getDouble("core_send_ms") - sample.getDouble("core_receive_ms"));
+                    if (rtt < bestRtt) { exchange = sample; bestRtt = rtt; }
+                }
+                clockBase = Jarvis.base(context);
+            } catch (Exception e) {
+                blockedUntil = SystemClock.elapsedRealtime() + DOWN_BACKOFF_MS;
+                return;
+            }
+        }
         long now = SystemClock.elapsedRealtime();
         if (now < blockedUntil) return;
         if ("stopped".equals(name) && "stopped".equals(lastSent)) return;  // once is enough
@@ -150,14 +182,16 @@ final class PlaybackReport {
             JSONObject body = new JSONObject()
                     .put("package", PLEX).put("state", name)
                     .put("position_ms", Math.max(0, position)).put("speed", Math.max(0, speed))
-                    .put("title", title);
+                    .put("title", title).put("elapsed_ms", now)
+                    .put("stream_id", streamId).put("report_id", ++reportId);
+            if (exchange != null) body.put("exchange", exchange);
             if (!key.isEmpty()) body.put("rating_key", key);
             HttpURLConnection conn = Jarvis.open(Jarvis.base(context), "/api/tv/playback", Jarvis.token(context), 2000);
             conn.setConnectTimeout(1500);
             conn.setRequestMethod("POST");
             conn.setDoOutput(true);
             conn.setRequestProperty("Content-Type", "application/json");
-            try {
+            {
                 try (OutputStream out = conn.getOutputStream()) {
                     out.write(body.toString().getBytes(StandardCharsets.UTF_8));
                 }
@@ -166,13 +200,26 @@ final class PlaybackReport {
                     Log.i(TAG, "Core won't take playback yet (HTTP " + code + "); trying again in 5 min");
                     blockedUntil = now + NOT_ALLOWED_BACKOFF_MS;
                 } else if (code == 200) {
+                    JSONObject reply = readJson(conn);
+                    exchange = reply.put("tv_send_ms", now).put("tv_receive_ms", SystemClock.elapsedRealtime());
                     lastSent = name;
+                } else {
+                    blockedUntil = now + DOWN_BACKOFF_MS;
                 }
-            } finally {
-                conn.disconnect();
+                if (code != 200) conn.disconnect();
             }
         } catch (Exception e) {
+            exchange = null;
             blockedUntil = now + DOWN_BACKOFF_MS;  // Core down or moved: Jarvis.refresh finds it again
+        }
+    }
+
+    private static JSONObject readJson(HttpURLConnection conn) throws Exception {
+        try (InputStream in = conn.getInputStream(); ByteArrayOutputStream bytes = new ByteArrayOutputStream()) {
+            byte[] buffer = new byte[1024];
+            int n;
+            while ((n = in.read(buffer)) != -1) bytes.write(buffer, 0, n);
+            return new JSONObject(bytes.toString("UTF-8"));
         }
     }
 

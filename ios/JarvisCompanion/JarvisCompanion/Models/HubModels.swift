@@ -915,7 +915,7 @@ struct LightSyncState: Decodable, Equatable {
         enum CodingKeys: String, CodingKey { case ratingKey = "rating_key", title }
     }
 
-    /// Timing, ms, positive = lights earlier. Effective = global + film.
+    /// Timing, ms, positive = lights earlier. Effective = setup + film override.
     struct Offset: Decodable, Equatable {
         let globalMs: Int
         let filmMs: Int
@@ -924,9 +924,26 @@ struct LightSyncState: Decodable, Equatable {
         let stepMs: Int
         /// The lamp's head start over the strips (it fades by itself), ms.
         let lampLeadMs: Int?
+        let formatMs: Int?
+        let formatKey: String?
         enum CodingKeys: String, CodingKey {
             case globalMs = "global_ms", filmMs = "film_ms", effectiveMs = "effective_ms"
             case filmTitle = "film_title", stepMs = "step_ms", lampLeadMs = "lamp_lead_ms"
+            case formatMs = "format_ms", formatKey = "format_key"
+        }
+    }
+
+    struct Diagnostics: Decodable, Equatable {
+        let source: String
+        let synchronized: Bool
+        let driftMs: Double?
+        let jitterP95Ms: Double
+        let rttMs: Double?
+        let droppedReports: Int
+        enum CodingKeys: String, CodingKey {
+            case source, synchronized
+            case driftMs = "drift_ms", jitterP95Ms = "jitter_p95_ms"
+            case rttMs = "rtt_ms", droppedReports = "dropped_reports"
         }
     }
 
@@ -948,12 +965,13 @@ struct LightSyncState: Decodable, Equatable {
     let queue: [Queued]?
     let offset: Offset?
     let calibrating: Calibration?
+    let diagnostics: Diagnostics?
     let reason: String
     /// JARVIS's answer to a start or stop (POST only).
     let message: String?
 
     enum CodingKeys: String, CodingKey {
-        case enabled, auto, intensity, running, paused, film, building, queue, offset, calibrating, reason, message
+        case enabled, auto, intensity, running, paused, film, building, queue, offset, calibrating, diagnostics, reason, message
         case hasTrack = "has_track"
     }
 

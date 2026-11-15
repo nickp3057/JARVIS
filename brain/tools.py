@@ -885,7 +885,8 @@ def _tool_light_sync(args: dict[str, Any]) -> str:
             parts.append(state["reason"])
         offset = state.get("offset") or {}
         if offset:
-            timing = f"Timing: global {offset.get('global_ms', 0)} ms"
+            timing = (f"Timing: setup {offset.get('format_ms', 0)} ms ({offset['format_key']})"
+                      if offset.get("format_key") else f"Timing: global {offset.get('global_ms', 0)} ms")
             if offset.get("film_title"):
                 timing += f", {offset['film_title']} {offset.get('film_ms', 0)} ms"
             parts.append(timing + " (positive = lights earlier).")
@@ -2418,8 +2419,8 @@ _CUSTOM_TOOLS: list[dict[str, Any]] = [
             "calibration); status (incl. builds in progress and the queue); list: which films have one; "
             "cancel_build: a queued/building film by title, or every build without one. "
             "nudge: move the timing. 'Lights are late' / 'nudge forward' / 'ahead' = direction earlier; "
-            "'lights are early' = later; ms is the amount (default 50). scope film (the film syncing, the "
-            "default) or global (every film); while calibrating it's global. reset_timing: back to 0. "
+            "'lights are early' = later; ms is the amount (default 50). scope film (the film syncing, an "
+            "override) or format (the current display pipeline, the default), or global (legacy default); calibration saves by format. reset_timing: back to 0. "
             "calibrate: play the flash test clip on the TV and sync it so Nick can nudge by eye; done: "
             "finish calibrating. intensity (subtle / medium / intense) can go with any action."
         ),
@@ -2431,7 +2432,7 @@ _CUSTOM_TOOLS: list[dict[str, Any]] = [
                 "intensity": {"type": "string", "enum": ["subtle", "medium", "intense"]},
                 "direction": {"type": "string", "enum": ["earlier", "later"]},
                 "ms": {"type": "number", "description": "Nudge amount in ms (signed if no direction: + = earlier)."},
-                "scope": {"type": "string", "enum": ["film", "global"]},
+                "scope": {"type": "string", "enum": ["film", "global", "format"]},
                 "title": {"type": "string", "description": "cancel_build: which film."},
             },
         },

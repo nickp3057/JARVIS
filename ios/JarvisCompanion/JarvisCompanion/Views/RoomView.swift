@@ -975,12 +975,12 @@ private struct MovieModeView: View {
         .task {
             while !Task.isCancelled {
                 await model.refreshLightSync()
-                try? await Task.sleep(for: .seconds(model.homeStreamLive ? 30 : 5))
+                try? await Task.sleep(for: .seconds(model.lightSync.value?.calibrating != nil ? 1 : (model.homeStreamLive ? 30 : 5)))
             }
         }
     }
 
-    /// Calibrating with the flash test clip: nudge the global timing by eye
+    /// Calibrating with the flash test clip: nudge the current video setup by eye
     /// (1, 5 or 25 ms a press), see where it stands, Done. Still and dim,
     /// like the rest of the movie screen.
     private func calibrationPanel(_ state: LightSyncState, _ calibration: LightSyncState.Calibration) -> some View {
@@ -1000,16 +1000,29 @@ private struct MovieModeView: View {
                 .frame(width: 200)
                 .accessibilityLabel("Nudge size")
                 Spacer()
-                Text("Global \(LightSyncState.milliseconds(state.offset?.globalMs ?? 0))")
+                Text("Setup \(LightSyncState.milliseconds(state.offset?.formatMs ?? state.offset?.globalMs ?? 0))")
                     .font(.headline.monospacedDigit())
                     .foregroundStyle(.white.opacity(0.75))
                     .contentTransition(.numericText())
-                    .accessibilityLabel("Global timing \(state.offset?.globalMs ?? 0) milliseconds")
+                    .accessibilityLabel("Setup timing \(state.offset?.formatMs ?? state.offset?.globalMs ?? 0) milliseconds")
             }
             HStack(spacing: 14) {
                 wide("Lights earlier", symbol: "backward.frame") { nudge(step) }
                 wide("Lights later", symbol: "forward.frame") { nudge(-step) }
                 wide("Done", symbol: "checkmark") { model.setLightSync(calibrate: false) }
+            }
+            if let diagnostics = state.diagnostics {
+                HStack(spacing: 14) {
+                    Text(diagnostics.synchronized ? "TV clock connected" : "Waiting for TV clock")
+                    Text("Drift \(Int((diagnostics.driftMs ?? 0).rounded())) ms")
+                    Text("Jitter \(Int(diagnostics.jitterP95Ms.rounded())) ms")
+                    Text("Dropped \(diagnostics.droppedReports)")
+                }
+                .font(.caption.monospacedDigit())
+                .foregroundStyle(.white.opacity(0.65))
+            }
+            if let format = state.offset?.formatKey {
+                Text(format).font(.caption).foregroundStyle(.white.opacity(0.5))
             }
             // The lamp fades by itself and lags the strips: its own head start.
             HStack(spacing: 14) {
@@ -1052,7 +1065,7 @@ private struct MovieModeView: View {
                 }
                 if running, state.calibrating == nil, let offset = state.offset {
                     let step = offset.stepMs
-                    Section("Timing · \(offset.filmTitle ?? "this film") \(LightSyncState.milliseconds(offset.filmMs))") {
+                    Section("Timing · \(offset.formatKey ?? offset.filmTitle ?? "this setup") \(LightSyncState.milliseconds(offset.formatMs ?? offset.filmMs))") {
                         Button { model.setLightSync(nudgeMs: step) } label: {
                             Label("Lights earlier (\(step) ms)", systemImage: "backward.frame")
                         }

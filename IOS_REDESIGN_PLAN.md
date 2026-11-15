@@ -5,6 +5,14 @@ off, JARVIS sounds scattered because a whole tool turn lands in one bubble,
 replies didn't stream, and media adds sometimes fail. He leans toward a
 hub-first app with chat as one tab.
 
+## Light sync calibration (6.59 / build 301, 2026-11-15)
+
+The movie calibration panel shows the current display profile, setup offset,
+clock connection, drift, jitter and dropped reports, refreshed each second.
+1/5/25ms controls save the current format on Core and apply live. The timing
+menu follows the setup profile; per-film overrides remain an explicit API/tool
+option. Physical screen/light timing is a device acceptance check.
+
 ## Donna mode (6.2 / build 244, 2026-11-10)
 
 Hold the JARVIS logo on Chat (title logo or the empty-chat orb, 0.8 s) to

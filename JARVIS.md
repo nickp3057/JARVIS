@@ -57,7 +57,7 @@ Pearson-Stark-Jarvis/
 │   ├── memory_proposals.py  Reviewable staging for low-confidence inferred facts
 │   ├── habits.py            Usage-pattern log + derived "what you've noticed" digest
 │   ├── knowledge_vault.py   Authorized Obsidian search, profile mirror, capture + journal
-│   ├── light_tracks.py      Light sync tracks: one colour per 0.1 s of a film (ffmpeg over Plex HTTP), built on request through a FIFO queue (one ffmpeg at a time, resumes after a restart), per-film timing offsets; memory/light_tracks/
+│   ├── light_tracks.py      Light sync tracks: one colour per 0.1 s of a film (ffmpeg over Plex HTTP), built on request through a FIFO queue (one ffmpeg at a time, resumes after a restart), Part provenance, 30fps version tracks; memory/light_tracks/
 │   ├── light_sync.py        Light sync player: Govee LAN razer stream to the strips, lamp colorwc, flash limiter, intensity, TV/Plex position clock, movie-mode arming, timing nudges (global + per film, live), calibration with the flash test clip
 │   ├── local_model.py       Optional OpenAI-compatible conversational fallback
 │   ├── maintenance.py       Recurring chores: countdowns + completion log (SQLite)
@@ -2957,12 +2957,29 @@ prototype in `~/Developer/projects/light-sync` (2026-11-09).
   the sync ran outside movie mode and the ring had been on, it is turned back
   on with no colour given (never white). Core shutting down releases the
   strips.
-- **Position**, best first: JARVIS TV's report (`POST /api/tv/playback`,
-  scope `playback:write`: Plex's media session, every second while playing,
-  every 5 s paused, on every change; fresh for 3 s, 15 s when paused), else
-  Plex `/status/sessions` for `LIGHT_SYNC_PLEX_PLAYER` (else the only movie
-  playing), polled ~1 s while armed; Plex's coarse viewOffset only re-anchors
-  the clock when it disagrees by more than 2 s.
+- **Position (overhaul, 2026-11-15, TV 9.9)**: option B from the overhaul
+  brief. TV sends elapsedRealtime, a process UUID/report sequence and the
+  previous four clock timestamps. `GET /api/tv/clock` warms the HTTP pool;
+  `POST /api/tv/playback` returns Core monotonic receive/send timestamps.
+  Both require `playback:write`. Responses are consumed to reuse Android's
+  HTTP connection pool. Core maps time with the lowest-RTT sample in a rolling
+  minute, then slews small phase errors by at most 5 ms/report. Seeks >700 ms,
+  state/speed changes and new films re-anchor. Players start from TV only;
+  a stale TV releases the stream, never lets Plex steer it. Plex positions
+  remain available in status before TV connects, but supply only metadata
+  to a running player. Transient TV failures retry after 1 s (401/403: 5 min).
+- **Part identity and precision**: the session retains the selected Media/Part
+  ids and Part URL. New tracks record those plus container `start_time_s` and
+  `fps` and decode at 30fps; legacy 10fps tracks remain readable. When a Part
+  differs (or a legacy track has no provenance), the actual playing Part gets
+  its own queued build (`<ratingKey>--<Part hash>.npy`). Sync waits for that
+  track instead of guessing a shift between edits. Hard cuts sample a step
+  and bypass the exponential blend; the flash limiter still applies.
+- **Diagnostics**: `GET /api/lightsync` includes `diagnostics` with source,
+  clock synchronization, drift estimate, RTT, inter-arrival jitter p50/p95,
+  dropped/duplicate reports, report age, re-anchor history and playing/track
+  Part ids. Stop logs the clock summary and track provenance. Clock error is
+  relative to Plex's MediaSession, not a measurement of the physical screen.
 - **Rules from the prototype, kept:** the razer ENABLE blips the strip for one
   frame, so it's re-sent only on a hard cut (at most every 20 s) or after a
   resume. The strips stay in streaming mode, ignoring HA, until they get
@@ -2971,29 +2988,26 @@ prototype in `~/Developer/projects/light-sync` (2026-11-09).
   and a flash test video: strip vs TV within 0-33 ms at lead 0; the lamp
   starts on the same frame but fades ~0.1 s up / ~0.4 s down, hence the
   150 ms lamp lead.
-- **Timing** (new): effective offset = global (`memory/light_sync.json`
-  `offset_ms`; until first saved it's `LIGHT_SYNC_LEAD_MS`) + the film's own
-  (`offset_ms` in the track index, kept on a rebuild), positive = lights
-  earlier, each and the sum clamped to ±2000 ms. The player reads the
-  offset every frame, so a nudge lands at once. Nudges: iPad ±25 ms, tool
-  (default 50 ms), API `nudge_ms`; by default to the film syncing (or the
-  film on the TV with a track), to global while calibrating or when no such
-  film is on.
-- **Calibration** (new; Nick's idea): the NAS has the prototype's flash
-  test video as a Plex film, "Light Sync Test (2026)" (3 min of 0.5 s
-  red/green/blue/white flashes every 2 s; keep it, it's the calibration
-  clip). `light_sync calibrate` / `POST /api/lightsync {calibrate: true}` /
-  the iPad's "Calibrate…" find it on Plex (`LIGHT_SYNC_TEST_TITLE`), build
-  its track first if missing (ahead of the queue, no push), start it on the
-  TV (`tv_remote.play_plex` with `plex.server_id()`, as `play_on_tv` does;
-  Plex may resume where the clip was left), and sync it whatever the scene
-  and the auto switch (a manual start; no movie-mode rules). Nudges go to
-  the global offset. Done / stop (`end_calibration`) stops syncing, sends
-  the TV `MEDIA_STOP` (`tv_remote.stop_playback`) if the clip is still on,
-  and hands the room back as a stop does (Movie scene only if movie mode is
-  on). The clip ending on the TV ends calibration too; if it never shows up
-  within 90 s calibration gives up. Light sync never switches the room's
-  scene to Movie on its own (Nick plays films in Game Time too).
+- **Setup timing (companion 6.59 / 301)**: display offsets in
+  `memory/light_sync.json` `format_offsets`, keyed by resolution, HDR transfer
+  (including Dolby Vision), codec, direct play/stream/transcode decision and
+  audio codec. `offset_ms` is retained as the initial value for uncalibrated
+  profiles. Add explicit per-film `offset_ms` overrides from the track index;
+  each and the sum are clamped to ±2000 ms, positive = earlier. Independent
+  `light_offsets` keyed by configured strip IP add per-strip latency; use
+  `POST /api/lightsync {light_ip, light_nudge_ms}`. The lamp retains its own
+  `lamp_lead_ms`. Nudges default to the active format, including calibration;
+  explicit `scope: film|global|format` remains available to API/tools.
+- **Calibration**: `python -m app.light_sync_calibration /tmp/Light-Sync-Test.mp4`
+  generates 180s at 30fps, black/white/colour cuts at deterministic irregular
+  intervals, silent audio, plus a JSON cut-frame manifest. Minimum holds are
+  1.3s and the end is black for looping. Install as the Plex film named
+  `LIGHT_SYNC_TEST_TITLE` (default "Light Sync Test"). Calibrate starts it from
+  0:00 through JARVIS TV, building the track first if needed. It runs outside
+  movie mode too. The iPad's 1/5/25ms nudges apply to the running player
+  instantly and save the current format; its panel refreshes diagnostics each
+  second. Done stops the clip, releases the strips and restores Movie only
+  if movie mode is still on. No camera measurement is implemented.
 - **Flash limiter** (new): colour may change fast, but at most 3 big
   brightness jumps (a one-direction move of more than 25% of full) in any
   second, 2 at Subtle; over budget a run is held to a small step, keeping the hue.

@@ -178,15 +178,18 @@ def _movie_record(item: dict[str, Any]) -> dict[str, Any]:
         except (TypeError, ValueError):
             return 1 << 40
     part_key = ""
+    selected_media, selected_part = {}, {}
     for media in sorted((m for m in item.get("Media") or [] if isinstance(m, dict)), key=pixels):
         for part in media.get("Part") or []:
             if part.get("key"):
+                selected_media, selected_part = media, part
                 part_key = str(part["key"])
                 break
         if part_key:
             break
     return {"rating_key": str(item.get("ratingKey") or ""), "title": str(item.get("title") or ""),
-            "year": item.get("year"), "duration_ms": int(item.get("duration") or 0), "part_key": part_key}
+            "year": item.get("year"), "duration_ms": int(item.get("duration") or 0), "part_key": part_key, "media_id": str(selected_media.get("id") or ""),
+            "part_id": str(selected_part.get("id") or "")}
 
 
 def _title_key(text: Any) -> str:
@@ -275,7 +278,21 @@ def sessions() -> tuple[bool, list[dict[str, Any]] | str]:
         if not isinstance(item, dict):
             continue
         player = item.get("Player") or {}
+        media_items = item.get("Media") or []
+        media = next((m for m in media_items if str(m.get("selected")).lower() in ("1", "true")), media_items[0] if media_items else {})
+        parts = media.get("Part") or []
+        part = next((p for p in parts if str(p.get("selected")).lower() in ("1", "true")), parts[0] if parts else {})
+        streams = part.get("Stream") or []
+        video = next((v for v in streams if str(v.get("streamType")) == "1"), {})
+        transcode = item.get("TranscodeSession") or {}
+        hdr = "dv" if str(video.get("DOVIPresent")).lower() in ("1", "true") else str(video.get("colorTrc") or "sdr").lower()
+        mode = str(transcode.get("videoDecision") or part.get("decision") or "directplay").lower()
+        fmt = "/".join(str(v).lower() for v in (media.get("videoResolution") or media.get("height") or "unknown",
+                                              hdr, media.get("videoCodec") or video.get("codec") or "unknown", mode,
+                                              media.get("audioCodec") or "unknown"))
         out.append({
+            "media_id": str(media.get("id") or ""), "part_id": str(part.get("id") or ""),
+            "part_key": str(part.get("key") or ""), "format_key": fmt,
             "rating_key": str(item.get("ratingKey") or ""), "title": str(item.get("title") or ""),
             "year": item.get("year"), "type": str(item.get("type") or ""),
             "view_offset_ms": int(item.get("viewOffset") or 0), "duration_ms": int(item.get("duration") or 0),

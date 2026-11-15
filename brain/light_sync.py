@@ -24,19 +24,21 @@ New in JARVIS:
 - **Intensity**: Subtle / Medium / Intense scale the per-light levels and the
   blend. Medium is the prototype's tuned values (strip 0.35, desk 0.35,
   lamp 0.6, blend 80 ms).
-- **Position**, best first: the TV launcher's own report (``POST
-  /api/tv/playback``) while it is fresh, else Plex's ``/status/sessions`` for
-  the room TV's player (``LIGHT_SYNC_PLEX_PLAYER``, else the only movie
-  playing), interpolated between readings.
-- **Timing**: the effective offset is the global offset (``memory/light_sync.json``,
-  first defaulting to ``LIGHT_SYNC_LEAD_MS``) plus the film's own (the track
-  index), positive = lights earlier, each clamped to +/-2000 ms. A nudge
-  reaches the running player at once (``Player.lead_ms``).
-- **Calibration**: ``calibrate`` plays the flash test clip (``LIGHT_SYNC_TEST_TITLE``,
-  building its track first, ahead of the queue) on the TV through
-  ``tv_remote.play_plex`` and syncs it whatever the scene; nudges go to the
-  global offset; ``end_calibration`` (Done / stop) stops the clip and hands
-  the room back as a stop does.
+- **Position**: TV elapsedRealtime mapped to Core monotonic time with four
+  timestamps and a rolling minimum-RTT filter. Small position discrepancies
+  slew by <=5ms/report; seeks >700ms and state changes re-anchor immediately.
+  A player starts from TV only. Stale reports release it, never switch to Plex.
+  Plex sessions supply the selected Part and pipeline metadata, not timing.
+- **Timing**: display profiles keyed by resolution/HDR/codec/play decision/audio
+  plus independent per-strip latencies and the lamp lead. Legacy offset_ms is
+  the initial value for an uncalibrated profile; per-film nudges remain an
+  explicit override. Calibration saves the active format, live each frame.
+- **Tracks**: unidentified legacy or mismatched Parts are replaced by a queued
+  track of the playing Part, at 30fps. Original 10fps tracks remain readable.
+  Container start_time and Media/Part ids are retained in the index.
+- **Calibration**: a deterministic 180s irregular-cut clip can be generated
+  with ``python -m app.light_sync_calibration``; Core starts it on the TV and
+  the companion shows clock drift, jitter and dropped reports while nudging.
 - **When**: in movie mode (the room's current scene is ``scene.movie``), a film
   with a track starts the sync on its own; no track, nothing happens. Stop,
   a film without a track, the end of movie mode or Barn Door release the
@@ -52,6 +54,7 @@ from __future__ import annotations
 
 import atexit
 import base64
+from collections import deque
 from dataclasses import dataclass, field
 import json
 import math
@@ -121,6 +124,7 @@ class Tuning:
     strip_level: float
     lamp_level: float
     jumps_per_s: int
+    light_offsets: dict[str, int] = field(default_factory=dict)
 
 
 LAMP_LEAD_LIMIT_MS = 1500
@@ -144,6 +148,7 @@ def tuning(intensity: str = "medium", lamp_lead_ms: float | None = None) -> Tuni
         strip_level=max(0.0, min(1.0, _num("LIGHT_SYNC_STRIP_LEVEL", 0.35) * level_x)),
         lamp_level=max(0.0, min(1.0, _num("LIGHT_SYNC_LAMP_LEVEL", 0.6) * level_x)),
         jumps_per_s=jumps,
+        light_offsets=load_state().get("light_offsets", {}),
     )
 
 
@@ -161,14 +166,19 @@ def _default_offset() -> int:
 
 def load_state() -> dict[str, Any]:
     """{"auto": bool, "intensity": str, "offset_ms": int}, defaults when the
-    file is missing or bad (``offset_ms`` from ``LIGHT_SYNC_LEAD_MS`` until saved)."""
+    file is missing or bad. Display profiles and per-strip latency live alongside
+    legacy ``offset_ms`` (``LIGHT_SYNC_LEAD_MS`` until saved)."""
     state = {"auto": True, "intensity": "medium", "offset_ms": _default_offset(),
-             "lamp_lead_ms": _default_lamp_lead()}
+             "lamp_lead_ms": _default_lamp_lead(), "format_offsets": {}, "light_offsets": {}}
     try:
         data = json.loads(_STATE_FILE.read_text())
     except (OSError, ValueError):
         return state
     if isinstance(data, dict):
+        for name in ("format_offsets", "light_offsets"):
+            if isinstance(data.get(name), dict):
+                state[name] = {str(k): light_tracks.clamp_offset(v) for k, v in data[name].items()
+                               if isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v)}
         if isinstance(data.get("auto"), bool):
             state["auto"] = data["auto"]
         if data.get("intensity") in INTENSITIES:
@@ -185,7 +195,8 @@ def save_state(state: dict[str, Any]) -> None:
     try:
         _STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
         tmp = _STATE_FILE.with_suffix(".json.tmp")
-        body = {"auto": bool(state["auto"]), "intensity": state["intensity"]}
+        body = {"auto": bool(state["auto"]), "intensity": state["intensity"],
+                "format_offsets": state.get("format_offsets", {}), "light_offsets": state.get("light_offsets", {})}
         if "offset_ms" in state:
             body["offset_ms"] = light_tracks.clamp_offset(state["offset_ms"])
         if "lamp_lead_ms" in state:
@@ -391,7 +402,14 @@ class Playback:
 
 
 class PlaybackClock:
-    """The film's position: the TV's report while fresh, else Plex, interpolated."""
+    """TV monotonic clock, minimum-RTT mapping and bounded phase correction.
+
+    The four timestamps use RFC 5905's offset/delay equations. The lowest
+    RTT from the last minute rejects Wi-Fi queueing. Small position errors
+    slew by at most 5ms/report; seeks over 700ms and state changes re-anchor.
+    Plex positions are available to callers before a TV connects, but a
+    player only starts from TV and never falls back to Plex mid-run.
+    """
 
     def __init__(self, now: Callable[[], float] = time.monotonic) -> None:
         self.now = now
@@ -399,9 +417,47 @@ class PlaybackClock:
         self.plex: Playback | None = None
         self.plex_polled_at = -1e9
         self._lock = threading.Lock()
+        self.received_at = -1e9
+        self.sync_samples = deque(maxlen=32)
+        self.errors = deque(maxlen=120)
+        self.jitter = deque(maxlen=120)
+        self.reanchors = deque(maxlen=120)
+        self.dropped = 0
+        self.last_elapsed = None
+        self.last_sent = None
+        self.stream_id = None
+        self.report_id = None
+        self.session_info: dict[str, Any] = {}
+        self.source_lock: str | None = None
+
+    def begin_session(self) -> None:
+        with self._lock:
+            self.jitter.clear()
+            self.errors.clear()
+            last_anchor = self.reanchors[-1] if self.reanchors else None
+            self.reanchors.clear()
+            if last_anchor:
+                self.reanchors.append(last_anchor)
+            self.dropped = 0
+
+    def diagnostics(self) -> dict[str, Any]:
+        with self._lock:
+            return {"source": self.source_lock or ("tv" if self.tv else "plex"),
+                    "synchronized": bool(self.sync_samples),
+                    "drift_ms": round(self.errors[-1], 2) if self.errors else None,
+                    "jitter_p50_ms": round(float(np.percentile(self.jitter, 50)), 2) if self.jitter else 0,
+                    "jitter_p95_ms": round(float(np.percentile(self.jitter, 95)), 2) if self.jitter else 0,
+                    "rtt_ms": round(min(self.sync_samples, key=lambda x: x[1])[1] * 1000, 2) if self.sync_samples else None,
+                    "dropped_reports": self.dropped, "source_switches": 0,
+                    "reanchors": list(self.reanchors),
+                    "report_age_ms": round((self.now() - self.received_at) * 1000) if self.tv else None,
+                    "playing_part": self.session_info.get("part_id"),
+                    "format": self.session_info.get("format_key")}
 
     def tv_report(self, *, state: str, position_ms: float, speed: float = 1.0, title: str = "",
-                  rating_key: str = "") -> None:
+                  rating_key: str = "", elapsed_ms: float | None = None,
+                  exchange: dict[str, float] | None = None, stream_id: str | None = None,
+                  report_id: int | None = None) -> None:
         state = state if state in ("playing", "paused", "buffering", "stopped") else "stopped"
         key = str(rating_key or "")
         if not key and title:
@@ -410,17 +466,80 @@ class PlaybackClock:
                 key = plex.rating_key
             else:
                 key = light_tracks.find_by_title(title) or ""
+        now = self.now()
         with self._lock:
-            self.tv = Playback(key, title or "", state, max(0.0, position_ms / 1000),
-                               float(speed) if state == "playing" else 0.0, self.now(), "tv")
+            if stream_id and stream_id != self.stream_id:
+                self.stream_id, self.report_id = stream_id, None
+                self.sync_samples.clear()
+                self.last_elapsed = self.last_sent = None
+                self.tv = None
+            if report_id is not None:
+                if self.report_id is not None:
+                    if report_id <= self.report_id:
+                        self.dropped += 1
+                        return
+                    self.dropped += report_id - self.report_id - 1
+                self.report_id = report_id
+            # elapsedRealtime resets on reboot; an HTTP retry may arrive out of order.
+            if elapsed_ms is not None and self.last_elapsed is not None and elapsed_ms <= self.last_elapsed:
+                if self.last_elapsed - elapsed_ms < 60_000:
+                    self.dropped += 1
+                    return
+                self.sync_samples.clear()
+                self.tv = None
+            if elapsed_ms is not None:
+                self.last_elapsed = elapsed_ms
+            if exchange:
+                t0, t1, t2, t3 = (exchange[k] / 1000 for k in ("tv_send_ms", "core_receive_ms", "core_send_ms", "tv_receive_ms"))
+                rtt = (t3 - t0) - (t2 - t1)
+                if 0 <= rtt <= 2 and t2 >= t1 and 0 <= now - t2 < 30:
+                    self.sync_samples.append((now, rtt, ((t1 - t0) + (t2 - t3)) / 2))
+            while self.sync_samples and now - self.sync_samples[0][0] > 60:
+                self.sync_samples.popleft()
+            at = now
+            if elapsed_ms is not None and not self.sync_samples:
+                self.dropped += 1
+                return  # timestamped clients must establish a mapping, never use arrival time
+            if elapsed_ms is not None and self.sync_samples:
+                at = elapsed_ms / 1000 + min(self.sync_samples, key=lambda x: x[1])[2]
+                if not now - 3 <= at <= now + 0.05:
+                    self.dropped += 1
+                    return
+            if self.last_sent is not None and elapsed_ms is not None:
+                self.jitter.append(abs((now - self.received_at) - (elapsed_ms - self.last_sent) / 1000) * 1000)
+            self.last_sent = elapsed_ms
+            self.received_at = now
+            old = self.tv
+            speed = float(speed) if state == "playing" else 0.0
+            pos = max(0.0, position_ms / 1000)
+            error = pos - old.position(at) if old else 0
+            self.errors.append(error * 1000)
+            changed = old is None or old.rating_key != key or old.state != state or old.speed != speed
+            if elapsed_ms is not None and (old is None or old.state == "stopped" or old.rating_key != key):
+                # Fetch this launch's selected Part before starting, even when
+                # the same ratingKey was just played using another version.
+                self.session_info = {}
+                self.plex_polled_at = -1e9
+            if changed or abs(error) > 0.7:
+                why = "state/film" if changed else "seek"
+                entry = {"at": round(now, 3), "ms": round(error * 1000, 2), "reason": why}
+                self.reanchors.append(entry)
+                log.info("Light sync clock re-anchor: %s", entry)
+                self.tv = Playback(key, title or "", state, pos, speed, at, "tv")
+            else:
+                # A bounded phase correction rejects noisy reports without a visible jump.
+                correction = max(-0.005, min(0.005, error * 0.15))
+                self.tv = Playback(key, title or "", state, old.position(at) + correction, speed, at, "tv")
 
     def plex_report(self, session: dict[str, Any] | None) -> None:
         now = self.now()
         with self._lock:
             self.plex_polled_at = now
             if not session:
+                self.session_info = {}
                 self.plex = None
                 return
+            self.session_info = dict(session)
             state = session.get("state") or "playing"
             state = state if state in ("playing", "paused", "buffering") else "stopped"
             pos = session.get("view_offset_ms", 0) / 1000
@@ -437,13 +556,15 @@ class PlaybackClock:
         if tv is None:
             return False
         limit = TV_FRESH_S if tv.state in ("playing", "stopped") else TV_FRESH_PAUSED_S
-        return self.now() - tv.at <= limit
+        return self.now() - self.received_at <= limit
 
     def current(self) -> Playback | None:
         """What's on the room TV now, or None when nothing is (or nobody knows)."""
         with self._lock:
             tv, plex = self.tv, self.plex
             plex_fresh = plex is not None and self.now() - self.plex_polled_at <= PLEX_FRESH_S
+        if self.source_lock == "plex":
+            return plex if plex_fresh and plex.state != "stopped" else None
         if tv is not None and self.tv_fresh():
             if tv.state == "stopped":
                 return None
@@ -453,6 +574,8 @@ class PlaybackClock:
             if key or tv.title:
                 return Playback(key, tv.title or (plex.title if plex_fresh else ""), tv.state, tv.position_s,
                                 tv.speed, tv.at, "tv")
+        if tv is not None or self.source_lock == "tv":
+            return None  # stale TV: release, never steer this run from coarse Plex offsets
         if plex_fresh and plex.state != "stopped":
             return plex
         return None
@@ -492,6 +615,8 @@ class Player:
         # The timing offset (ms, positive = lights earlier), read every frame so
         # a nudge lands at once; None = the tuning's LIGHT_SYNC_LEAD_MS.
         self.lead_ms = lead_ms
+        self.fps = light_tracks.FPS
+        self.light_offsets: dict[str, int] = {}
         self.rating_key = rating_key
         self.clock, self.tune, self.sender, self.now = clock, tune, sender, now
         self.on_exit = on_exit
@@ -543,10 +668,12 @@ class Player:
     def _loop(self) -> None:
         tune = self.tune()
         self.strips = tune.strips
+        self.light_offsets = tune.light_offsets
         self.sender.wake(list(tune.strips) + ([tune.lamp] if tune.lamp else []))
         self.sender.enable(tune.strips)
         enabled_at = tuned_at = last = self.now()
         limiter, lamp_limiter = FlashLimiter(tune.jumps_per_s), FlashLimiter(tune.jumps_per_s)
+        strip_limiters = {ip: FlashLimiter(tune.jumps_per_s) for ip in tune.strips}
         prev_tgt = cur = None
         lamp_last, lamp_sent, sent_at = -1e9, None, -1e9
         was_moving = None
@@ -557,6 +684,8 @@ class Player:
             if now - tuned_at >= 1.0:
                 tune, tuned_at = self.tune(), now
                 limiter.per_second = lamp_limiter.per_second = tune.jumps_per_s
+                for strip_limiter in strip_limiters.values():
+                    strip_limiter.per_second = tune.jumps_per_s
             reading = self.clock()
             if reading is None:
                 continue  # don't know where the film is: hold
@@ -568,14 +697,16 @@ class Player:
             if not moving and now - sent_at < 0.2:
                 continue  # paused: hold the colour, a few refreshes a second is plenty
             lead = tune.lead_ms if self.lead_ms is None else self.lead_ms
-            f = (pos + lead / 1000) * light_tracks.FPS
+            f = (pos + lead / 1000) * self.fps
             i = int(f)
             if not 0 <= i < frames - 1:
                 continue
-            tgt = self.track[i] + (self.track[i + 1] - self.track[i]) * (f - i)
+            tgt = self.track[i].copy()
             if cur is None:
                 cur, prev_tgt = tgt.copy(), tgt
-            cur = cur + (tgt - cur) * (1 - math.exp(-dt / tune.blend_ms * 1000))
+            cut = prev_tgt is not None and float(np.abs(tgt - prev_tgt).max()) > CUT
+            # Known cuts land immediately; the flash limiter still owns the brightness budget.
+            cur = tgt.copy() if cut else cur + (tgt - cur) * (1 - math.exp(-dt / tune.blend_ms * 1000))
             cur = limiter.apply(cur.clip(0, 255), now)
             self.colour = cur
             # Re-take the strips (something outside keeps pulling them back to
@@ -588,13 +719,20 @@ class Player:
             prev_tgt = tgt
             rgb = cur.astype(int)
             for ip in tune.strips:
-                self.sender.strip(ip, [int(v * tune.strip_level) for v in rgb], tune.segments)
+                # Each strip can have its own transport latency, without changing the display profile.
+                extra = self.light_offsets.get(ip, 0)
+                if extra:
+                    idx = min(max(int((pos + (lead + extra) / 1000) * self.fps), 0), frames - 1)
+                    strip_rgb = strip_limiters[ip].apply(self.track[idx], now)
+                else:
+                    strip_rgb = strip_limiters[ip].apply(cur, now)
+                self.sender.strip(ip, [int(v * tune.strip_level) for v in strip_rgb], tune.segments)
             sent_at = now
             if tune.lamp:
                 # The lamp fades on its own (~0.1 s up, ~0.4 s down): it reads ahead.
-                lf = f + tune.lamp_lead_ms / 1000 * light_tracks.FPS
+                lf = f + tune.lamp_lead_ms / 1000 * self.fps
                 li = min(max(int(lf), 0), frames - 2)
-                lrgb = (self.track[li] + (self.track[li + 1] - self.track[li]) * (lf - li)).clip(0, 255)
+                lrgb = self.track[li].copy()
                 # A hard cut goes at once (0.1 s since the last command, so the
                 # bulb isn't flooded); anything else waits its 0.2 s turn.
                 change = 1e9 if lamp_sent is None else float(np.abs(lrgb - lamp_sent).max())
@@ -666,6 +804,7 @@ class LightSync:
             log.debug("Light sync: Plex sessions unavailable: %s", found)
             return
         self.clock.plex_report(pick_session(found, os.getenv("LIGHT_SYNC_PLEX_PLAYER", "")))
+        self._apply_offset()
 
     def tv_report(self, **report: Any) -> None:
         before = self._film_signature()
@@ -676,6 +815,18 @@ class LightSync:
     def _film_signature(self) -> tuple[str, str, str] | None:
         pb = self.clock.current()
         return (pb.rating_key, pb.title, "paused" if not pb.moving else "playing") if pb else None
+
+    def _track_key(self, pb: Playback) -> str:
+        info = self.clock.session_info
+        if info.get("rating_key") != pb.rating_key or not info.get("part_id"):
+            return pb.rating_key
+        meta = light_tracks.get(pb.rating_key) or {}
+        if str(meta.get("part_id") or "") == str(info["part_id"]):
+            return pb.rating_key
+        # Decode the actual playing Part: no guessed shift between different edits.
+        import hashlib
+        suffix = hashlib.sha256(str(info["part_id"]).encode()).hexdigest()[:16]
+        return f"{pb.rating_key}--{suffix}"
 
     # -- the decision
     def tick(self, *, movie_mode: bool, barn_door: bool) -> None:
@@ -693,10 +844,13 @@ class LightSync:
                 self.suppressed_key = None
             want, reason = self._wanted(pb)
             self.reason = reason
-            if self.session and (not want or self.session.rating_key != film):
+            if self.session and (not want or self.session.rating_key != film
+                                 or getattr(self.session.player, "track_key", film) != self._track_key(pb)):
                 self._stop_session(restore=not barn_door)
             if want and self.session is None and pb is not None:
                 self._start_session(pb)
+            if self.session:
+                self.session.player.lead_ms = self.effective_offset(self.session.rating_key)
             if self._film_signature() != before:
                 self.bump()
 
@@ -706,8 +860,17 @@ class LightSync:
         if pb is None or not pb.rating_key:
             return False, "Calibrating: waiting for the test clip." if self.calibration \
                 else "Nothing is playing on the TV."
-        if not light_tracks.has_track(pb.rating_key):
-            return False, f"{pb.title or 'This film'} has no light sync yet."
+        if pb.source != "tv":
+            return False, "Waiting for the TV clock; Plex is metadata only."
+        if self.clock.sync_samples and (self.clock.session_info.get("rating_key") != pb.rating_key
+                                       or not self.clock.session_info.get("part_id")):
+            return False, "Waiting for Plex to identify the playing video Part."
+        track_key = self._track_key(pb)
+        if not light_tracks.has_track(track_key):
+            if track_key != pb.rating_key and light_tracks.has_track(pb.rating_key) and not light_tracks.pending(track_key):
+                light_tracks.start_build({**self.clock.session_info, "rating_key": track_key,
+                                          "base_rating_key": pb.rating_key}, quiet=True)
+            return False, f"{pb.title or 'This film'} has no light sync for this Part yet."
         if self.barn_door:
             return False, "Barn Door has the lights."
         if self.calibration and self.calibration["rating_key"] == pb.rating_key:
@@ -723,12 +886,13 @@ class LightSync:
         return True, ""
 
     def _start_session(self, pb: Playback) -> None:
-        track = light_tracks.load(pb.rating_key)
+        track_key = self._track_key(pb)
+        track = light_tracks.load(track_key)
         if track is None:
             self.reason = "The light track couldn't be read."
             return
-        track = steady_track(track)
-        meta = light_tracks.get(pb.rating_key) or {}
+        track = steady_track(track, frames=max(2, round(STEADY_FRAMES * (light_tracks.get(track_key) or {}).get("fps", light_tracks.FPS) / light_tracks.FPS)))
+        meta = light_tracks.get(track_key) or {}
         if (self.calibration and self.calibration["rating_key"] == pb.rating_key) \
                 or _same_title(str(meta.get("title") or pb.title or ""), test_title()):
             track = without_glow(track)  # flashes from black: no grey between them
@@ -743,8 +907,12 @@ class LightSync:
                 return None
             return now_pb.position(self.now()), now_pb.speed if now_pb.moving else 0.0
 
+        self.clock.source_lock = pb.source
+        self.clock.begin_session()
         player = Player(track, key, clock, _live_tuning, self._sender,
                         now=self.now, on_exit=self._player_exited, lead_ms=self.effective_offset(key))
+        player.track_key = track_key
+        player.fps = meta.get("fps", light_tracks.FPS)
         session = _Session(key, title, player)
         session.paused_follow = _pause_follow()
         session.fan_was_on = _fan_off()  # Nick: the fan ring stays dark while the lights sync
@@ -773,7 +941,9 @@ class LightSync:
             _restore_movie_scene()  # the Movie scene sets the fan ring itself
         elif restore and session.fan_was_on and not _barn_door_engaged():
             _fan_on()
-        log.info("Light sync off: %s", session.title)
+        log.info("Light sync off: %s; track=%s; diagnostics=%s", session.title,
+                 light_tracks.get(getattr(session.player, "track_key", session.rating_key)), self.clock.diagnostics())
+        self.clock.source_lock = None
         self.bump()
 
     # -- what Nick asks for
@@ -832,9 +1002,18 @@ class LightSync:
     def global_offset(self) -> int:
         return int(load_state()["offset_ms"])
 
+    def format_key(self) -> str | None:
+        pb = self.clock.current()
+        info = self.clock.session_info
+        return info.get("format_key") if pb and info.get("rating_key") == pb.rating_key else None
+
+    def setup_offset(self) -> int:
+        state = load_state()
+        # The legacy global offset becomes the initial value of each uncalibrated setup.
+        return state["format_offsets"].get(self.format_key(), state["offset_ms"])
+
     def effective_offset(self, rating_key: str | None) -> int:
-        """Global + this film's offset (ms, positive = lights earlier), clamped."""
-        return light_tracks.clamp_offset(self.global_offset() + light_tracks.film_offset(rating_key))
+        return light_tracks.clamp_offset(self.setup_offset() + light_tracks.film_offset(rating_key))
 
     def _target_film(self) -> tuple[str, str] | None:
         """(ratingKey, title) a film-scope nudge applies to: the film syncing,
@@ -857,14 +1036,16 @@ class LightSync:
 
     def _resolve_scope(self, scope: str | None) -> str:
         scope = (scope or "").strip().lower()
-        if scope in ("film", "global"):
+        if scope in ("film", "global", "format"):
             return scope
+        if self.format_key() or (self.calibration and self.clock.stream_id):
+            return "format"
         return "global" if self.calibration is not None or self._target_film() is None else "film"
 
     def nudge(self, ms: float, scope: str | None = None) -> tuple[bool, str]:
         """Move the lights' timing by ``ms`` (positive = earlier). ``scope``
-        film (the film syncing) or global; by default the film, or global
-        while calibrating or when no film with a track is on."""
+        format (the current pipeline, default when known), film (explicit
+        override), or global (legacy default when the format is unknown)."""
         try:
             ms = float(ms)
         except (TypeError, ValueError):
@@ -873,6 +1054,17 @@ class LightSync:
             return False, "How far, sir? Give me a number of milliseconds."
         with self._lock:
             scope = self._resolve_scope(scope)
+            if scope == "format":
+                fmt = self.format_key()
+                if not fmt:
+                    return False, "Waiting for the video format from Plex, sir."
+                state = load_state()
+                before = self.setup_offset()
+                after = light_tracks.clamp_offset(before + ms)
+                state["format_offsets"][fmt] = after
+                save_state(state)
+                self._apply_offset()
+                return True, self._offset_said(after - before, f"for {fmt}", after, None)
             if scope == "film":
                 target = self._target_film()
                 if target is None:
@@ -892,9 +1084,18 @@ class LightSync:
             return True, self._offset_said(state["offset_ms"] - before, "globally", state["offset_ms"], None)
 
     def reset_offset(self, scope: str | None = None) -> tuple[bool, str]:
-        """Back to 0: the film's offset, or the global one while calibrating."""
+        """Reset the selected format, explicit film override, or legacy default."""
         with self._lock:
             scope = self._resolve_scope(scope)
+            if scope == "format":
+                fmt = self.format_key()
+                if not fmt:
+                    return False, "Waiting for the video format from Plex, sir."
+                state = load_state()
+                state["format_offsets"][fmt] = 0
+                save_state(state)
+                self._apply_offset()
+                return True, f"Timing for {fmt} reset, sir."
             if scope == "film":
                 target = self._target_film()
                 if target is None:
@@ -918,6 +1119,17 @@ class LightSync:
             said += f" (effective {_ms(self.effective_offset(key))})"
         return said + "."
 
+    def nudge_light(self, ip: str, ms: int) -> None:
+        if ip not in tuning().strips:
+            raise ValueError("Unknown light sync strip")
+        with self._lock:
+            state = load_state()
+            state["light_offsets"][ip] = light_tracks.clamp_offset(state["light_offsets"].get(ip, 0) + ms)
+            save_state(state)
+            if self.session:
+                self.session.player.light_offsets = state["light_offsets"]
+            self.bump()
+
     def nudge_lamp(self, ms: int) -> tuple[bool, str]:
         """The lamp's own head start over the strips (it fades by itself and
         takes few updates a second), positive = lamp earlier. Live."""
@@ -933,7 +1145,8 @@ class LightSync:
     def offsets(self) -> dict[str, Any]:
         target = self._target_film()
         film_ms = light_tracks.film_offset(target[0]) if target else 0
-        return {"global_ms": self.global_offset(), "film_ms": film_ms,
+        return {"global_ms": self.global_offset(), "format_ms": self.setup_offset(), "format_key": self.format_key(),
+                "light_offsets": load_state()["light_offsets"], "film_ms": film_ms,
                 "effective_ms": self.effective_offset(target[0] if target else None),
                 "film_title": target[1] if target else None,
                 "scope": self._resolve_scope(None), "step_ms": OFFSET_STEP_MS,
@@ -942,7 +1155,7 @@ class LightSync:
     # -- calibration
     def calibrate(self) -> tuple[bool, str]:
         """Play the flash test clip on the TV and sync it, whatever the
-        scene; nudges go to the global offset until Done."""
+        scene; nudges go to its current video format until Done."""
         from integrations import plex
         if not enabled():
             return False, "Light sync is switched off in my settings, sir (LIGHT_SYNC)."
@@ -996,7 +1209,7 @@ class LightSync:
             calibration.update(phase="playing", since=self.now(), seen=False, fallback=False)
             self.bump()
         return True, (f"Calibrating, sir: {calibration['title']} is starting on the TV. Watch the flashes and "
-                      "tell me if the lights are early or late; I'll move the global timing. Say done when they match.")
+                      "tell me if the lights are early or late; I'll save the timing for this video format. Say done when they match.")
 
     def _calibration_tick(self, film: str | None) -> None:
         """Called from ``tick`` (lock held): the clip's track is ready -> play
@@ -1015,6 +1228,8 @@ class LightSync:
             return
         if film == key:
             calibration["seen"] = True
+        elif film is None and self.clock.tv is not None and self.clock.tv.state != "stopped" and self.now() - self.clock.received_at < 15:
+            return  # a brief heartbeat outage releases lights, but keeps calibration controls
         elif calibration["seen"] or self.now() - calibration["since"] > CALIBRATION_START_S:
             log.info("Light sync calibration over (%s)", "clip ended" if calibration["seen"] else "clip never started")
             self.calibration = None
@@ -1047,7 +1262,7 @@ class LightSync:
                 tv_remote.stop_playback()
             except Exception:  # noqa: BLE001 - the lights are already handed back
                 log.warning("Light sync couldn't stop the test clip", exc_info=True)
-        return True, f"Calibration done, sir. The global timing is {_ms(self.global_offset())}."
+        return True, f"Calibration done, sir. The setup timing is {_ms(self.setup_offset())}."
 
     def release_for_barn_door(self) -> None:
         """Barn Door is engaging: let go of the strips now (not at the next
@@ -1088,11 +1303,12 @@ class LightSync:
             "paused": bool(session and pb is not None and not pb.moving),
             "movie_mode": self.movie_mode,
             "film": film,
-            "has_track": bool(pb and light_tracks.has_track(pb.rating_key)),
+            "has_track": bool(pb and light_tracks.has_track(self._track_key(pb))),
             "building": light_tracks.building(),
             "queue": light_tracks.queue(),
             "tracks": light_tracks.listing(),
             "offset": self.offsets(),
+            "diagnostics": {**self.clock.diagnostics(), "track_part": (light_tracks.get(getattr(session.player, "track_key", pb.rating_key) if session else self._track_key(pb)) or {}).get("part_id") if pb else None},
             "calibrating": ({"title": self.calibration["title"], "phase": self.calibration["phase"]}
                             if self.calibration else None),
             "reason": "" if session else self.reason,

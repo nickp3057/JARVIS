@@ -317,8 +317,8 @@ class ClockTests(TrackStoreDir):
         pb = self.clock.current()
         self.assertEqual(pb.source, "tv")
         self.assertAlmostEqual(pb.position(self.t), 61.5)
-        self.t += 2.0  # TV stale: Plex takes over (it was polled 3.5 s ago)
-        self.assertEqual(self.clock.current().source, "plex")
+        self.t += 2.0  # TV stale: never fall back to the coarse Plex clock
+        self.assertIsNone(self.clock.current())
         self.t += 20  # nothing fresh at all
         self.assertIsNone(self.clock.current())
 
@@ -652,11 +652,11 @@ class ControllerTests(ControllerBase):
         self.assertFalse(self.sync.running)
 
     def test_state_file_round_trip_and_revision(self) -> None:
-        self.assertEqual(light_sync.load_state(), {"auto": True, "intensity": "medium", "offset_ms": 0, "lamp_lead_ms": 150})
+        self.assertEqual(light_sync.load_state(), {"auto": True, "intensity": "medium", "offset_ms": 0, "lamp_lead_ms": 150, "format_offsets": {}, "light_offsets": {}})
         before = self.sync.revision()
         self.sync.set_intensity("Subtle")
         self.sync.set_auto(False)
-        self.assertEqual(light_sync.load_state(), {"auto": False, "intensity": "subtle", "offset_ms": 0, "lamp_lead_ms": 150})
+        self.assertEqual(light_sync.load_state(), {"auto": False, "intensity": "subtle", "offset_ms": 0, "lamp_lead_ms": 150, "format_offsets": {}, "light_offsets": {}})
         self.assertGreater(self.sync.revision(), before)
         with self.assertRaises(ValueError):
             self.sync.set_intensity("blinding")
@@ -777,8 +777,7 @@ class ApiTests(ApiBase):
         without = {"Authorization": "Bearer " + client_tokens.create("nicks-room-tv", ["status:read"])}
         self.assertEqual(self.client.post("/api/tv/playback", headers=without, json=report).status_code, 403)
         client_tokens.grant("nicks-room-tv", ["playback:write"])
-        self.assertEqual(self.client.post("/api/tv/playback", headers=without, json=report).json(),
-                         {"ok": True, "used": True})
+        self.assertTrue(self.client.post("/api/tv/playback", headers=without, json=report).json()["used"])
         pb = self.sync.clock.current()
         self.assertEqual((pb.rating_key, pb.source), ("1", "tv"))
         other = {**report, "package": "com.spotify.tv.android"}
@@ -1295,3 +1294,151 @@ class SteadyTrackTests(unittest.TestCase):
         frames = [self.BLUE] * 8 + [flash, flash] + [self.BLUE] * 8
         out = steady_track(np.array(frames, np.uint8))
         self.assertEqual(out[8].tolist(), flash)
+
+
+class FilteredClockTests(TrackStoreDir):
+    def setUp(self):
+        super().setUp()
+        self.t = 100.0
+        self.clock = light_sync.PlaybackClock(now=lambda: self.t)
+
+    @staticmethod
+    def exchange(sent, outbound=.002, inbound=.002):
+        return {"tv_send_ms": (sent - 80) * 1000,
+                "core_receive_ms": (sent + outbound) * 1000,
+                "core_send_ms": (sent + outbound) * 1000,
+                "tv_receive_ms": (sent - 80 + outbound + inbound) * 1000}
+
+    def report(self, sent, delay=.01, position=None, **kwargs):
+        self.t = sent + delay
+        self.clock.tv_report(state="playing", rating_key="1", title="Up",
+                             position_ms=(sent - 100) * 1000 if position is None else position,
+                             elapsed_ms=(sent - 80) * 1000,
+                             exchange=self.exchange(sent - .1), **kwargs)
+
+    def test_five_launches_two_minutes_each_ignore_wifi_arrival_jitter(self):
+        for launch in range(5):
+            self.clock = light_sync.PlaybackClock(now=lambda: self.t)
+            for second in range(121):
+                delay = (.010, .290, .035, .160, .070)[(second + launch) % 5]
+                self.report(100 + second, delay)
+                error = self.clock.current().position(self.t) - (self.t - 100)
+                self.assertLess(abs(error), .001)
+            diag = self.clock.diagnostics()
+            self.assertEqual(diag["source_switches"], 0)
+            self.assertEqual(len(diag["reanchors"]), 1)
+            self.assertGreater(diag["jitter_p95_ms"], 100)
+            self.assertLess(abs(diag["drift_ms"]), 1)
+
+    def test_minimum_rtt_rejects_asymmetric_queueing(self):
+        self.report(100)
+        self.t = 101.3
+        self.clock.tv_report(state="playing", rating_key="1", title="Up", position_ms=1000,
+                             elapsed_ms=21000, exchange=self.exchange(100.9, outbound=.25))
+        self.assertAlmostEqual(self.clock.current().position(self.t), 1.3, places=5)
+        self.assertAlmostEqual(self.clock.diagnostics()["rtt_ms"], 4, places=4)
+
+    def test_small_media_position_noise_slews_at_most_five_ms(self):
+        self.report(100)
+        self.report(101, position=1080)
+        self.assertAlmostEqual(self.clock.current().position(self.t), 1.015, places=5)
+        self.assertEqual(len(self.clock.reanchors), 1)
+
+    def test_seek_pause_resume_anchor_immediately(self):
+        self.report(100)
+        self.report(101, position=60000)
+        self.assertAlmostEqual(self.clock.current().position(self.t), 60.01, places=5)
+        self.assertEqual(self.clock.reanchors[-1]["reason"], "seek")
+        self.t = 102.1
+        self.clock.tv_report(state="paused", rating_key="1", title="Up", position_ms=61000,
+                             elapsed_ms=22000, exchange=self.exchange(101.9))
+        self.t += 10
+        self.assertEqual(self.clock.current().position(self.t), 61)
+        self.clock.tv_report(state="playing", rating_key="1", title="Up", position_ms=61000,
+                             elapsed_ms=(self.t - 80) * 1000, exchange=self.exchange(self.t - .1))
+        self.assertAlmostEqual(self.clock.current().position(self.t), 61, places=5)
+
+    def test_report_gap_and_duplicate_counted_and_restart_recovers(self):
+        self.report(100, stream_id="first", report_id=1)
+        self.report(101, stream_id="first", report_id=3)
+        self.report(101.1, stream_id="first", report_id=2)
+        self.assertEqual(self.clock.dropped, 2)
+        self.report(102, stream_id="second", report_id=1)
+        self.assertEqual(self.clock.report_id, 1)
+        self.assertAlmostEqual(self.clock.current().position(self.t), 2.01)
+
+    def test_stale_tv_never_uses_fresh_plex(self):
+        self.report(100)
+        self.t = 104
+        self.clock.plex_report({"rating_key": "1", "title": "Up", "state": "playing", "view_offset_ms": 90000})
+        self.assertIsNone(self.clock.current())
+        self.report(105)
+        self.assertAlmostEqual(self.clock.current().position(self.t), 5.01)
+
+
+class SetupAndPartTests(ControllerBase):
+    def metadata(self, part="9", fmt="1080/sdr/h264/directplay/aac"):
+        info = {"rating_key": "1", "title": "Up", "state": "playing", "view_offset_ms": 10000,
+                "part_id": part, "part_key": "/library/parts/" + part + "/file.mkv", "media_id": "7",
+                "format_key": fmt, "duration_ms": 10000}
+        self.sync.clock.plex_report(info)
+        return info
+
+    def test_calibration_saves_format_and_nudges_running_player_instantly(self):
+        source = self.metadata()
+        light_tracks.save("1", np.zeros((300, 3), np.uint8), "Up", source={**source, "fps": 30})
+        self.play()
+        self.tick()
+        player = FakePlayer.instances[-1]
+        self.assertEqual(player.fps, 30)
+        self.assertTrue(self.sync.nudge(5)[0])
+        self.assertEqual(player.lead_ms, 5)
+        self.assertEqual(light_tracks.film_offset("1"), 0)
+        self.assertEqual(self.sync.global_offset(), 0)
+        self.metadata(fmt="4k/dv/hevc/directplay/truehd")
+        self.assertEqual(self.sync.effective_offset("1"), 0)
+        self.sync.nudge(25)
+        self.metadata()
+        self.assertEqual(self.sync.effective_offset("1"), 5)
+        self.assertEqual(light_sync.load_state()["format_offsets"][source["format_key"]], 5)
+        self.sync.reset_offset()
+        self.assertEqual(self.sync.effective_offset("1"), 0)
+
+    def test_mismatched_part_queues_actual_file_and_does_not_play_wrong_track(self):
+        self.metadata(part="42")
+        self.play()
+        with patch.object(light_tracks, "start_build", return_value=(True, "Building")) as build:
+            self.tick()
+        self.assertFalse(self.sync.running)
+        film = build.call_args.args[0]
+        self.assertEqual((film["part_id"], film["base_rating_key"]), ("42", "1"))
+        light_tracks.save(film["rating_key"], np.zeros((300, 3), np.uint8), "Up",
+                          source={**film, "fps": 30, "start_time_s": 1.25})
+        self.tick()
+        self.assertTrue(self.sync.running)
+        self.assertEqual(FakePlayer.instances[-1].track_key, film["rating_key"])
+        self.assertEqual(self.sync.status()["diagnostics"]["track_part"], "42")
+
+    def test_plex_alone_never_starts_light_sync(self):
+        self.metadata()
+        self.tick()
+        self.assertFalse(self.sync.running)
+        self.assertIn("TV clock", self.sync.reason)
+
+    def test_strip_latency_persists_separately(self):
+        with patch.dict(os.environ, {"LIGHT_SYNC_STRIPS": "strip,desk"}):
+            self.sync.nudge_light("desk", 25)
+            self.assertEqual(light_sync.load_state()["light_offsets"], {"desk": 25})
+            with self.assertRaises(ValueError):
+                self.sync.nudge_light("somewhere-else", 25)
+
+
+class CalibrationTimelineTests(unittest.TestCase):
+    def test_three_minutes_irregular_cuts_and_no_flash_budget_violation(self):
+        from app.light_sync_calibration import timeline
+        cuts = timeline()
+        self.assertEqual(sum(c["frames"] for c in cuts), 180 * 30)
+        self.assertGreater(len({c["frames"] for c in cuts[:-1]}), 4)
+        self.assertTrue(all(c["frames"] >= 39 for c in cuts[:-1]))
+        self.assertEqual(cuts[-1]["rgb"], [0, 0, 0])
+        self.assertEqual(cuts, timeline())

@@ -150,9 +150,16 @@ See JARVIS.md Recently Shipped.
 - [ ] The investing review skips Thanksgiving (2026-11-26).
 - [ ] Yearly chore: add the 2028 NYSE holidays to `_NYSE_HOLIDAYS` in `brain/investing.py` before 2028.
 
-### Light sync (2026-11-14): check
+### Light sync overhaul (2026-11-15): physical acceptance checks
 
-Built into Core, the iPad and JARVIS TV (see JARVIS.md **Light sync**); nothing deployed or tried live.
+Clock overhaul implemented (Core + TV 9.9, companion 6.59/301). See JARVIS.md **Light sync**.
+Remaining acceptance needs Nick's eyes or a camera: five launches without nudges
+within ±50ms, a two-minute run without wobble, 1080p/4K profiles, pause/resume,
+seek, Barn Door and physical light latency. Simulated clocks do not prove screen timing.
+New Part builds may take several minutes the first time a version is played.
+- [ ] Check `diagnostics`: drift within ±30ms after 3s; source remains TV.
+- [ ] Calibrate each display format using the 180s irregular-cut clip; nudges now save the format.
+- [ ] Measure independent strip/desk latency if needed through the per-light API.
 One-time on the Surface, after pulling and before restarting Core:
 `cd ~/jarvis && .venv/bin/pip install imageio-ffmpeg && .venv/bin/python -m app.client_tokens grant nicks-room-tv playback:write`
 - [ ] "Hey Jarvis, create a light sync for Cars 2": the build starts, the iPad's Light sync menu shows "Building… N%", and a push says it's ready. Note how long it took on the Surface (the Mac took ~3 min with VideoToolbox; the Surface is CPU only). If it's too slow or Core feels sluggish meanwhile, lower `LIGHT_SYNC_BUILD_THREADS`.
@@ -167,7 +174,7 @@ One-time on the Surface, after pulling and before restarting Core:
 - [ ] Restart Core mid-film: the strips are released (they shouldn't stay frozen on a colour).
 - [ ] TV 9.7 deployed: `adb logcat -s TvHomePlayback` shows no 403s after the grant, and Core uses the TV clock (`GET /api/lightsync` film.source = "tv"). If the TV's Plex session has no numeric media id, Core matches by title (Plex sessions or the track index).
 - [ ] If two Plex players are ever playing films at once, set `LIGHT_SYNC_PLEX_PLAYER` to the room TV's player name.
-- [ ] **Calibrate once** with the test clip (companion 6.34): iPad movie screen › Light sync › Calibrate… (or "Jarvis, calibrate the light sync"). The clip starts on the TV (its track builds first if missing); nudge Lights earlier / later until the strip flashes with the picture, then Done. Check the TV actually starts the clip from the deep link and that Done stops it (`MEDIA_STOP`); if Plex resumes mid-clip that's fine (flashes repeat every 2 s). Note the global offset you settle on.
+- [ ] **Calibrate once** with the test clip (companion 6.34): iPad movie screen › Light sync › Calibrate… (or "Jarvis, calibrate the light sync"). The clip starts on the TV (its track builds first if missing); nudge Lights earlier / later until the strip flashes with the picture, then Done. Check the TV actually starts the clip from the deep link and that Done stops it (`MEDIA_STOP`); if Plex resumes mid-clip that's fine (flashes repeat every 2 s). Note the video-format offset you settle on.
 - [ ] **Queue with 2-3 films**: "make light syncs for all the Hunger Games movies": the first builds, the rest say "Queued …, second in line"; the iPad menu shows "Building … N%" and "Next: …" rows; one push per film. Restart Core mid-build: the queue picks up again (the interrupted film from scratch).
 - [ ] Per-film nudge while a film syncs (menu Lights earlier / later, Reset timing; or "the lights are late"): lands within a frame, survives a restart.
 

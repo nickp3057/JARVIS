@@ -16,11 +16,13 @@ no NAS mount and no system ffmpeg, so the file is read over HTTP from Plex
 (the media Part's URL with the token, never logged) and ffmpeg comes from
 the ``imageio-ffmpeg`` package (``shutil.which("ffmpeg")`` as a fallback).
 
-Storage: ``memory/light_tracks/<plex ratingKey>.npy`` (uint8, N x 3) and
-``memory/light_tracks/index.json`` ({ratingKey: title, year, frames,
-built_at, offset_ms}). The .npy is written atomically. ``offset_ms`` is the
-film's own timing nudge for light sync (positive = lights earlier); a
-rebuild keeps it.
+Storage: ``memory/light_tracks/<ratingKey>.npy`` and Part-specific
+``<ratingKey>--<part hash>.npy`` (uint8 Nx3), plus an atomic index recording
+Media/Part ids, Part key, container start_time_s, fps, title and build time.
+New identified Parts decode at 30fps; legacy tracks remain 10fps. A playing
+Part that differs from the built Part is decoded separately, never reused
+with an assumed alignment between editions. Per-film offset_ms remains an
+explicit override and survives a rebuild.
 """
 from __future__ import annotations
 
@@ -161,11 +163,11 @@ def find_by_title(title: str) -> str | None:
     wanted = _title_key(title)
     for key, meta in index().items():
         if wanted and _title_key(meta.get("title")) == wanted:
-            return key
+            return str(meta.get("base_rating_key") or key)
     return None
 
 
-def save(rating_key: str, track: np.ndarray, title: str, year: Any = None) -> None:
+def save(rating_key: str, track: np.ndarray, title: str, year: Any = None, *, source: dict[str, Any] | None = None) -> None:
     """Write the track atomically and record it in the index."""
     rating_key = str(rating_key)
     with _lock:
@@ -184,6 +186,8 @@ def save(rating_key: str, track: np.ndarray, title: str, year: Any = None) -> No
         old = data.get(rating_key) if isinstance(data.get(rating_key), dict) else {}
         data[rating_key] = {"title": title, "year": year, "frames": int(len(track)), "built_at": time.time(),
                             "offset_ms": clamp_offset(old.get("offset_ms", 0))}
+        if source:
+            data[rating_key].update({k: source.get(k) for k in ("media_id", "part_id", "part_key", "start_time_s", "base_rating_key", "fps")})
         _write_index(data)
     _changed()
 
@@ -272,8 +276,8 @@ def ffmpeg_exe() -> str | None:
     return shutil.which("ffmpeg")
 
 
-def ffmpeg_command(exe: str, source: str) -> list[str]:
-    """Decode at 10 fps to 64x27 rgb24 on stdout. HTTP reconnects ride out a
+def ffmpeg_command(exe: str, source: str, fps: int = FPS) -> list[str]:
+    """Decode at the requested fps to 64x27 rgb24 on stdout. HTTP reconnects ride out a
     Wi-Fi blip over a two-hour read; audio, subtitles and data are skipped.
     Software decode by default: ``-hwaccel auto`` makes imageio-ffmpeg's
     build try CUDA first and abort (exit -6, "Cannot load libcuda.so.1") on
@@ -288,7 +292,7 @@ def ffmpeg_command(exe: str, source: str) -> list[str]:
     if source.startswith("http"):
         command += ["-reconnect", "1", "-reconnect_streamed", "1", "-reconnect_delay_max", "10"]
     return command + ["-i", source, "-an", "-sn", "-dn",
-                      "-vf", f"fps={FPS},scale={W}:{H}:flags=area",
+                      "-vf", f"fps={fps},scale={W}:{H}:flags=area",
                       "-f", "rawvideo", "-pix_fmt", "rgb24", "-"]
 
 
@@ -315,7 +319,7 @@ def pending(rating_key: str | None) -> bool:
                               or any(str(e["film"].get("rating_key")) == key for e in _queue))
 
 
-_QUEUE_FIELDS = ("rating_key", "title", "year", "duration_ms", "part_key")
+_QUEUE_FIELDS = ("rating_key", "title", "year", "duration_ms", "part_key", "part_id", "media_id", "start_time_s", "base_rating_key", "fps")
 
 
 def _queue_file() -> Path:
@@ -509,14 +513,20 @@ def _run_build(film: dict[str, Any], exe: str, quiet: bool = False) -> None:
     global _build
     from integrations import plex
     key, title = str(film["rating_key"]), str(film.get("title") or "that film")
-    expected = max(1, int(film.get("duration_ms") or 0) // 100)  # frames at 10 fps
+    film["fps"] = 30 if film.get("part_id") else FPS
+    expected = max(1, int(film.get("duration_ms") or 0) * film["fps"] // 1000)
     url = plex.part_url(str(film["part_key"]))
     _, token = plex._config()  # noqa: SLF001 - only to scrub it from ffmpeg's error text
     started = time.monotonic()
     stderr_tail: list[bytes] = []
     requeue = False
     try:
-        proc = subprocess.Popen(ffmpeg_command(exe, url), stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        if film.get("part_id"):
+            probe = subprocess.run([exe, "-hide_banner", "-i", url], capture_output=True, timeout=30)
+            import re
+            start = re.search(r"start: (-?[0-9.]+)", probe.stderr.decode("utf-8", "replace"))
+            film["start_time_s"] = float(start.group(1)) if start else None
+        proc = subprocess.Popen(ffmpeg_command(exe, url, film["fps"]), stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                                 stdin=subprocess.DEVNULL, bufsize=_FRAME_BYTES * 64,
                                 preexec_fn=_nice if os.name == "posix" else None)
         with _lock:
@@ -566,10 +576,10 @@ def _run_build(film: dict[str, Any], exe: str, quiet: bool = False) -> None:
             log.warning("Light track for %s failed: ffmpeg exit %s, %d of ~%d frames. %s",
                         title, code, len(track), expected, why[-500:])
             _notify("Light sync failed", f"I couldn't build the light sync for {title}, sir. "
-                    f"The film stopped reading after {len(track) // FPS // 60} minutes. Try again later.",
+                    f"The film stopped reading after {len(track) // film['fps'] // 60} minutes. Try again later.",
                     "warning")
             return
-        save(key, track, title, film.get("year"))
+        save(key, track, title, film.get("year"), source=film)
         minutes = (time.monotonic() - started) / 60
         log.info("Light track for %s: %d frames in %.1f min", title, len(track), minutes)
         if not quiet:
