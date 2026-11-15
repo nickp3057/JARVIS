@@ -120,7 +120,6 @@ Review checklist when home:
 - [ ] **Nick's top 5s** (2026-10-27): his top fives (films, albums, etc.) as standing knowledge Nick can edit.
 - [ ] NAS: allow-listed, confirm-gated "update one container" action (pull + recreate one named container from compose); per-container restart needs a new `recover_stack.sh` verb, i.e. a permission change: ask first.
 - [ ] Put the bus alert id in the APNs payload so tapping a push opens that incident report.
-- [ ] `download_stalled` incident reports should call `media_doctor.diagnose(title)` for that title (today it runs without one).
 
 ### JARVIS TV
 

@@ -135,8 +135,20 @@ def _ha_logs() -> list[str]:
     return [f'Home Assistant {_flat(line)}' for line in lines[-_LOG_LINES:]]
 
 
-def _media_sweep() -> list[str]:
-    report = media_doctor.diagnose()
+def _media_sweep(torrent_hash: str = '') -> list[str]:
+    """The media doctor's view: for a stalled download, a full trace of the
+    title behind it (library, release, indexers, client) instead of the
+    generic queue sweep; the sweep when no arr item owns the torrent."""
+    report = None
+    if torrent_hash:
+        found = media_doctor.find_queue_record(torrent_hash)
+        if found is not None:
+            service, record, label = found
+            # The library title (an episode's label is "Series — Episode", which the library doesn't know).
+            owner = record.get('movie' if service == 'radarr' else 'series') or {}
+            report = media_doctor.diagnose(str(owner.get('title') or label), service)
+    if report is None:
+        report = media_doctor.diagnose()
     lines = [str(report.get('summary', ''))]
     lines += [f"{s['stage']}: {s['detail']}" for s in report.get('steps', []) if s.get('status') == 'fail'][:6]
     lines += [f"possible fix: {f['label']}" for f in report.get('fixes', [])[:4]]
@@ -159,7 +171,7 @@ def _gather(deadline: float, alert: event_bus.Alert | None = None) -> dict[str, 
     jobs: dict[str, Callable[[], Any]] = {
         'health': nas_stack.poll_health,
         'status': nas_stack.watchdog_status if nas_stack.status_configured() else (lambda: None),
-        'media': _media_sweep,
+        'media': _media_sweep,  # traces the stalled title when the alert names a torrent (below)
         'radarr_log': lambda: _arr_logs('radarr'),
         'sonarr_log': lambda: _arr_logs('sonarr'),
         'prowlarr_log': _prowlarr_logs,
@@ -170,6 +182,7 @@ def _gather(deadline: float, alert: event_bus.Alert | None = None) -> dict[str, 
     torrent_hash = str((alert.context if alert else {}).get('torrent_hash') or '')
     if torrent_hash:
         jobs['download'] = lambda: _download_lines(torrent_hash)
+        jobs['media'] = lambda: _media_sweep(torrent_hash)
     pool = ThreadPoolExecutor(max_workers=len(jobs), thread_name_prefix='incident')
     futures = {name: pool.submit(job) for name, job in jobs.items()}
     wait(futures.values(), timeout=max(1.0, deadline - time.monotonic()))

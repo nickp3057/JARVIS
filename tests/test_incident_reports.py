@@ -152,6 +152,23 @@ class BuildTests(unittest.TestCase):
         self.assertIsNone(out['status'])
         self.assertEqual(out['media'], ['ok'])
 
+    def test_stalled_download_traces_its_own_title(self):
+        md = incident_reports.media_doctor
+        traced = {'summary': 'Dune: no seeders', 'steps': [], 'fixes': []}
+        with patch.object(md, 'find_queue_record', return_value=('radarr', {}, 'Dune (2021)')), \
+             patch.object(md, 'diagnose', return_value=traced) as diagnose:
+            self.assertEqual(incident_reports._media_sweep('abc'), ['Dune: no seeders'])
+        diagnose.assert_called_once_with('Dune (2021)', 'radarr')
+        series = {'series': {'title': 'Severance'}}
+        with patch.object(md, 'find_queue_record', return_value=('sonarr', series, 'Severance — Hello, Ms. Cobel')), \
+             patch.object(md, 'diagnose', return_value=traced) as diagnose:
+            incident_reports._media_sweep('abc')
+        diagnose.assert_called_once_with('Severance', 'sonarr')  # the show, not the episode label
+        with patch.object(md, 'find_queue_record', return_value=None), \
+             patch.object(md, 'diagnose', return_value={'summary': 'queue fine'}) as diagnose:
+            self.assertEqual(incident_reports._media_sweep('abc'), ['queue fine'])
+        diagnose.assert_called_once_with()  # hand-added torrent: the sweep
+
     def test_find_alert_rejects_an_id_from_before_a_restart(self):
         alert = event_bus.publish('arr_stack', 't', 'm', source='arr-stack')
         self.assertIs(incident_reports.find_alert(alert.id, alert.created_at), alert)
