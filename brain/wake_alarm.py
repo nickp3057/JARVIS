@@ -371,14 +371,17 @@ def wake_tv_with_backup(stop: threading.Event) -> str:
     return "ringing"
 
 
-def im_up() -> None:
+def im_up(lights: bool = True) -> None:
     """I'm up (phone, TV, or "stop" to the room voice while the backup rings):
     clears a snooze, silences the backup ring, stops the TV's music and closes
-    its wake screen, and turns on the good-morning lights in the background."""
+    its wake screen, and turns on the good-morning lights in the background.
+    ``lights=False`` is the alarm screen's "I'm awake, leave the lights":
+    everything above except the lights, so the room stays exactly as it is."""
     from brain import event_bus
     alarm_on = _recent(time.time())
     awake()
-    threading.Thread(target=_good_morning_logged, daemon=True).start()
+    if lights:
+        threading.Thread(target=_good_morning_logged, daemon=True).start()
     if alarm_on:
         # The TV pauses when the event reaches it; this covers a TV whose event
         # stream is down. MEDIA_PAUSE (not play/pause) can't start it again.

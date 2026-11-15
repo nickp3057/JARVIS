@@ -85,10 +85,28 @@ struct RoomView: View {
     @AppStorage(RoomView.favoritesKey) private var favoriteScenes = RoomView.defaultFavorites
     /// "Back to the panel" during a movie; cleared when the scene changes.
     @State private var movieDismissed = false
+    /// Nightstand or Door (`PadRole`); "" = by screen size.
+    @AppStorage(PadRole.storageKey) private var padRoleRaw = ""
+    fileprivate var padRole: PadRole { PadRole.resolve(padRoleRaw) }
+    /// The nightstand's night screen shows a dim clock and the next alarm.
+    @AppStorage(RoomView.nightClockKey) private var nightClock = true
+    static let nightClockKey = "room.nightClock"
 
-    /// Movie is on: the panel becomes a dark, quiet movie remote.
+    /// The Movie scene is on.
+    private var movieScene: Bool {
+        !RootView.isMac && model.scenes.value?.current == "scene.movie"
+    }
+
+    /// Movie is on: the nightstand iPad becomes a dark, quiet movie remote.
+    /// The door iPad stays the panel (`movieDims` still dims it).
     fileprivate var movieMode: Bool {
-        !RootView.isMac && !movieDismissed && model.scenes.value?.current == "scene.movie"
+        movieScene && !movieDismissed && padRole.hostsMovieMode
+    }
+
+    /// Movie's dim backlight: the movie remote, and the door panel for the
+    /// whole film, so neither glows while the film is on.
+    fileprivate var movieDims: Bool {
+        movieMode || (movieScene && !padRole.hostsMovieMode)
     }
 
     var body: some View {
@@ -131,6 +149,9 @@ struct RoomView: View {
                 }
             }
         }
+        // The door panel during a movie: any touch lights it back up for 20 s.
+        .simultaneousGesture(TapGesture().onEnded { movieTouches &+= 1 },
+                             including: movieDims && !movieMode ? .all : .subviews)
         // Full screen really is full: down past the home indicator's strip.
         .animation(.easeInOut(duration: 0.35), value: talking)
         .modifier(RoomVoiceHost(voice: voice, covered: covered))
@@ -168,15 +189,21 @@ struct RoomView: View {
         }
         .animation(.easeOut(duration: 0.18), value: dragger.panelID ?? dragger.activeID)
         .fullScreenCover(isPresented: $asleep) {
-            // Black; a tap is the only thing on it.
+            // Black; a tap is the only thing on it. The nightstand iPad keeps
+            // a dim grey clock (the Hub's old job), the backlight at its lowest.
             ZStack {
                 Color.black.ignoresSafeArea()
-                // Lens on while the room sleeps: a faint grey line, readable
-                // from bed, so a watcher can't go unnoticed.
-                if cameraWatching {
-                    Label("JARVIS is watching", systemImage: "eye")
-                        .font(.title2.weight(.medium))
-                        .foregroundStyle(Color(white: 0.6))
+                VStack(spacing: 18) {
+                    if padRole == .nightstand && nightClock {
+                        NightClock(alarm: wake?.enabled == true && wake?.nextAt != nil ? wakeText : nil)
+                    }
+                    // Lens on while the room sleeps: a faint grey line, readable
+                    // from bed, so a watcher can't go unnoticed.
+                    if cameraWatching {
+                        Label("JARVIS is watching", systemImage: "eye")
+                            .font(.title2.weight(.medium))
+                            .foregroundStyle(Color(white: 0.6))
+                    }
                 }
             }
             .contentShape(Rectangle())
@@ -274,8 +301,8 @@ struct RoomView: View {
                 Task { await refresh() }
             }
         }
-        .onAppear { if !RootView.isMac { UIApplication.shared.isIdleTimerDisabled = keepAwake || movieMode } }
-        .onChange(of: keepAwake) { _, on in if !RootView.isMac { UIApplication.shared.isIdleTimerDisabled = on || movieMode } }
+        .onAppear { if !RootView.isMac { UIApplication.shared.isIdleTimerDisabled = keepAwake || movieDims } }
+        .onChange(of: keepAwake) { _, on in if !RootView.isMac { UIApplication.shared.isIdleTimerDisabled = on || movieDims } }
         .modifier(movieModeEffects)
     }
 
@@ -1078,6 +1105,8 @@ private struct RoomSettingsView: View {
     @AppStorage("room.wakeLight") private var wakeLight = "light.bedroom_lights"
     @AppStorage(RoomView.autoReturnKey) private var autoReturn = true
     @AppStorage(RoomView.favoritesKey) private var favoriteScenes = RoomView.defaultFavorites
+    @AppStorage(PadRole.storageKey) private var padRoleRaw = ""
+    @AppStorage(RoomView.nightClockKey) private var nightClock = true
 
     private var favorites: [String] {
         favoriteScenes.split(separator: ",").map(String.init)
@@ -1086,10 +1115,25 @@ private struct RoomSettingsView: View {
     var body: some View {
         NavigationStack {
             Form {
+                if !RootView.isMac {
+                    Section {
+                        Picker("This iPad", selection: $padRoleRaw) {
+                            Text("Automatic (\(PadRole.automatic.title))").tag("")
+                            ForEach(PadRole.allCases) { Text($0.title).tag($0.rawValue) }
+                        }
+                    } header: {
+                        Text("Where it lives")
+                    } footer: {
+                        Text("Nightstand: the clock and alarm, room controls, movie mode and the camera's Bed angle. Door: the room panel and the camera's Door angle; during a movie it stays the panel, dimmed.")
+                    }
+                }
                 Section("Screen") {
                     Toggle("Full screen", isOn: $fullScreen)
                     Toggle("Keep screen on", isOn: $keepAwake)
                     Toggle("Dark at night when the lights are off", isOn: $nightScreen)
+                    if PadRole.resolve(padRoleRaw) == .nightstand {
+                        Toggle("Dim clock on the dark screen", isOn: $nightClock)
+                    }
                     if !wakeLightChoices.isEmpty {
                         Picker("Tap the dark screen to turn on", selection: $wakeLight) {
                             Text("Just the screen").tag("")
@@ -1153,19 +1197,20 @@ private struct MovieModeEffects: ViewModifier {
 
     func body(content: Content) -> some View {
         content
-            .onChange(of: room.movieMode) { _, on in
+            .onChange(of: room.movieDims) { _, on in
                 UIApplication.shared.isIdleTimerDisabled = room.keepAwake || on
                 if !on { room.setMovieDim(nil) }
             }
             .onChange(of: room.scenePhase) { _, phase in if phase != .active { room.setMovieDim(nil) } }
             // The lens coming on mid-movie lights the screen like a tap would.
-            .onChange(of: room.cameraWatching) { _, on in if on && room.movieMode { room.movieTouches &+= 1 } }
-            // Movie mode: a tap lights the screen fully, 20 s idle drops it to 15%.
-            .task(id: "\(room.movieMode)-\(room.movieTouches)-\(room.scenePhase == .active)") {
-                guard room.movieMode, room.scenePhase == .active else { return }
+            .onChange(of: room.cameraWatching) { _, on in if on && room.movieDims { room.movieTouches &+= 1 } }
+            // Movie (the remote on the nightstand, the panel by the door): a
+            // tap lights the screen fully, 20 s idle drops it to 15%.
+            .task(id: "\(room.movieDims)-\(room.movieTouches)-\(room.scenePhase == .active)") {
+                guard room.movieDims, room.scenePhase == .active else { return }
                 if room.movieTouches > 0 { room.setMovieDim(1.0) }
                 try? await Task.sleep(for: .seconds(20))
-                if !Task.isCancelled, room.movieMode { room.setMovieDim(0.15) }
+                if !Task.isCancelled, room.movieDims { room.setMovieDim(0.15) }
             }
     }
 }
@@ -1218,5 +1263,30 @@ private struct RoomVoiceHost: ViewModifier {
                 voice.setInlineHost(inline)
                 AnswerCardPresenter.shared.setInlineHost(inline)
             }
+    }
+}
+
+
+/// The nightstand's night-screen clock: big, thin and dim grey, with the next
+/// alarm under it. No seconds and no animation, so nothing moves in the dark.
+private struct NightClock: View {
+    let alarm: String?
+
+    var body: some View {
+        TimelineView(.everyMinute) { context in
+            VStack(spacing: 10) {
+                Text(context.date, format: .dateTime.hour().minute())
+                    .font(.system(size: 120, weight: .thin, design: .rounded))
+                    .monospacedDigit()
+                    .minimumScaleFactor(0.5)
+                    .lineLimit(1)
+                if let alarm {
+                    Label(alarm, systemImage: "alarm")
+                        .font(.title3)
+                }
+            }
+            .foregroundStyle(Color(white: 0.32))
+        }
+        .accessibilityElement(children: .combine)
     }
 }

@@ -65,7 +65,9 @@ log = get_logger(__name__)
 _JINGLE_REPLIES = {"done", "yes sir", "yes, sir", "ok", "okay"}
 # While a timer rings, any of these (with or without "Hey JARVIS") stops it.
 _GUEST_ALARM_LINE = "That alarm is Nick's to stop, I'm afraid. He can end it from his phone."
-_DISMISS = re.compile(r"\b(stop|cancel|dismiss|enough|off|okay|ok|thanks|thank you|got it|i'm up|shut up|quiet)\b")
+_DISMISS = re.compile(r"\b(stop|cancel|dismiss|enough|off|okay|ok|thanks|thank you|got it|i'm up|i'm awake|shut up|quiet)\b")
+# "I'm up, leave the lights" while the wake-up rings: stop the alarm only.
+_KEEP_LIGHTS = re.compile(r"\b(leave|keep|don'?t (?:turn|touch|change)|no)\b.*\blights?\b")
 
 
 def _streaming_enabled() -> bool:
@@ -332,10 +334,10 @@ class RoomVoice:
         except Exception:  # noqa: BLE001
             return []
 
-    def _dismiss_alarms(self) -> bool:
+    def _dismiss_alarms(self, lights: bool = True) -> bool:
         from brain import timers, wake_alarm
         if self._wake_ringing():
-            wake_alarm.im_up()  # stops the ring, lights on, TV wake screen closes
+            wake_alarm.im_up(lights=lights)  # stops the ring, lights on (unless kept), TV wake screen closes
             log.info("Dismissed the wake-up backup ring")
             room_sounds.play("done")
             voice_presence.update("idle")
@@ -521,7 +523,7 @@ class RoomVoice:
                 self._say(_GUEST_ALARM_LINE)
                 voice_presence.update("idle")
                 return False
-            self._dismiss_alarms()
+            self._dismiss_alarms(lights=not _KEEP_LIGHTS.search(text.lower()))
             voice_presence.update("idle")
             return False
 

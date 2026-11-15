@@ -52,9 +52,10 @@ final class WakeRinging: ObservableObject {
     }
 }
 
-/// Full-screen alarm: two big buttons, no animation. Both tell JARVIS Core,
-/// which tells the TV (the same calls as the notification's buttons); I'm up
-/// stops the TV's music.
+/// Full-screen alarm: three big buttons, no animation. All tell JARVIS Core,
+/// which tells the TV (the same calls as the notification's buttons). I'm up
+/// stops the TV's music and runs the good-morning lights; "I'm awake, leave
+/// the lights" stops the alarm and nothing else, so the room stays as it is.
 struct WakeRingingView: View {
     @EnvironmentObject private var settings: AppSettings
     @ObservedObject var ringing = WakeRinging.shared
@@ -81,6 +82,9 @@ struct WakeRingingView: View {
                 }
                 button("Snooze 9 min", symbol: "zzz", tint: JarvisTheme.blue) { try await $0.snoozeWakeUp() }
                 button("I'm up", symbol: "sun.max", tint: JarvisTheme.cyan) { try await $0.wakeUpAwake() }
+                button("I'm awake, leave the lights", symbol: "lightbulb.slash", tint: JarvisTheme.blue) {
+                    try await $0.wakeUpAwake(lights: false)
+                }
                 Button("Close") { ringing.close() }
                     .font(.footnote).foregroundStyle(.secondary)
             }

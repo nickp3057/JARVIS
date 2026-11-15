@@ -342,3 +342,17 @@ class WakeWordTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class KeepTheLightsPhraseTests(unittest.TestCase):
+    """While the wake-up rings, "I'm awake, leave the lights" stops only the alarm."""
+
+    def test_phrases(self) -> None:
+        from speech import room_voice
+        for said in ("i'm awake, leave the lights", "i'm up, keep the lights as they are",
+                     "stop, don't turn on the lights", "i'm up no lights"):
+            self.assertTrue(room_voice._DISMISS.search(said), said)
+            self.assertTrue(room_voice._KEEP_LIGHTS.search(said), said)
+        for said in ("i'm up", "stop", "i'm awake"):
+            self.assertTrue(room_voice._DISMISS.search(said), said)
+            self.assertFalse(room_voice._KEEP_LIGHTS.search(said), said)

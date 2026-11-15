@@ -92,15 +92,16 @@ final class PushAppDelegate: NSObject, UIApplicationDelegate, UNUserNotification
     func application(_ application: UIApplication,
                      didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
         UNUserNotificationCenter.current().delegate = self
-        // The wake-up push (category WAKE_UP) gets I'm up / Snooze buttons.
+        // The wake-up push (category WAKE_UP) gets I'm up / Snooze / leave the lights buttons.
         let awake = UNNotificationAction(identifier: Self.wakeAwake, title: "I'm up", options: [])
         let snooze = UNNotificationAction(identifier: Self.wakeSnooze, title: "Snooze 9 min", options: [])
+        let keep = UNNotificationAction(identifier: Self.wakeKeepLights, title: "I'm awake, leave the lights", options: [])
         UNUserNotificationCenter.current().setNotificationCategories([
-            UNNotificationCategory(identifier: "WAKE_UP", actions: [awake, snooze], intentIdentifiers: [])])
+            UNNotificationCategory(identifier: "WAKE_UP", actions: [awake, snooze, keep], intentIdentifiers: [])])
         return true
     }
 
-    static let wakeAwake = "WAKE_AWAKE", wakeSnooze = "WAKE_SNOOZE"
+    static let wakeAwake = "WAKE_AWAKE", wakeSnooze = "WAKE_SNOOZE", wakeKeepLights = "WAKE_KEEP_LIGHTS"
 
     /// A button on the wake-up push: tell JARVIS Core, which tells the TV.
     func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse,
@@ -116,14 +117,14 @@ final class PushAppDelegate: NSObject, UIApplicationDelegate, UNUserNotification
             }
             return
         }
-        guard action == Self.wakeAwake || action == Self.wakeSnooze else {
+        guard action == Self.wakeAwake || action == Self.wakeSnooze || action == Self.wakeKeepLights else {
             completionHandler()
             return
         }
         Task { @MainActor in
             if let client = try? JarvisAPIClient.make(from: AppSettings()) {
                 if action == Self.wakeSnooze { try? await client.snoozeWakeUp() }
-                else { try? await client.wakeUpAwake() }
+                else { try? await client.wakeUpAwake(lights: action != Self.wakeKeepLights) }
             }
             completionHandler()
         }

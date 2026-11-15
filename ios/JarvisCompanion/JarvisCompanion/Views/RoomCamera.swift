@@ -2,7 +2,9 @@ import AVFoundation
 import SwiftUI
 import UIKit
 
-/// The iPad as the room's camera. While Core says the lens is `wanted`
+/// Each iPad as one of the room's two camera angles (its `PadRole.lens`:
+/// `door` for the Air, `bed` for the nightstand mini; Nick's phone shows
+/// both). While Core says the lens is `wanted`
 /// (Nick's phone is watching and there's no kill lockout) it runs the front
 /// camera and uploads a downscaled JPEG a few times a second; otherwise the
 /// session is off and nothing is captured. Core pushes `wanted` on the home
@@ -85,7 +87,8 @@ final class RoomCameraController: NSObject, ObservableObject {
         let level = device.batteryLevel
         let charging = device.batteryState == .charging || device.batteryState == .full
         guard level >= 0, let client, reportedBattery.map({ $0 != (level, charging) }) ?? true else { return }
-        if (try? await client.reportBattery(level: level, charging: charging)) != nil {
+        if (try? await client.reportBattery(device: PadRole.current.deviceName, level: level,
+                                            charging: charging)) != nil {
             reportedBattery = (level, charging)
         }
     }
@@ -151,7 +154,7 @@ extension RoomCameraController: AVCaptureVideoDataOutputSampleBufferDelegate {
             defer { self.uploading = false }
             // A kill mid-stream returns 409: stop at once.
             guard let settings = self.settings else { return }
-            do { try await JarvisAPIClient.make(from: settings).putCameraFrame(jpeg) }
+            do { try await JarvisAPIClient.make(from: settings).putCameraFrame(jpeg, lens: PadRole.current.lens) }
             catch { self.stop() }
         }
     }

@@ -55,13 +55,27 @@ Nick saw a video on "Voice Studio" (likely VoiceStudio by debpalash, or Jamie Pi
 - **Chosen wiring, Option A:** JARVIS drives it from the **Surface's Bluetooth** with `pySwitchbot`, as an `integrations/` module + tool ("open/close the blinds", "tilt to 50%"), usable in scenes and the wake-up, mirrored to HA. Option B if A is flaky: an ESP32 ESPHome Bluetooth proxy near the window.
 - **Before building:** `bluetoothctl show` on the Surface and check BLE range. Nick asked to wait until the SwitchBot is in hand.
 
-### Nightstand iPad mini (planned 2026-11-13, waiting on hardware, nothing built)
+### Nightstand iPad mini (hardware in hand 2026-11-14)
 
-A free iPad mini from work **replaces the Google Nest Hub on the nightstand**; the iPad Air stays as the room panel by the door; the desk (Surface, mic, speaker) is ~17 ft away.
+The free iPad mini from work **replaces the Google Nest Hub on the nightstand**; the iPad Air stays by the door (the room panel and the camera's door angle); the desk (Surface, mic, speaker) is ~17 ft away. Nothing in Core still talks to the Hub except `media_player.nick_s_room_display` in `TV_MEDIA_PLAYERS` (drop it once the Hub is unplugged).
 
-- **Phase 1 (no new code):** companion app, plugged in, Guided Access on the Room screen. Check the dim night look, movie mode, camera view, scenes. List what the Hub still does that the mini doesn't (alarms, a clock readable from bed, timers).
-- **Phase 2, voice satellite:** the app listens for "Hey JARVIS" while on screen, streams the utterance to Core, plays the reply on the mini. **Arbitration:** when the desk mic and the mini both hear the wake word within ~1 s, the louder/closer one answers.
-- **Open questions:** does the mini replace the Hub's alarm? Should the door iPad also be a satellite? Wake word on iOS: openWakeWord in Core ML vs. Apple's on-device speech.
+**Built in 6.35 (277), not installed or deployed:** per-iPad role (Nightstand / Door), movie mode on the mini only (the Air dims instead), two-angle camera (phone shows Door + Bed), dim night clock on the mini, "I'm awake, leave the lights" (alarm screen, push, voice). See JARVIS.md "Nightstand iPad mini".
+
+Review checklist when home:
+- [ ] Settings › General › VPN & Device Management on the mini: if work's MDM supervises it, erase and release it before installing (it could block the app, Guided Access, camera or mic, and work could see it).
+- [ ] Install 6.35 on the mini, iPad Air and phone (`ios/install.sh`), deploy Core to the Surface (camera lenses + `lights` flag need the new Core; old iPads/phone keep working against it).
+- [ ] Mini: Room settings › Where it lives reads "Automatic (Nightstand)"; Air reads "Automatic (Door)". Keep screen on, Full screen, Guided Access, plugged in.
+- [ ] Movie scene: the mini turns into the movie remote; the Air stays the panel and dims after 20 s, a tap brightens it.
+- [ ] Phone › Room camera: both angles show (stacked in portrait, side by side in landscape), Both / Door / Bed switch, both green orbs on, Kill stops both.
+- [ ] Lights off at night: the mini's dark screen shows the dim clock and next alarm; check it's readable from bed but not a night light (colour `Color(white: 0.32)` in `NightClock`).
+- [ ] Alarm: "I'm awake, leave the lights" stops the TV music and the screen closes, lights unchanged; "I'm up" still runs good-morning lights. Say "I'm awake, leave the lights" during a backup ring.
+- [ ] Keep the Hub plugged in until the mini has woken you for a week.
+
+**Still to build:**
+- **Mini as a second mic and speaker (Nick asked 2026-11-14).** Recommended design: the mini doesn't think; while the app is on screen it streams raw 16 kHz mic audio to Core (~32 KB/s), Core's room voice runs the wake word, voice ID, STT, barge-in and hush on it like the desk mic, and the reply is sent back to the speaker of whichever device heard the wake word (reuse `remote_voice.pcm_stream`). Arbitration: both mics hear "Hey JARVIS" within ~1 s → the higher wake score/energy answers. During quiet hours replies go to the mini only, at night volume. While either speaker talks, both mics ignore the wake word (except barge-in); the mini uses iOS voice-processing I/O for its own echo. iOS only allows the mic while the app is in front (fine with Guided Access). Open: night routing (Nick to confirm), whether the Air becomes a satellite too.
+- **Alarm that rings without Core:** the mini schedules the next alarm locally from `GET /api/wake` and rings itself if Core/Wi-Fi is down at alarm time. Needed before the Hub goes.
+- Link map: the mini shows as `ipad` (`X-Jarvis-Device`); give it its own node if Nick wants to see both.
+- Open questions for Nick: portrait or landscape on the nightstand; did the Hub do anything else he'd miss (sleep sounds, photo frame, Assistant routines).
 
 ### Voice ID and "he just knows I'm talking to him"
 

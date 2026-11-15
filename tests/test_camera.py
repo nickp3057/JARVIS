@@ -50,6 +50,57 @@ class CameraStateTests(unittest.TestCase):
         self.assertIsNone(camera.get_frame(now=100 + camera.FRAME_TTL + 1))  # stale
 
 
+class TwoAngleTests(unittest.TestCase):
+    """The door iPad and the nightstand mini are two lenses on one viewer."""
+
+    def setUp(self) -> None:
+        camera.reset_for_tests()
+        self.addCleanup(camera.reset_for_tests)
+
+    def test_each_lens_keeps_its_own_frame(self) -> None:
+        camera.view_heartbeat(now=100)
+        self.assertTrue(camera.put_frame(b"door", now=100))  # no name: the door
+        self.assertTrue(camera.put_frame(b"bed", now=100, lens="bed"))
+        self.assertEqual(camera.get_frame(now=101, lens="door"), b"door")
+        self.assertEqual(camera.get_frame(now=101, lens="bed"), b"bed")
+        self.assertEqual(camera.lenses(now=101), ["door", "bed"])
+        self.assertEqual(camera.status(now=101)["lenses"], ["door", "bed"])
+
+    def test_old_phone_gets_the_door_else_any_angle(self) -> None:
+        camera.view_heartbeat(now=100)
+        camera.put_frame(b"bed", now=100, lens="bed")
+        self.assertEqual(camera.get_frame(now=101), b"bed")  # only the mini is up
+        camera.put_frame(b"door", now=101)
+        self.assertEqual(camera.get_frame(now=102), b"door")
+
+    def test_one_angle_going_stale_leaves_the_other(self) -> None:
+        camera.view_heartbeat(now=100)
+        camera.put_frame(b"door", now=100)
+        camera.view_heartbeat(now=105)
+        camera.put_frame(b"bed", now=105, lens="bed")
+        later = 100 + camera.FRAME_TTL + 1
+        self.assertEqual(camera.lenses(now=later), ["bed"])
+        self.assertIsNone(camera.get_frame(now=later, lens="door"))
+
+    def test_kill_and_leave_drop_every_angle(self) -> None:
+        camera.view_heartbeat(now=100)
+        camera.put_frame(b"door", now=100)
+        camera.put_frame(b"bed", now=100, lens="bed")
+        camera.kill(now=100)
+        self.assertEqual(camera.lenses(now=100), [])
+        self.assertFalse(camera.put_frame(b"bed", now=101, lens="bed"))
+        camera.reset_for_tests()
+        camera.view_heartbeat(now=100)
+        camera.put_frame(b"bed", now=100, lens="bed")
+        camera.leave()
+        self.assertIsNone(camera.get_frame(now=100, lens="bed"))
+
+    def test_lens_names(self) -> None:
+        self.assertEqual(camera.lens_name(None), "door")
+        self.assertEqual(camera.lens_name(" Bed "), "bed")
+        self.assertIsNone(camera.lens_name("../etc"))
+
+
 class CameraEndpointTests(unittest.TestCase):
     def setUp(self) -> None:
         camera.reset_for_tests()
@@ -66,6 +117,17 @@ class CameraEndpointTests(unittest.TestCase):
         self.assertEqual(up.status_code, 200)
         got = self.client.get("/api/camera/frame", headers=self.headers)
         self.assertEqual((got.status_code, got.content), (200, b"\xff\xd8jpeg"))
+
+    def test_two_angles_over_http(self) -> None:
+        self.client.post("/api/camera/view", headers=self.headers)
+        self.client.post("/api/camera/frame", headers=self.headers, content=b"door")
+        self.client.post("/api/camera/frame?lens=bed", headers=self.headers, content=b"bed")
+        self.assertEqual(self.client.get("/api/camera/status", headers=self.headers).json()["lenses"],
+                         ["door", "bed"])
+        self.assertEqual(self.client.get("/api/camera/frame?lens=bed", headers=self.headers).content, b"bed")
+        self.assertEqual(self.client.get("/api/camera/frame", headers=self.headers).content, b"door")
+        bad = self.client.post("/api/camera/frame?lens=..%2F", headers=self.headers, content=b"x")
+        self.assertEqual(bad.status_code, 422)
 
     def test_leave_endpoint_refuses_the_next_frame(self) -> None:
         self.client.post("/api/camera/view", headers=self.headers)

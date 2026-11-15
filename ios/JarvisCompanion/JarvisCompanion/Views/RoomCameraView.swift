@@ -1,35 +1,55 @@
 import SwiftUI
 
 /// The sentry view on Nick's phone. While it's open it heartbeats Core every
-/// ~1.5 s (so the iPad keeps the lens on) and pulls the newest frame about 8
-/// times a second. Closing it stops the heartbeat, and the lens goes off
-/// within a few seconds. A Kill button (and "Jarvis, kill the camera")
-/// locks the lens off for five minutes. Barn Door engages with a slide (so it
-/// can't fire by accident) and stands down with a tap, without leaving the view.
+/// ~1.5 s (so the iPads keep their lenses on) and pulls each angle's newest
+/// frame about 8 times a second. Two angles: the door iPad (`door`) and the
+/// nightstand mini (`bed`), side by side in landscape, stacked in portrait;
+/// tap one to make it full screen, tap again (or Both) to go back.
+/// Closing it stops the heartbeat, and the lenses go off within a few
+/// seconds. A Kill button (and "Jarvis, kill the camera") locks every lens
+/// off for five minutes. Barn Door engages with a slide (so it can't fire by
+/// accident) and stands down with a tap, without leaving the view.
 struct RoomCameraView: View {
     @EnvironmentObject private var settings: AppSettings
     @Environment(\.dismiss) private var dismiss
-    @State private var frame: UIImage?
+    /// Newest frame per angle ("door", "bed").
+    @State private var frames: [String: UIImage] = [:]
     @State private var status: CameraStatus?
+    /// nil = every angle; else just that one, full screen.
+    @State private var solo: String?
     @State private var barnDoorOn = JarvisPalette.current == .barnDoor
     @State private var message: String?
 
     private var client: JarvisAPIClient? { try? JarvisAPIClient.make(from: settings) }
 
+    /// The angles to draw: Core's live list (door first), or the door alone
+    /// against a Core that doesn't name them.
+    private var angles: [String] {
+        let live = status?.lenses ?? (frames.isEmpty ? [] : ["door"])
+        if let solo, live.contains(solo) { return [solo] }
+        return live
+    }
+
     var body: some View {
         ZStack {
             Color.black.ignoresSafeArea()
 
-            if let frame {
-                Image(uiImage: frame)
-                    .resizable()
-                    .aspectRatio(contentMode: .fit)
-                    .ignoresSafeArea()
-            } else {
+            if angles.isEmpty || status?.killed == true {
                 VStack(spacing: 14) {
                     ProgressView().tint(.white)
                     Text(waitingText).font(.subheadline).foregroundStyle(.white.opacity(0.7))
                 }
+            } else {
+                GeometryReader { geo in
+                    let wide = geo.size.width > geo.size.height
+                    let layout = wide ? AnyLayout(HStackLayout(spacing: 4)) : AnyLayout(VStackLayout(spacing: 4))
+                    layout {
+                        ForEach(angles, id: \.self) { angle in
+                            angleView(angle, labelled: (status?.lenses?.count ?? 1) > 1)
+                        }
+                    }
+                }
+                .ignoresSafeArea()
             }
 
             VStack {
@@ -39,6 +59,8 @@ struct RoomCameraView: View {
                             .font(.headline).padding(.horizontal, 16).padding(.vertical, 10)
                             .background(.ultraThinMaterial, in: .capsule)
                     }
+                    Spacer()
+                    if (status?.lenses?.count ?? 0) > 1 { anglePicker }
                     Spacer()
                     if status?.viewing == true {
                         Label("LIVE", systemImage: "dot.radiowaves.left.and.right")
@@ -55,9 +77,59 @@ struct RoomCameraView: View {
             .tint(.white)
         }
         .task { await drive() }
-        // Closing the view tells Core at once, so the iPad's orb goes out
+        // Closing the view tells Core at once, so the iPads' orbs go out
         // within a frame instead of after the heartbeat lapses.
         .onDisappear { let c = client; Task { _ = try? await c?.cameraLeave() } }
+    }
+
+    private static func title(_ lens: String) -> String {
+        switch lens {
+        case "door": return "Door"
+        case "bed": return "Bed"
+        default: return lens.capitalized
+        }
+    }
+
+    /// Both / Door / Bed.
+    private var anglePicker: some View {
+        HStack(spacing: 2) {
+            ForEach([nil] + (status?.lenses ?? []).map(Optional.some), id: \.self) { lens in
+                Button { withAnimation(.easeInOut(duration: 0.25)) { solo = lens } } label: {
+                    Text(lens.map(Self.title) ?? "Both")
+                        .font(.subheadline.weight(.semibold))
+                        .padding(.horizontal, 12).padding(.vertical, 8)
+                        .background(solo == lens ? Color.white.opacity(0.25) : .clear, in: .capsule)
+                }
+            }
+        }
+        .padding(3)
+        .background(.ultraThinMaterial, in: .capsule)
+    }
+
+    /// One angle, fitted into its half (or the whole screen when it's solo).
+    private func angleView(_ lens: String, labelled: Bool) -> some View {
+        ZStack(alignment: .bottomLeading) {
+            Color.black
+            if let image = frames[lens] {
+                Image(uiImage: image).resizable().aspectRatio(contentMode: .fit)
+            } else {
+                ProgressView().tint(.white).frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+            if labelled {
+                Text(Self.title(lens))
+                    .font(.caption.weight(.bold))
+                    .padding(.horizontal, 10).padding(.vertical, 5)
+                    .background(.ultraThinMaterial, in: .capsule)
+                    .padding(10)
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .contentShape(Rectangle())
+        .onTapGesture {
+            guard (status?.lenses?.count ?? 1) > 1 else { return }
+            withAnimation(.easeInOut(duration: 0.25)) { solo = solo == nil ? lens : nil }
+        }
+        .accessibilityLabel("\(Self.title(lens)) camera")
     }
 
     private var waitingText: String {
@@ -97,7 +169,7 @@ struct RoomCameraView: View {
         }
     }
 
-    /// Heartbeat + frame pull, until the view closes.
+    /// Heartbeat + frame pull (every live angle at once), until the view closes.
     private func drive() async {
         guard let client else { return }
         var lastBeat = Date.distantPast
@@ -108,9 +180,23 @@ struct RoomCameraView: View {
                 status = try? await client.cameraHeartbeat()
             }
             if status?.killed == true {
-                frame = nil
-            } else if let data = try? await client.cameraFrame(), let image = UIImage(data: data) {
-                frame = image
+                frames = [:]
+            } else {
+                // A Core before 6.34 names no angles: pull its one frame as the door's.
+                let wanted: [String?] = status?.lenses.map { $0.map(Optional.some) } ?? [nil]
+                let pulled = await withTaskGroup(of: (String, Data?).self) { group in
+                    for lens in wanted {
+                        group.addTask { (lens ?? "door", try? await client.cameraFrame(lens: lens)) }
+                    }
+                    var out: [(String, Data?)] = []
+                    for await result in group { out.append(result) }
+                    return out
+                }
+                var next = frames.filter { lens, _ in wanted.contains(where: { ($0 ?? "door") == lens }) }
+                for (lens, data) in pulled {
+                    if let data, let image = UIImage(data: data) { next[lens] = image }
+                }
+                frames = next
             }
             try? await Task.sleep(for: .milliseconds(120))
         }
@@ -118,7 +204,7 @@ struct RoomCameraView: View {
 
     private func kill() async {
         status = try? await client?.cameraKill()
-        frame = nil
+        frames = [:]
         message = "Camera off for 5 minutes. Ask JARVIS why it was on."
     }
 

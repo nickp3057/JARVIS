@@ -307,6 +307,22 @@ class WakeBackupRingTests(unittest.TestCase):
                 wake_alarm.im_up()
             self.assertIsNone(wake_alarm.ringing_state(now=1030.0))
 
+    def test_im_awake_leave_the_lights_skips_good_morning(self) -> None:
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.addCleanup(wake_alarm._fired.clear)
+        with patch.object(wake_alarm, "_FILE", Path(tmp.name) / "w.json"), \
+                patch.object(wake_alarm, "_good_morning_logged") as lights, \
+                patch.object(wake_alarm, "_pause_tv") as pause, patch("brain.event_bus.publish"):
+            wake_alarm.alarm_fired("x")
+            wake_alarm.im_up(lights=False)
+            __import__("time").sleep(0.2)
+            lights.assert_not_called()
+            pause.assert_called_once()  # the alarm itself (the TV's music) still stops
+            wake_alarm.im_up()
+            __import__("time").sleep(0.2)
+            lights.assert_called_once()
+
     def test_im_up_pauses_the_tv_only_after_an_alarm(self) -> None:
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)

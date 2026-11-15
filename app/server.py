@@ -950,23 +950,35 @@ def camera_kill(_: None = Depends(authorize)) -> dict[str, object]:
     return camera.status()
 
 
-@app.post("/api/camera/frame")
-async def camera_put_frame(request: Request, _: None = Depends(authorize)) -> dict[str, object]:
-    """The iPad's latest JPEG (raw body). Refused (409) during a kill."""
+def _camera_lens(raw: str | None) -> str:
     from brain import camera
+    name = camera.lens_name(raw)
+    if name is None:
+        raise HTTPException(status_code=422, detail="bad lens name")
+    return name
+
+
+@app.post("/api/camera/frame")
+async def camera_put_frame(request: Request, lens: str | None = None,
+                           _: None = Depends(authorize)) -> dict[str, object]:
+    """An iPad's latest JPEG (raw body), under its lens name (``?lens=bed``
+    for the nightstand mini; none = ``door``). Refused (409) during a kill."""
+    from brain import camera
+    name = _camera_lens(lens)
     data = await request.body()
     if not data:
         raise HTTPException(status_code=400, detail="empty frame")
-    if not camera.put_frame(data):
+    if not camera.put_frame(data, lens=name):
         raise HTTPException(status_code=409, detail="camera is off")
     return {"ok": True}
 
 
 @app.get("/api/camera/frame")
-def camera_get_frame(_: None = Depends(authorize)) -> Response:
-    """The phone pulls the newest frame; 404 when the lens isn't sending."""
+def camera_get_frame(lens: str | None = None, _: None = Depends(authorize)) -> Response:
+    """The phone pulls one angle's newest frame (``?lens=door`` / ``bed``;
+    none = the door's, else any); 404 when that lens isn't sending."""
     from brain import camera
-    data = camera.get_frame()
+    data = camera.get_frame(lens=_camera_lens(lens) if lens else None)
     if data is None:
         raise HTTPException(status_code=404, detail="no frame")
     return Response(content=data, media_type="image/jpeg",
@@ -1008,13 +1020,21 @@ def wake_snooze(_: None = Depends(authorize)) -> dict[str, object]:
     return {"until": at.timestamp()}
 
 
+class WakeAwakeRequest(BaseModel):
+    # False: "I'm awake, leave the lights": the alarm stops, the room stays as it is.
+    lights: bool = True
+
+
 @app.post("/api/wake/awake")
-def wake_awake(_: None = Depends(require_scope("wake:write"))) -> dict[str, object]:
-    """I'm up (phone or TV): the TV's wake screen closes, its music stops, and
-    the good-morning lights come on (``wake_alarm.good_morning``)."""
+def wake_awake(payload: WakeAwakeRequest | None = None,
+               _: None = Depends(require_scope("wake:write"))) -> dict[str, object]:
+    """I'm up (phone, iPad or TV): the TV's wake screen closes, its music
+    stops, and the good-morning lights come on (``wake_alarm.good_morning``).
+    ``{"lights": false}`` stops the alarm and touches nothing else."""
     from brain import wake_alarm
-    wake_alarm.im_up()
-    return {"ok": True}
+    lights = payload.lights if payload is not None else True
+    wake_alarm.im_up(lights=lights)
+    return {"ok": True, "lights": lights}
 
 
 # --- What JARVIS knows: the Obsidian vault, read-only (brain/knowledge_vault.py)

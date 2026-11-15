@@ -121,7 +121,7 @@ Check these on the phone first. Some of the "weird" may already be gone.
 
 - Home tab: a **Scenes** card under the tiles, every saved HA scene as a
   tile, the last one run lit (like picking a Focus). Tap runs it.
-- Tapping the wake-up push opens `WakeRingingView` (Snooze / I'm up).
+- Tapping the wake-up push opens `WakeRingingView` (Snooze / I'm up / I'm awake, leave the lights — 6.35).
 - iPad: a **Room** tab (default on iPad) — clock, next alarm/event, TV
   remote, keep-screen-on, big device tiles, scenes. No camera/security yet
   (Nick, 2026-10-28). 4.8 adds long-press brightness/colour (`LightSheet`)
@@ -134,6 +134,9 @@ Check these on the phone first. Some of the "weird" may already be gone.
   5.31: the hold expands into a big level bar; full screen locks the iPad to Room.
   5.32: drag without holding (landscape); hold-and-release opens the same big
   panel to use (`LevelPanel`, colours too); Barn Door orb = the TV's red-alert reactor.
+  6.35: two iPads, two roles (`PadRole`): the nightstand mini gets movie mode,
+  a dim night clock and the camera's Bed angle; the door Air keeps the panel
+  (dimmed during movies) and the Door angle. The phone's camera view shows both.
   5.33: polling trimmed: no light/theme polls while the home stream is up, Room
   skips Hub-only sections, portfolio every 5 s only in market hours.
 - Next: an iOS Home Screen / Control Center widget for scenes (needs a

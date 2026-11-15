@@ -752,10 +752,11 @@ struct JarvisAPIClient {
     }
 
     /// The wall iPad's battery, so Core can warn the phone when it runs low.
-    func reportBattery(level: Float, charging: Bool) async throws {
-        struct Body: Encodable { let device = "iPad"; let level: Float; let charging: Bool }
+    func reportBattery(device: String, level: Float, charging: Bool) async throws {
+        struct Body: Encodable { let device: String; let level: Float; let charging: Bool }
         struct Reply: Decodable { let ok: Bool }
-        _ = try await postJSON(Reply.self, path: "api/device/battery", body: Body(level: level, charging: charging))
+        _ = try await postJSON(Reply.self, path: "api/device/battery",
+                               body: Body(device: device, level: level, charging: charging))
     }
 
     /// Lock the lens off for five minutes, from the phone's Kill button.
@@ -764,18 +765,30 @@ struct JarvisAPIClient {
         try await postEmpty(CameraStatus.self, path: "api/camera/kill")
     }
 
-    /// The iPad uploads one JPEG frame (raw body). Throws on a kill (409).
-    func putCameraFrame(_ jpeg: Data) async throws {
-        var r = request(path: "api/camera/frame", method: "POST")
+    /// `api/camera/frame?lens=<lens>`: each iPad is its own angle (Core's
+    /// `brain/camera.py`), `door` for the iPad Air, `bed` for the mini.
+    private func cameraFrameRequest(lens: String?, method: String = "GET") -> URLRequest {
+        var r = request(path: "api/camera/frame", method: method)
+        if let lens, let url = r.url, var components = URLComponents(url: url, resolvingAgainstBaseURL: false) {
+            components.queryItems = [URLQueryItem(name: "lens", value: lens)]
+            r.url = components.url ?? url
+        }
+        return r
+    }
+
+    /// An iPad uploads one JPEG frame (raw body) as its lens. Throws on a kill (409).
+    func putCameraFrame(_ jpeg: Data, lens: String) async throws {
+        var r = cameraFrameRequest(lens: lens, method: "POST")
         r.setValue("image/jpeg", forHTTPHeaderField: "Content-Type")
         r.httpBody = jpeg
         let (data, response) = try await session.upload(for: r, from: jpeg)
         _ = try validate(response, data: data)
     }
 
-    /// The phone pulls the newest frame; nil when the lens isn't sending (404).
-    func cameraFrame() async throws -> Data? {
-        let r = request(path: "api/camera/frame")
+    /// The phone pulls one angle's newest frame (nil = the door's, else any);
+    /// nil when that lens isn't sending (404).
+    func cameraFrame(lens: String? = nil) async throws -> Data? {
+        let r = cameraFrameRequest(lens: lens)
         let (data, response) = try await session.data(for: r)
         guard let http = response as? HTTPURLResponse else { throw JarvisAPIError.malformedResponse(nil) }
         if http.statusCode == 404 { return nil }
@@ -857,9 +870,12 @@ struct JarvisAPIClient {
         _ = try await postJSON(Until.self, path: "api/wake/snooze", body: EmptyBody())
     }
 
-    func wakeUpAwake() async throws {
+    /// I'm up. `lights: false` is "I'm awake, leave the lights": the alarm
+    /// stops and the room stays exactly as it is.
+    func wakeUpAwake(lights: Bool = true) async throws {
+        struct Body: Encodable { let lights: Bool }
         struct Done: Decodable { let ok: Bool }
-        _ = try await postJSON(Done.self, path: "api/wake/awake", body: EmptyBody())
+        _ = try await postJSON(Done.self, path: "api/wake/awake", body: Body(lights: lights))
     }
 
     func saveWakeSchedule(_ draft: WakeScheduleDraft) async throws -> WakeSchedule {

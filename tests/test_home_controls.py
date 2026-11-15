@@ -205,8 +205,12 @@ class EndpointTests(unittest.TestCase):
         from brain import wake_alarm
         with patch.object(wake_alarm, "im_up") as im_up:
             response = self.client.post("/api/wake/awake", headers=self.headers)
-        self.assertEqual(response.json(), {"ok": True})
-        im_up.assert_called_once()
+        self.assertEqual(response.json(), {"ok": True, "lights": True})
+        im_up.assert_called_once_with(lights=True)
+        with patch.object(wake_alarm, "im_up") as im_up:  # "I'm awake, leave the lights"
+            kept = self.client.post("/api/wake/awake", headers=self.headers, json={"lights": False})
+        self.assertEqual(kept.json(), {"ok": True, "lights": False})
+        im_up.assert_called_once_with(lights=False)
 
         class InlineThread:  # runs the target right away, so nothing races the asserts
             def __init__(self, target, daemon=None, **_):  # noqa: ANN001

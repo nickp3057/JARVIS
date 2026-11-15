@@ -397,9 +397,11 @@ struct CameraStatus: Decodable, Equatable {
     let killSecondsLeft: Int
     /// A fresh frame is available to pull.
     let hasFrame: Bool
+    /// The angles sending right now ("door", "bed"); nil from a Core before 6.34.
+    var lenses: [String]? = nil
 
     enum CodingKeys: String, CodingKey {
-        case wanted, viewing, killed
+        case wanted, viewing, killed, lenses
         case killSecondsLeft = "kill_seconds_left"
         case hasFrame = "has_frame"
     }
