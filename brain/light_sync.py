@@ -523,6 +523,7 @@ class _Session:
     title: str
     player: Player
     paused_follow: bool = False
+    fan_was_on: bool = False  # the fan ring was on before the sync turned it off
     started_at: float = field(default_factory=time.time)
 
 
@@ -652,6 +653,7 @@ class LightSync:
                         now=self.now, on_exit=self._player_exited, lead_ms=self.effective_offset(key))
         session = _Session(key, title, player)
         session.paused_follow = _pause_follow()
+        session.fan_was_on = _fan_off()  # Nick: the fan ring stays dark while the lights sync
         self.session = session
         player.start()
         log.info("Light sync on: %s (%s)", title, pb.source)
@@ -674,7 +676,9 @@ class LightSync:
         if session.paused_follow and not _barn_door_engaged():
             _resume_follow()  # Barn Door turns it back on at its own stand-down
         if restore and self.movie_mode:
-            _restore_movie_scene()
+            _restore_movie_scene()  # the Movie scene sets the fan ring itself
+        elif restore and session.fan_was_on and not _barn_door_engaged():
+            _fan_on()
         log.info("Light sync off: %s", session.title)
         self.bump()
 
@@ -944,6 +948,8 @@ class LightSync:
             session.player.stop(wait=1.0)
             if session.paused_follow and not _barn_door_engaged():
                 _resume_follow()
+            if session.fan_was_on and not _barn_door_engaged():
+                _fan_on()
 
     def status(self) -> dict[str, Any]:
         state = load_state()
@@ -1016,6 +1022,37 @@ def _pause_follow() -> bool:
     except Exception:  # noqa: BLE001
         log.warning("Light sync couldn't pause the fan's follow automation", exc_info=True)
         return False
+
+
+_FAN = "light.nicks_fan"
+
+
+def _fan_off() -> bool:
+    """Turn the fan ring off for the sync; True if it was on (so a stop
+    outside movie mode turns it back on; in movie mode the scene does)."""
+    if _barn_door_engaged():
+        return False
+    try:
+        from brain.protocols import _is_on
+        from integrations import home_assistant
+        was_on = _is_on(_FAN)
+        if was_on:
+            home_assistant.call_service("light", "turn_off", _FAN)
+        return was_on
+    except Exception:  # noqa: BLE001
+        log.warning("Light sync couldn't turn the fan ring off", exc_info=True)
+        return False
+
+
+def _fan_on() -> None:
+    """Back on as it was (HA keeps its last colour; the follow automation,
+    already resumed, gives it the strip's rainbow). Never sets a colour, so it
+    can't come back white."""
+    try:
+        from integrations import home_assistant
+        home_assistant.call_service("light", "turn_on", _FAN)
+    except Exception:  # noqa: BLE001
+        log.warning("Light sync couldn't turn the fan ring back on", exc_info=True)
 
 
 def _resume_follow() -> None:

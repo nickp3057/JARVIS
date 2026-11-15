@@ -457,11 +457,15 @@ class ControllerBase(TrackStoreDir):
         light_tracks.save("1", np.zeros((100, 3), np.uint8), "Up")
         self.restored = []
         self.follow = []
+        self.fan = []
+        self.fan_was_on = True
         self.barn = False
         for p in (patch.object(light_sync, "Player", FakePlayer),
                   patch.object(light_sync, "_restore_movie_scene", side_effect=lambda: self.restored.append(1)),
                   patch.object(light_sync, "_pause_follow", side_effect=lambda: self.follow.append("off") or True),
                   patch.object(light_sync, "_resume_follow", side_effect=lambda: self.follow.append("on")),
+                  patch.object(light_sync, "_fan_off", side_effect=lambda: self.fan.append("off") or self.fan_was_on),
+                  patch.object(light_sync, "_fan_on", side_effect=lambda: self.fan.append("on")),
                   patch.object(light_sync, "_barn_door_engaged", side_effect=lambda: self.barn),
                   patch.object(light_sync, "_movie_mode", return_value=False),
                   patch.dict(os.environ, {"LIGHT_SYNC": "1", "LIGHT_SYNC_LEAD_MS": "", "LIGHT_SYNC_TEST_TITLE": ""})):
@@ -550,6 +554,36 @@ class ControllerTests(ControllerBase):
         self.tick(movie=False)
         self.assertFalse(self.sync.running)
         self.assertIsNone(self.sync.manual_key)
+
+    def test_fan_ring_goes_dark_and_the_movie_scene_brings_it_back(self) -> None:
+        self.play()
+        self.tick()
+        self.assertEqual(self.fan, ["off"])
+        self.play(state="stopped")
+        self.tick()
+        self.assertEqual(self.fan, ["off"])  # the Movie scene sets the ring itself
+        self.assertEqual(self.restored, [1])
+
+    def test_fan_ring_comes_back_after_a_sync_outside_movie_mode(self) -> None:
+        self.play()
+        self.sync.start()
+        self.assertEqual(self.fan, ["off"])
+        self.sync.stop()
+        self.assertEqual(self.fan, ["off", "on"])
+
+    def test_fan_ring_that_was_off_stays_off(self) -> None:
+        self.fan_was_on = False
+        self.play()
+        self.sync.start()
+        self.sync.stop()
+        self.assertEqual(self.fan, ["off"])
+
+    def test_fan_ring_left_to_barn_door(self) -> None:
+        self.play()
+        self.tick()
+        self.barn = True
+        self.sync.release_for_barn_door()
+        self.assertEqual(self.fan, ["off"])
 
     def test_manual_start_refusals(self) -> None:
         with patch.object(self.sync, "poll_plex"):

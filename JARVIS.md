@@ -2946,7 +2946,11 @@ prototype in `~/Developer/projects/light-sync` (2026-11-09).
   outside movie mode, until that film ends; a manual stop holds for that film.
   While syncing, HA's `automation.fan_light_follows_strip` is paused (as Barn
   Door does) and turned back on afterwards (unless Barn Door is up; its
-  stand-down does it). Core shutting down releases the strips.
+  stand-down does it). The fan ring (`light.nicks_fan`) is turned off for the
+  sync (Nick, 2026-11-15); afterwards the Movie scene sets it again, or, when
+  the sync ran outside movie mode and the ring had been on, it is turned back
+  on with no colour given (never white). Core shutting down releases the
+  strips.
 - **Position**, best first: JARVIS TV's report (`POST /api/tv/playback`,
   scope `playback:write`: Plex's media session, every second while playing,
   every 5 s paused, on every change; fresh for 3 s, 15 s when paused), else
