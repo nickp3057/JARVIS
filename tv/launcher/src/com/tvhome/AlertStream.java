@@ -99,6 +99,10 @@ final class AlertStream {
      * ids are their own series, so they're remembered apart from alerts.
      */
     private static void card(Context c, JSONObject card) {
+        if ("tv_play".equals(card.optString("card"))) {
+            play(c, card);
+            return;
+        }
         if (!AnswerCard.known(card.optString("card"))) return;
         long ttl = (long) (card.optDouble("ttl_s", 60) * 1000);
         long age = System.currentTimeMillis() - (long) (card.optDouble("created_at") * 1000);
@@ -110,6 +114,25 @@ final class AlertStream {
         Log.i(TAG, "card " + card.optLong("id") + " [" + card.optString("card") + "] age=" + age / 1000 + "s");
         // A skewed clock still gets a few seconds on screen.
         AnswerCard.show(c, Jarvis.theme(c), card, Math.max(8_000, ttl - Math.max(0, age)));
+    }
+
+    /**
+     * Core asks the TV to play a Plex title (light sync calibration's test
+     * clip): once, while fresh, screen on or off.
+     */
+    private static void play(Context c, JSONObject card) {
+        long ttl = (long) (card.optDouble("ttl_s", 20) * 1000);
+        long age = System.currentTimeMillis() - (long) (card.optDouble("created_at") * 1000);
+        if (age >= ttl) return;
+        synchronized (SEEN) {
+            if (!SEEN.add("card" + card.optLong("id") + "@" + card.optDouble("created_at"))) return;
+        }
+        JSONObject data = card.optJSONObject("data");
+        if (data == null || data.optString("rating_key").isEmpty()) return;
+        Log.i(TAG, "play " + data.optString("title") + " for Core");
+        String type = data.optString("type", "movie");
+        String title = data.optString("title"), key = data.optString("rating_key");
+        new Thread(() -> PlexWatch.playFresh(c, type, title, key), "tv-play").start();
     }
 
     private static void handle(Context c, JSONObject alert) {

@@ -1084,7 +1084,7 @@ JARVIS_SERVER_PORT=8000
 WAKE_UP_LIGHTS=1            # I'm up (phone or TV) turns on every light (strip segments skipped); 0 = off
 ROOM_VOICE=0                # 1 = "Hey JARVIS" on the Optiplex mic/speakers inside Core (speech/room_voice.py)
 SATELLITE_ARBITRATION_MS=350  # when the desk mic and an iPad satellite both hear "Hey JARVIS", wait this long and let the higher score answer
-SATELLITE_SYNC_MS=0         # desk vs iPad speakers: positive = the desk waits that many ms, negative = the iPads wait
+SATELLITE_SYNC_MS=60        # desk vs iPad speakers: positive = the desk waits that many ms, negative = the iPads wait (raise it if the iPads still trail)
 DESK_BUFFER_MS=100          # the desk aplay buffer when iPads play along (aplay's default ~500 ms made the desk lag)
 AUDIO_OUTPUT_DEVICE=        # ALSA device for aplay; Optiplex: plughw:1,0 (card 0 is the USB mic, no output)
 MIC_DEVICE=CMTECK           # sounddevice input name/index. Set it: left empty, Core's room voice opened the onboard jack (hw:1,0). Rates it refuses are converted (48 kHz -> 16 kHz)
@@ -1330,6 +1330,7 @@ there, so edit files with a `sudo python3` one-shot or vi.
 
 ## Recently Shipped
 
+- **Speaker sync nudge, bolder mini clocks (2026-11-15, companion 6.48 / 290).** The iPads still trailed the desk by a hair (voice and the listening sound), so `SATELLITE_SYNC_MS` now defaults to 60 (the desk waits 60 ms); raise it if the iPads still trail, lower it if the desk does. The nightstand clocks are heavier: `NightstandTime` takes a `weight` (semibold on the panel, was ultra-light; heavy on the dark screen, with a semibold alarm line under it).
 - **Speaker sync, movie on the mini (2026-11-15, companion 6.41 / 283).** Live test: both speakers talked, but the laptop lagged the iPad. aplay's default buffer (about half a second, filled before it starts) plus the old 150 ms desk hold-back; the desk's aplay now runs `--buffer-time` `DESK_BUFFER_MS` (100) and `SATELLITE_SYNC_MS` defaults to 0 and works both ways (positive: the desk waits, negative: the iPads get leading silence). Nightstand movie: the movie remote no longer dims the mini (`movieDimsScreen`: only the door panel dims during a film); with the Movie scene on and "Back to panel" pressed, the bar's Movie button becomes an amber **Movie controls** that brings the remote back; the dark screen stays away for the whole Movie scene.
 - **Every speaker at once, matched loudness (2026-11-15, companion 6.40 / 282).** Nick's first live test: the mini heard him and turned the fan on, but played nothing, and its connection dropped as soon as a reply started (iOS voice processing reshuffled the audio). Now whatever the room voice says or plays goes to the desk speaker and every satellite together (`satellites.play_everywhere`, `say_everywhere`, `say_stream_everywhere`, `sound_everywhere`): synthesized once (`remote_voice.pcm_stream`), teed to a raw `aplay` on the desk (registered as TTS's current player, so `stop_playback` cuts it) and to each iPad, the desk held back `SATELLITE_SYNC_MS` (150) for the iPad's network and buffer delay. Without satellites the desk keeps its old path (`tts.speak`, cache and all). Loudness: `output_gain(level)` gives the iPad the desk's level on ALSA's mapped curve (60 dB wide, amplitude = (level/10)^3; `ROOM_VOLUME_MAPPED=0`: level/10), night level at night, `ROOM_ALARM_VOLUME` for the backup ring. App: no voice processing (mode `.default`); Room settings › Mic and speaker › Match the desk trims the iPad 0.5-2x by ear (keep the iPad's volume up); before hanging up on an error the iPad sends `{"type":"bye","reason":…}` and Core logs it, and Core now logs why a satellite socket ended at INFO. Which mic heard the wake word still decides where Core listens for the rest of the exchange.
 - **Nightstand redo + satellite fix (2026-11-15, companion 6.39 / 281).** Nick's notes on 6.37: the nightstand now uses the shared theme and backdrop like the phone and the door iPad (no own palette). Layout sideways: JARVIS big on the left (grows and glows while talking), the clock centred on the right with the date, weather, wake-up pill and next event (the conversation takes that side while JARVIS talks), and a bottom bar: a wide **Goodnight**, then **Room** (`NightstandRoomSheet`: every scene, light and switch, tap to toggle, hold a light for its `LightSheet`, plus JARVIS volume), Movie, Remote, TV power, menu. Peace lives on the Room page. The dark screen is unchanged. Satellite: the mini dropped every 20 s because an audio configuration change right after start marked the engine failed and the next message (Core's ping) ended the connection; `SatelliteAudio.resume()` now restarts the engine in place after a configuration change or an ended interruption and only a failed restart reconnects.
@@ -2996,9 +2997,14 @@ prototype in `~/Developer/projects/light-sync` (2026-11-09).
   .env default (`LIGHT_SYNC_LAMP_LEAD_MS` 150), so the calibration panel has
   Lamp earlier / Lamp later (±25 ms, 0-1500) saved as `lamp_lead_ms` in
   `memory/light_sync.json` and read live by the player; `POST /api/lightsync
-  {lamp_nudge_ms}`. Known bug: calibration's `tv_remote.play_plex` deep link
-  is ignored while Plex is already open on its home screen (Nick started the
-  clip by hand); fix by sending Home first.
+  {lamp_nudge_ms}`.
+- **Calibration starts the clip through JARVIS TV** (2026-11-15, TV 9.8):
+  HA's `tv_remote.play_plex` deep link was ignored while Plex was open on its
+  home screen (Nick had to start the clip by hand). `_play_calibration` now
+  publishes a `tv_play` answer card (`event_bus.publish_card`, 20 s TTL; the
+  phone ignores unknown cards); the TV launcher force-stops Plex, opens the
+  title and presses Watch. If the clip isn't on the TV after `TV_FALLBACK_S`
+  (15 s), Core sends the old HA deep link once; 90 s still gives up.
 - **Lamp is a bulb (H6004)** (2026-11-15): it can't stream like the strips,
   and its firmware fades every `colorwc` (~0.1 s up, ~0.4 s down; the LAN API
   has no transition setting), so it will always look softer than the strips.

@@ -1034,15 +1034,46 @@ class CalibrationTests(ControllerBase):
     def setUp(self) -> None:
         super().setUp()
         self.play_plex = Mock(return_value=(True, "ok"))
+        self.card = Mock()
         self.stop_tv = Mock(return_value=(True, "ok"))
         self.find = Mock(return_value=(True, dict(self.TEST)))
         for p in (patch("integrations.plex.is_configured", return_value=True),
                   patch("integrations.plex.find_movie", self.find),
                   patch("integrations.plex.server_id", return_value="srv"),
                   patch("integrations.tv_remote.play_plex", self.play_plex),
+                  patch("brain.event_bus.publish_card", self.card),
                   patch("integrations.tv_remote.stop_playback", self.stop_tv)):
             p.start()
             self.addCleanup(p.stop)
+
+    def assert_asked_tv(self) -> None:
+        self.card.assert_called_once()
+        args, kwargs = self.card.call_args
+        self.assertEqual(args[0], "tv_play")
+        self.assertEqual(args[2]["rating_key"], "50")
+        self.play_plex.assert_not_called()  # JARVIS TV first
+
+    def test_ha_deep_link_only_when_the_tv_doesnt_start_the_clip(self) -> None:
+        light_tracks.save("50", np.zeros((1800, 3), np.uint8), "Light Sync Test")
+        self.assertTrue(self.sync.calibrate()[0])
+        self.assert_asked_tv()
+        self.t += light_sync.TV_FALLBACK_S - 1
+        self.tick(movie=False)
+        self.play_plex.assert_not_called()
+        self.t += 2
+        self.tick(movie=False)
+        self.tick(movie=False)
+        self.play_plex.assert_called_once_with("50", "srv")
+        self.assertIsNotNone(self.sync.calibration)  # still waiting for the clip
+        # When the TV does start it, there's no fallback at all.
+        self.sync.end_calibration()
+        self.play_plex.reset_mock()
+        self.sync.calibrate()
+        self.play(key="50", title="Light Sync Test")
+        self.tick(movie=False)
+        self.t += light_sync.TV_FALLBACK_S + 1
+        self.tick(movie=False)
+        self.play_plex.assert_not_called()
 
     def test_builds_the_test_track_first_then_plays_and_syncs_in_any_scene(self) -> None:
         with patch.object(light_tracks, "start_build", return_value=(True, "Building")) as build, \
@@ -1053,12 +1084,12 @@ class CalibrationTests(ControllerBase):
             build.assert_called_once_with(self.TEST, front=True, quiet=True)
             self.find.assert_called_once_with("Light Sync Test")
             self.tick(movie=False)
-            self.play_plex.assert_not_called()
+            self.card.assert_not_called()
             self.assertEqual(self.sync.status()["calibrating"]["phase"], "building")
         light_tracks.save("50", np.zeros((1800, 3), np.uint8), "Light Sync Test")
         self.sync.set_auto(False)  # calibration is a manual start: auto doesn't matter
         self.tick(movie=False)  # Game Time, say
-        self.play_plex.assert_called_once_with("50", "srv")
+        self.assert_asked_tv()
         self.play(key="50", title="Light Sync Test")
         self.tick(movie=False)
         self.assertTrue(self.sync.running)
@@ -1087,7 +1118,7 @@ class CalibrationTests(ControllerBase):
         self.assertTrue(ok, said)
         self.assertIn("Calibrating", said)
         self.assertTrue(FakePlayer.instances[0].stopped)  # Up let go for the clip
-        self.play_plex.assert_called_once_with("50", "srv")
+        self.assert_asked_tv()
         self.play(key="50", title="Light Sync Test")
         self.tick()
         self.assertEqual(self.sync.session.rating_key, "50")
@@ -1122,12 +1153,6 @@ class CalibrationTests(ControllerBase):
         self.assertFalse(ok)
         self.assertIn("Flashes", said)
         self.find.return_value = (True, dict(self.TEST))
-        light_tracks.save("50", np.zeros((1800, 3), np.uint8), "Light Sync Test")
-        self.play_plex.return_value = (False, "HA down")
-        ok, said = self.sync.calibrate()
-        self.assertFalse(ok)
-        self.assertIn("HA down", said)
-        self.assertIsNone(self.sync.calibration)
 
 
 class QueueToolAndApiTests(ApiBase):

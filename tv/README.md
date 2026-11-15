@@ -40,6 +40,11 @@ every deploy, so edit the repo copy, not the TV's.
   timers) draw a readout on the right of the screen over any app, without
   focus, in the current theme; it fades out after the card's 45 s and a
   new card replaces it. Screen on only; unknown card types are skipped.
+- **Play for Core** (9.8, 2026-11-15): a `tv_play` card ({rating_key, type,
+  title}, 20 s TTL; light sync calibration's test clip) isn't drawn: the
+  launcher wakes the screen, force-stops Plex over its own adb (Plex ignores
+  a deep link while it's open), opens the title page and lets `PlexWatch`
+  press Watch / Resume (`PlexWatch.playFresh`). Screen on or off.
 - **Voice** (`Voice`, via `RemoteBridgeService`): "Jarvis, ..." on the remote
   mic. The Assistant hears it too; the launcher reads its transcript from
   logcat, sends the rest to Core `POST /chat`, shows the reply as a banner

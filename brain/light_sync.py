@@ -82,7 +82,8 @@ PLEX_REANCHOR_S = 2.0     # Plex's viewOffset is coarse: only jump to it when it
 MOVIE_SCENE = "scene.movie"
 INTENSITIES = ("subtle", "medium", "intense")
 OFFSET_STEP_MS = 25           # the iPad's "Lights earlier / later" step
-CALIBRATION_START_S = 90.0    # the clip has this long to show up on the TV before calibration gives up
+CALIBRATION_START_S = 90.0
+TV_FALLBACK_S = 15.0          # JARVIS TV hasn't started the clip by then: try Home Assistant's deep link    # the clip has this long to show up on the TV before calibration gives up
 # level multiplier, blend multiplier, big jumps allowed per second
 _PRESETS = {"subtle": (0.6, 2.5, 2), "medium": (1.0, 1.0, 3), "intense": (1.6, 0.6, 3)}
 
@@ -975,18 +976,19 @@ class LightSync:
         return self._play_calibration()
 
     def _play_calibration(self) -> tuple[bool, str]:
-        from integrations import plex, tv_remote
         calibration = self.calibration
         if calibration is None:
             return False, "Calibration isn't on, sir."
-        sent, detail = tv_remote.play_plex(calibration["rating_key"], plex.server_id())
+        # JARVIS TV plays it: it closes Plex first, since Plex ignores a deep
+        # link while it's open (HA's remote.turn_on did, 2026-11-14/15), then
+        # opens the clip and presses Watch. HA's deep link is the fallback.
+        from brain import event_bus
+        event_bus.publish_card("tv_play", calibration["title"],
+                               {"rating_key": calibration["rating_key"], "type": "movie",
+                                "title": calibration["title"]},
+                               source="light_sync", ttl_s=20)
         with self._lock:
-            if not sent:
-                self.calibration = None
-                self.bump()
-                log.warning("Light sync calibration: the TV didn't take the clip: %s", detail)
-                return False, f"The TV didn't take the test clip, sir: {detail}"
-            calibration.update(phase="playing", since=self.now(), seen=False)
+            calibration.update(phase="playing", since=self.now(), seen=False, fallback=False)
             self.bump()
         return True, (f"Calibrating, sir: {calibration['title']} is starting on the TV. Watch the flashes and "
                       "tell me if the lights are early or late; I'll move the global timing. Say done when they match.")
@@ -1012,6 +1014,12 @@ class LightSync:
             log.info("Light sync calibration over (%s)", "clip ended" if calibration["seen"] else "clip never started")
             self.calibration = None
             self.bump()
+        elif not calibration.get("fallback") and self.now() - calibration["since"] > TV_FALLBACK_S:
+            from integrations import plex, tv_remote
+            calibration["fallback"] = True
+            sent, detail = tv_remote.play_plex(key, plex.server_id())
+            log.info("Light sync calibration: JARVIS TV didn't start the clip; HA deep link %s",
+                     "sent" if sent else f"failed: {detail}")
 
     def end_calibration(self) -> tuple[bool, str]:
         """Done: stop syncing, stop the clip if it's still on, hand the room back."""
