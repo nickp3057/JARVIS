@@ -882,6 +882,7 @@ private struct MovieModeView: View {
                         model.toggle(bedroom, to: !on)
                     }
                 }
+                lightSyncSwitch
                 lightSyncMenu
                 wide("TV remote", symbol: "appletvremote.gen4", action: showRemote)
             }
@@ -936,8 +937,8 @@ private struct MovieModeView: View {
         model.setLightSync(nudgeMs: ms)
     }
 
-    /// Light sync: start/stop, intensity, timing, a track for this film, the
-    /// build queue, calibration, auto in movie mode.
+    /// Light sync's extras beside the switch: intensity, timing, a track
+    /// for this film, the build queue, calibration.
     private var lightSyncMenu: some View {
         let state = model.lightSync.value
         let running = state?.running == true
@@ -947,11 +948,6 @@ private struct MovieModeView: View {
                     Button { model.setLightSync(calibrate: false) } label: {
                         Label("Done calibrating", systemImage: "checkmark")
                     }
-                } else if running {
-                    Button { model.setLightSync(action: "stop") } label: { Label("Stop", systemImage: "stop.fill") }
-                } else {
-                    Button { model.setLightSync(action: "start") } label: { Label("Start", systemImage: "play.fill") }
-                        .disabled(!state.hasTrack)
                 }
                 if running, state.calibrating == nil, let offset = state.offset {
                     let step = offset.stepMs
@@ -997,21 +993,62 @@ private struct MovieModeView: View {
                         Label("Calibrate…", systemImage: "slider.horizontal.below.rectangle")
                     }
                 }
-                Toggle("Auto in movie mode", isOn: Binding(get: { state.auto },
-                                                           set: { model.setLightSync(auto: $0) }))
             } else {
                 Button {} label: { Text("Light sync isn't answering") }.disabled(true)
             }
         } label: {
-            Label(running ? "Light sync on" : "Light sync", systemImage: "sparkles")
+            Image(systemName: "ellipsis")
                 .font(.headline)
-                .frame(maxWidth: .infinity, minHeight: 56)
+                .frame(width: 56, height: 56)
                 .foregroundStyle(running ? JarvisTheme.cyan.opacity(0.8) : .white.opacity(0.7))
                 .background(Color.white.opacity(0.06), in: .rect(cornerRadius: 16))
         }
         .menuStyle(.button)
         .buttonStyle(CockpitButtonStyle())
-        .accessibilityLabel(running ? "Light sync, on" : "Light sync")
+        .accessibilityLabel("Light sync options")
+    }
+
+    /// Light sync on/off. On: sync films that have a light track (this one
+    /// now, if it has one). Off: stop and leave the Movie scene's lights.
+    /// The ellipsis beside it holds intensity, timing, making a track and
+    /// calibration.
+    private var lightSyncSwitch: some View {
+        let state = model.lightSync.value
+        let running = state?.running == true
+        let on = running || state?.auto == true
+        let detail: String = {
+            guard let state else { return "Not answering" }
+            if state.calibrating != nil { return "Calibrating" }
+            if running { return state.film?.title ?? "Syncing" }
+            if !on { return "Off" }
+            if let film = state.film { return state.hasTrack ? film.title : "None for this film" }
+            return "Waiting for a film"
+        }()
+        return Toggle(isOn: Binding(get: { on }, set: { want in
+            tick += 1
+            if want {
+                model.setLightSync(action: state?.hasTrack == true && !running ? "start" : nil, auto: true)
+            } else {
+                model.setLightSync(action: running ? "stop" : nil, auto: false)
+            }
+        })) {
+            VStack(alignment: .leading, spacing: 2) {
+                Label("Light sync", systemImage: "sparkles")
+                    .font(.headline)
+                    .foregroundStyle(on ? JarvisTheme.cyan.opacity(0.8) : .white.opacity(0.7))
+                Text(detail)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+        }
+        .tint(JarvisTheme.cyan.opacity(0.7))
+        .disabled(state == nil || state?.calibrating != nil)
+        .padding(.horizontal, 16)
+        .frame(maxWidth: .infinity, minHeight: 56)
+        .background(Color.white.opacity(0.06), in: .rect(cornerRadius: 16))
+        .accessibilityLabel("Light sync")
+        .accessibilityValue(on ? "On, \(detail)" : "Off")
     }
 
     private func control(_ symbol: String, _ label: String, key: String,

@@ -2990,15 +2990,18 @@ prototype in `~/Developer/projects/light-sync` (2026-11-09).
   `message`), `POST /api/lightsync/build {title | rating_key, rebuild}`
   (starts or queues) or `{cancel: <ratingKey>|all}`. `/api/home/stream` events carry `lightsync` (a
   revision) so the iPad refetches when it moves.
-- **iPad**: the movie screen's bottom row has a Light sync menu between
-  Bedroom light and TV remote: Start / Stop, Subtle / Medium / Intense
-  (checkmarked), "Make a light sync for <film>" when the playing film has
-  none, "Building <film>… N%" and disabled "Next: <film>" rows for the
-  queue, "Calibrate…", Auto in movie mode. While a film syncs: a Timing
-  section (the film's offset) with Lights earlier / Lights later (±25 ms)
-  and Reset timing. While calibrating, a still panel above the bottom row:
-  Lights earlier / Lights later / Done and the global offset in ms (the
-  movie screen only shows in movie mode; voice nudges work anywhere).
+- **iPad** (the movie screen, which is the nightstand iPad's; companion
+  6.36): the bottom row has a **Light sync switch** between Bedroom light
+  and TV remote. On = the auto switch on, and the playing film starts now if
+  it has a track; off = stop and auto off. Under the label: the film
+  syncing, "None for this film", "Waiting for a film" or "Off". The ellipsis
+  beside it holds the rest: Subtle / Medium / Intense (checkmarked), "Make a
+  light sync for <film>" when the playing film has none, "Building <film>…
+  N%" and disabled "Next: <film>" rows for the queue, "Calibrate…". While a
+  film syncs: a Timing section (the film's offset) with Lights earlier /
+  Lights later (±25 ms) and Reset timing. While calibrating, a still panel
+  above the bottom row: Lights earlier / Lights later / Done and the global
+  offset in ms (voice nudges work anywhere).
 - Not yet: the fan ring (Tuya, cloud, slow), see FUTURE_SESSIONS.md.
 
 ## JARVIS TV
