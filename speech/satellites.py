@@ -1,6 +1,6 @@
 """Voice satellites: iPads that lend the room voice their mic and speaker.
 
-The nightstand iPad mini (and the door iPad, if Nick switches it on) opens
+The nightstand iPad mini and the door iPad Air (both on by default) open
 ``WS /api/voice/satellite?name=bed`` while the companion app is on screen and
 streams its mic as raw 16 kHz mono int16 PCM. It doesn't think at all: Core's
 room voice (``speech/room_voice.py``) runs the wake word, voice ID, the

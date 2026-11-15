@@ -960,6 +960,8 @@ def start(runtime) -> RoomVoice | None:  # noqa: ANN001
         return _voice
     _voice = RoomVoice(runtime)
     threading.Thread(target=_voice.run_forever, name="room-voice", daemon=True).start()
+    from brain import event_bus
+    event_bus.subscribe("room", _on_alert)
     return _voice
 
 
@@ -981,3 +983,29 @@ def announce(text: str) -> bool:
         return False
     _voice.broadcast(text[:400])
     return True
+
+
+def _alert_line(title: str, message: str) -> str:
+    """What the room hears for an alert: the message's first two sentences
+    (it usually names the subject), else the title."""
+    text = (message or "").strip() or (title or "").strip()
+    sentences = re.split(r"(?<=[.!?])\s+", text)
+    return " ".join(sentences[:2])[:300]
+
+
+def _on_alert(alert) -> None:  # noqa: ANN001 - brain.event_bus.Alert
+    """Bus subscriber: an alert that buzzes the phone is also said in the
+    room (chime first, desk and iPads together), so a notification sound
+    never comes without words. Not passive ones, not the wake-up alarm (it
+    has its own ring), not in quiet hours; ``ROOM_ALERTS=0`` turns it off."""
+    if _voice is None or not alert.push or alert.grouping.get("passive"):
+        return
+    if alert.kind.startswith("wake"):
+        return
+    if os.getenv("ROOM_ALERTS", "1").strip().lower() in ("0", "off", "false", "no"):
+        return
+    if room_volume.quiet_now():
+        return
+    line = _alert_line(alert.title, alert.message)
+    if line:
+        _voice.broadcast(line)

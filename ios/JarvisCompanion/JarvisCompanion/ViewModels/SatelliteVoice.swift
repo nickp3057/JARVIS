@@ -17,8 +17,8 @@ import SwiftUI
 /// dropped the connection, and Core doesn't listen for the wake word while
 /// JARVIS talks anyway (barge-in aside).
 ///
-/// On by default on the nightstand iPad, off on the door's
-/// (Room settings › JARVIS listens here). iOS only lets an app use the mic
+/// On by default on both room iPads, the nightstand mini and the door Air,
+/// so the whole room hears JARVIS (Room settings › JARVIS listens here). iOS only lets an app use the mic
 /// while it's in front, which the wall/nightstand iPads always are.
 @MainActor
 final class SatelliteVoice: ObservableObject {
@@ -45,12 +45,12 @@ final class SatelliteVoice: ObservableObject {
     /// Room settings › Match the desk: the iPad's loudness relative to the desk (0.5-2).
     static let trimKey = "room.satelliteTrim"
 
-    /// The stored choice: "" = by role (on for the nightstand), "on", "off".
+    /// The stored choice: "" = by role (on for both room iPads), "on", "off".
     static func enabled(stored: String, role: PadRole) -> Bool {
         switch stored {
         case "on": return true
         case "off": return false
-        default: return role == .nightstand
+        default: return role == .nightstand || role == .door
         }
     }
 

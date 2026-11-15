@@ -184,6 +184,7 @@ struct RootView: View {
         .onAppear(perform: sizeMacWindow)
         .onAppear { phoneVoice.configure(settings: settings, chat: chat) }
         .onChange(of: chat.conversationID) { _, id in phoneVoice.conversationChanged(id) }
+        .overlay(alignment: .top) { InAppNoticeBanner() }  // pushes Guided Access would hide
         .fullScreenCover(isPresented: $wakeRinging.showing) { WakeRingingView().environmentObject(settings) }
         // While the iPad's lens is on, its reactors draw the green orb.
         .environment(\.cameraWatching, camera.watching)
@@ -208,7 +209,7 @@ struct RootView: View {
         }
         .task(id: "\(scenePhase)-\(satelliteSetting)-\(padRoleRaw)-\(settings.connectionIdentity)") {
             // An iPad lends Core's room voice its mic and speaker while the
-            // app is open (on by default on the nightstand, off by the door).
+            // app is open (on by default on both the nightstand and the door).
             guard Self.isPad, !Self.isMac else { return }
             let role = PadRole.resolve(padRoleRaw)
             SatelliteVoice.shared.stop()

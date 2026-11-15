@@ -142,6 +142,11 @@ final class PushAppDelegate: NSObject, UIApplicationDelegate, UNUserNotification
                                 withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void) {
         let content = notification.request.content
         guard content.categoryIdentifier == "WAKE_UP" else {
+            // Guided Access (the room iPads) hides system banners but still
+            // plays the sound: show the alert in the app instead.
+            if UIAccessibility.isGuidedAccessEnabled {
+                Task { @MainActor in InAppNotice.shared.show(title: content.title, body: content.body) }
+            }
             completionHandler([.banner, .list, .sound])
             return
         }
@@ -150,6 +155,70 @@ final class PushAppDelegate: NSObject, UIApplicationDelegate, UNUserNotification
             WakeRinging.shared.detail = content.body
             WakeRinging.shared.open()
             completionHandler([.list, .sound])
+        }
+    }
+}
+
+/// A push that arrived while the app was open under Guided Access, where iOS
+/// plays the sound but shows no banner: RootView draws it at the top for a
+/// few seconds (tap to dismiss). Steady, no pulsing.
+@MainActor
+final class InAppNotice: ObservableObject {
+    static let shared = InAppNotice()
+
+    struct Notice: Equatable, Identifiable {
+        let id = UUID()
+        let title: String
+        let body: String
+    }
+
+    @Published private(set) var current: Notice?
+    private var hide: Task<Void, Never>?
+
+    func show(title: String, body: String) {
+        guard !(title.isEmpty && body.isEmpty) else { return }
+        let notice = Notice(title: title, body: body)
+        withAnimation(.easeOut(duration: 0.25)) { current = notice }
+        hide?.cancel()
+        hide = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(12))
+            if !Task.isCancelled, self?.current?.id == notice.id { self?.dismiss() }
+        }
+    }
+
+    func dismiss() {
+        hide?.cancel()
+        withAnimation(.easeOut(duration: 0.25)) { current = nil }
+    }
+}
+
+struct InAppNoticeBanner: View {
+    @ObservedObject private var notices = InAppNotice.shared
+
+    var body: some View {
+        if let notice = notices.current {
+            HStack(alignment: .top, spacing: 12) {
+                Image(systemName: "bell.fill")
+                    .foregroundStyle(JarvisTheme.cyan)
+                VStack(alignment: .leading, spacing: 4) {
+                    if !notice.title.isEmpty {
+                        Text(notice.title).font(.headline).foregroundStyle(.primary)
+                    }
+                    if !notice.body.isEmpty {
+                        Text(notice.body).font(.subheadline).foregroundStyle(.secondary).lineLimit(4)
+                    }
+                }
+                Spacer(minLength: 0)
+            }
+            .padding(16)
+            .frame(maxWidth: 560)
+            .background(JarvisTheme.panelRaised, in: RoundedRectangle(cornerRadius: 16))
+            .overlay(RoundedRectangle(cornerRadius: 16).stroke(JarvisTheme.border))
+            .padding(.horizontal, 16)
+            .padding(.top, 12)
+            .transition(.move(edge: .top).combined(with: .opacity))
+            .onTapGesture { notices.dismiss() }
+            .id(notice.id)
         }
     }
 }

@@ -113,3 +113,41 @@ class VoicePresenceTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class RoomAlertTests(unittest.TestCase):
+    """Phone alerts are also said in the room (speech/room_voice._on_alert)."""
+
+    def _alert(self, **over):
+        from brain.event_bus import Alert
+        fields = dict(id=1, kind="temp_4k_ready", severity="info", title="Dune is ready in 4K",
+                      message="Dune (2021) is in Plex in 4K; pick the 4K version. It goes back tomorrow.",
+                      source="media", created_at=0.0, push=True)
+        fields.update(over)
+        return Alert(**fields)
+
+    def _run(self, alert, quiet=False, env=None):
+        from unittest import mock
+        from speech import room_voice
+        voice = mock.Mock()
+        with mock.patch.object(room_voice, "_voice", voice), \
+                mock.patch.object(room_voice.room_volume, "quiet_now", return_value=quiet), \
+                mock.patch.dict("os.environ", env or {}, clear=False):
+            room_voice._on_alert(alert)
+        return voice.broadcast.call_args_list
+
+    def test_push_alert_is_said(self) -> None:
+        calls = self._run(self._alert())
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(calls[0].args[0], "Dune (2021) is in Plex in 4K; pick the 4K version. It goes back tomorrow.")
+
+    def test_skips_quiet_passive_wake_and_no_push(self) -> None:
+        self.assertEqual(self._run(self._alert(), quiet=True), [])
+        self.assertEqual(self._run(self._alert(push=False)), [])
+        self.assertEqual(self._run(self._alert(grouping={"passive": True})), [])
+        self.assertEqual(self._run(self._alert(kind="wake_up")), [])
+        self.assertEqual(self._run(self._alert(), env={"ROOM_ALERTS": "0"}), [])
+
+    def test_title_when_no_message(self) -> None:
+        calls = self._run(self._alert(message=""))
+        self.assertEqual(calls[0].args[0], "Dune is ready in 4K")
