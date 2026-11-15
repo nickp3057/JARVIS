@@ -309,6 +309,38 @@ def voice_satellites_sync(request: SatelliteSyncRequest, _: None = Depends(autho
     return {"sync_ms": satellites.set_sync_ms(satellites.sync_ms() + (request.nudge_ms or 0))}
 
 
+class SpeakerTestRequest(BaseModel):
+    target: str = Field(min_length=1, max_length=20)  # "desk" or a satellite's name
+    text: str = Field(default="", max_length=200)
+
+
+@app.post("/api/voice/satellites/test")
+def voice_speaker_test(request: SpeakerTestRequest, _: None = Depends(authorize)) -> dict[str, object]:
+    """Say a line on one speaker alone (the desk, or one iPad), to check
+    each speaker by itself. Returns at once; the line plays in the background."""
+    import threading as _threading
+    from speech import remote_voice, satellites
+    name = "the desk" if request.target == "desk" else f"the {request.target} iPad"
+    text = request.text.strip() or f"Testing, sir. This is {name}."
+    if request.target == "desk":
+        from speech.tts import speak
+        _threading.Thread(target=speak, args=(text,), daemon=True, name="speaker-test").start()
+        return {"ok": True, "target": "desk"}
+    sat = satellites.get(satellites.clean_name(request.target) or "")
+    if sat is None:
+        return {"ok": False, "detail": f"{request.target} isn't connected"}
+
+    def play() -> None:
+        stopped = _threading.Event()
+        try:
+            sat.play_pcm(remote_voice.pcm_stream(text, stopped), remote_voice.SAMPLE_RATE)
+        finally:
+            stopped.set()
+
+    _threading.Thread(target=play, daemon=True, name="speaker-test").start()
+    return {"ok": True, "target": sat.name}
+
+
 class RenameRequest(BaseModel):
     title: str = Field(min_length=1, max_length=120)
 
