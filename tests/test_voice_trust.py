@@ -164,6 +164,31 @@ class SpeakerIdTests(unittest.TestCase):
         self.enroll()  # re-enrolling on the desk keeps the bed's print
         self.assertTrue(speaker_id.identify(clip(False)).verified)
 
+    def test_ipad_enrolment_fixes_the_mic_and_shows_lines(self) -> None:
+        from brain import voice_presence
+        voice_presence.reset_for_tests()
+        self.addCleanup(voice_presence.reset_for_tests)
+        self.assertIsNone(speaker_id.enrollment_status())
+        speaker_id.start_enrollment("desk")  # taught at the desk ...
+        first = voice_presence.current()["enroll"]
+        self.assertEqual((first["needed"], first["taken"], first["mic"]), (3, 0, "desk"))
+        self.assertEqual(first["line"], speaker_id.LINES[0])
+        speaker_id.take_sample(clip(True), "bed")  # ... even if the mini's mic took the turn
+        second = voice_presence.current()["enroll"]
+        self.assertEqual((second["taken"], second["line"]), (1, speaker_id.LINES[1]))
+        speaker_id.take_sample(clip(True), "bed")
+        self.assertIn("I'll know it's you.", speaker_id.take_sample(clip(True), "bed"))  # the desk's print
+        self.assertIsNone(voice_presence.current()["enroll"])
+        self.assertNotIn("bed mic", speaker_id.status_text())
+
+    def test_cancel_clears_the_ipad_card(self) -> None:
+        from brain import voice_presence
+        self.addCleanup(voice_presence.reset_for_tests)
+        speaker_id.start_enrollment("bed")
+        self.assertEqual(voice_presence.current()["enroll"]["mic"], "bed")
+        speaker_id.cancel_enrollment()
+        self.assertIsNone(voice_presence.current()["enroll"])
+
     def test_print_from_another_model_is_ignored(self) -> None:
         self.enroll()
         with patch.dict(os.environ, {"VOICE_ID_MODEL": "/models/other.onnx"}):

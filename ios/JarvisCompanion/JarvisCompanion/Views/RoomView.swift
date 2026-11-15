@@ -1326,10 +1326,13 @@ private struct RoomSettingsView: View {
                             .contextMenu { Button("Reset to default") { nudgeSync(0, reset: true) } }
                             .task { speakerSync = try? await JarvisAPIClient.make(from: settings).speakerSync() }
                         }
+                        VoiceEnrollButtons(settings: settings, padMic: PadRole.resolve(padRoleRaw).lens,
+                                           listening: SatelliteVoice.enabled(stored: satelliteSetting,
+                                                                             role: PadRole.resolve(padRoleRaw)))
                     } header: {
                         Text("Mic and speaker")
                     } footer: {
-                        Text("\(satellite.status.text). This iPad hears \u{201C}Hey JARVIS\u{201D} for the room, and plays everything JARVIS says together with the desk speaker, at the same loudness. Keep this iPad's volume up and use Match the desk if it sounds louder or quieter than the desk. If this iPad sounds behind the desk, press Desk timing › Later (20 ms a press); if the desk sounds behind, Earlier. Applies to the next thing JARVIS says, on every iPad; hold for Reset. Works while the app is open.")
+                        Text("\(satellite.status.text). This iPad hears \u{201C}Hey JARVIS\u{201D} for the room, and plays everything JARVIS says together with the desk speaker, at the same loudness. Keep this iPad's volume up and use Match the desk if it sounds louder or quieter than the desk. If this iPad sounds behind the desk, press Desk timing › Later (20 ms a press); if the desk sounds behind, Earlier. Applies to the next thing JARVIS says, on every iPad; hold for Reset. Works while the app is open. Teach JARVIS my voice: pick the mic (this iPad, or the desk), then read each line that appears out loud; JARVIS counts them off and saves a print for that mic.")
                     }
                 }
                 Section("Screen") {

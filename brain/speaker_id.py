@@ -57,6 +57,24 @@ _extractor: Any = None
 _extractor_path: str | None = None
 _enrolling: dict[str, Any] | None = None  # {"needed": n, "samples": [vec], "until": t}
 
+# Lines Nick reads off the iPad while enrolling (Room settings › Teach JARVIS
+# my voice): full sentences in his normal voice, between them covering a
+# wide spread of sounds, so the print isn't built from one phrase.
+LINES = (
+    "Hey JARVIS, turn the lamp on and set the strip to a warm orange.",
+    "What's the weather looking like for Saturday afternoon?",
+    "Remind me to call the pharmacy tomorrow at nine thirty.",
+    "Play the next episode of the show I was watching last night.",
+    "Put on some quiet music and dim the lights to twenty percent.",
+    "How long until my package from the warehouse shows up?",
+    "Set a timer for twelve minutes, the pizza's in the oven.",
+    "Good morning. Open the blinds and tell me what's on today.",
+    "Lock everything up, I'm heading out to the gym for an hour.",
+    "Read me the last three emails and skip anything from school.",
+    "Movie time: bring the TV up and turn the fan down to low.",
+    "Thanks, JARVIS. That's everything for tonight, goodnight.",
+)
+
 
 def enabled() -> bool:
     return os.getenv("VOICE_ID", "0").strip().lower() in ("1", "on", "true", "yes")
@@ -233,12 +251,19 @@ def identify(audio: np.ndarray) -> voice_trust.Speaker:
 
 # --- enrolment -----------------------------------------------------------------
 
-def start_enrollment() -> int:
-    """Arm enrolment: the next N room commands become samples. Returns N."""
+def start_enrollment(mic: str | None = None) -> int:
+    """Arm enrolment: the next N room commands become samples. Returns N.
+
+    ``mic`` (from the iPad's Teach JARVIS my voice): "desk" or a satellite's
+    name fixes whose print this makes, whichever mic the room voice used;
+    None leaves it to the first sample's mic, as before."""
     global _enrolling
     needed = _sample_count()
     with _lock:
         _enrolling = {"needed": needed, "samples": [], "until": time.monotonic() + _ENROLL_TTL_S}
+        if mic:
+            _enrolling.update(fixed=True, mic=None if mic == "desk" else mic)
+    _publish()
     return needed
 
 
@@ -246,15 +271,43 @@ def cancel_enrollment() -> None:
     global _enrolling
     with _lock:
         _enrolling = None
+    _publish()
 
 
 def enrolling() -> bool:
     global _enrolling
+    expired = False
     with _lock:
         if _enrolling and time.monotonic() > _enrolling["until"]:
             log.info("Voice ID: enrolment expired")
-            _enrolling = None
-        return _enrolling is not None
+            _enrolling, expired = None, True
+        active = _enrolling is not None
+    if expired:
+        _publish()
+    return active
+
+
+def enrollment_status() -> dict[str, Any] | None:
+    """What the iPads show while enrolling: the line to read next, the count,
+    and whose print it makes ("desk" or a satellite's name; None until the
+    first sample when it wasn't fixed). None when not enrolling."""
+    with _lock:
+        state = _enrolling
+        if state is None:
+            return None
+        taken = len(state["samples"])
+        decided = state.get("fixed") or bool(state["samples"])
+        return {"needed": state["needed"], "taken": taken, "line": LINES[taken % len(LINES)],
+                "mic": (state.get("mic") or "desk") if decided else None}
+
+
+def _publish() -> None:
+    """Hand the enrolment state to the iPads (``/api/voice/stream``)."""
+    try:
+        from brain import voice_presence
+        voice_presence.set_enroll(enrollment_status())
+    except Exception:  # noqa: BLE001 - a screen not updating is never worth a lost sample
+        log.debug("Voice ID: couldn't publish enrolment state", exc_info=True)
 
 
 def take_sample(audio: np.ndarray, mic: str | None = None) -> str:
@@ -270,15 +323,22 @@ def take_sample(audio: np.ndarray, mic: str | None = None) -> str:
         if vector is None:
             if not available():
                 _enrolling = None
-                return "I can't learn voices yet, sir: the voice model isn't installed."
-            return "That one was too short, sir. A full sentence, please."
-        if not state["samples"]:
-            state["mic"] = mic
-        state["samples"].append(vector)
-        left = state["needed"] - len(state["samples"])
-        if left > 0:
-            return f"Got it. {left} more."
-        samples, target, _enrolling = state["samples"], state.get("mic"), None
+                said = "I can't learn voices yet, sir: the voice model isn't installed."
+            else:
+                said = "That one was too short, sir. A full sentence, please."
+            vector_ok = False
+        else:
+            vector_ok = True
+            if not state["samples"] and not state.get("fixed"):
+                state["mic"] = mic
+            state["samples"].append(vector)
+            left = state["needed"] - len(state["samples"])
+            said = f"Got it. {left} more." if left > 0 else ""
+            if left <= 0:
+                samples, target, _enrolling = state["samples"], state.get("mic"), None
+    _publish()
+    if not vector_ok or said:
+        return said
     _save_print(samples, target)
     log.info("Voice ID: enrolled the %s print from %d samples", target or "desk", len(samples))
     if target:

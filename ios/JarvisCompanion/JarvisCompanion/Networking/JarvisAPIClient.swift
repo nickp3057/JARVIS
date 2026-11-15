@@ -473,6 +473,10 @@ struct JarvisAPIClient {
                 try Task.checkCancellation()
                 guard line.hasPrefix("data: "), let data = line.dropFirst(6).data(using: .utf8),
                       let state = try? JSONDecoder().decode(VoiceState.self, from: data) else { continue }
+                // Teach JARVIS my voice: the line to read next (nil when not enrolling).
+                struct Enroll: Decodable { let enroll: VoiceEnrollState? }
+                let enroll = (try? JSONDecoder().decode(Enroll.self, from: data))?.enroll
+                await VoiceEnrollment.shared.follow(enroll: enroll, reply: state.reply)
                 await onState(state)
             }
         } catch let error as URLError {
@@ -909,6 +913,19 @@ struct JarvisAPIClient {
         }
         return try await postJSON(SyncReply.self, path: "api/voice/satellites/sync",
                                   body: Body(nudgeMs: nudge, reset: reset)).syncMs
+    }
+
+    struct VoiceEnrollReply: Decodable {
+        let ok: Bool
+        let detail: String?
+        let enroll: VoiceEnrollState?
+    }
+
+    /// Teach JARVIS my voice (`POST /api/voice/enroll`): `start` on `mic`
+    /// ("desk", "bed", "door"), or `cancel`.
+    func voiceEnroll(action: String, mic: String) async throws -> VoiceEnrollReply {
+        struct Body: Encodable { let action: String; let mic: String }
+        return try await postJSON(VoiceEnrollReply.self, path: "api/voice/enroll", body: Body(action: action, mic: mic))
     }
 
     // MARK: - Wake-up schedule and shared theme

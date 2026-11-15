@@ -19,7 +19,8 @@ from typing import Any
 PHASES = ("idle", "listening", "thinking", "speaking", "done", "error")
 
 _cond = threading.Condition()
-_state: dict[str, Any] = {"seq": 0, "phase": "idle", "transcript": "", "reply": "", "at": 0.0}
+# ``enroll``: voice ID enrolment in progress (brain/speaker_id.enrollment_status), else None.
+_state: dict[str, Any] = {"seq": 0, "phase": "idle", "transcript": "", "reply": "", "at": 0.0, "enroll": None}
 
 
 def update(phase: str | None = None, *, transcript: str | None = None, reply: str | None = None) -> None:
@@ -49,6 +50,15 @@ def update(phase: str | None = None, *, transcript: str | None = None, reply: st
         _cond.notify_all()
 
 
+def set_enroll(enroll: dict[str, Any] | None) -> None:
+    """Voice ID enrolment's progress for the iPads (the line to read next)."""
+    with _cond:
+        _state["enroll"] = dict(enroll) if enroll else None
+        _state["seq"] += 1
+        _state["at"] = time.time()
+        _cond.notify_all()
+
+
 def current() -> dict[str, Any]:
     with _cond:
         return dict(_state)
@@ -63,4 +73,4 @@ def wait(after_seq: int, timeout: float) -> dict[str, Any]:
 
 def reset_for_tests() -> None:
     with _cond:
-        _state.update(seq=0, phase="idle", transcript="", reply="", at=0.0)
+        _state.update(seq=0, phase="idle", transcript="", reply="", at=0.0, enroll=None)

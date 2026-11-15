@@ -185,6 +185,7 @@ struct RootView: View {
         .onAppear { phoneVoice.configure(settings: settings, chat: chat) }
         .onChange(of: chat.conversationID) { _, id in phoneVoice.conversationChanged(id) }
         .overlay(alignment: .top) { InAppNoticeBanner() }  // pushes Guided Access would hide
+        .overlay { VoiceEnrollCard() }  // Teach JARVIS my voice: the line to read
         .fullScreenCover(isPresented: $wakeRinging.showing) { WakeRingingView().environmentObject(settings) }
         // While the iPad's lens is on, its reactors draw the green orb.
         .environment(\.cameraWatching, camera.watching)

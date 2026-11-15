@@ -1345,6 +1345,37 @@ def voice_hush(_: None = Depends(require_scope("chat"))) -> dict[str, object]:
     return {"hushed": room_voice.hush()}
 
 
+class VoiceEnrollRequest(BaseModel):
+    action: str = "start"  # start | cancel
+    mic: str = "desk"      # "desk" or a satellite's name (bed, door)
+
+
+@app.post("/api/voice/enroll")
+def voice_enroll(body: VoiceEnrollRequest, _: None = Depends(require_scope("chat"))) -> dict[str, object]:
+    """Teach JARVIS my voice from the iPad: ``start`` arms voice ID enrolment
+    for ``mic`` and the room voice listens there for the lines (no wake word);
+    the iPads show each line from ``/api/voice/stream``'s ``enroll``.
+    ``cancel`` stops it and leaves the old print alone."""
+    from brain import speaker_id
+    from speech import room_voice, satellites
+    if body.action == "cancel":
+        speaker_id.cancel_enrollment()
+        room_voice.hush()
+        return {"ok": True, "enroll": None}
+    if body.action != "start":
+        raise HTTPException(status_code=400, detail="action must be start or cancel")
+    mic = "desk" if body.mic == "desk" else satellites.clean_name(body.mic)
+    if mic is None:
+        raise HTTPException(status_code=400, detail="unknown mic")
+    if not speaker_id.available():
+        return {"ok": False, "detail": "The voice model isn't installed on Core."}
+    if mic != "desk" and satellites.get(mic) is None:
+        return {"ok": False, "detail": "That iPad isn't connected as a mic. Turn on JARVIS listens here."}
+    if not room_voice.enroll_from(mic):
+        return {"ok": False, "detail": "The room voice isn't running on Core."}
+    return {"ok": True, "enroll": speaker_id.enrollment_status()}
+
+
 @app.get("/api/voice/state")
 def voice_state(_: None = _status_read) -> dict[str, object]:
     """What the room voice is doing (brain/voice_presence.py)."""

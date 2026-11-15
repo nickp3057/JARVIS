@@ -141,6 +141,11 @@ class RoomVoice:
         # The satellite this exchange is on (None: the desk mic and speaker).
         self._source = None
         self._satellite_detector = satellite_detector  # factory, for tests
+        # Teach JARVIS my voice from the iPad (``enroll_from``): listen on this
+        # mic ("desk" or a satellite's name) with no wake word until it's done.
+        self._enroll_mic: str | None = None
+        self._enroll_started = False
+        self._quiet_listen = False
 
     # --- lifecycle -----------------------------------------------------------
 
@@ -189,9 +194,12 @@ class RoomVoice:
                     return
                 self._hushed.clear()  # a tap while idle mustn't cut off the next "Hey JARVIS"
                 self._warm_connections()  # handshakes happen while Nick is still talking
-                preroll = self._in().get_recent_audio(_seconds("VOICE_PREROLL_S", 2.0))
+                # Enrolling from the iPad: no wake word, so no preroll to fall back on
+                # (it would turn a silent turn into a sample of the room).
+                preroll = None if self._enroll_mic else self._in().get_recent_audio(_seconds("VOICE_PREROLL_S", 2.0))
                 voice_presence.update("listening")
-                self._sound("listen")
+                if not self._quiet_listen:
+                    self._sound("listen")
                 audio = self._capture(self._in(), preroll, start_timeout=_seconds("VOICE_START_TIMEOUT_S", 4.0))
             else:  # follow-up: no wake word, a shorter wait
                 voice_presence.update("listening")
@@ -346,11 +354,14 @@ class RoomVoice:
         the others; the highest score wins and becomes ``self._source``.
         With no satellites connected it's the desk mic alone, no delay."""
         self._source = None
+        self._quiet_listen = False
         self._reset_detectors()
         candidates: list[tuple[float, object]] = []  # (score, satellite or None for the desk)
         deadline = 0.0
         while not self.stop.is_set():
             self._duties(stream)
+            if self._enroll_turn():
+                return True
             sats = satellites.connected()
             frame = stream.read(timeout=0.05 if sats or candidates else 0.5)
             if frame is not None:
@@ -380,6 +391,26 @@ class RoomVoice:
             self._source = winner
             return True
         return False
+
+    def _enroll_turn(self) -> bool:
+        """While enrolling from the iPad: take the next line on the chosen mic
+        without the wake word (the listen tone only the first time)."""
+        mic = self._enroll_mic
+        if mic is None:
+            return False
+        from brain import speaker_id
+        if not speaker_id.enrolling():
+            self._enroll_mic = None
+            return False
+        source = None if mic == "desk" else satellites.get(mic)
+        if mic != "desk" and (source is None or not source.connected):
+            return False  # the iPad dropped: wait for it (or "Hey JARVIS")
+        self._source = source
+        self._quiet_listen, self._enroll_started = self._enroll_started, True
+        return True
+
+    def enroll_from(self, mic: str) -> None:
+        self._enroll_mic, self._enroll_started = mic, False
 
     # --- alarms, reminders, broadcasts ------------------------------------------
 
@@ -982,6 +1013,18 @@ def announce(text: str) -> bool:
     if _voice is None or not text:
         return False
     _voice.broadcast(text[:400])
+    return True
+
+
+def enroll_from(mic: str) -> bool:
+    """Teach JARVIS my voice from the iPad: arm voice ID enrolment for ``mic``
+    ("desk" or a satellite's name) and listen there for the lines, no wake
+    word needed. False when the room voice isn't running here."""
+    from brain import speaker_id
+    if _voice is None:
+        return False
+    speaker_id.start_enrollment(mic)
+    _voice.enroll_from(mic)
     return True
 
 
