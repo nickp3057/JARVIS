@@ -1035,6 +1035,7 @@ class CalibrationTests(ControllerBase):
         super().setUp()
         self.play_plex = Mock(return_value=(True, "ok"))
         self.card = Mock()
+        self.from_start = Mock(return_value=(True, ""))
         self.stop_tv = Mock(return_value=(True, "ok"))
         self.find = Mock(return_value=(True, dict(self.TEST)))
         for p in (patch("integrations.plex.is_configured", return_value=True),
@@ -1042,6 +1043,7 @@ class CalibrationTests(ControllerBase):
                   patch("integrations.plex.server_id", return_value="srv"),
                   patch("integrations.tv_remote.play_plex", self.play_plex),
                   patch("brain.event_bus.publish_card", self.card),
+                  patch("integrations.plex.play_from_start", self.from_start),
                   patch("integrations.tv_remote.stop_playback", self.stop_tv)):
             p.start()
             self.addCleanup(p.stop)
@@ -1050,6 +1052,7 @@ class CalibrationTests(ControllerBase):
         self.card.assert_called_once()
         args, kwargs = self.card.call_args
         self.assertEqual(args[0], "tv_play")
+        self.from_start.assert_called_with("50")  # no resuming half way through
         self.assertEqual(args[2]["rating_key"], "50")
         self.play_plex.assert_not_called()  # JARVIS TV first
 

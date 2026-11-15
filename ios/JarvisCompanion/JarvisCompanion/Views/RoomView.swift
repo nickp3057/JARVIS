@@ -907,6 +907,8 @@ private struct MovieModeView: View {
     let showRemote: () -> Void
     let backToPanel: () -> Void
     @State private var tick = 0
+    /// Calibration's nudge size (ms): 25 to get close, 5 and 1 to finish.
+    @State private var calibrationStep = 25
 
     private var bedroom: HomeEntity? {
         model.entities.value?.first { $0.entityID == "light.bedroom_lights" }
@@ -979,10 +981,10 @@ private struct MovieModeView: View {
     }
 
     /// Calibrating with the flash test clip: nudge the global timing by eye
-    /// (±25 ms a press), see where it stands, Done. Still and dim, like the
-    /// rest of the movie screen.
+    /// (1, 5 or 25 ms a press), see where it stands, Done. Still and dim,
+    /// like the rest of the movie screen.
     private func calibrationPanel(_ state: LightSyncState, _ calibration: LightSyncState.Calibration) -> some View {
-        let step = state.offset?.stepMs ?? 25
+        let step = calibrationStep
         let building = calibration.phase == "building"
         return VStack(spacing: 14) {
             HStack {
@@ -990,6 +992,13 @@ private struct MovieModeView: View {
                       systemImage: "slider.horizontal.below.rectangle")
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(JarvisTheme.cyan.opacity(0.8))
+                Spacer()
+                Picker("Step", selection: $calibrationStep) {
+                    ForEach([1, 5, 25], id: \.self) { Text("\($0) ms").tag($0) }
+                }
+                .pickerStyle(.segmented)
+                .frame(width: 200)
+                .accessibilityLabel("Nudge size")
                 Spacer()
                 Text("Global \(LightSyncState.milliseconds(state.offset?.globalMs ?? 0))")
                     .font(.headline.monospacedDigit())

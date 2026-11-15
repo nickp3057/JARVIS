@@ -3056,8 +3056,12 @@ prototype in `~/Developer/projects/light-sync` (2026-11-09).
   N%" and disabled "Next: <film>" rows for the queue, "Calibrate…". While a
   film syncs: a Timing section (the film's offset) with Lights earlier /
   Lights later (±25 ms) and Reset timing. While calibrating, a still panel
-  above the bottom row: Lights earlier / Lights later / Done and the global
-  offset in ms (voice nudges work anywhere).
+  above the bottom row: a 1 / 5 / 25 ms step picker (2026-11-15, applies to
+  both rows), Lights earlier / Lights later / Done and the global offset in
+  ms, Lamp earlier / Lamp later and the lamp's head start (voice nudges work
+  anywhere). Calibration resets the clip's resume point first
+  (`plex.play_from_start`, a scrobble): Plex resumed a half-watched clip,
+  which then ended after 30 s and took calibration with it.
 - Not yet: the fan ring (Tuya, cloud, slow), see FUTURE_SESSIONS.md.
 
 ## JARVIS TV

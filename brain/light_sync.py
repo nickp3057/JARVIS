@@ -983,6 +983,11 @@ class LightSync:
         # link while it's open (HA's remote.turn_on did, 2026-11-14/15), then
         # opens the clip and presses Watch. HA's deep link is the fallback.
         from brain import event_bus
+        from integrations import plex
+        # From 0:00: Plex resumed a half-watched clip, so it ended after 30 s (2026-11-15).
+        reset, detail = plex.play_from_start(calibration["rating_key"])
+        if not reset:
+            log.info("Light sync calibration: couldn't reset the clip's resume point: %s", detail)
         event_bus.publish_card("tv_play", calibration["title"],
                                {"rating_key": calibration["rating_key"], "type": "movie",
                                 "title": calibration["title"]},

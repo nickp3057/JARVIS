@@ -118,6 +118,13 @@ def _episode_label(item: dict[str, Any]) -> str:
             f"episode {item.get('index')}, \"{item.get('title')}\"")
 
 
+def play_from_start(rating_key: str) -> tuple[bool, str]:
+    """Clear an item's resume point (marks it watched, which Plex does by
+    dropping viewOffset) so the next Watch starts at 0:00."""
+    ok, detail = _get("/:/scrobble", {"key": str(rating_key), "identifier": "com.plexapp.plugins.library"})
+    return ok, "" if ok else str(detail)
+
+
 def server_id() -> str | None:
     """This Plex server's machineIdentifier (for the TV's plex:// deep link)."""
     ok, ident = _get("/identity")
