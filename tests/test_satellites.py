@@ -151,9 +151,17 @@ class EverywhereTests(unittest.TestCase):
         self.assertEqual(self.kinds(), ["play", "pcm", "end"])
         self.assertEqual(json.loads(self.sent[0])["gain"], 0.512)  # the desk's level 8
         written = self.desk.stdin.getvalue()
-        lead = b"\0\0" * int(22050 * 0.1)  # the desk waits for the iPad's delay
+        lead = b"\0\0" * int(22050 * 0.1)  # SATELLITE_SYNC_MS=100: the desk waits
         self.assertEqual(written, lead + clip)
         self.closed.assert_called_once_with(self.desk, False)
+
+    def test_negative_sync_holds_the_ipads_back(self) -> None:
+        clip = b"\x01\x00" * 220
+        with patch.dict("os.environ", {"SATELLITE_SYNC_MS": "-50"}):
+            satellites.play_everywhere([clip], 22050)
+        self.assertEqual(self.desk.stdin.getvalue(), clip)  # the desk starts at once
+        pcm = [m for m in self.sent if isinstance(m, bytes)]
+        self.assertEqual(pcm, [b"\0\0" * int(22050 * 0.05), clip])
 
     def test_spoken_once_for_the_whole_room(self) -> None:
         with patch("speech.remote_voice.pcm_stream", return_value=iter([b"\x00\x00" * 10])) as voice:

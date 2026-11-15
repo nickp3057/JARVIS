@@ -111,6 +111,8 @@ struct RoomView: View {
             talking: talking, voiceActive: voice.active, dialogue: AnyView(RoomDialogue(presence: voice)),
             showRemote: { showingRemote = true }, showWake: { showingWake = true },
             showSettings: { showingSettings = true },
+            backToMovie: movieScene && movieDismissed
+                ? { withAnimation(.easeInOut(duration: 0.4)) { movieDismissed = false } } : nil,
             menuExtras: AnyView(Group {
                 Button { roomCover = .memoryMap } label: { Label("Memory map", systemImage: "point.3.connected.trianglepath.dotted") }
                 Button { roomCover = .linkMap } label: { Label("Link map", systemImage: "dot.radiowaves.left.and.right") }
@@ -136,6 +138,10 @@ struct RoomView: View {
     fileprivate var movieDims: Bool {
         movieMode || (movieScene && !padRole.hostsMovieMode)
     }
+
+    /// The backlight actually drops: the door panel during a film only. The
+    /// nightstand's movie remote stays at full brightness (Nick, 2026-11-15).
+    fileprivate var movieDimsScreen: Bool { movieDims && padRole != .nightstand }
 
     var body: some View {
         GeometryReader { geo in
@@ -409,7 +415,7 @@ struct RoomView: View {
     private var roomIsDark: Bool {
         // The wake-up alarm's screen beats the night screen (WakeRinging).
         guard !RootView.isMac, nightScreen, scenePhase == .active, !voice.active, !timers.contains(where: { $0.state == "alarming" }),
-              !wakeRinging.showing, !wakeRinging.opening, !movieDims,
+              !wakeRinging.showing, !wakeRinging.opening, !movieScene,
               // The nightstand goes dark whenever every light is off, day or night.
               padRole == .nightstand || lightsOut || (keepAwake && model.sun == "below_horizon") else { return false }
         return lightsAllOff == true
@@ -1317,14 +1323,14 @@ private struct MovieModeEffects: ViewModifier {
             }
             .onChange(of: room.scenePhase) { _, phase in if phase != .active { room.setMovieDim(nil) } }
             // The lens coming on mid-movie lights the screen like a tap would.
-            .onChange(of: room.cameraWatching) { _, on in if on && room.movieDims { room.movieTouches &+= 1 } }
+            .onChange(of: room.cameraWatching) { _, on in if on && room.movieDimsScreen { room.movieTouches &+= 1 } }
             // Movie (the remote on the nightstand, the panel by the door): a
             // tap lights the screen fully, 20 s idle drops it to 15%.
-            .task(id: "\(room.movieDims)-\(room.movieTouches)-\(room.scenePhase == .active)") {
-                guard room.movieDims, room.scenePhase == .active else { return }
+            .task(id: "\(room.movieDimsScreen)-\(room.movieTouches)-\(room.scenePhase == .active)") {
+                guard room.movieDimsScreen, room.scenePhase == .active else { return }
                 if room.movieTouches > 0 { room.setMovieDim(1.0) }
                 try? await Task.sleep(for: .seconds(20))
-                if !Task.isCancelled, room.movieDims { room.setMovieDim(0.15) }
+                if !Task.isCancelled, room.movieDimsScreen { room.setMovieDim(0.15) }
             }
     }
 }

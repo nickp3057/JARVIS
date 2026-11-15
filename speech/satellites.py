@@ -22,8 +22,9 @@ Wire format (one socket per iPad):
 
 Speakers: everything the room voice says or plays goes to the desk speaker
 and every satellite at once (``play_everywhere``), from one synthesis, so
-the room hears one voice. The desk is held back ``SATELLITE_SYNC_MS`` (150)
-to line up with the iPad's network and buffer delay, and the iPad plays at
+the room hears one voice. ``SATELLITE_SYNC_MS`` lines them up: positive
+holds the desk back that long, negative holds the iPads back (default 0;
+the desk's aplay runs a 100 ms buffer, ``DESK_BUFFER_MS``). The iPad plays at
 the same loudness as the desk (``output_gain``: the desk's 0-10 level on
 ALSA's mapped curve, which is 60 dB wide, so amplitude = (level/10)^3).
 
@@ -290,10 +291,20 @@ def ring_all(name: str = "alarm", level: int | None = None) -> None:
 # --- the whole room at once ----------------------------------------------------
 
 def _sync_seconds() -> float:
+    """Desk-vs-iPad offset: > 0 the desk waits, < 0 the iPads wait (seconds)."""
     try:
-        return max(0.0, min(1.0, float(os.getenv("SATELLITE_SYNC_MS", "150")) / 1000))
+        return max(-1.0, min(1.0, float(os.getenv("SATELLITE_SYNC_MS", "0")) / 1000))
     except ValueError:
-        return 0.15
+        return 0.0
+
+
+def _desk_buffer_us() -> int:
+    """aplay's buffer: its default (about half a second) made the desk lag
+    the iPads, since aplay waits for a full buffer before it starts."""
+    try:
+        return int(max(20, min(1000, float(os.getenv("DESK_BUFFER_MS", "100")))) * 1000)
+    except ValueError:
+        return 100_000
 
 
 def _open_desk(rate: int):  # noqa: ANN202
@@ -305,7 +316,7 @@ def _open_desk(rate: int):  # noqa: ANN202
     from speech import tts
     try:
         proc = subprocess.Popen(["aplay", "-q", *tts.alsa_device_args(), "-t", "raw", "-f", "S16_LE",
-                                 "-r", str(int(rate)), "-c", "1"],
+                                 "-r", str(int(rate)), "-c", "1", f"--buffer-time={_desk_buffer_us()}"],
                                 stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     except OSError:
         log.warning("Desk speaker: aplay unavailable")
@@ -347,12 +358,15 @@ def play_everywhere(chunks: Iterable[bytes], rate: int, interrupt: threading.Eve
         sat._halt.clear()  # noqa: SLF001
         sat.send_json({"type": "play", "rate": int(rate), "gain": round(gain, 3)})
     desk = _open_desk(rate)
-    lead = _sync_seconds() if sats else 0.0
-    if desk is not None and lead:
-        try:  # the desk waits for the iPads' network and buffer delay
-            desk.stdin.write(b"\0\0" * int(rate * lead))
+    offset = _sync_seconds() if sats else 0.0
+    if desk is not None and offset > 0:
+        try:  # the desk waits for the iPads
+            desk.stdin.write(b"\0\0" * int(rate * offset))
         except OSError:
             desk = None
+    if offset < 0:  # the iPads wait for the desk
+        for sat in sats:
+            sat.send_bytes(b"\0\0" * int(rate * -offset))
     started: float | None = None
     samples = 0
     cut = False

@@ -28,6 +28,9 @@ struct NightstandPanel: View {
     let showRemote: () -> Void
     let showWake: () -> Void
     let showSettings: () -> Void
+    /// Set while the Movie scene runs but Nick went back to the panel: the
+    /// bar's Movie button becomes "Movie controls" and brings the remote back.
+    let backToMovie: (() -> Void)?
     let menuExtras: AnyView
     @State private var showingRoom = false
 
@@ -178,7 +181,9 @@ struct NightstandPanel: View {
                 GoodnightButton(model: model, scene: goodnight)
             }
             barButton("Room", symbol: "square.grid.2x2.fill") { showingRoom = true }
-            if let movie = scene("scene.movie", "movie") {
+            if let backToMovie {
+                barButton("Movie controls", symbol: "play.rectangle.fill", highlighted: true, action: backToMovie)
+            } else if let movie = scene("scene.movie", "movie") {
                 barButton("Movie", symbol: "film.fill", busy: model.runningScene == movie.entityID) {
                     model.runScene(movie)
                 }
@@ -204,17 +209,19 @@ struct NightstandPanel: View {
         .frame(height: 72)
     }
 
-    private func barButton(_ title: String, symbol: String, busy: Bool = false,
+    private func barButton(_ title: String, symbol: String, busy: Bool = false, highlighted: Bool = false,
                            action: @escaping () -> Void) -> some View {
         Button(action: action) {
             VStack(spacing: 5) {
                 if busy { ProgressView() } else { Image(systemName: symbol).font(.title3) }
-                Text(title).font(.caption.weight(.semibold))
+                Text(title).font(.caption.weight(.semibold)).lineLimit(1).minimumScaleFactor(0.75)
             }
-            .foregroundStyle(JarvisTheme.cyan)
-            .frame(width: 92, height: 72)
+            .foregroundStyle(highlighted ? JarvisTheme.amber : JarvisTheme.cyan)
+            .frame(width: highlighted ? 120 : 92, height: 72)
+            .background(highlighted ? JarvisTheme.amber.opacity(0.14) : .clear, in: .rect(cornerRadius: 20))
             .jarvisSurface(in: .rect(cornerRadius: 20))
-            .overlay(RoundedRectangle(cornerRadius: 20).strokeBorder(JarvisTheme.border))
+            .overlay(RoundedRectangle(cornerRadius: 20)
+                .strokeBorder(highlighted ? JarvisTheme.amber.opacity(0.5) : JarvisTheme.border))
         }
         .buttonStyle(CockpitButtonStyle())
         .accessibilityLabel(title)
