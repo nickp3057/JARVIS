@@ -2,9 +2,10 @@
 Core and the rest of the house, for the companion's link map and the iPad's
 neural core (each real request fires a thought).
 
-Nodes are fixed names: ``core`` (this Optiplex), ``nas`` (HA, Plex, the arr
-stack), ``tv``, ``iphone``, ``ipad``, ``mac`` and ``internet`` (Anthropic,
-APNs, weather...). Signals carry a short label (a path, a service name),
+Nodes are fixed names: ``core`` (the Surface), ``nas`` (HA, Plex, the arr
+stack), ``tv``, ``iphone``, ``ipad`` (the door iPad), ``nightstand`` (the
+iPad mini by the bed), ``mac`` and ``internet`` (Anthropic, APNs,
+weather...). Signals carry a short label (a path, a service name),
 never a query string or a body.
 
 Recorded from three places: the server's HTTP middleware (clients -> Core),
@@ -25,7 +26,7 @@ from collections import deque
 from typing import Any
 from urllib.parse import urlsplit
 
-NODES = ("core", "nas", "tv", "iphone", "ipad", "mac", "internet")
+NODES = ("core", "nas", "tv", "iphone", "ipad", "nightstand", "mac", "internet")
 
 _lock = threading.Lock()
 _log: deque[dict[str, Any]] = deque(maxlen=400)
@@ -59,12 +60,14 @@ def since(after: int) -> list[dict[str, Any]]:
 
 def client_node(name: str | None, device: str | None = None) -> str:
     """Which node a request came from: the companion says so in
-    ``X-Jarvis-Device`` (ipad / iphone / mac); a client token's name says the
-    rest (a token named for the TV is the TV)."""
+    ``X-Jarvis-Device`` (ipad / ipad-nightstand / iphone / mac); a client
+    token's name says the rest (a token named for the TV is the TV)."""
     for hint in (device, name):
         text = (hint or "").strip().lower()
         if not text:
             continue
+        if "nightstand" in text:
+            return "nightstand"
         if "ipad" in text:
             return "ipad"
         if "phone" in text:

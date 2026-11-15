@@ -8,6 +8,7 @@ from brain import traffic
 class TrafficTests(unittest.TestCase):
     def test_client_nodes(self) -> None:
         self.assertEqual(traffic.client_node(None, "ipad"), "ipad")
+        self.assertEqual(traffic.client_node(None, "ipad-nightstand"), "nightstand")
         self.assertEqual(traffic.client_node(None, "iphone"), "iphone")
         self.assertEqual(traffic.client_node("jarvis-tv", None), "tv")
         self.assertEqual(traffic.client_node(None, None), "iphone")

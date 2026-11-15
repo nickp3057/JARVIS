@@ -315,11 +315,24 @@ struct JarvisAPIClient {
         return request
     }
 
-    private static let device: String = {
+    /// "ipad-nightstand" for the mini by the bed, so the link map gives it
+    /// its own node. Read per request: Room settings can change the role.
+    private static var device: String {
         if ProcessInfo.processInfo.isMacCatalystApp { return "mac" }
         // The hardware model ("iPad13,4") is readable off the main thread, unlike the idiom.
-        return modelIsPad ? "ipad" : "iphone"
-    }()
+        let model = machine
+        guard model.hasPrefix("iPad") else { return "iphone" }
+        // PadRole's stored choice; "Automatic" means a mini (PadRole.automatic
+        // goes by screen size, which needs the main actor; the model doesn't).
+        let stored = UserDefaults.standard.string(forKey: PadRole.storageKey) ?? ""
+        let nightstand = stored.isEmpty ? miniModels.contains(model) : stored == PadRole.nightstand.rawValue
+        return nightstand ? "ipad-nightstand" : "ipad"
+    }
+
+    /// iPad mini hardware: 4th and 5th gen, 6th gen, A17 Pro.
+    private static let miniModels: Set<String> = [
+        "iPad5,1", "iPad5,2", "iPad11,1", "iPad11,2", "iPad14,1", "iPad14,2", "iPad16,1", "iPad16,2",
+    ]
 
     /// `WS /api/voice/satellite?name=<bed|door>`: this iPad lends Core's room
     /// voice its mic and speaker (`SatelliteVoice`, Core's `speech/satellites.py`).
@@ -351,12 +364,11 @@ struct JarvisAPIClient {
         return LiveVoiceConnection(socket: session.webSocketTask(with: request))
     }
 
-    private static var modelIsPad: Bool {
+    private static let machine: String = {
         var info = utsname()
         uname(&info)
-        let machine = withUnsafeBytes(of: &info.machine) { String(decoding: $0.prefix { $0 != 0 }, as: UTF8.self) }
-        return machine.hasPrefix("iPad")
-    }
+        return withUnsafeBytes(of: &info.machine) { String(decoding: $0.prefix { $0 != 0 }, as: UTF8.self) }
+    }()
 
     private func validate(_ response: URLResponse, data: Data? = nil) throws -> HTTPURLResponse {
         guard let http = response as? HTTPURLResponse else {

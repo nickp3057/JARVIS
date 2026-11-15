@@ -98,7 +98,8 @@ struct LinkMapView: View {
         .init(id: "core", name: "JARVIS", symbol: "cpu", spot: CGPoint(x: 0.5, y: 0.5)),
         .init(id: "nas", name: "NAS · HA, Plex, arr", symbol: "externaldrive.connected.to.line.below", spot: CGPoint(x: 0.14, y: 0.5)),
         .init(id: "tv", name: "TV", symbol: "tv", spot: CGPoint(x: 0.5, y: 0.12)),
-        .init(id: "ipad", name: "iPad", symbol: "ipad.landscape", spot: CGPoint(x: 0.86, y: 0.5)),
+        .init(id: "ipad", name: "Door iPad", symbol: "ipad.landscape", spot: CGPoint(x: 0.86, y: 0.36)),
+        .init(id: "nightstand", name: "Nightstand mini", symbol: "ipad", spot: CGPoint(x: 0.86, y: 0.64)),
         .init(id: "iphone", name: "iPhone", symbol: "iphone", spot: CGPoint(x: 0.7, y: 0.88)),
         .init(id: "mac", name: "Mac", symbol: "laptopcomputer", spot: CGPoint(x: 0.3, y: 0.88)),
         .init(id: "internet", name: "Internet · Claude, APNs", symbol: "globe", spot: CGPoint(x: 0.82, y: 0.14)),
@@ -320,7 +321,8 @@ enum TrafficWords {
         case "nas": return "the NAS"
         case "tv": return "the TV"
         case "iphone": return "your iPhone"
-        case "ipad": return "the iPad"
+        case "ipad": return "the door iPad"
+        case "nightstand": return "the nightstand iPad"
         case "mac": return "the Mac"
         case "internet": return "the internet"
         default: return node
@@ -329,7 +331,7 @@ enum TrafficWords {
 
     static func describe(_ signal: TrafficSignal) -> String {
         let label = signal.label.lowercased()
-        let reply = signal.from == "core" && ["iphone", "ipad", "mac", "tv"].contains(signal.to)
+        let reply = signal.from == "core" && ["iphone", "ipad", "nightstand", "mac", "tv"].contains(signal.to)
         // Core calling out: the NAS's services and the internet.
         if signal.from == "core" && (signal.to == "nas" || signal.to == "internet") {
             return outbound(label)

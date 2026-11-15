@@ -61,6 +61,19 @@ _BUFFER_FRAMES = int(5000 / FRAME_MS)  # the rolling 5 s for the wake word's pre
 _PLAY_TAIL_S = 0.25          # after the last sample: the iPad's own output latency
 
 
+def traffic_node(name: str) -> str:
+    """The link map's node for a satellite: ``bed`` is the nightstand mini."""
+    return "nightstand" if name == "bed" else "ipad"
+
+
+def _signal(source: str, target: str, label: str) -> None:
+    try:
+        from brain import traffic
+        traffic.record(source, target, label)
+    except Exception:  # noqa: BLE001 - the map must never break the voice
+        pass
+
+
 def clean_name(raw: str | None) -> str | None:
     """A satellite's name as the iPad sends it (``bed``, ``door``); None if bad."""
     name = (raw or "").strip().lower()
@@ -162,6 +175,7 @@ class Satellite:
         True if any audio went out. An interrupt or ``stop()`` ends it early
         and tells the iPad to drop what it has buffered."""
         self._halt.clear()
+        _signal("core", traffic_node(self.name), "voice")
         self.send_json({"type": "play", "rate": int(rate), "gain": round(output_gain() if gain is None else gain, 3)})
         started: float | None = None
         samples = 0
@@ -253,6 +267,7 @@ def register(name: str, send) -> Satellite:  # noqa: ANN001
         old.connected = False
         old._halt.set()  # noqa: SLF001
     log.info("Voice satellite '%s' connected", name)
+    _signal(traffic_node(name), "core", "voice satellite")
     return sat
 
 
@@ -357,6 +372,7 @@ def play_everywhere(chunks: Iterable[bytes], rate: int, interrupt: threading.Eve
     gain = output_gain() if gain is None else gain
     for sat in sats:
         sat._halt.clear()  # noqa: SLF001
+        _signal("core", traffic_node(sat.name), "voice")
         sat.send_json({"type": "play", "rate": int(rate), "gain": round(gain, 3)})
     desk = _open_desk(rate)
     offset = _sync_seconds() if sats else 0.0
