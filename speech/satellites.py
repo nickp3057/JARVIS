@@ -11,13 +11,21 @@ the satellite's speaker instead of the desk's.
 Wire format (one socket per iPad):
 
 - iPad -> Core, binary: mic PCM, 16 kHz mono int16 little-endian, any size.
-- iPad -> Core, text: ``{"type": "ping"}`` (ignored; keeps proxies happy).
+- iPad -> Core, text: ``{"type": "bye", "reason": "..."}`` before it hangs
+  up on an error (logged, so a drop says why); anything else is ignored.
 - Core -> iPad, text: ``{"type": "hello", "rate": 16000}`` on connect;
   ``{"type": "play", "rate": 22050, "gain": 0.4}`` before a clip,
   ``{"type": "end"}`` after it, ``{"type": "stop"}`` to cut it off now
   (barge-in, hush), ``{"type": "off"}`` when the room voice isn't running,
   ``{"type": "ping"}`` every 20 s (ignore it; it keeps the socket alive).
 - Core -> iPad, binary: speaker PCM at the last ``play`` rate, mono int16.
+
+Speakers: everything the room voice says or plays goes to the desk speaker
+and every satellite at once (``play_everywhere``), from one synthesis, so
+the room hears one voice. The desk is held back ``SATELLITE_SYNC_MS`` (150)
+to line up with the iPad's network and buffer delay, and the iPad plays at
+the same loudness as the desk (``output_gain``: the desk's 0-10 level on
+ALSA's mapped curve, which is 60 dB wide, so amplitude = (level/10)^3).
 
 A ``Satellite`` doubles as a mic stream for the room voice (``read``,
 ``drain``, ``get_recent_audio``, like ``speech.audio.MicStream``). Frames are
@@ -28,7 +36,10 @@ from __future__ import annotations
 
 import collections
 import json
+import os
 import queue
+import subprocess
+import sys
 import re
 import threading
 import time
@@ -149,7 +160,7 @@ class Satellite:
         True if any audio went out. An interrupt or ``stop()`` ends it early
         and tells the iPad to drop what it has buffered."""
         self._halt.clear()
-        self.send_json({"type": "play", "rate": int(rate), "gain": round(output_gain() if gain is None else gain, 2)})
+        self.send_json({"type": "play", "rate": int(rate), "gain": round(output_gain() if gain is None else gain, 3)})
         started: float | None = None
         samples = 0
         cut = False
@@ -179,55 +190,17 @@ class Satellite:
             self.send_json({"type": "stop"})
         return True
 
-    def say(self, text: str, interrupt: threading.Event | None = None) -> bool:
-        """Speak ``text`` on the iPad in JARVIS's voice (the phone's voice
-        pipeline: ElevenLabs PCM, Piper as the fallback)."""
-        from speech import remote_voice
-        text = (text or "").strip()
-        if not text:
-            return False
-        stopped = threading.Event()
-
-        def chunks():
-            try:
-                for chunk in remote_voice.pcm_stream(text, stopped):
-                    yield chunk
-            except RuntimeError:
-                log.warning("Satellite %s: no voice for %r", self.name, text[:60])
-
-        try:
-            return self.play_pcm(chunks(), remote_voice.SAMPLE_RATE, interrupt)
-        finally:
-            stopped.set()
-
-    def say_stream(self, fragments: Iterable[str], interrupt: threading.Event | None = None) -> bool:
-        """A reply still being written, spoken a sentence at a time."""
-        from speech.tts import _split_ready_sentences
-        buffer, spoke = "", False
-        for fragment in fragments:
-            if interrupt is not None and interrupt.is_set():
-                return spoke
-            buffer += fragment or ""
-            ready, buffer = _split_ready_sentences(buffer)
-            for sentence in ready:
-                if (interrupt is not None and interrupt.is_set()) or self._halt.is_set():
-                    return spoke
-                spoke = self.say(sentence, interrupt) or spoke
-        if buffer.strip() and not (interrupt is not None and interrupt.is_set()):
-            spoke = self.say(buffer, interrupt) or spoke
-        return spoke
-
-    def play_sound(self, name: str, wait: bool = False) -> None:
-        """One of the room voice's sounds (``speech/room_sounds.py``)."""
+    def play_sound(self, name: str, wait: bool = False, gain: float | None = None) -> None:
+        """One of the room voice's sounds (``speech/room_sounds.py``) on this iPad alone."""
         try:
             pcm, rate = _sound_pcm(name)
         except Exception:  # noqa: BLE001
             log.debug("Satellite sound %s unavailable", name, exc_info=True)
             return
         if wait:
-            self.play_pcm([pcm], rate)
+            self.play_pcm([pcm], rate, gain=gain)
         else:
-            threading.Thread(target=self.play_pcm, args=([pcm], rate), daemon=True,
+            threading.Thread(target=self.play_pcm, args=([pcm], rate), kwargs={"gain": gain}, daemon=True,
                              name=f"satellite-{self.name}-sound").start()
 
 
@@ -242,16 +215,24 @@ def _sound_pcm(name: str) -> tuple[bytes, int]:
     return _sound_cache[name]
 
 
-def output_gain() -> float:
-    """How loud the iPad plays, on top of its own volume buttons: full by
-    day, the room's night level in quiet hours (``ROOM_NIGHT_VOLUME``)."""
-    try:
-        from speech import room_volume
-        if room_volume.quiet_now():
-            return max(0.15, min(1.0, room_volume.night_level() / 10))
-    except Exception:  # noqa: BLE001
-        log.debug("Satellite gain: room volume unreadable", exc_info=True)
-    return 1.0
+def output_gain(level: int | None = None) -> float:
+    """How loud the iPad plays (amplitude 0-1, on top of its own volume, best
+    left at full): the same loudness as the desk speaker at ``level`` (the
+    room's current 0-10 level, night or day, when not given). The desk uses
+    ALSA's mapped scale (``ROOM_VOLUME_MAPPED``), 60 dB wide: level 8 is
+    about -6 dB, so amplitude = (level/10)^3; raw steps are close to linear."""
+    if level is None:
+        try:
+            from speech import room_volume
+            level = room_volume.level()
+        except Exception:  # noqa: BLE001
+            log.debug("Satellite gain: room volume unreadable", exc_info=True)
+            level = None
+    if level is None:
+        return 1.0
+    fraction = max(0, min(10, int(level))) / 10
+    mapped = os.getenv("ROOM_VOLUME_MAPPED", "1").strip().lower() not in ("0", "off", "false", "no")
+    return round(fraction ** 3 if mapped else fraction, 3)
 
 
 # --- the registry -------------------------------------------------------------
@@ -297,11 +278,178 @@ def stop_all() -> None:
         sat.stop()
 
 
-def ring_all(name: str = "alarm") -> None:
-    """A sound on every satellite at once (the wake-up backup ring: the
-    nightstand iPad is right by the bed)."""
+def ring_all(name: str = "alarm", level: int | None = None) -> None:
+    """A sound on every satellite at once, at the desk's ``level`` (the
+    wake-up backup ring rings at ``ROOM_ALARM_VOLUME``: the nightstand iPad
+    is right by the bed)."""
+    gain = output_gain(level)
     for sat in connected():
-        sat.play_sound(name)
+        sat.play_sound(name, gain=gain)
+
+
+# --- the whole room at once ----------------------------------------------------
+
+def _sync_seconds() -> float:
+    try:
+        return max(0.0, min(1.0, float(os.getenv("SATELLITE_SYNC_MS", "150")) / 1000))
+    except ValueError:
+        return 0.15
+
+
+def _open_desk(rate: int):  # noqa: ANN202
+    """The desk speaker as a raw PCM pipe (ALSA ``aplay``), registered as
+    TTS's current player so ``tts.stop_playback`` (barge-in, hush, "stop")
+    cuts it off too. None off Linux (the Mac dev box) or without aplay."""
+    if not sys.platform.startswith("linux"):
+        return None
+    from speech import tts
+    try:
+        proc = subprocess.Popen(["aplay", "-q", *tts.alsa_device_args(), "-t", "raw", "-f", "S16_LE",
+                                 "-r", str(int(rate)), "-c", "1"],
+                                stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except OSError:
+        log.warning("Desk speaker: aplay unavailable")
+        return None
+    with tts._player_lock:  # noqa: SLF001
+        tts._current_player = proc  # noqa: SLF001
+    return proc
+
+
+def _close_desk(proc, cut: bool) -> None:  # noqa: ANN001
+    from speech import tts
+    try:
+        if proc.stdin and not proc.stdin.closed:
+            proc.stdin.close()
+    except OSError:
+        pass
+    if cut:
+        if proc.poll() is None:
+            proc.terminate()
+    else:
+        try:
+            proc.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            proc.terminate()
+    with tts._player_lock:  # noqa: SLF001
+        if tts._current_player is proc:  # noqa: SLF001
+            tts._current_player = None  # noqa: SLF001
+
+
+def play_everywhere(chunks: Iterable[bytes], rate: int, interrupt: threading.Event | None = None,
+                    gain: float | None = None) -> bool:
+    """Play one clip (mono int16 PCM at ``rate``) on the desk speaker and
+    every satellite at the same time, at the same loudness. Blocks about as
+    long as the clip lasts. An interrupt, ``tts.stop_playback`` or
+    ``stop_all`` cuts every speaker off. True if any audio went out."""
+    sats = connected()
+    gain = output_gain() if gain is None else gain
+    for sat in sats:
+        sat._halt.clear()  # noqa: SLF001
+        sat.send_json({"type": "play", "rate": int(rate), "gain": round(gain, 3)})
+    desk = _open_desk(rate)
+    lead = _sync_seconds() if sats else 0.0
+    if desk is not None and lead:
+        try:  # the desk waits for the iPads' network and buffer delay
+            desk.stdin.write(b"\0\0" * int(rate * lead))
+        except OSError:
+            desk = None
+    started: float | None = None
+    samples = 0
+    cut = False
+
+    def halted() -> bool:
+        return (interrupt is not None and interrupt.is_set()) or any(s._halt.is_set() for s in sats)  # noqa: SLF001
+
+    try:
+        for chunk in chunks:
+            if halted():
+                cut = True
+                break
+            if not chunk:
+                continue
+            if started is None:
+                started = time.monotonic()
+            for sat in sats:
+                sat.send_bytes(chunk)
+            if desk is not None:
+                try:
+                    desk.stdin.write(chunk)  # paces the loop at real time
+                except (OSError, ValueError):  # stop_playback killed it: that's a stop
+                    cut = True
+                    break
+            samples += len(chunk) // 2
+    except Exception:  # noqa: BLE001 - the voice failed mid-clip: play what we have
+        log.exception("Speech failed mid-clip")
+    for sat in sats:
+        sat.send_json({"type": "end"})
+    if started is None:
+        if desk is not None:
+            _close_desk(desk, cut=True)
+        return False
+    if desk is not None:
+        _close_desk(desk, cut)  # without a cut: waits for the desk to finish
+    until = started + samples / max(1, rate) + _PLAY_TAIL_S
+    while not cut and sats and time.monotonic() < until:
+        if halted():
+            cut = True
+            break
+        time.sleep(0.03)
+    if cut:
+        for sat in sats:
+            sat.send_json({"type": "stop"})
+    return True
+
+
+def say_everywhere(text: str, interrupt: threading.Event | None = None) -> bool:
+    """Speak ``text`` on every speaker at once in JARVIS's voice (synthesized
+    once: the phone's voice pipeline, ElevenLabs PCM with Piper behind it)."""
+    from speech import remote_voice
+    text = (text or "").strip()
+    if not text:
+        return False
+    stopped = threading.Event()
+
+    def chunks():
+        try:
+            yield from remote_voice.pcm_stream(text, stopped)
+        except RuntimeError:
+            log.warning("No voice for %r", text[:60])
+
+    try:
+        return play_everywhere(chunks(), remote_voice.SAMPLE_RATE, interrupt)
+    finally:
+        stopped.set()
+
+
+def say_stream_everywhere(fragments: Iterable[str], interrupt: threading.Event | None = None) -> bool:
+    """A reply still being written, spoken a sentence at a time everywhere."""
+    from speech.tts import _split_ready_sentences
+    buffer, spoke = "", False
+    for fragment in fragments:
+        if interrupt is not None and interrupt.is_set():
+            return spoke
+        buffer += fragment or ""
+        ready, buffer = _split_ready_sentences(buffer)
+        for sentence in ready:
+            if interrupt is not None and interrupt.is_set():
+                return spoke
+            spoke = say_everywhere(sentence, interrupt) or spoke
+    if buffer.strip() and not (interrupt is not None and interrupt.is_set()):
+        spoke = say_everywhere(buffer, interrupt) or spoke
+    return spoke
+
+
+def sound_everywhere(name: str, wait: bool = False) -> None:
+    """A room-voice sound on every speaker at once."""
+    try:
+        pcm, rate = _sound_pcm(name)
+    except Exception:  # noqa: BLE001
+        log.debug("Sound %s unavailable", name, exc_info=True)
+        return
+    if wait:
+        play_everywhere([pcm], rate)
+    else:
+        threading.Thread(target=play_everywhere, args=([pcm], rate), daemon=True, name=f"sound-{name}").start()
 
 
 def status() -> list[dict[str, object]]:

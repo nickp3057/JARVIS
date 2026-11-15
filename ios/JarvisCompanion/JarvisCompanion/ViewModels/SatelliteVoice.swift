@@ -10,8 +10,12 @@ import SwiftUI
 /// "Hey JARVIS" best, sends the reply's audio back to play here.
 /// See Core's `speech/satellites.py` for the wire format.
 ///
-/// Echo: the input runs with iOS voice processing, so JARVIS's own voice
-/// from this speaker is cancelled out of what the mic sends.
+/// Speaker: Core plays everything on the desk speaker and every iPad at
+/// once, at the desk's loudness (`play {gain}`); Room settings › Match the
+/// desk trims it by ear (keep the iPad's own volume up). No iOS voice
+/// processing: it reshuffled the audio as soon as a reply played and
+/// dropped the connection, and Core doesn't listen for the wake word while
+/// JARVIS talks anyway (barge-in aside).
 ///
 /// On by default on the nightstand iPad, off on the door's
 /// (Room settings › JARVIS listens here). iOS only lets an app use the mic
@@ -38,6 +42,8 @@ final class SatelliteVoice: ObservableObject {
     @Published private(set) var status: Status = .off
 
     static let settingKey = "room.satellite"
+    /// Room settings › Match the desk: the iPad's loudness relative to the desk (0.5-2).
+    static let trimKey = "room.satelliteTrim"
 
     /// The stored choice: "" = by role (on for the nightstand), "on", "off".
     static func enabled(stored: String, role: PadRole) -> Bool {
@@ -89,6 +95,9 @@ final class SatelliteVoice: ObservableObject {
                 if Task.isCancelled { break }
                 status = .failed(error.localizedDescription)
                 backoff = min(30, backoff * 2)
+                // Tell Core why, so its log says more than "disconnected".
+                socket?.send(.string(#"{"type":"bye","reason":"\#(Self.reason(error))"}"#)) { _ in }
+                try? await Task.sleep(for: .milliseconds(200))
             }
             audio?.stop()
             audio = nil
@@ -99,6 +108,11 @@ final class SatelliteVoice: ObservableObject {
     }
 
     private enum SatelliteError: Error { case roomVoiceOff, audioStopped }
+
+    private static func reason(_ error: Error) -> String {
+        let text = error is SatelliteError ? "audio stopped (\(error))" : error.localizedDescription
+        return text.replacingOccurrences(of: "\"", with: "'").replacingOccurrences(of: "\\", with: "/")
+    }
 
     /// One connection: open the socket, start the audio, then follow Core's
     /// messages until the socket drops.
@@ -129,7 +143,9 @@ final class SatelliteVoice: ObservableObject {
                 let json = Self.decode(text)
                 switch json["type"] as? String {
                 case "play":
-                    audio.begin(rate: (json["rate"] as? Double) ?? 22050, gain: Float((json["gain"] as? Double) ?? 1))
+                    let trim = UserDefaults.standard.object(forKey: Self.trimKey) as? Double ?? 1
+                    audio.begin(rate: (json["rate"] as? Double) ?? 22050,
+                                gain: Float(((json["gain"] as? Double) ?? 1) * trim))
                 case "stop":
                     audio.flush()
                 case "off":
@@ -172,17 +188,16 @@ final class SatelliteAudio: @unchecked Sendable {
     private let lock = NSLock()
     private var _failed = false
 
-    /// The engine stopped under us (an interruption, a route change): the
-    /// connection restarts and brings the audio back up.
+    /// The engine stopped and couldn't be restarted in place: the connection
+    /// restarts and brings the audio back up.
     var failed: Bool { lock.withLock { _failed } }
 
     func start(onMic: @escaping @Sendable (Data) -> Void) throws {
         let session = AVAudioSession.sharedInstance()
-        try session.setCategory(.playAndRecord, mode: .voiceChat, options: [.defaultToSpeaker, .mixWithOthers])
+        try session.setCategory(.playAndRecord, mode: .default, options: [.defaultToSpeaker, .mixWithOthers])
         try session.setActive(true)
 
         let input = engine.inputNode
-        try input.setVoiceProcessingEnabled(true)  // echo cancellation: JARVIS doesn't hear himself
         let inFormat = input.outputFormat(forBus: 0)
         converter = AVAudioConverter(from: inFormat, to: micFormat)
 

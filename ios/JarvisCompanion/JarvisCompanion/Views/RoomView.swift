@@ -1194,6 +1194,7 @@ private struct RoomSettingsView: View {
 
     private var nightstand: Bool { PadRole.resolve(padRoleRaw) == .nightstand }
     @AppStorage(SatelliteVoice.settingKey) private var satelliteSetting = ""
+    @AppStorage(SatelliteVoice.trimKey) private var satelliteTrim = 1.0
     @ObservedObject private var satellite = SatelliteVoice.shared
 
     private var favorites: [String] {
@@ -1221,10 +1222,16 @@ private struct RoomSettingsView: View {
                                 let byRole = SatelliteVoice.enabled(stored: "", role: PadRole.resolve(padRoleRaw))
                                 satelliteSetting = on == byRole ? "" : (on ? "on" : "off")
                             }))
+                        if SatelliteVoice.enabled(stored: satelliteSetting, role: PadRole.resolve(padRoleRaw)) {
+                            LabeledContent("Match the desk") {
+                                Slider(value: $satelliteTrim, in: 0.5...2, step: 0.05)
+                                    .frame(maxWidth: 260)
+                            }
+                        }
                     } header: {
                         Text("Mic and speaker")
                     } footer: {
-                        Text("\(satellite.status.text). This iPad hears \u{201C}Hey JARVIS\u{201D} for the room, and when it heard you best, JARVIS answers from its speaker instead of the desk's. Works while the app is open.")
+                        Text("\(satellite.status.text). This iPad hears \u{201C}Hey JARVIS\u{201D} for the room, and plays everything JARVIS says together with the desk speaker, at the same loudness. Keep this iPad's volume up and use Match the desk if it sounds louder or quieter than the desk. Works while the app is open.")
                     }
                 }
                 Section("Screen") {

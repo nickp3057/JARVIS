@@ -270,8 +270,15 @@ async def voice_satellite(socket: WebSocket) -> None:
                 break
             if message.get("bytes"):
                 sat.feed(message["bytes"])
-    except Exception:  # noqa: BLE001 - a dropped socket ends the satellite, nothing else
-        log.debug("Voice satellite %s socket ended", name, exc_info=True)
+            elif message.get("text"):
+                try:
+                    note = json.loads(message["text"])
+                except ValueError:
+                    continue
+                if isinstance(note, dict) and note.get("type") == "bye":
+                    log.info("Voice satellite %s hanging up: %s", name, str(note.get("reason", ""))[:200])
+    except Exception as exc:  # noqa: BLE001 - a dropped socket ends the satellite, nothing else
+        log.info("Voice satellite %s socket ended: %s", name, exc or type(exc).__name__)
     finally:
         satellites.unregister(sat)
         outbox.put_nowait(None)

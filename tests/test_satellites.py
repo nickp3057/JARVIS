@@ -80,16 +80,21 @@ class SatelliteSpeakerTests(unittest.TestCase):
         return [json.loads(m)["type"] if isinstance(m, str) else "pcm" for m in self.sent]
 
     def test_a_clip_is_play_pcm_end(self) -> None:
-        with patch.object(room_volume, "quiet_now", return_value=False):
+        with patch.object(room_volume, "level", return_value=None):
             self.assertTrue(self.sat.play_pcm([b"\x01\x00" * 100, b"\x01\x00" * 100], 22050))
         self.assertEqual(self.messages(), ["play", "pcm", "pcm", "end"])
         self.assertEqual(json.loads(self.sent[0]), {"type": "play", "rate": 22050, "gain": 1.0})
 
-    def test_night_plays_quieter(self) -> None:
-        with patch.object(room_volume, "quiet_now", return_value=True), \
-                patch.object(room_volume, "night_level", return_value=4):
+    def test_ipad_loudness_matches_the_desk(self) -> None:
+        # ALSA's mapped scale is 60 dB wide: level 8 is about -6 dB, amplitude 0.512.
+        self.assertEqual(satellites.output_gain(10), 1.0)
+        self.assertEqual(satellites.output_gain(8), 0.512)
+        self.assertEqual(satellites.output_gain(3), 0.027)
+        with patch.dict("os.environ", {"ROOM_VOLUME_MAPPED": "0"}):
+            self.assertEqual(satellites.output_gain(8), 0.8)
+        with patch.object(room_volume, "level", return_value=4):  # the night level, say
             self.sat.play_pcm([b"\x00\x00"], 22050)
-        self.assertEqual(json.loads(self.sent[0])["gain"], 0.4)
+        self.assertEqual(json.loads(self.sent[0])["gain"], 0.064)
 
     def test_an_interrupt_stops_the_ipad(self) -> None:
         stop = __import__("threading").Event()
@@ -105,11 +110,6 @@ class SatelliteSpeakerTests(unittest.TestCase):
         self.assertLess(time.monotonic() - started, 0.8)  # cut off, not played out
         self.assertIn("stop", self.messages())
 
-    def test_say_uses_the_phone_voice(self) -> None:
-        with patch("speech.remote_voice.pcm_stream", return_value=iter([b"\x00\x00" * 10])) as voice:
-            self.assertTrue(self.sat.say("Good evening, sir."))
-        voice.assert_called_once()
-        self.assertEqual(self.messages(), ["play", "pcm", "end"])
 
     def test_sounds_go_to_the_ipad(self) -> None:
         satellites._sound_cache.clear()
@@ -117,6 +117,63 @@ class SatelliteSpeakerTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp, patch.object(room_sounds, "_DIR", Path(tmp)):
             self.sat.play_sound("listen", wait=True)
         self.assertEqual(self.messages(), ["play", "pcm", "end"])
+
+
+class FakeDesk:
+    """aplay's stdin, recorded."""
+
+    def __init__(self) -> None:
+        self.stdin = __import__("io").BytesIO()
+        self.stdin.close = lambda: None  # keep what was written readable
+
+
+class EverywhereTests(unittest.TestCase):
+    """The desk and every iPad play the same audio at once, at matched loudness."""
+
+    def setUp(self) -> None:
+        satellites.reset_for_tests()
+        self.addCleanup(satellites.reset_for_tests)
+        self.sent: list = []
+        self.sat = satellites.register("bed", self.sent.append)
+        self.desk = FakeDesk()
+        patch.object(satellites, "_open_desk", return_value=self.desk).start()
+        self.closed = patch.object(satellites, "_close_desk").start()
+        patch.object(room_volume, "level", return_value=8).start()
+        patch.dict("os.environ", {"SATELLITE_SYNC_MS": "100"}).start()
+        self.addCleanup(patch.stopall)
+
+    def kinds(self) -> list:
+        return [json.loads(m)["type"] if isinstance(m, str) else "pcm" for m in self.sent]
+
+    def test_one_clip_on_both_speakers(self) -> None:
+        clip = b"\x01\x00" * 220
+        self.assertTrue(satellites.play_everywhere([clip], 22050))
+        self.assertEqual(self.kinds(), ["play", "pcm", "end"])
+        self.assertEqual(json.loads(self.sent[0])["gain"], 0.512)  # the desk's level 8
+        written = self.desk.stdin.getvalue()
+        lead = b"\0\0" * int(22050 * 0.1)  # the desk waits for the iPad's delay
+        self.assertEqual(written, lead + clip)
+        self.closed.assert_called_once_with(self.desk, False)
+
+    def test_spoken_once_for_the_whole_room(self) -> None:
+        with patch("speech.remote_voice.pcm_stream", return_value=iter([b"\x00\x00" * 10])) as voice:
+            self.assertTrue(satellites.say_everywhere("Good evening, sir."))
+        voice.assert_called_once()  # one synthesis, not one per speaker
+        self.assertEqual(self.kinds(), ["play", "pcm", "end"])
+
+    def test_a_stop_cuts_every_speaker(self) -> None:
+        def chunks():  # noqa: ANN202
+            yield b"\x00\x00" * 10
+            satellites.stop_all()
+            yield b"\x00\x00" * 10
+        satellites.play_everywhere(chunks(), 22050)
+        self.assertEqual(self.kinds(), ["play", "pcm", "stop", "end", "stop"])
+        self.closed.assert_called_once_with(self.desk, True)
+
+    def test_streamed_reply_sentence_by_sentence(self) -> None:
+        with patch.object(satellites, "say_everywhere", return_value=True) as say:
+            satellites.say_stream_everywhere(iter(["Good evening, sir. ", "The lights ", "are off."]))
+        self.assertEqual([c.args[0] for c in say.call_args_list], ["Good evening, sir.", "The lights are off."])
 
 
 class ArbitrationTests(unittest.TestCase):
@@ -168,17 +225,17 @@ class ArbitrationTests(unittest.TestCase):
             self.assertTrue(self.voice._wait_for_wake(QuietStream()))
         self.assertIs(self.voice._source, self.sat)
 
-    def test_replies_and_sounds_go_to_the_satellite_that_heard(self) -> None:
+    def test_with_a_satellite_everything_plays_everywhere(self) -> None:
         self.voice._source = self.sat
         self.voice.stream = QuietStream()
-        with patch.object(self.sat, "say", return_value=True) as say, \
-                patch.object(self.sat, "play_sound") as sound, patch("speech.tts.speak") as desk:
+        with patch.object(satellites, "say_everywhere", return_value=True) as say, \
+                patch.object(satellites, "sound_everywhere") as sound, patch("speech.tts.speak") as desk_only:
             self.voice._speak("It's 9 o'clock, sir.")
             self.voice._sound("listen")
             self.voice._say("Sleep well, sir.")
         self.assertEqual([c.args[0] for c in say.call_args_list], ["It's 9 o'clock, sir.", "Sleep well, sir."])
         sound.assert_called_once_with("listen", wait=False)
-        desk.assert_not_called()
+        desk_only.assert_not_called()  # the desk plays through play_everywhere instead
 
     def test_a_dropped_satellite_falls_back_to_the_desk(self) -> None:
         self.voice._source = self.sat
@@ -197,9 +254,9 @@ class ArbitrationTests(unittest.TestCase):
 
     def test_the_wake_up_backup_ring_rings_the_satellite_too(self) -> None:
         self.voice._wake_ringing = lambda: True
-        with patch.object(room_volume, "ring_alarm"), patch.object(satellites, "ring_all") as ring:
+        with patch.object(room_volume, "ring_alarm", return_value=8), patch.object(satellites, "ring_all") as ring:
             self.voice._duties(QuietStream())
-        ring.assert_called_once_with("alarm")
+        ring.assert_called_once_with("alarm", level=8)
 
 
 class SatelliteSocketTests(unittest.TestCase):

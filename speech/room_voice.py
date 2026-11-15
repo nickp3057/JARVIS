@@ -46,10 +46,11 @@ from before the wake word is kept and used when nothing follows it.
 Satellites (``speech/satellites.py``): an iPad on the companion app can lend
 its mic and speaker. Each satellite gets its own wake detector; when more
 than one mic hears "Hey JARVIS" within ``SATELLITE_ARBITRATION_MS`` (350),
-the highest wake score answers. That exchange (capture, follow-ups, the
-goodnight questions, barge-in) then listens on that mic and speaks through
-that speaker, sounds included. Reminders, timers and broadcasts stay on the
-desk speaker; the wake-up backup ring also rings every satellite.
+the highest wake score answers, and that exchange (capture, follow-ups, the
+goodnight questions, barge-in) listens on that mic. Whatever JARVIS says or
+plays goes to the desk speaker and every satellite at once, at the same
+loudness (``satellites.play_everywhere``); the wake-up backup ring rings
+them all at ``ROOM_ALARM_VOLUME``.
 """
 from __future__ import annotations
 
@@ -313,29 +314,31 @@ class RoomVoice:
                 sat.detector.reset()
             sat.wake_hits = 0
 
-    def _sound(self, name: str, wait: bool = False) -> None:
-        """A room-voice sound, on the speaker of whoever is being answered."""
-        source = self._source
-        if source is not None and source.connected:
-            source.play_sound(name, wait=wait)
+    @staticmethod
+    def _sound(name: str, wait: bool = False) -> None:
+        """A room-voice sound: the desk speaker, and every satellite with it."""
+        if satellites.connected():
+            satellites.sound_everywhere(name, wait=wait)
+        elif wait:
+            room_sounds.play(name, wait=True)
         else:
-            room_sounds.play(name, wait=wait)
+            room_sounds.play(name)
 
-    def _voice_out(self, text: str, cache: bool | str, interrupt: threading.Event | None) -> None:
-        """Say ``text`` on this exchange's speaker."""
-        source = self._source
-        if source is not None and source.connected:
-            source.say(text, interrupt)
+    @staticmethod
+    def _voice_out(text: str, cache: bool | str, interrupt: threading.Event | None) -> None:
+        """Say ``text`` in the room: the desk speaker alone (TTS's own path,
+        with its cache), or with satellites, every speaker at once."""
+        if satellites.connected():
+            satellites.say_everywhere(text, interrupt)
             return
         from speech.tts import speak
         speak(text, cache=cache)
 
-    def _stop_output(self) -> None:
+    @staticmethod
+    def _stop_output() -> None:
         from speech.tts import stop_playback
         stop_playback()
-        source = self._source
-        if source is not None:
-            source.stop()
+        satellites.stop_all()
 
     def _wait_for_wake(self, stream: MicStream) -> bool:
         """Listen on the desk mic and every satellite. The first mic to hear
@@ -398,9 +401,9 @@ class RoomVoice:
             # Wake-up backup (brain/wake_alarm.py): the TV didn't come on.
             if now >= self._next_ring:
                 self._next_ring = now + 3.5
-                room_volume.ring_alarm()  # ROOM_ALARM_VOLUME, never the night level
+                level = room_volume.ring_alarm()  # ROOM_ALARM_VOLUME, never the night level
                 room_sounds.play("alarm")
-                satellites.ring_all("alarm")  # the nightstand iPad is right by the bed
+                satellites.ring_all("alarm", level=level)  # the nightstand iPad is right by the bed
         if self._ringing_since is not None:
             if not self._alarming() or now - self._ringing_since > _seconds("ROOM_ALARM_RING_S", 120):
                 self._ringing_since = None
@@ -408,7 +411,7 @@ class RoomVoice:
             elif now >= self._next_ring:
                 self._next_ring = now + 3.5
                 room_volume.prepare()
-                room_sounds.play("alarm")
+                self._sound("alarm")
         if self._spoke:
             self._spoke = False
             self._drain_all(stream)  # don't hear ourselves as the wake word
@@ -424,7 +427,7 @@ class RoomVoice:
             self._ringing_since = time.monotonic()
             self._next_ring = 0.0
             room_volume.prepare()
-            room_sounds.play("alarm", wait=True)
+            self._sound("alarm", wait=True)
             self._say(f"Sir, your {label} timer is done." if label else "Sir, your timer is done.")
             voice_presence.update("speaking", reply="Time's up")
         elif isinstance(item, Reminder):
@@ -438,7 +441,7 @@ class RoomVoice:
         if not text:
             return
         room_volume.prepare()
-        room_sounds.play("chime", wait=True)
+        self._sound("chime", wait=True)
         self._say(text)
         voice_presence.update("idle")
 
@@ -840,9 +843,8 @@ class RoomVoice:
 
         log.info("Room voice streaming its reply: %r…", head[:60])
         voice_presence.update("speaking", reply=head.strip())
-        source = self._source
-        if source is not None and source.connected:
-            self._barged = self._play(lambda interrupt: source.say_stream(rest(), interrupt))
+        if satellites.connected():
+            self._barged = self._play(lambda interrupt: satellites.say_stream_everywhere(rest(), interrupt))
         else:
             self._barged = self._play(lambda interrupt: speak_stream(rest(), interrupt_event=interrupt))
         self.last_reply = "".join(parts).strip()
