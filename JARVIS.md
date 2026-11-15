@@ -2991,6 +2991,11 @@ prototype in `~/Developer/projects/light-sync` (2026-11-09).
 - **Flash limiter** (new): colour may change fast, but at most 3 big
   brightness jumps (a one-direction move of more than 25% of full) in any
   second, 2 at Subtle; over budget a run is held to a small step, keeping the hue.
+- **Restarts don't lose builds:** systemd stops ffmpeg with Core (exit 255,
+  no error text), often before Core's shutdown hook runs; `killed_from_outside`
+  spots that, keeps the film at the front of the queue with no "failed" push,
+  and retries after 30 s (gone by then on a real restart; the queue file
+  brings it back). After 2 such kills in one run it counts as a failure.
 - **Colour steadying** (`steady_track`, applied when a track loads, no
   rebuild): in dim scenes the builder's 3% "vivid" test flips neighbouring
   frames between a hue and the warm-white fallback (The Hunger Games at

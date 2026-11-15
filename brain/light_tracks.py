@@ -53,6 +53,9 @@ _build: dict[str, Any] | None = None
 # Films waiting their turn, oldest first: {"film": plex.movie record, "rebuild", "quiet"}.
 _queue: list[dict[str, Any]] = []
 _stopping = False  # Core is shutting down: keep the interrupted build in the queue file
+_interrupts: dict[str, int] = {}  # ratingKey -> times ffmpeg was killed from outside
+_MAX_INTERRUPTS = 2
+_RETRY_AFTER_S = 30.0
 OFFSET_LIMIT_MS = 2000
 _cancel = threading.Event()
 _notifier: Callable[[str, str, str], None] | None = None
@@ -511,6 +514,7 @@ def _run_build(film: dict[str, Any], exe: str, quiet: bool = False) -> None:
     _, token = plex._config()  # noqa: SLF001 - only to scrub it from ffmpeg's error text
     started = time.monotonic()
     stderr_tail: list[bytes] = []
+    requeue = False
     try:
         proc = subprocess.Popen(ffmpeg_command(exe, url), stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                                 stdin=subprocess.DEVNULL, bufsize=_FRAME_BYTES * 64,
@@ -546,8 +550,17 @@ def _run_build(film: dict[str, Any], exe: str, quiet: bool = False) -> None:
         if _cancel.is_set():
             log.info("Light track for %s cancelled", title)
             return
+        why = b"".join(stderr_tail).decode("utf-8", "replace").strip()
+        if killed_from_outside(code, why) and _interrupts.get(key, 0) < _MAX_INTERRUPTS:
+            # systemd stops ffmpeg with Core on a restart (exit 255, no error
+            # text), often before Core's own shutdown hook runs: not the film's
+            # fault. Keep it at the front of the queue, quietly.
+            _interrupts[key] = _interrupts.get(key, 0) + 1
+            log.info("Light track for %s interrupted (ffmpeg exit %s at %d of ~%d frames); kept in the queue",
+                     title, code, len(track), expected)
+            requeue = True
+            return
         if code != 0 or len(track) < max(10, expected // 2):
-            why = b"".join(stderr_tail).decode("utf-8", "replace").strip()
             if token:
                 why = why.replace(token, "***")
             log.warning("Light track for %s failed: ffmpeg exit %s, %d of ~%d frames. %s",
@@ -568,13 +581,29 @@ def _run_build(film: dict[str, Any], exe: str, quiet: bool = False) -> None:
                 "warning")
     finally:
         with _lock:
+            entry = (_build or {}).get("entry") or {"film": film, "rebuild": False, "quiet": quiet}
             _build = None
+            if requeue:
+                _queue.insert(0, entry)
             if not _stopping:
                 _persist()  # at shutdown the file keeps it, so the next start builds it again
-        if not _stopping:
+        if requeue:
+            # Later, not now: if Core is going down, it's gone by then and the
+            # queue file brings the film back on the next start.
+            retry = threading.Timer(_RETRY_AFTER_S, _pump)
+            retry.daemon = True
+            retry.start()
+        elif not _stopping:
             _cancel.clear()
             _pump()
         _changed()
+
+
+def killed_from_outside(code: int | None, stderr_text: str) -> bool:
+    """ffmpeg ended by a signal rather than a read or decode error: a
+    negative return code, or 255 with nothing on stderr (how it exits on
+    SIGTERM/SIGINT at ``-v error``)."""
+    return code is not None and (code < 0 or (code == 255 and not stderr_text.strip()))
 
 
 def _nice() -> None:  # in the ffmpeg child: Core's voice and API come first

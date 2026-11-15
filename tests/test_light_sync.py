@@ -200,6 +200,35 @@ class BuildTests(BuildBase):
         self.assertIn("sir", self.notes[-1][1])
         self.assertNotIn("sekrit", " ".join(logs.output))
 
+    def test_a_restart_killing_ffmpeg_keeps_the_film_queued_quietly(self) -> None:
+        light_tracks._interrupts.clear()
+        self.addCleanup(light_tracks._interrupts.clear)
+        proc = _FakeProc(_frame((0, 0, 255)) * 5, code=255, err=b"")  # SIGTERM from systemd
+        with patch.object(light_tracks.subprocess, "Popen", return_value=proc), \
+                patch.object(light_tracks, "_RETRY_AFTER_S", 60.0):
+            light_tracks.start_build(self.FILM)
+            self._wait()
+        self.assertEqual(self.notes, [])  # no "failed" push
+        self.assertEqual([e["film"]["rating_key"] for e in light_tracks._queue], ["7"])
+        light_tracks._queue.clear()
+
+    def test_a_film_that_keeps_getting_killed_fails_in_the_end(self) -> None:
+        light_tracks._interrupts.clear()
+        self.addCleanup(light_tracks._interrupts.clear)
+        light_tracks._interrupts["7"] = light_tracks._MAX_INTERRUPTS
+        proc = _FakeProc(_frame((0, 0, 255)) * 5, code=255, err=b"")
+        with patch.object(light_tracks.subprocess, "Popen", return_value=proc), \
+                self.assertLogs("jarvis.brain.light_tracks", level="WARNING"):
+            light_tracks.start_build(self.FILM)
+            self._wait()
+        self.assertEqual(self.notes[-1][0], "Light sync failed")
+
+    def test_killed_from_outside(self) -> None:
+        self.assertTrue(light_tracks.killed_from_outside(255, ""))
+        self.assertTrue(light_tracks.killed_from_outside(-15, "anything"))
+        self.assertFalse(light_tracks.killed_from_outside(255, "http error 404"))
+        self.assertFalse(light_tracks.killed_from_outside(1, ""))
+
     def test_existing_track_and_a_second_film_queues(self) -> None:
         light_tracks.save("7", np.zeros((5, 3), np.uint8), "Cars 2")
         ok, message = light_tracks.start_build(self.FILM)
