@@ -922,9 +922,11 @@ struct LightSyncState: Decodable, Equatable {
         let effectiveMs: Int
         let filmTitle: String?
         let stepMs: Int
+        /// The lamp's head start over the strips (it fades by itself), ms.
+        let lampLeadMs: Int?
         enum CodingKeys: String, CodingKey {
             case globalMs = "global_ms", filmMs = "film_ms", effectiveMs = "effective_ms"
-            case filmTitle = "film_title", stepMs = "step_ms"
+            case filmTitle = "film_title", stepMs = "step_ms", lampLeadMs = "lamp_lead_ms"
         }
     }
 

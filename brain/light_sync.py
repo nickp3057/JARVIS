@@ -122,8 +122,16 @@ class Tuning:
     jumps_per_s: int
 
 
-def tuning(intensity: str = "medium") -> Tuning:
-    """The live .env values with ``intensity`` applied."""
+LAMP_LEAD_LIMIT_MS = 1500
+
+
+def _default_lamp_lead() -> int:
+    return int(max(0, min(LAMP_LEAD_LIMIT_MS, _num("LIGHT_SYNC_LAMP_LEAD_MS", 150))))
+
+
+def tuning(intensity: str = "medium", lamp_lead_ms: float | None = None) -> Tuning:
+    """The live .env values with ``intensity`` applied; ``lamp_lead_ms`` is
+    the lamp's head start Nick set while calibrating (else the .env value)."""
     level_x, blend_x, jumps = _PRESETS.get(intensity, _PRESETS["medium"])
     return Tuning(
         strips=tuple(_ips("LIGHT_SYNC_STRIPS", "10.0.0.125,10.0.0.221")),
@@ -131,11 +139,18 @@ def tuning(intensity: str = "medium") -> Tuning:
         segments=max(1, min(50, int(_num("LIGHT_SYNC_SEGMENTS", 15)))),
         lead_ms=_num("LIGHT_SYNC_LEAD_MS", 0),
         blend_ms=max(1.0, _num("LIGHT_SYNC_BLEND_MS", 80) * blend_x),
-        lamp_lead_ms=_num("LIGHT_SYNC_LAMP_LEAD_MS", 150),
+        lamp_lead_ms=float(_default_lamp_lead() if lamp_lead_ms is None else lamp_lead_ms),
         strip_level=max(0.0, min(1.0, _num("LIGHT_SYNC_STRIP_LEVEL", 0.35) * level_x)),
         lamp_level=max(0.0, min(1.0, _num("LIGHT_SYNC_LAMP_LEVEL", 0.6) * level_x)),
         jumps_per_s=jumps,
     )
+
+
+def _live_tuning() -> Tuning:
+    """What the player reads every frame: intensity and the lamp's head start
+    from the state file, the rest from .env."""
+    state = load_state()
+    return tuning(state["intensity"], state["lamp_lead_ms"])
 
 
 def _default_offset() -> int:
@@ -146,7 +161,8 @@ def _default_offset() -> int:
 def load_state() -> dict[str, Any]:
     """{"auto": bool, "intensity": str, "offset_ms": int}, defaults when the
     file is missing or bad (``offset_ms`` from ``LIGHT_SYNC_LEAD_MS`` until saved)."""
-    state = {"auto": True, "intensity": "medium", "offset_ms": _default_offset()}
+    state = {"auto": True, "intensity": "medium", "offset_ms": _default_offset(),
+             "lamp_lead_ms": _default_lamp_lead()}
     try:
         data = json.loads(_STATE_FILE.read_text())
     except (OSError, ValueError):
@@ -158,6 +174,9 @@ def load_state() -> dict[str, Any]:
             state["intensity"] = data["intensity"]
         if isinstance(data.get("offset_ms"), (int, float)) and not isinstance(data.get("offset_ms"), bool):
             state["offset_ms"] = light_tracks.clamp_offset(data["offset_ms"])
+        lamp = data.get("lamp_lead_ms")
+        if isinstance(lamp, (int, float)) and not isinstance(lamp, bool):
+            state["lamp_lead_ms"] = int(max(0, min(LAMP_LEAD_LIMIT_MS, lamp)))
     return state
 
 
@@ -168,6 +187,8 @@ def save_state(state: dict[str, Any]) -> None:
         body = {"auto": bool(state["auto"]), "intensity": state["intensity"]}
         if "offset_ms" in state:
             body["offset_ms"] = light_tracks.clamp_offset(state["offset_ms"])
+        if "lamp_lead_ms" in state:
+            body["lamp_lead_ms"] = int(max(0, min(LAMP_LEAD_LIMIT_MS, state["lamp_lead_ms"])))
         tmp.write_text(json.dumps(body))
         tmp.replace(_STATE_FILE)
     except OSError as exc:
@@ -701,7 +722,7 @@ class LightSync:
                 return None
             return now_pb.position(self.now()), now_pb.speed if now_pb.moving else 0.0
 
-        player = Player(track, key, clock, lambda: tuning(load_state()["intensity"]), self._sender,
+        player = Player(track, key, clock, _live_tuning, self._sender,
                         now=self.now, on_exit=self._player_exited, lead_ms=self.effective_offset(key))
         session = _Session(key, title, player)
         session.paused_follow = _pause_follow()
@@ -876,6 +897,18 @@ class LightSync:
             said += f" (effective {_ms(self.effective_offset(key))})"
         return said + "."
 
+    def nudge_lamp(self, ms: int) -> tuple[bool, str]:
+        """The lamp's own head start over the strips (it fades by itself and
+        takes few updates a second), positive = lamp earlier. Live."""
+        state = load_state()
+        before = state["lamp_lead_ms"]
+        state["lamp_lead_ms"] = int(max(0, min(LAMP_LEAD_LIMIT_MS, before + int(ms))))
+        save_state(state)
+        self.bump()
+        if state["lamp_lead_ms"] == before:
+            return False, f"The lamp's as far {'earlier' if ms > 0 else 'later'} as I'll take it, sir: {before} ms ahead."
+        return True, f"Lamp {abs(int(ms))} ms {'earlier' if ms > 0 else 'later'}, sir: {state['lamp_lead_ms']} ms ahead of the strips."
+
     def offsets(self) -> dict[str, Any]:
         target = self._target_film()
         film_ms = light_tracks.film_offset(target[0]) if target else 0
@@ -883,7 +916,7 @@ class LightSync:
                 "effective_ms": self.effective_offset(target[0] if target else None),
                 "film_title": target[1] if target else None,
                 "scope": self._resolve_scope(None), "step_ms": OFFSET_STEP_MS,
-                "limit_ms": light_tracks.OFFSET_LIMIT_MS}
+                "limit_ms": light_tracks.OFFSET_LIMIT_MS, "lamp_lead_ms": load_state()["lamp_lead_ms"]}
 
     # -- calibration
     def calibrate(self) -> tuple[bool, str]:

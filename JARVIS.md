@@ -2991,6 +2991,14 @@ prototype in `~/Developer/projects/light-sync` (2026-11-09).
 - **Flash limiter** (new): colour may change fast, but at most 3 big
   brightness jumps (a one-direction move of more than 25% of full) in any
   second, 2 at Subtle; over budget a run is held to a small step, keeping the hue.
+- **Lamp head start** (2026-11-15): the lamp fades by itself and takes ~5
+  updates a second, so it reads ahead of the strips. Nick saw it lag at the
+  .env default (`LIGHT_SYNC_LAMP_LEAD_MS` 150), so the calibration panel has
+  Lamp earlier / Lamp later (±25 ms, 0-1500) saved as `lamp_lead_ms` in
+  `memory/light_sync.json` and read live by the player; `POST /api/lightsync
+  {lamp_nudge_ms}`. Known bug: calibration's `tv_remote.play_plex` deep link
+  is ignored while Plex is already open on its home screen (Nick started the
+  clip by hand); fix by sending Home first.
 - **Restarts don't lose builds:** systemd stops ffmpeg with Core (exit 255,
   no error text), often before Core's shutdown hook runs; `killed_from_outside`
   spots that, keeps the film at the front of the queue with no "failed" push,

@@ -652,11 +652,11 @@ class ControllerTests(ControllerBase):
         self.assertFalse(self.sync.running)
 
     def test_state_file_round_trip_and_revision(self) -> None:
-        self.assertEqual(light_sync.load_state(), {"auto": True, "intensity": "medium", "offset_ms": 0})
+        self.assertEqual(light_sync.load_state(), {"auto": True, "intensity": "medium", "offset_ms": 0, "lamp_lead_ms": 150})
         before = self.sync.revision()
         self.sync.set_intensity("Subtle")
         self.sync.set_auto(False)
-        self.assertEqual(light_sync.load_state(), {"auto": False, "intensity": "subtle", "offset_ms": 0})
+        self.assertEqual(light_sync.load_state(), {"auto": False, "intensity": "subtle", "offset_ms": 0, "lamp_lead_ms": 150})
         self.assertGreater(self.sync.revision(), before)
         with self.assertRaises(ValueError):
             self.sync.set_intensity("blinding")
@@ -950,6 +950,21 @@ class QueueTests(BuildBase):
 
 
 class OffsetTests(ControllerBase):
+    def test_lamp_head_start_is_nudged_live_and_kept(self) -> None:
+        with patch.dict(os.environ, {"LIGHT_SYNC_LAMP_LEAD_MS": "150"}):
+            self.assertEqual(light_sync.load_state()["lamp_lead_ms"], 150)
+            ok, said = self.sync.nudge_lamp(25)
+            self.assertTrue(ok)
+            self.assertIn("175 ms ahead", said)
+            self.assertEqual(light_sync._live_tuning().lamp_lead_ms, 175)  # the player's next read
+            self.assertEqual(self.sync.offsets()["lamp_lead_ms"], 175)
+            self.sync.nudge_lamp(-5000)
+            self.assertEqual(light_sync.load_state()["lamp_lead_ms"], 0)
+            ok, _ = self.sync.nudge_lamp(-25)
+            self.assertFalse(ok)
+            self.sync.set_auto(False)  # other saves keep it
+            self.assertEqual(light_sync.load_state()["lamp_lead_ms"], 0)
+
     def test_offset_math_default_from_env_and_clamp(self) -> None:
         with patch.dict(os.environ, {"LIGHT_SYNC_LEAD_MS": "40"}):
             self.assertEqual(light_sync.load_state()["offset_ms"], 40)

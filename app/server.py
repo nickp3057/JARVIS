@@ -1657,6 +1657,7 @@ class LightSyncRequest(BaseModel):
     scope: str | None = Field(default=None, pattern="^(film|global)$")
     reset_offset: bool | None = None
     calibrate: bool | None = None
+    lamp_nudge_ms: int | None = Field(default=None, ge=-1500, le=1500)
 
 
 @app.post("/api/lightsync")
@@ -1669,7 +1670,7 @@ def lightsync_set(request: LightSyncRequest, _: None = Depends(authorize)) -> di
     from brain import light_sync
     sync = light_sync.controller
     if all(v is None for v in (request.action, request.intensity, request.auto, request.nudge_ms,
-                               request.reset_offset, request.calibrate)):
+                               request.reset_offset, request.calibrate, request.lamp_nudge_ms)):
         raise HTTPException(status_code=422, detail="Send an action, intensity, auto, nudge_ms, reset_offset or calibrate.")
     messages = []
     if request.intensity is not None:
@@ -1684,6 +1685,8 @@ def lightsync_set(request: LightSyncRequest, _: None = Depends(authorize)) -> di
         messages.append(sync.reset_offset(request.scope)[1])
     if request.nudge_ms:
         messages.append(sync.nudge(request.nudge_ms, request.scope)[1])
+    if request.lamp_nudge_ms:
+        messages.append(sync.nudge_lamp(request.lamp_nudge_ms)[1])
     if request.action == "start":
         messages.append(sync.start()[1])
     elif request.action == "stop":

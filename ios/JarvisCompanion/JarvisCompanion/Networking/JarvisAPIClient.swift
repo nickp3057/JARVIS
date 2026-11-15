@@ -1256,18 +1256,19 @@ struct JarvisAPIClient {
     /// global while calibrating), a timing reset, calibrate on (true) / Done (false).
     func setLightSync(action: String? = nil, intensity: String? = nil, auto: Bool? = nil,
                       nudgeMs: Int? = nil, resetOffset: Bool? = nil,
-                      calibrate: Bool? = nil) async throws -> LightSyncState {
+                      calibrate: Bool? = nil, lampNudgeMs: Int? = nil) async throws -> LightSyncState {
         struct Body: Encodable {
             let action: String?; let intensity: String?; let auto: Bool?
-            let nudgeMs: Int?; let resetOffset: Bool?; let calibrate: Bool?
+            let nudgeMs: Int?; let resetOffset: Bool?; let calibrate: Bool?; let lampNudgeMs: Int?
             enum CodingKeys: String, CodingKey {
                 case action, intensity, auto, calibrate
-                case nudgeMs = "nudge_ms", resetOffset = "reset_offset"
+                case nudgeMs = "nudge_ms", resetOffset = "reset_offset", lampNudgeMs = "lamp_nudge_ms"
             }
         }
         return try await postJSON(LightSyncState.self, path: "api/lightsync",
                                   body: Body(action: action, intensity: intensity, auto: auto,
-                                             nudgeMs: nudgeMs, resetOffset: resetOffset, calibrate: calibrate))
+                                             nudgeMs: nudgeMs, resetOffset: resetOffset, calibrate: calibrate,
+                                             lampNudgeMs: lampNudgeMs))
     }
 
     /// Make a light sync for one film (Plex's ratingKey); Core alerts when it's ready.

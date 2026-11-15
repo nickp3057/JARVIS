@@ -977,6 +977,17 @@ private struct MovieModeView: View {
                 wide("Lights later", symbol: "forward.frame") { nudge(-step) }
                 wide("Done", symbol: "checkmark") { model.setLightSync(calibrate: false) }
             }
+            // The lamp fades by itself and lags the strips: its own head start.
+            HStack(spacing: 14) {
+                wide("Lamp earlier", symbol: "lamp.table") { nudgeLamp(step) }
+                wide("Lamp later", symbol: "lamp.table") { nudgeLamp(-step) }
+                Text("Lamp +\(state.offset?.lampLeadMs ?? 150) ms")
+                    .font(.headline.monospacedDigit())
+                    .foregroundStyle(.white.opacity(0.75))
+                    .contentTransition(.numericText())
+                    .frame(maxWidth: .infinity, minHeight: 56)
+                    .accessibilityLabel("Lamp head start \(state.offset?.lampLeadMs ?? 150) milliseconds")
+            }
         }
         .padding(18)
         .background(Color.white.opacity(0.04), in: .rect(cornerRadius: 20))
@@ -986,6 +997,11 @@ private struct MovieModeView: View {
     private func nudge(_ ms: Int) {
         tick += 1
         model.setLightSync(nudgeMs: ms)
+    }
+
+    private func nudgeLamp(_ ms: Int) {
+        tick += 1
+        model.setLightSync(lampNudgeMs: ms)
     }
 
     /// Light sync's extras beside the switch: intensity, timing, a track
