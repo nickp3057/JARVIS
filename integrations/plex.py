@@ -154,10 +154,17 @@ def next_up(title: str) -> tuple[bool, dict[str, Any] | str]:
 
 
 def _movie_record(item: dict[str, Any]) -> dict[str, Any]:
-    """ratingKey, title, year, duration and the first media Part's key."""
+    """ratingKey, title, year, duration and a media Part's key: the
+    smallest version's (a 1080p copy over a 4K one), since the light track
+    is built at 64x27 and a 4K decode on Core's CPU takes several times longer."""
+    def pixels(media: dict[str, Any]) -> int:
+        try:
+            return int(media.get("width") or 0) * int(media.get("height") or 0) or 1 << 40
+        except (TypeError, ValueError):
+            return 1 << 40
     part_key = ""
-    for media in item.get("Media") or []:
-        for part in (media or {}).get("Part") or []:
+    for media in sorted((m for m in item.get("Media") or [] if isinstance(m, dict)), key=pixels):
+        for part in media.get("Part") or []:
             if part.get("key"):
                 part_key = str(part["key"])
                 break

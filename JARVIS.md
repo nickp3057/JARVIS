@@ -2888,7 +2888,8 @@ prototype in `~/Developer/projects/light-sync` (2026-11-09).
 
 - **Tracks, on request only** (`brain/light_tracks.py`). "Create a light sync
   for X" reads the film's file over HTTP from Plex (the media Part URL with
-  the token, never logged; the Surface has no NAS mount) through ffmpeg from
+  the token, never logged; the Surface has no NAS mount; the smallest version,
+  so a 1080p copy is read over a 4K one) through ffmpeg from
   `imageio-ffmpeg` (`shutil.which("ffmpeg")` as fallback), `-hwaccel auto`,
   10 fps scaled to 64x27, no audio/subtitles, nice 10. Each 0.1 s becomes one
   colour: the biggest vivid hue region (18 hue bins, neighbours count half),

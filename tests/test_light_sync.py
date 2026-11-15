@@ -725,3 +725,18 @@ class BarnDoorHookTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class PlexMovieRecordTests(unittest.TestCase):
+    def test_smallest_version_is_read_for_the_track(self) -> None:
+        from integrations import plex
+        item = {"ratingKey": 7, "title": "Michael", "year": 2026, "duration": 1000, "Media": [
+            {"width": 3840, "height": 2160, "Part": [{"key": "/library/parts/4k/file.mkv"}]},
+            {"width": 1920, "height": 1080, "Part": [{"key": "/library/parts/hd/file.mkv"}]},
+        ]}
+        self.assertEqual(plex._movie_record(item)["part_key"], "/library/parts/hd/file.mkv")
+
+    def test_versions_without_sizes_still_give_a_part(self) -> None:
+        from integrations import plex
+        item = {"ratingKey": 8, "title": "Cars 2", "Media": [{"Part": [{"key": "/library/parts/1/file.mp4"}]}]}
+        self.assertEqual(plex._movie_record(item)["part_key"], "/library/parts/1/file.mp4")
