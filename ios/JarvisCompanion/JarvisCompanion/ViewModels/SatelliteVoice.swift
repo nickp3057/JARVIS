@@ -197,11 +197,34 @@ final class SatelliteAudio: @unchecked Sendable {
         try engine.start()
         player.play()
 
+        // iOS reshuffles audio now and then (voice processing settling in,
+        // the camera starting, a route change, a call). Bring the engine back
+        // up in place; only if that fails does the connection restart.
         let center = NotificationCenter.default
-        observers.append(center.addObserver(forName: AVAudioSession.interruptionNotification, object: nil,
-                                            queue: nil) { [weak self] _ in self?.markFailed() })
         observers.append(center.addObserver(forName: .AVAudioEngineConfigurationChange, object: engine,
-                                            queue: nil) { [weak self] _ in self?.markFailed() })
+                                            queue: .main) { [weak self] _ in self?.resume() })
+        observers.append(center.addObserver(forName: AVAudioSession.interruptionNotification, object: nil,
+                                            queue: .main) { [weak self] note in
+            let raw = note.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt
+            if raw == AVAudioSession.InterruptionType.ended.rawValue { self?.resume() }
+        })
+    }
+
+    /// Restart a stopped engine (after a configuration change or an
+    /// interruption ends); the connection restarts only if this fails.
+    private func resume() {
+        guard !engine.isRunning else {
+            if !player.isPlaying { player.play() }
+            return
+        }
+        do {
+            try AVAudioSession.sharedInstance().setActive(true)
+            engine.prepare()
+            try engine.start()
+            player.play()
+        } catch {
+            markFailed()
+        }
     }
 
     func stop() {

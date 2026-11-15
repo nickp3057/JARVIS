@@ -111,7 +111,6 @@ struct RoomView: View {
             talking: talking, voiceActive: voice.active, dialogue: AnyView(RoomDialogue(presence: voice)),
             showRemote: { showingRemote = true }, showWake: { showingWake = true },
             showSettings: { showingSettings = true },
-            openLevel: { dragger.openPanel($0.entityID) },
             menuExtras: AnyView(Group {
                 Button { roomCover = .memoryMap } label: { Label("Memory map", systemImage: "point.3.connected.trianglepath.dotted") }
                 Button { roomCover = .linkMap } label: { Label("Link map", systemImage: "dot.radiowaves.left.and.right") }

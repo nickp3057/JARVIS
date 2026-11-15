@@ -1,25 +1,21 @@
 import SwiftUI
 import UIKit
 
-/// The nightstand iPad mini's own screen (`PadRole.nightstand`), not the
-/// door panel squeezed down. A dark bedside console, laid out for the mini
-/// on its side (1133 × 744 pt) with nothing to scroll:
+/// The nightstand iPad mini's own screen (`PadRole.nightstand`), laid out for
+/// the mini on its side (1133 × 744 pt) with nothing to scroll, on the same
+/// theme and backdrop as the phone and the door iPad:
 ///
-/// - Left: a big clock, the date and weather, the next alarm (tap to edit
-///   the wake-up), what's next on the calendar and running timers, and a
-///   small JARVIS (three taps: Barn Door, as everywhere).
-/// - Right: Goodnight / Peace / Movie as three wide buttons, the room's
-///   lights and switches as compact tiles (tap toggles, hold opens the big
-///   brightness panel with colours), and a bottom row with the TV remote,
-///   TV power and the menu.
-/// - While JARVIS talks, the conversation takes the right side.
+/// - Left: JARVIS, big (three taps: Barn Door, as everywhere). He grows a
+///   little and his glow lifts while he's talking.
+/// - Right: the clock, the date and weather, the next wake-up (tap to edit),
+///   what's next on the calendar and running timers. While JARVIS talks, the
+///   conversation takes this side.
+/// - Bottom: a big Goodnight, then Room (every light, switch and scene, on
+///   its own page: `NightstandRoomSheet`), Movie, the TV remote, TV power
+///   and the menu.
 ///
-/// Its own palette, whatever the shared theme: near-black with warm
-/// off-white text and soft amber for anything on. Nothing pulses. Upright,
-/// the same pieces stack and scroll.
-///
-/// When every light is off, `RoomView` covers it with `NightstandDarkClock`:
-/// the backlight at its lowest and a massive, very dim clock.
+/// Upright, the same pieces stack and scroll. When every light is off,
+/// `RoomView` covers it with `NightstandDarkClock`.
 struct NightstandPanel: View {
     @ObservedObject var model: HubViewModel
     let wakeText: String
@@ -32,121 +28,132 @@ struct NightstandPanel: View {
     let showRemote: () -> Void
     let showWake: () -> Void
     let showSettings: () -> Void
-    let openLevel: (HomeEntity) -> Void
     let menuExtras: AnyView
+    @State private var showingRoom = false
 
     var body: some View {
         GeometryReader { geo in
             let wide = geo.size.width > geo.size.height
-            Group {
-                if wide {
-                    HStack(alignment: .top, spacing: 28) {
-                        clockColumn(width: geo.size.width * 0.46, height: geo.size.height)
-                            .frame(width: geo.size.width * 0.46)
-                        controlsColumn
-                            .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    }
-                    .padding(.horizontal, 32)
-                    .padding(.vertical, 26)
-                } else {
-                    ScrollView {
-                        VStack(alignment: .leading, spacing: 28) {
-                            clockColumn(width: geo.size.width - 48, height: 520)
-                            controlsColumn
+            if wide {
+                VStack(spacing: 18) {
+                    HStack(spacing: 24) {
+                        jarvis(size: min(geo.size.height * 0.56, geo.size.width * 0.34))
+                            .frame(width: geo.size.width * 0.40)
+                        Group {
+                            if talking {
+                                dialoguePanel
+                            } else {
+                                clock(width: geo.size.width * 0.52, height: geo.size.height)
+                            }
                         }
-                        .padding(24)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
                     }
+                    .frame(maxHeight: .infinity)
+                    bottomBar
+                }
+                .padding(.horizontal, 28)
+                .padding(.vertical, 22)
+            } else {
+                ScrollView {
+                    VStack(spacing: 26) {
+                        jarvis(size: min(geo.size.width * 0.5, 320))
+                        if talking { dialoguePanel.frame(minHeight: 320) } else {
+                            clock(width: geo.size.width - 48, height: 560)
+                        }
+                        bottomBar
+                    }
+                    .padding(24)
                 }
             }
         }
-        .background { Nightstand.background.ignoresSafeArea() }
-        .foregroundStyle(Nightstand.text)
-        .tint(Nightstand.amber)
-        .environment(\.colorScheme, .dark)
+        .sheet(isPresented: $showingRoom) { NightstandRoomSheet(model: model) }
     }
 
-    // MARK: - Left: the time
+    // MARK: - JARVIS
 
-    private func clockColumn(width: CGFloat, height: CGFloat) -> some View {
-        VStack(alignment: .leading, spacing: 0) {
-            HStack(spacing: 14) {
+    private func jarvis(size: CGFloat) -> some View {
+        VStack(spacing: 14) {
+            HStack {
                 BatteryBadge()
                 Spacer(minLength: 0)
-                weather
             }
-            .font(.subheadline)
-            .foregroundStyle(Nightstand.dim)
+            Spacer(minLength: 0)
+            JarvisCoreMark(size: size, active: voiceActive)
+                .background {
+                    Circle()
+                        .fill(RadialGradient(colors: [JarvisTheme.reactor.opacity(0.35), .clear],
+                                             center: .center, startRadius: 0, endRadius: size * 0.62))
+                        .frame(width: size * 1.25, height: size * 1.25)
+                        .opacity(talking ? 1 : 0)
+                        .allowsHitTesting(false)
+                }
+                .scaleEffect(talking ? 1.08 : 1)
+                .animation(.easeInOut(duration: 0.5), value: talking)
+                .barnDoorTaps()
+                .accessibilityLabel("JARVIS. Triple-tap for Barn Door Protocol.")
+            Text(voiceActive ? "Listening" : "Say \u{201C}Hey JARVIS\u{201D}")
+                .font(.footnote)
+                .foregroundStyle(.tertiary)
+            Spacer(minLength: 0)
+        }
+    }
 
-            Spacer(minLength: 8)
+    // MARK: - The time
 
+    private func clock(width: CGFloat, height: CGFloat) -> some View {
+        VStack(spacing: 18) {
+            Spacer(minLength: 0)
             TimelineView(.everyMinute) { context in
-                VStack(alignment: .leading, spacing: 4) {
-                    NightstandTime(date: context.date, size: min(width * 0.34, height * 0.30))
-                        .frame(maxWidth: width, alignment: .leading)
-                    Text(context.date, format: .dateTime.weekday(.wide).month(.wide).day())
-                        .font(.title2.weight(.light))
-                        .foregroundStyle(Nightstand.dim)
+                VStack(spacing: 6) {
+                    NightstandTime(date: context.date, size: min(width * 0.30, height * 0.26), color: .primary)
+                        .frame(maxWidth: width)
+                    HStack(spacing: 12) {
+                        Text(context.date, format: .dateTime.weekday(.wide).month(.wide).day())
+                        weather
+                    }
+                    .font(.title3)
+                    .foregroundStyle(.secondary)
                 }
             }
-
-            Spacer(minLength: 16)
-
             Button(action: showWake) {
-                HStack(spacing: 14) {
+                HStack(spacing: 12) {
                     Image(systemName: alarmOn ? "alarm.fill" : "alarm")
-                        .font(.title2)
-                        .foregroundStyle(alarmOn ? Nightstand.amber : Nightstand.dim)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(alarmOn ? "Wake-up" : "No wake-up set")
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(Nightstand.dim)
-                        if alarmOn {
-                            Text(wakeText).font(.title3.weight(.medium)).monospacedDigit()
-                        }
-                    }
-                    Spacer(minLength: 0)
-                    Image(systemName: "chevron.right").font(.footnote).foregroundStyle(Nightstand.faint)
+                        .font(.title3)
+                        .foregroundStyle(alarmOn ? JarvisTheme.amber : Color.secondary)
+                    Text(alarmOn ? wakeText : "No wake-up set")
+                        .font(.title3.weight(.medium))
+                        .monospacedDigit()
+                    Image(systemName: "chevron.right").font(.footnote).foregroundStyle(.tertiary)
                 }
-                .padding(.horizontal, 18)
-                .frame(minHeight: 66)
-                .background(Nightstand.card, in: .rect(cornerRadius: 20))
-                .overlay(RoundedRectangle(cornerRadius: 20).strokeBorder(Nightstand.edge))
+                .padding(.horizontal, 22)
+                .frame(minHeight: 54)
+                .jarvisSurface(in: .capsule)
+                .overlay(Capsule().strokeBorder(JarvisTheme.border))
             }
             .buttonStyle(CockpitButtonStyle())
             .accessibilityLabel(alarmOn ? "Wake-up, \(wakeText)" : "No wake-up set")
             .accessibilityHint("Opens the wake-up schedule")
-
-            VStack(alignment: .leading, spacing: 10) {
-                if let nextEvent {
-                    Label(nextEvent, systemImage: "calendar")
-                        .lineLimit(1)
+            if nextEvent != nil || !timers.isEmpty {
+                VStack(spacing: 8) {
+                    if let nextEvent {
+                        Label(nextEvent, systemImage: "calendar").lineLimit(1)
+                    }
+                    ForEach(timers.prefix(2)) { NightstandTimerRow(timer: $0) }
                 }
-                ForEach(timers.prefix(2)) { NightstandTimerRow(timer: $0) }
+                .font(.callout)
+                .foregroundStyle(.secondary)
             }
-            .font(.callout)
-            .foregroundStyle(Nightstand.dim)
-            .padding(.top, 14)
-
-            Spacer(minLength: 12)
-
-            HStack(spacing: 14) {
-                JarvisCoreMark(size: 64, active: voiceActive)
-                    .barnDoorTaps()
-                    .accessibilityLabel("JARVIS. Triple-tap for Barn Door Protocol.")
-                Text(voiceActive ? "Listening" : "Say \u{201C}Hey JARVIS\u{201D}")
-                    .font(.footnote)
-                    .foregroundStyle(Nightstand.faint)
-            }
+            Spacer(minLength: 0)
         }
-        .frame(maxHeight: .infinity, alignment: .top)
+        .frame(maxWidth: .infinity)
     }
 
     @ViewBuilder private var weather: some View {
         if let weather = model.glance.value?.weather, weather.online != false, (weather.error ?? "").isEmpty,
            let temp = weather.temperatureF {
-            HStack(spacing: 6) {
+            HStack(spacing: 5) {
                 Image(systemName: weather.symbol(night: model.sun == "below_horizon"))
-                    .symbolRenderingMode(.hierarchical)
+                    .symbolRenderingMode(.multicolor)
                 Text("\(Int(temp.rounded()))°").monospacedDigit()
             }
             .accessibilityElement(children: .ignore)
@@ -154,72 +161,31 @@ struct NightstandPanel: View {
         }
     }
 
-    // MARK: - Right: the room
-
-    @ViewBuilder private var controlsColumn: some View {
-        if talking {
-            dialogue
-                .padding(20)
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-                .background(Nightstand.card, in: .rect(cornerRadius: 26))
-                .overlay(RoundedRectangle(cornerRadius: 26).strokeBorder(Nightstand.edge))
-                .transition(.opacity)
-        } else {
-            VStack(spacing: 16) {
-                bedtimeRow
-                devices
-                bottomRow
-            }
-        }
+    private var dialoguePanel: some View {
+        dialogue
+            .padding(20)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            .jarvisSurface(in: .rect(cornerRadius: 24))
+            .overlay(RoundedRectangle(cornerRadius: 24).strokeBorder(JarvisTheme.border))
+            .transition(.opacity)
     }
 
-    /// Goodnight, Peace and Movie: the three things done from bed.
-    private var bedtimeRow: some View {
+    // MARK: - Bottom bar
+
+    private var bottomBar: some View {
         HStack(spacing: 12) {
-            ForEach(bedtimeScenes) { scene in
-                NightstandSceneButton(model: model, scene: scene,
-                                      lit: model.scenes.value?.current == scene.entityID)
+            if let goodnight = scene("scene.goodnight", "goodnight") {
+                GoodnightButton(model: model, scene: goodnight)
             }
-        }
-    }
-
-    private var bedtimeScenes: [HomeScene] {
-        guard let scenes = model.scenes.value?.scenes else { return [] }
-        func find(_ id: String, _ name: String) -> HomeScene? {
-            scenes.first { $0.entityID == id }
-                ?? scenes.first { $0.name.lowercased().replacingOccurrences(of: " ", with: "") == name }
-        }
-        return [find("scene.goodnight", "goodnight"), find("scene.peace", "peace"), find("scene.movie", "movie")]
-            .compactMap { $0 }
-    }
-
-    @ViewBuilder private var devices: some View {
-        if let entities = model.entities.value, !entities.isEmpty {
-            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 12), count: 3), spacing: 12) {
-                ForEach(entities) { entity in
-                    NightstandDeviceTile(model: model, entity: entity, openLevel: openLevel)
+            barButton("Room", symbol: "square.grid.2x2.fill") { showingRoom = true }
+            if let movie = scene("scene.movie", "movie") {
+                barButton("Movie", symbol: "film.fill", busy: model.runningScene == movie.entityID) {
+                    model.runScene(movie)
                 }
+                .disabled(model.runningScene != nil)
             }
-            .frame(maxHeight: .infinity, alignment: .top)
-        } else if let failure = model.entities.failureText {
-            Text(failure).font(.subheadline).foregroundStyle(Nightstand.amber)
-                .frame(maxHeight: .infinity, alignment: .top)
-        } else {
-            ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
-        }
-    }
-
-    private var bottomRow: some View {
-        HStack(spacing: 12) {
-            Button(action: showRemote) {
-                Label("TV remote", systemImage: "appletvremote.gen4")
-                    .font(.headline)
-                    .frame(maxWidth: .infinity, minHeight: 56)
-                    .background(Nightstand.card, in: .rect(cornerRadius: 18))
-                    .overlay(RoundedRectangle(cornerRadius: 18).strokeBorder(Nightstand.edge))
-            }
-            .buttonStyle(CockpitButtonStyle())
-            TVPowerButton(size: 56)
+            barButton("Remote", symbol: "appletvremote.gen4", action: showRemote)
+            TVPowerButton(size: 72)
             Menu {
                 Button(action: showSettings) { Label("Room settings", systemImage: "gearshape") }
                 Button(action: showWake) { Label("Wake-up · \(wakeText)", systemImage: "alarm") }
@@ -228,27 +194,120 @@ struct NightstandPanel: View {
             } label: {
                 Image(systemName: "ellipsis")
                     .font(.title3.weight(.semibold))
-                    .frame(width: 56, height: 56)
-                    .background(Nightstand.card, in: .rect(cornerRadius: 18))
-                    .overlay(RoundedRectangle(cornerRadius: 18).strokeBorder(Nightstand.edge))
+                    .frame(width: 72, height: 72)
+                    .jarvisSurface(in: .rect(cornerRadius: 20))
+                    .overlay(RoundedRectangle(cornerRadius: 20).strokeBorder(JarvisTheme.border))
             }
             .buttonStyle(CockpitButtonStyle())
             .accessibilityLabel("Menu")
         }
+        .frame(height: 72)
+    }
+
+    private func barButton(_ title: String, symbol: String, busy: Bool = false,
+                           action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            VStack(spacing: 5) {
+                if busy { ProgressView() } else { Image(systemName: symbol).font(.title3) }
+                Text(title).font(.caption.weight(.semibold))
+            }
+            .foregroundStyle(JarvisTheme.cyan)
+            .frame(width: 92, height: 72)
+            .jarvisSurface(in: .rect(cornerRadius: 20))
+            .overlay(RoundedRectangle(cornerRadius: 20).strokeBorder(JarvisTheme.border))
+        }
+        .buttonStyle(CockpitButtonStyle())
+        .accessibilityLabel(title)
+    }
+
+    private func scene(_ id: String, _ name: String) -> HomeScene? {
+        guard let scenes = model.scenes.value?.scenes else { return nil }
+        return scenes.first { $0.entityID == id }
+            ?? scenes.first { $0.name.lowercased().replacingOccurrences(of: " ", with: "") == name }
     }
 }
 
-/// The nightstand's palette: its own, whatever the shared theme is.
-enum Nightstand {
-    static let background = LinearGradient(colors: [Color(red: 0.035, green: 0.04, blue: 0.065),
-                                                     Color(red: 0.015, green: 0.017, blue: 0.03)],
-                                           startPoint: .top, endPoint: .bottom)
-    static let text = Color(red: 0.93, green: 0.90, blue: 0.85)
-    static let dim = Color(red: 0.93, green: 0.90, blue: 0.85).opacity(0.55)
-    static let faint = Color(red: 0.93, green: 0.90, blue: 0.85).opacity(0.32)
-    static let amber = Color(red: 1.0, green: 0.72, blue: 0.38)
-    static let card = Color.white.opacity(0.045)
-    static let edge = Color.white.opacity(0.08)
+/// Goodnight, big: the one thing done from bed every night.
+private struct GoodnightButton: View {
+    @ObservedObject var model: HubViewModel
+    let scene: HomeScene
+
+    var body: some View {
+        Button { model.runScene(scene) } label: {
+            HStack(spacing: 14) {
+                if model.runningScene == scene.entityID {
+                    ProgressView()
+                } else {
+                    Image(systemName: "moon.zzz.fill").font(.title)
+                }
+                Text("Goodnight").font(.title2.weight(.semibold))
+            }
+            .foregroundStyle(JarvisTheme.cyan)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(JarvisTheme.cyan.opacity(0.16), in: .rect(cornerRadius: 22))
+            .overlay(RoundedRectangle(cornerRadius: 22).strokeBorder(JarvisTheme.cyan.opacity(0.45)))
+        }
+        .buttonStyle(CockpitButtonStyle())
+        .disabled(model.runningScene != nil)
+        .accessibilityLabel("Goodnight")
+        .accessibilityHint("Runs the Goodnight scene")
+    }
+}
+
+/// Every light, switch and scene, on a page of its own behind the Room
+/// button: tap a tile to toggle it, hold a light for brightness and colour.
+struct NightstandRoomSheet: View {
+    @ObservedObject var model: HubViewModel
+    @Environment(\.dismiss) private var dismiss
+    @State private var lightSheet: LightSheetID?
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 22) {
+                    if let scenes = model.scenes.value?.scenes, !scenes.isEmpty {
+                        section("Scenes", symbol: "sparkles")
+                        LazyVGrid(columns: [GridItem(.adaptive(minimum: 170), spacing: 12)], spacing: 12) {
+                            ForEach(scenes) { scene in
+                                SceneTile(model: model, scene: scene, lit: scene.entityID == model.scenes.value?.current)
+                            }
+                        }
+                    }
+                    section("Lights & switches", symbol: "lightbulb.2")
+                    if let entities = model.entities.value, !entities.isEmpty {
+                        LazyVGrid(columns: [GridItem(.adaptive(minimum: 170), spacing: 12)], spacing: 12) {
+                            ForEach(entities) { entity in
+                                NightstandDeviceTile(model: model, entity: entity) {
+                                    lightSheet = LightSheetID(id: entity.entityID)
+                                }
+                            }
+                        }
+                    } else if let failure = model.entities.failureText {
+                        Text(failure).font(.subheadline).foregroundStyle(JarvisTheme.amber)
+                    } else {
+                        ProgressView().frame(maxWidth: .infinity)
+                    }
+                    RoomVolumeControl()
+                        .padding(18)
+                        .jarvisSurface(in: .rect(cornerRadius: 20))
+                        .overlay(RoundedRectangle(cornerRadius: 20).strokeBorder(JarvisTheme.border))
+                }
+                .padding(20)
+            }
+            .background { JarvisBackdrop().ignoresSafeArea() }
+            .navigationTitle("Room")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Done") { dismiss() } } }
+            .sheet(item: $lightSheet) { LightSheet(model: model, entityID: $0.id) }
+        }
+        .tint(JarvisTheme.cyan)
+    }
+
+    private func section(_ title: String, symbol: String) -> some View {
+        Label(title, systemImage: symbol)
+            .font(.subheadline.weight(.semibold))
+            .foregroundStyle(JarvisTheme.cyan)
+    }
 }
 
 /// "10:42" big and thin, with a small AM/PM after it so the digits get the
@@ -256,7 +315,7 @@ enum Nightstand {
 struct NightstandTime: View {
     let date: Date
     let size: CGFloat
-    var color: Color = Nightstand.text
+    var color: Color = .primary
 
     var body: some View {
         let digits = Text(date, format: .dateTime.hour(.defaultDigits(amPM: .omitted)).minute())
@@ -318,48 +377,12 @@ struct NightstandDarkClock: View {
     static let defaultLevel = 0.17
 }
 
-private struct NightstandSceneButton: View {
-    @ObservedObject var model: HubViewModel
-    let scene: HomeScene
-    let lit: Bool
-
-    var body: some View {
-        Button { model.runScene(scene) } label: {
-            HStack(spacing: 10) {
-                if model.runningScene == scene.entityID {
-                    ProgressView().tint(Nightstand.amber)
-                } else {
-                    Image(systemName: symbol).font(.title3)
-                }
-                Text(scene.name).font(.headline).lineLimit(1).minimumScaleFactor(0.8)
-            }
-            .foregroundStyle(lit ? Nightstand.amber : Nightstand.text)
-            .frame(maxWidth: .infinity, minHeight: 64)
-            .background(lit ? Nightstand.amber.opacity(0.13) : Nightstand.card, in: .rect(cornerRadius: 20))
-            .overlay(RoundedRectangle(cornerRadius: 20)
-                .strokeBorder(lit ? Nightstand.amber.opacity(0.45) : Nightstand.edge))
-        }
-        .buttonStyle(CockpitButtonStyle())
-        .disabled(model.runningScene != nil)
-        .accessibilityLabel(scene.name)
-    }
-
-    private var symbol: String {
-        switch scene.entityID {
-        case "scene.goodnight": return "moon.zzz.fill"
-        case "scene.peace": return "hand.wave.fill"
-        case "scene.movie": return "film.fill"
-        default: return scene.symbol
-        }
-    }
-}
-
-/// One light or switch: icon, name and state, compact. Tap toggles; hold
-/// opens the big brightness panel (with colours) like the door panel's tiles.
+/// One light or switch on the Room page: tap toggles; hold a light or the
+/// fan for its sheet (brightness, colour, Rainbow).
 private struct NightstandDeviceTile: View {
     @ObservedObject var model: HubViewModel
     let entity: HomeEntity
-    let openLevel: (HomeEntity) -> Void
+    let openSheet: () -> Void
 
     var body: some View {
         let pending = model.pendingEntityStates[entity.entityID]
@@ -367,38 +390,38 @@ private struct NightstandDeviceTile: View {
         Button { model.toggle(entity, to: !on) } label: {
             HStack(spacing: 12) {
                 Image(systemName: RoomView.symbol(for: entity))
-                    .font(.title3)
-                    .foregroundStyle(on ? Nightstand.amber : Nightstand.faint)
-                    .frame(width: 30)
+                    .font(.title2)
+                    .foregroundStyle(on ? JarvisTheme.amber : Color.secondary)
+                    .frame(width: 32)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(entity.friendlyName)
-                        .font(.subheadline.weight(.semibold))
+                        .font(.headline)
                         .lineLimit(2)
                         .minimumScaleFactor(0.85)
                         .multilineTextAlignment(.leading)
                     Text(state(on: on))
-                        .font(.caption)
-                        .foregroundStyle(on ? Nightstand.amber.opacity(0.8) : Nightstand.faint)
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
                         .monospacedDigit()
                 }
                 Spacer(minLength: 0)
-                if pending != nil { ProgressView().controlSize(.small) }
+                if pending != nil { ProgressView() }
             }
-            .padding(.horizontal, 14)
-            .frame(maxWidth: .infinity, minHeight: 64, alignment: .leading)
-            .background(on ? Nightstand.amber.opacity(0.11) : Nightstand.card, in: .rect(cornerRadius: 18))
+            .padding(16)
+            .frame(maxWidth: .infinity, minHeight: 80, alignment: .leading)
+            .background(on ? JarvisTheme.amber.opacity(0.16) : JarvisTheme.cyan.opacity(0.05), in: .rect(cornerRadius: 18))
             .overlay(RoundedRectangle(cornerRadius: 18)
-                .strokeBorder(on ? Nightstand.amber.opacity(0.4) : Nightstand.edge))
+                .strokeBorder(on ? JarvisTheme.amber.opacity(0.45) : JarvisTheme.border))
         }
         .buttonStyle(CockpitButtonStyle())
         .disabled(!entity.isToggleable || pending != nil)
         .simultaneousGesture(LongPressGesture(minimumDuration: 0.35).onEnded { _ in
-            if LevelDragger.adjustable(entity) { openLevel(entity) }
+            if LevelDragger.adjustable(entity) { openSheet() }
         })
         .sensoryFeedback(.impact(weight: .light), trigger: on)
         .accessibilityLabel(entity.friendlyName)
         .accessibilityValue(on ? "On" : "Off")
-        .accessibilityHint(LevelDragger.adjustable(entity) ? "Hold for brightness" : "")
+        .accessibilityHint(LevelDragger.adjustable(entity) ? "Hold for brightness and colour" : "")
     }
 
     private func state(on: Bool) -> String {
@@ -417,10 +440,10 @@ private struct NightstandTimerRow: View {
         let done = timer.state == "alarming" || end <= .now
         HStack(spacing: 8) {
             Image(systemName: done ? "alarm.waves.left.and.right.fill" : "timer")
-                .foregroundStyle(done ? Nightstand.amber : Nightstand.dim)
+                .foregroundStyle(done ? JarvisTheme.amber : Color.secondary)
             Text(timer.label.isEmpty ? "Timer" : timer.label.capitalized)
             if done {
-                Text("Time's up").foregroundStyle(Nightstand.amber)
+                Text("Time's up").foregroundStyle(JarvisTheme.amber)
             } else {
                 Text(timerInterval: Date.now...end, countsDown: true).monospacedDigit()
             }
