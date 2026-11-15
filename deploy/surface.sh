@@ -47,7 +47,9 @@ if [ "$RESTART" = 1 ]; then
   host=$(sed -n 's/^JARVIS_SERVER_HOST=//p' .env | tail -1)
   case "$host" in ""|0.0.0.0|::) host=127.0.0.1 ;; esac
   for i in $(seq 1 30); do
-    if curl -fsS -m 2 "http://$host:$port/health" >/dev/null 2>&1; then
+    # /health wants the token; any HTTP answer (401 included) means Core is up.
+    code=$(curl -s -o /dev/null -m 2 -w '%{http_code}' "http://$host:$port/health" 2>/dev/null || true)
+    if [ -n "$code" ] && [ "$code" != 000 ]; then
       echo "✓ Core restarted and answering (${i}s)"
       exit 0
     fi
