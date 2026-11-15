@@ -55,6 +55,9 @@ struct RoomView: View {
     @AppStorage(RoomView.autoReturnKey) private var autoReturn = true
     /// The screen's brightness before the night screen, to put back.
     @State private var savedBrightness: CGFloat?
+    /// Room settings › Max brightness: full backlight whenever the iPad isn't
+    /// dark for the night or dimmed for a movie (Nick, 2026-11-15).
+    @AppStorage(RoomView.maxBrightnessKey) private var maxBrightness = true
     /// The screen's brightness before movie mode dimmed it.
     @State private var movieBrightness: CGFloat?
     /// Bumped by each tap in movie mode: full brightness, then back to dim.
@@ -320,6 +323,14 @@ struct RoomView: View {
                 try? await Task.sleep(for: .seconds(600))
             }
         }
+        .task(id: "\(scenePhase)-\(maxBrightness)") {
+            // Max brightness: set it now and keep it there (Auto-Brightness
+            // and Control Center can pull it down).
+            while scenePhase == .active, maxBrightness, !Task.isCancelled {
+                applyMaxBrightness()
+                try? await Task.sleep(for: .seconds(15))
+            }
+        }
         .task(id: scenePhase) {
             // The next alarm changes rarely; once a minute is plenty.
             while scenePhase == .active, !Task.isCancelled {
@@ -432,7 +443,19 @@ struct RoomView: View {
         } else if let saved = movieBrightness {
             screen.brightness = saved
             movieBrightness = nil
+            applyMaxBrightness()
         }
+    }
+
+    static let maxBrightnessKey = "room.maxBrightness"
+
+    /// Full backlight while the panel is up: not over the night screen, not
+    /// during movie mode's dim, only while the app is in front.
+    fileprivate func applyMaxBrightness() {
+        guard maxBrightness, !RootView.isMac, scenePhase == .active, !asleep, movieBrightness == nil, savedBrightness == nil,
+              let screen = (UIApplication.shared.connectedScenes.first as? UIWindowScene)?.screen,
+              screen.brightness < 1 else { return }
+        screen.brightness = 1
     }
 
     /// The app may set the screen's brightness while it's in front; put it
@@ -445,6 +468,7 @@ struct RoomView: View {
         } else if let saved = savedBrightness {
             screen.brightness = saved
             savedBrightness = nil
+            applyMaxBrightness()
         }
     }
 
@@ -1216,6 +1240,7 @@ private struct RoomSettingsView: View {
     @AppStorage(RoomView.nightstandWakeLightKey) private var nightstandWakeLight = ""
 
     private var nightstand: Bool { PadRole.resolve(padRoleRaw) == .nightstand }
+    @AppStorage(RoomView.maxBrightnessKey) private var maxBrightness = true
     @AppStorage(SatelliteVoice.settingKey) private var satelliteSetting = ""
     @AppStorage(SatelliteVoice.trimKey) private var satelliteTrim = 1.0
     @ObservedObject private var satellite = SatelliteVoice.shared
@@ -1288,6 +1313,9 @@ private struct RoomSettingsView: View {
                 Section("Screen") {
                     Toggle("Full screen", isOn: $fullScreen)
                     Toggle("Keep screen on", isOn: $keepAwake)
+                    if !RootView.isMac {
+                        Toggle("Max brightness", isOn: $maxBrightness)
+                    }
                     if nightstand {
                         Toggle("Dark when every light is off", isOn: $nightScreen)
                         Toggle("Big clock on the dark screen", isOn: $nightClock)
