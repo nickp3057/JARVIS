@@ -321,6 +321,23 @@ struct JarvisAPIClient {
         return modelIsPad ? "ipad" : "iphone"
     }()
 
+    /// `WS /api/voice/satellite?name=<bed|door>`: this iPad lends Core's room
+    /// voice its mic and speaker (`SatelliteVoice`, Core's `speech/satellites.py`).
+    func satelliteSocket(name: String) throws -> URLSessionWebSocketTask {
+        var request = request(path: "api/voice/satellite")
+        guard let url = request.url, var components = URLComponents(url: url, resolvingAgainstBaseURL: false) else {
+            throw JarvisAPIError.invalidBaseURL(baseURL.absoluteString)
+        }
+        components.scheme = components.scheme == "https" ? "wss" : "ws"
+        components.queryItems = [URLQueryItem(name: "name", value: name)]
+        guard let socketURL = components.url else { throw JarvisAPIError.invalidBaseURL(baseURL.absoluteString) }
+        request.url = socketURL
+        request.timeoutInterval = 120  // Core pings every 20 s
+        let task = session.webSocketTask(with: request)
+        task.maximumMessageSize = 4 * 1024 * 1024
+        return task
+    }
+
     @MainActor
     func liveVoiceConnection() throws -> LiveVoiceConnection {
         var request = request(path: "api/voice/live")

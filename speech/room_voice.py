@@ -42,6 +42,14 @@ Smart-speaker extras:
 
 The wake word works at the end too ("game time, Jarvis"): a little audio
 from before the wake word is kept and used when nothing follows it.
+
+Satellites (``speech/satellites.py``): an iPad on the companion app can lend
+its mic and speaker. Each satellite gets its own wake detector; when more
+than one mic hears "Hey JARVIS" within ``SATELLITE_ARBITRATION_MS`` (350),
+the highest wake score answers. That exchange (capture, follow-ups, the
+goodnight questions, barge-in) then listens on that mic and speaks through
+that speaker, sounds included. Reminders, timers and broadcasts stay on the
+desk speaker; the wake-up backup ring also rings every satellite.
 """
 from __future__ import annotations
 
@@ -56,7 +64,7 @@ import numpy as np
 
 from brain import voice_presence, voice_shortcuts
 from jarvis_logger import get_logger
-from speech import room_sounds, room_volume
+from speech import room_sounds, room_volume, satellites
 from speech.audio import FRAME_MS, SAMPLE_RATE, MicStream, rescan_devices, rms, rms_threshold
 from speech.wake_words import strip_wake_word
 
@@ -105,7 +113,8 @@ class RoomVoice:
     """The listen -> transcribe -> act loop. Detector and transcribers can be
     passed in (tests); by default they are openWakeWord and faster-whisper."""
 
-    def __init__(self, runtime, *, detector=None, final=None, live=None) -> None:  # noqa: ANN001
+    def __init__(self, runtime, *, detector=None, final=None, live=None,  # noqa: ANN001
+                 satellite_detector=None) -> None:  # noqa: ANN001
         from speech.stt import Transcriber
         from speech.wake import WakeDetector
         self.runtime = runtime  # JarvisRuntime (not imported: avoids a cycle)
@@ -127,6 +136,10 @@ class RoomVoice:
         self._spoke = False
         self._noise = 0.0  # the room's background level (RMS), learned between commands
         self._wake_hits = 0  # consecutive frames over the threshold (debounce)
+        self._last_wake_score = 0.0  # the score of the last wake that fired
+        # The satellite this exchange is on (None: the desk mic and speaker).
+        self._source = None
+        self._satellite_detector = satellite_detector  # factory, for tests
 
     # --- lifecycle -----------------------------------------------------------
 
@@ -165,23 +178,23 @@ class RoomVoice:
         need_wake = True
         barged = False
         while not self.stop.is_set():
-            stream.drain()
+            self._drain_all(stream)
             if barged:  # "Hey JARVIS" cut him off: listen straight away
                 voice_presence.update("listening")
-                room_sounds.play("listen")
-                audio = self._capture(stream, None, start_timeout=_seconds("VOICE_START_TIMEOUT_S", 4.0))
+                self._sound("listen")
+                audio = self._capture(self._in(), None, start_timeout=_seconds("VOICE_START_TIMEOUT_S", 4.0))
             elif need_wake:
                 if not self._wait_for_wake(stream):
                     return
                 self._hushed.clear()  # a tap while idle mustn't cut off the next "Hey JARVIS"
                 self._warm_connections()  # handshakes happen while Nick is still talking
-                preroll = stream.get_recent_audio(_seconds("VOICE_PREROLL_S", 2.0))
+                preroll = self._in().get_recent_audio(_seconds("VOICE_PREROLL_S", 2.0))
                 voice_presence.update("listening")
-                room_sounds.play("listen")
-                audio = self._capture(stream, preroll, start_timeout=_seconds("VOICE_START_TIMEOUT_S", 4.0))
+                self._sound("listen")
+                audio = self._capture(self._in(), preroll, start_timeout=_seconds("VOICE_START_TIMEOUT_S", 4.0))
             else:  # follow-up: no wake word, a shorter wait
                 voice_presence.update("listening")
-                audio = self._capture(stream, None, start_timeout=_seconds("VOICE_FOLLOWUP_S", 8.0))
+                audio = self._capture(self._in(), None, start_timeout=_seconds("VOICE_FOLLOWUP_S", 8.0))
             if audio is None:
                 voice_presence.update("idle")
                 need_wake = True
@@ -212,6 +225,7 @@ class RoomVoice:
             log.info("Room voice hushed from a screen")
             self._hushed.set()
             stop_playback()
+            satellites.stop_all()
             voice_presence.update("idle", reply="")
         return busy
 
@@ -240,23 +254,128 @@ class RoomVoice:
             return False
         log.info("Wake word fired (score=%.2f, %d frames)", top, self._wake_hits)
         self._wake_hits = 0
+        self._last_wake_score = top
         return True
 
-    def _wait_for_wake(self, stream: MicStream) -> bool:
-        self._wake_hits = 0
+    # --- satellites (speech/satellites.py) ------------------------------------
+
+    def _in(self):  # noqa: ANN202
+        """The mic this exchange listens on: a satellite's, or the desk's."""
+        source = self._source
+        if source is not None and source.connected:
+            return source
+        return self.stream
+
+    def _drain_all(self, stream) -> None:  # noqa: ANN001
+        stream.drain()
+        for sat in satellites.connected():
+            sat.drain()
+
+    def _sat_detector(self, sat):  # noqa: ANN001, ANN202
+        if sat.detector is None:
+            if self._satellite_detector is not None:
+                sat.detector = self._satellite_detector()
+            else:
+                from speech.wake import WakeDetector
+                sat.detector = WakeDetector()
+                sat.detector._ensure_loaded()  # noqa: SLF001
+        return sat.detector
+
+    def _sat_heard_wake(self, sat, frame: np.ndarray) -> float | None:  # noqa: ANN001
+        """A satellite's own wake word check (same threshold and streak as
+        the desk mic). The score when it fired, else None."""
+        from speech.wake import wake_threshold
+        try:
+            scores = self._sat_detector(sat)._model.predict(frame)  # noqa: SLF001
+        except Exception:  # noqa: BLE001
+            log.exception("Satellite %s: wake word predict() failed", sat.name)
+            return None
+        top = max(scores.values(), default=0.0)
+        if top < wake_threshold():
+            sat.wake_hits = 0
+            return None
+        sat.wake_hits += 1
+        try:
+            needed = max(1, int(os.getenv("WAKE_CONSECUTIVE", "2")))
+        except ValueError:
+            needed = 2
+        if sat.wake_hits < needed:
+            return None
+        log.info("Wake word fired on satellite %s (score=%.2f)", sat.name, top)
+        sat.wake_hits = 0
+        return top
+
+    def _reset_detectors(self) -> None:
         self.detector.reset()
+        self._wake_hits = 0
+        for sat in satellites.connected():
+            if sat.detector is not None:
+                sat.detector.reset()
+            sat.wake_hits = 0
+
+    def _sound(self, name: str, wait: bool = False) -> None:
+        """A room-voice sound, on the speaker of whoever is being answered."""
+        source = self._source
+        if source is not None and source.connected:
+            source.play_sound(name, wait=wait)
+        else:
+            room_sounds.play(name, wait=wait)
+
+    def _voice_out(self, text: str, cache: bool | str, interrupt: threading.Event | None) -> None:
+        """Say ``text`` on this exchange's speaker."""
+        source = self._source
+        if source is not None and source.connected:
+            source.say(text, interrupt)
+            return
+        from speech.tts import speak
+        speak(text, cache=cache)
+
+    def _stop_output(self) -> None:
+        from speech.tts import stop_playback
+        stop_playback()
+        source = self._source
+        if source is not None:
+            source.stop()
+
+    def _wait_for_wake(self, stream: MicStream) -> bool:
+        """Listen on the desk mic and every satellite. The first mic to hear
+        "Hey JARVIS" opens a short window (``SATELLITE_ARBITRATION_MS``) for
+        the others; the highest score wins and becomes ``self._source``.
+        With no satellites connected it's the desk mic alone, no delay."""
+        self._source = None
+        self._reset_detectors()
+        candidates: list[tuple[float, object]] = []  # (score, satellite or None for the desk)
+        deadline = 0.0
         while not self.stop.is_set():
             self._duties(stream)
-            frame = stream.read(timeout=0.5)
-            if frame is None:
+            sats = satellites.connected()
+            frame = stream.read(timeout=0.05 if sats or candidates else 0.5)
+            if frame is not None:
+                self._learn_noise(frame)
+                if self._heard_wake(frame):
+                    candidates.append((self._last_wake_score, None))
+            for sat in sats:
+                while (sat_frame := sat.read(0)) is not None:
+                    sat.learn_noise(sat_frame)
+                    score = self._sat_heard_wake(sat, sat_frame)
+                    if score is not None:
+                        candidates.append((score, sat))
+            if not candidates:
                 continue
-            self._learn_noise(frame)
-            if self._heard_wake(frame):
-                if self._ringing_since is not None or self._wake_ringing():  # "Hey JARVIS" while ringing: that's stop
-                    self._dismiss_alarms()
-                    self.detector.reset()
-                    continue
-                return True
+            if not deadline:
+                deadline = time.monotonic() + (_seconds("SATELLITE_ARBITRATION_MS", 350) / 1000 if sats else 0)
+            if time.monotonic() < deadline:
+                continue
+            score, winner = max(candidates, key=lambda c: c[0])
+            candidates, deadline = [], 0.0
+            if len(sats):
+                log.info("Wake word: %s answers (score %.2f)", getattr(winner, "name", "desk"), score)
+            if self._ringing_since is not None or self._wake_ringing():  # "Hey JARVIS" while ringing: that's stop
+                self._dismiss_alarms()
+                self._reset_detectors()
+                continue
+            self._source = winner
+            return True
         return False
 
     # --- alarms, reminders, broadcasts ------------------------------------------
@@ -281,6 +400,7 @@ class RoomVoice:
                 self._next_ring = now + 3.5
                 room_volume.ring_alarm()  # ROOM_ALARM_VOLUME, never the night level
                 room_sounds.play("alarm")
+                satellites.ring_all("alarm")  # the nightstand iPad is right by the bed
         if self._ringing_since is not None:
             if not self._alarming() or now - self._ringing_since > _seconds("ROOM_ALARM_RING_S", 120):
                 self._ringing_since = None
@@ -291,8 +411,8 @@ class RoomVoice:
                 room_sounds.play("alarm")
         if self._spoke:
             self._spoke = False
-            stream.drain()  # don't hear ourselves as the wake word
-            self.detector.reset()
+            self._drain_all(stream)  # don't hear ourselves as the wake word
+            self._reset_detectors()
 
     def _deliver(self, item) -> None:  # noqa: ANN001
         from brain.reminders import Reminder
@@ -339,7 +459,7 @@ class RoomVoice:
         if self._wake_ringing():
             wake_alarm.im_up(lights=lights)  # stops the ring, lights on (unless kept), TV wake screen closes
             log.info("Dismissed the wake-up backup ring")
-            room_sounds.play("done")
+            self._sound("done")
             voice_presence.update("idle")
             return True
         ringing = self._alarming()
@@ -348,7 +468,7 @@ class RoomVoice:
         self._ringing_since = None
         if ringing:
             log.info("Dismissed %d ringing timer(s)", len(ringing))
-            room_sounds.play("done")
+            self._sound("done")
             voice_presence.update("idle")
         return bool(ringing)
 
@@ -359,18 +479,16 @@ class RoomVoice:
 
     def _speak(self, text: str, cache: bool | str = False) -> bool:
         """Say ``text``; True if Nick cut in with the wake word."""
-        from speech.tts import speak
         self.last_reply = text
-        return self._play(lambda _interrupt: speak(text, cache=cache))
+        return self._play(lambda interrupt: self._voice_out(text, cache, interrupt))
 
     def _play(self, say) -> bool:  # noqa: ANN001
         """Run ``say(interrupt_event)`` while listening for a barge-in; True if
         Nick cut in with the wake word. The event is set by a barge-in or a
         hush, so a reply spoken a sentence at a time stops between sentences
         too, not only mid-clip."""
-        from speech.tts import stop_playback
         room_volume.prepare()
-        stream = self.stream
+        stream = self._in()
         if self._hushed.is_set():
             return False
         if stream is None or os.getenv("VOICE_BARGE_IN", "1").strip().lower() in ("0", "off", "false", "no"):
@@ -391,18 +509,25 @@ class RoomVoice:
         while not done.is_set() and not self.stop.is_set():
             if self._hushed.is_set():  # synthesis may finish after the tap's stop: keep it quiet
                 interrupt.set()
-                stop_playback()
+                self._stop_output()
                 done.wait(0.1)
                 continue
             frame = stream.read(timeout=0.1)
-            if frame is not None and self._heard_wake(frame):
+            if frame is not None and self._heard_barge_in(frame):
                 log.info("Barge-in: stopped speaking")
                 interrupt.set()
-                stop_playback()
+                self._stop_output()
                 done.wait(2)
-                self.detector.reset()
+                self._reset_detectors()
                 return True
         return False
+
+    def _heard_barge_in(self, frame: np.ndarray) -> bool:
+        """The wake word on this exchange's mic while JARVIS talks."""
+        source = self._source
+        if source is not None and source.connected:
+            return self._sat_heard_wake(source, frame) is not None
+        return self._heard_wake(frame)
 
     def _learn_noise(self, frame: np.ndarray) -> None:
         """Track the room's background level while nobody's talking to JARVIS
@@ -414,10 +539,12 @@ class RoomVoice:
         """RMS that counts as speech: a few times the room's background, never
         stricter than MIC_RMS_THRESHOLD (a mic across the room is quiet)."""
         ceiling = rms_threshold()  # live: JARVIS may have retuned it
-        if self._noise <= 0:
+        source = self._source
+        noise = source.noise if source is not None and source.connected else self._noise
+        if noise <= 0:
             return ceiling
         floor = _seconds("VOICE_MIN_RMS", 90)
-        return min(ceiling, max(floor, self._noise * _seconds("VOICE_NOISE_RATIO", 2.5)))
+        return min(ceiling, max(floor, noise * _seconds("VOICE_NOISE_RATIO", 2.5)))
 
     def _capture(self, stream: MicStream, preroll: np.ndarray | None, start_timeout: float) -> np.ndarray | None:
         """One utterance, captioned live; None if nobody spoke."""
@@ -540,9 +667,8 @@ class RoomVoice:
         if answer is not None:
             log.info("Room voice quick answer: %s", answer.kind)
             if answer.stop:
-                from speech.tts import stop_playback
                 self._dismiss_alarms()
-                stop_playback()
+                self._stop_output()
                 voice_presence.update("idle")
                 return False
             if answer.say:
@@ -714,7 +840,11 @@ class RoomVoice:
 
         log.info("Room voice streaming its reply: %r…", head[:60])
         voice_presence.update("speaking", reply=head.strip())
-        self._barged = self._play(lambda interrupt: speak_stream(rest(), interrupt_event=interrupt))
+        source = self._source
+        if source is not None and source.connected:
+            self._barged = self._play(lambda interrupt: source.say_stream(rest(), interrupt))
+        else:
+            self._barged = self._play(lambda interrupt: speak_stream(rest(), interrupt_event=interrupt))
         self.last_reply = "".join(parts).strip()
         voice_presence.update("idle")
         if self._barged or self._hushed.is_set():
@@ -734,20 +864,19 @@ class RoomVoice:
     # --- for routines that hold a short conversation (goodnight) ---------------
 
     def _say(self, text: str) -> None:
-        from speech.tts import speak
         if self._hushed.is_set():
             return
         voice_presence.update("speaking", reply=text)
         room_volume.prepare()
         self.last_reply = text
-        speak(text, cache=True)  # routine lines repeat: instant from the second time
+        self._voice_out(text, True, self._hushed)  # routine lines repeat: instant from the second time
         self._spoke = True
 
     def _listen_for_answer(self) -> str | None:
         """One reply, no wake word needed; None if Nick says nothing."""
-        self.stream.drain()  # what's queued is JARVIS's own question, not the answer
+        self._in().drain()  # what's queued is JARVIS's own question, not the answer
         voice_presence.update("listening")
-        audio = self._capture(self.stream, None, start_timeout=_seconds("VOICE_FOLLOWUP_S", 8.0))
+        audio = self._capture(self._in(), None, start_timeout=_seconds("VOICE_FOLLOWUP_S", 8.0))
         if audio is None:
             return None
         voice_presence.update("thinking")
@@ -777,7 +906,7 @@ class RoomVoice:
     def _finish(self, phase: str, reply: str) -> None:
         voice_presence.update(phase, reply=reply)
         room_volume.prepare()
-        room_sounds.play("done" if phase == "done" else "error", wait=True)
+        self._sound("done" if phase == "done" else "error", wait=True)
         time.sleep(0.6)  # long enough for a screen to show the tick
         voice_presence.update("idle")
 

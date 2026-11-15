@@ -45,6 +45,8 @@ struct RoomView: View {
     @State private var lightSheet: LightSheetID?
     @AppStorage("room.nightScreen") private var nightScreen = true
     @State private var asleep = false
+    /// The dark screen was tapped away (the nightstand waits longer to go dark again).
+    @State private var tappedAwake = false
     /// Peace or Goodnight just ran: go dark once the lights are out, even by day.
     @State private var lightsOut = false
     @AppStorage("room.fullScreen") private var fullScreen = false
@@ -91,6 +93,33 @@ struct RoomView: View {
     /// The nightstand's night screen shows a dim clock and the next alarm.
     @AppStorage(RoomView.nightClockKey) private var nightClock = true
     static let nightClockKey = "room.nightClock"
+    /// How bright the nightstand's dark-screen clock is (grey level).
+    @AppStorage(RoomView.darkClockKey) private var darkClockLevel = NightstandDarkClock.defaultLevel
+    static let darkClockKey = "nightstand.darkClockLevel"
+    /// The nightstand's own tap-to-wake light: none by default, so a tap in
+    /// the night shows the panel without lighting the room.
+    @AppStorage(RoomView.nightstandWakeLightKey) private var nightstandWakeLight = ""
+    static let nightstandWakeLightKey = "nightstand.wakeLight"
+
+    /// The light a tap on the dark screen turns on, for this iPad's role.
+    private var tapLight: String { padRole == .nightstand ? nightstandWakeLight : wakeLight }
+
+    private var nightstandPanel: some View {
+        NightstandPanel(
+            model: model, wakeText: wakeText, alarmOn: wake?.enabled == true && wake?.nextAt != nil,
+            nextEvent: model.now.value?.nextEvent.map(eventText), timers: timers,
+            talking: talking, voiceActive: voice.active, dialogue: AnyView(RoomDialogue(presence: voice)),
+            showRemote: { showingRemote = true }, showWake: { showingWake = true },
+            showSettings: { showingSettings = true },
+            openLevel: { dragger.openPanel($0.entityID) },
+            menuExtras: AnyView(Group {
+                Button { roomCover = .memoryMap } label: { Label("Memory map", systemImage: "point.3.connected.trianglepath.dotted") }
+                Button { roomCover = .linkMap } label: { Label("Link map", systemImage: "dot.radiowaves.left.and.right") }
+                Button { roomCover = .agentMap } label: { Label("Agents", systemImage: "person.3.sequence") }
+                Button { showingImport = true } label: { Label("Import memory", systemImage: "square.and.arrow.down") }
+            }))
+        .transition(.opacity)
+    }
 
     /// The Movie scene is on.
     private var movieScene: Bool {
@@ -117,6 +146,8 @@ struct RoomView: View {
                               backToPanel: { withAnimation(.easeInOut(duration: 0.4)) { movieDismissed = true } })
                     .simultaneousGesture(TapGesture().onEnded { movieTouches &+= 1 })
                     .transition(.opacity)
+            } else if padRole == .nightstand && !RootView.isMac {
+                nightstandPanel
             } else if wide {
                 HStack(alignment: .top, spacing: 18) {
                     clockPanel(fill: true)
@@ -193,27 +224,38 @@ struct RoomView: View {
             // a dim grey clock (the Hub's old job), the backlight at its lowest.
             ZStack {
                 Color.black.ignoresSafeArea()
+                if padRole == .nightstand && nightClock {
+                    NightstandDarkClock(alarm: wake?.enabled == true && wake?.nextAt != nil ? wakeText : nil,
+                                       level: darkClockLevel)
+                        .padding(24)
+                        .ignoresSafeArea()
+                }
                 VStack(spacing: 18) {
-                    if padRole == .nightstand && nightClock {
-                        NightClock(alarm: wake?.enabled == true && wake?.nextAt != nil ? wakeText : nil)
-                    }
+                    Spacer()
                     // Lens on while the room sleeps: a faint grey line, readable
                     // from bed, so a watcher can't go unnoticed.
                     if cameraWatching {
                         Label("JARVIS is watching", systemImage: "eye")
                             .font(.title2.weight(.medium))
                             .foregroundStyle(Color(white: 0.6))
+                            .padding(.bottom, padRole == .nightstand ? 28 : 0)
                     }
+                    if padRole != .nightstand { Spacer() }
                 }
             }
             .contentShape(Rectangle())
+            .statusBarHidden(true)
+            .persistentSystemOverlays(.hidden)
             .onTapGesture { wakeFromNight() }
             .accessibilityLabel(cameraWatching ? "Night screen. JARVIS is watching. Tap to wake." : "Night screen. Tap to wake.")
         }
         .transaction { $0.disablesAnimations = asleep }
         .task(id: "\(roomIsDark)-\(asleep)-\(lightsOut)") {
             if roomIsDark && !asleep {
-                try? await Task.sleep(for: .seconds(lightsOut ? 3 : 45))
+                // The nightstand goes dark soon after the last light (and 20 s
+                // after a tap shows the panel); the door keeps its 45 s.
+                let wait: Double = lightsOut ? 3 : padRole == .nightstand ? (tappedAwake ? 20 : 6) : 45
+                try? await Task.sleep(for: .seconds(wait))
                 if !Task.isCancelled, roomIsDark { asleep = true }
             } else if !roomIsDark && asleep {
                 asleep = false
@@ -236,7 +278,7 @@ struct RoomView: View {
         .onChange(of: model.scenes.value?.current) { _, _ in movieDismissed = false }
         .animation(.easeInOut(duration: 0.4), value: movieMode)
         .onChange(of: lightsAllOff) { was, off in
-            if off == false { lightsOut = false } else if off == true, was == false { lightsOut = true }
+            if off == false { lightsOut = false; tappedAwake = false } else if off == true, was == false { lightsOut = true }
         }
         // "Hey JARVIS" lights the screen back up (the conversation shows in place).
         .onChange(of: voice.active) { _, active in if active { asleep = false } }
@@ -301,8 +343,10 @@ struct RoomView: View {
                 Task { await refresh() }
             }
         }
-        .onAppear { if !RootView.isMac { UIApplication.shared.isIdleTimerDisabled = keepAwake || movieDims } }
-        .onChange(of: keepAwake) { _, on in if !RootView.isMac { UIApplication.shared.isIdleTimerDisabled = on || movieDims } }
+        // The nightstand always stays awake: its dark screen is the bedside clock.
+        .onAppear { if !RootView.isMac { UIApplication.shared.isIdleTimerDisabled = keepAwake || movieDims || padRole == .nightstand } }
+        .onChange(of: keepAwake) { _, on in if !RootView.isMac { UIApplication.shared.isIdleTimerDisabled = on || movieDims || padRole == .nightstand } }
+        .onChange(of: padRoleRaw) { if !RootView.isMac { UIApplication.shared.isIdleTimerDisabled = keepAwake || movieDims || padRole == .nightstand } }
         .modifier(movieModeEffects)
     }
 
@@ -338,7 +382,8 @@ struct RoomView: View {
     private func wakeFromNight() {
         lightsOut = false
         asleep = false
-        if let light = model.entities.value?.first(where: { $0.entityID == wakeLight }), !light.isOn {
+        tappedAwake = true
+        if let light = model.entities.value?.first(where: { $0.entityID == tapLight }), !light.isOn {
             model.toggle(light, to: true)
         }
     }
@@ -365,8 +410,9 @@ struct RoomView: View {
     private var roomIsDark: Bool {
         // The wake-up alarm's screen beats the night screen (WakeRinging).
         guard !RootView.isMac, nightScreen, scenePhase == .active, !voice.active, !timers.contains(where: { $0.state == "alarming" }),
-              !wakeRinging.showing, !wakeRinging.opening,
-              lightsOut || (keepAwake && model.sun == "below_horizon") else { return false }
+              !wakeRinging.showing, !wakeRinging.opening, !movieDims,
+              // The nightstand goes dark whenever every light is off, day or night.
+              padRole == .nightstand || lightsOut || (keepAwake && model.sun == "below_horizon") else { return false }
         return lightsAllOff == true
     }
 
@@ -741,7 +787,7 @@ struct RoomView: View {
             }
     }
 
-    private static func symbol(for entity: HomeEntity) -> String {
+    static func symbol(for entity: HomeEntity) -> String {
         let name = entity.friendlyName.lowercased()
         if entity.domain == "light" && (name.contains("fan") || entity.entityID == "light.nicks_fan") {
             return "fan.and.light.ceiling.fill"  // the fan's RGB ring
@@ -1090,7 +1136,7 @@ private struct MovieModeView: View {
 }
 
 /// The iPad's battery, since full screen hides the status bar.
-private struct BatteryBadge: View {
+struct BatteryBadge: View {
     @State private var level: Float = -1  // -1 when unknown
     @State private var charging = false
 
@@ -1144,6 +1190,12 @@ private struct RoomSettingsView: View {
     @AppStorage(RoomView.favoritesKey) private var favoriteScenes = RoomView.defaultFavorites
     @AppStorage(PadRole.storageKey) private var padRoleRaw = ""
     @AppStorage(RoomView.nightClockKey) private var nightClock = true
+    @AppStorage(RoomView.darkClockKey) private var darkClockLevel = NightstandDarkClock.defaultLevel
+    @AppStorage(RoomView.nightstandWakeLightKey) private var nightstandWakeLight = ""
+
+    private var nightstand: Bool { PadRole.resolve(padRoleRaw) == .nightstand }
+    @AppStorage(SatelliteVoice.settingKey) private var satelliteSetting = ""
+    @ObservedObject private var satellite = SatelliteVoice.shared
 
     private var favorites: [String] {
         favoriteScenes.split(separator: ",").map(String.init)
@@ -1161,18 +1213,37 @@ private struct RoomSettingsView: View {
                     } header: {
                         Text("Where it lives")
                     } footer: {
-                        Text("Nightstand: the clock and alarm, room controls, movie mode and the camera's Bed angle. Door: the room panel and the camera's Door angle; during a movie it stays the panel, dimmed.")
+                        Text("Nightstand: its own dark bedside screen, a big dim clock whenever every light is off, movie mode and the camera's Bed angle. Door: the room panel and the camera's Door angle; during a movie it stays the panel, dimmed.")
+                    }
+                    Section {
+                        Toggle("JARVIS listens here", isOn: Binding(
+                            get: { SatelliteVoice.enabled(stored: satelliteSetting, role: PadRole.resolve(padRoleRaw)) },
+                            set: { on in
+                                let byRole = SatelliteVoice.enabled(stored: "", role: PadRole.resolve(padRoleRaw))
+                                satelliteSetting = on == byRole ? "" : (on ? "on" : "off")
+                            }))
+                    } header: {
+                        Text("Mic and speaker")
+                    } footer: {
+                        Text("\(satellite.status.text). This iPad hears \u{201C}Hey JARVIS\u{201D} for the room, and when it heard you best, JARVIS answers from its speaker instead of the desk's. Works while the app is open.")
                     }
                 }
                 Section("Screen") {
                     Toggle("Full screen", isOn: $fullScreen)
                     Toggle("Keep screen on", isOn: $keepAwake)
-                    Toggle("Dark at night when the lights are off", isOn: $nightScreen)
-                    if PadRole.resolve(padRoleRaw) == .nightstand {
-                        Toggle("Dim clock on the dark screen", isOn: $nightClock)
+                    if nightstand {
+                        Toggle("Dark when every light is off", isOn: $nightScreen)
+                        Toggle("Big clock on the dark screen", isOn: $nightClock)
+                        if nightClock {
+                            Picker("Dark clock", selection: $darkClockLevel) {
+                                ForEach(NightstandDarkClock.levels, id: \.value) { Text($0.name).tag($0.value) }
+                            }
+                        }
+                    } else {
+                        Toggle("Dark at night when the lights are off", isOn: $nightScreen)
                     }
                     if !wakeLightChoices.isEmpty {
-                        Picker("Tap the dark screen to turn on", selection: $wakeLight) {
+                        Picker("Tap the dark screen to turn on", selection: nightstand ? $nightstandWakeLight : $wakeLight) {
                             Text("Just the screen").tag("")
                             ForEach(wakeLightChoices) { Text($0.friendlyName).tag($0.entityID) }
                         }
@@ -1235,7 +1306,7 @@ private struct MovieModeEffects: ViewModifier {
     func body(content: Content) -> some View {
         content
             .onChange(of: room.movieDims) { _, on in
-                UIApplication.shared.isIdleTimerDisabled = room.keepAwake || on
+                UIApplication.shared.isIdleTimerDisabled = room.keepAwake || on || room.padRole == .nightstand
                 if !on { room.setMovieDim(nil) }
             }
             .onChange(of: room.scenePhase) { _, phase in if phase != .active { room.setMovieDim(nil) } }
@@ -1300,30 +1371,5 @@ private struct RoomVoiceHost: ViewModifier {
                 voice.setInlineHost(inline)
                 AnswerCardPresenter.shared.setInlineHost(inline)
             }
-    }
-}
-
-
-/// The nightstand's night-screen clock: big, thin and dim grey, with the next
-/// alarm under it. No seconds and no animation, so nothing moves in the dark.
-private struct NightClock: View {
-    let alarm: String?
-
-    var body: some View {
-        TimelineView(.everyMinute) { context in
-            VStack(spacing: 10) {
-                Text(context.date, format: .dateTime.hour().minute())
-                    .font(.system(size: 120, weight: .thin, design: .rounded))
-                    .monospacedDigit()
-                    .minimumScaleFactor(0.5)
-                    .lineLimit(1)
-                if let alarm {
-                    Label(alarm, systemImage: "alarm")
-                        .font(.title3)
-                }
-            }
-            .foregroundStyle(Color(white: 0.32))
-        }
-        .accessibilityElement(children: .combine)
     }
 }

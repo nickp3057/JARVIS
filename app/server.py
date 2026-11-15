@@ -218,6 +218,74 @@ async def companion_voice(socket: WebSocket) -> None:
     await serve(socket, runtime)
 
 
+@app.websocket("/api/voice/satellite")
+async def voice_satellite(socket: WebSocket) -> None:
+    """An iPad lends the room voice its mic and speaker (speech/satellites.py).
+    ``?name=bed`` (or ``door``). In: binary 16 kHz mono int16 PCM. Out: JSON
+    control messages and the reply's PCM. Companion token only."""
+    try:
+        authorize(socket.headers.get("authorization"))
+    except HTTPException:
+        await socket.close(code=1008)
+        return
+    from speech import room_voice, satellites
+    name = satellites.clean_name(socket.query_params.get("name"))
+    if name is None:
+        await socket.close(code=1008)
+        return
+    await socket.accept()
+    if not room_voice.enabled():
+        await socket.send_text(json.dumps({"type": "off"}))
+        await socket.close(code=1000)
+        return
+    loop = asyncio.get_running_loop()
+    outbox: asyncio.Queue = asyncio.Queue()
+
+    def send(item: str | bytes) -> None:  # from the room voice's threads
+        try:
+            loop.call_soon_threadsafe(outbox.put_nowait, item)
+        except RuntimeError:  # the loop is gone: the socket is closing anyway
+            pass
+
+    async def writer() -> None:
+        while (item := await outbox.get()) is not None:
+            if isinstance(item, bytes):
+                await socket.send_bytes(item)
+            else:
+                await socket.send_text(item)
+
+    async def keepalive() -> None:  # Core is silent between replies; the iPad's idle timeout isn't
+        while True:
+            await asyncio.sleep(20)
+            send(json.dumps({"type": "ping"}))
+
+    sat = satellites.register(name, send)
+    task = asyncio.create_task(writer())
+    pinger = asyncio.create_task(keepalive())
+    try:
+        sat.send_json({"type": "hello", "rate": 16000})
+        while True:
+            message = await socket.receive()
+            if message.get("type") == "websocket.disconnect":
+                break
+            if message.get("bytes"):
+                sat.feed(message["bytes"])
+    except Exception:  # noqa: BLE001 - a dropped socket ends the satellite, nothing else
+        log.debug("Voice satellite %s socket ended", name, exc_info=True)
+    finally:
+        satellites.unregister(sat)
+        outbox.put_nowait(None)
+        pinger.cancel()
+        task.cancel()
+
+
+@app.get("/api/voice/satellites")
+def voice_satellites(_: None = Depends(authorize)) -> dict[str, object]:
+    """Which iPads are lending the room voice their mic and speaker."""
+    from speech import satellites
+    return {"satellites": satellites.status()}
+
+
 class RenameRequest(BaseModel):
     title: str = Field(min_length=1, max_length=120)
 

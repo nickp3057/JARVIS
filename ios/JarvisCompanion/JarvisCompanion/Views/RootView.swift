@@ -24,6 +24,9 @@ struct RootView: View {
     /// The iPad as the room camera: runs the lens while Nick's phone watches.
     @StateObject private var camera = RoomCameraController()
     @StateObject private var phoneVoice = PushToTalkController()
+    /// The iPad as JARVIS's ears and voice in the room (SatelliteVoice).
+    @AppStorage(SatelliteVoice.settingKey) private var satelliteSetting = ""
+    @AppStorage(PadRole.storageKey) private var padRoleRaw = ""
     /// The phone's camera viewer is presented here, above `.id(palette)`, so a
     /// theme flip (Barn Door engaging) doesn't tear down the live feed.
     @ObservedObject private var cameraViewer = RoomCameraPresenter.shared
@@ -201,6 +204,16 @@ struct RootView: View {
             while !Task.isCancelled {
                 try? await Task.sleep(for: .seconds(10))
                 if !hub.homeStreamLive { await ThemeSync.pull(settings) }
+            }
+        }
+        .task(id: "\(scenePhase)-\(satelliteSetting)-\(padRoleRaw)-\(settings.connectionIdentity)") {
+            // An iPad lends Core's room voice its mic and speaker while the
+            // app is open (on by default on the nightstand, off by the door).
+            guard Self.isPad, !Self.isMac else { return }
+            let role = PadRole.resolve(padRoleRaw)
+            SatelliteVoice.shared.stop()
+            if scenePhase == .active, SatelliteVoice.enabled(stored: satelliteSetting, role: role) {
+                SatelliteVoice.shared.start(settings: settings, name: role.lens)
             }
         }
         .task(id: scenePhase) {
