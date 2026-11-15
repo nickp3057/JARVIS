@@ -1188,3 +1188,30 @@ class PlexSearchTests(unittest.TestCase):
             ok, films = plex.search_movies("Hunger Games")
         self.assertTrue(ok)
         self.assertEqual([f["rating_key"] for f in films], ["1", "3"])
+
+
+class SteadyTrackTests(unittest.TestCase):
+    BLUE = [23, 41, 57]
+    GREY = [57, 48, 40]  # the warm-white fallback, dim
+
+    def test_dim_blue_grey_flicker_holds_blue(self) -> None:
+        from brain.light_sync import steady_track
+        frames = [self.BLUE] * 8 + [self.GREY, self.BLUE, self.BLUE, self.GREY, self.BLUE, self.GREY] + [self.BLUE] * 8
+        out = steady_track(np.array(frames, np.uint8))
+        for row in out:
+            self.assertGreater(int(row[2]), int(row[0]))  # blue everywhere, no grey blips
+        self.assertEqual(out.max(1).tolist(), np.array(frames, np.uint8).max(1).tolist())  # brightness untouched
+
+    def test_a_real_colour_change_goes_through(self) -> None:
+        from brain.light_sync import steady_track
+        red = [180, 20, 20]
+        frames = [self.BLUE] * 8 + [red] * 10
+        out = steady_track(np.array(frames, np.uint8))
+        self.assertEqual(out[-1].tolist(), red)
+
+    def test_action_flash_still_punches_through(self) -> None:
+        from brain.light_sync import steady_track
+        flash = [255, 200, 120]  # an explosion: much brighter, short
+        frames = [self.BLUE] * 8 + [flash, flash] + [self.BLUE] * 8
+        out = steady_track(np.array(frames, np.uint8))
+        self.assertEqual(out[8].tolist(), flash)

@@ -176,6 +176,57 @@ def save_state(state: dict[str, Any]) -> None:
 
 # --- Govee LAN ---------------------------------------------------------------
 
+# --- Steadying a track ---------------------------------------------------------
+# In dim scenes the builder's "is enough of the picture vivid?" test sits on its
+# 3% line, so neighbouring frames flip between the hue and the warm-white
+# fallback (The Hunger Games at 30:11: dark blue / grey ten times in 2 s, at the
+# same brightness). The flash limiter only watches brightness, so it let that
+# through. A colour now has to hold for STEADY_FRAMES before the lights follow
+# it; a big brightness jump (an explosion, a hard cut) still goes at once.
+
+STEADY_FRAMES = 5          # 0.5 s at the track's 10 fps
+STEADY_JUMP = 0.25         # a brightness change this big (0-1) is real action
+
+
+def _colour_key(track: np.ndarray) -> np.ndarray:
+    """One small int per frame for "which colour is this": the warm-white
+    fallback is -1, any other colour its hue in 12 bins."""
+    rgb = track.astype(np.float32)
+    mx = rgb.max(1)
+    mn = rgb.min(1)
+    chroma = rgb / np.maximum(mx, 1)[:, None]
+    fallback = np.abs(chroma - np.array([1.0, 0.85, 0.7], np.float32)).max(1) < 0.05
+    d = np.maximum(mx - mn, 1e-6)
+    r, g, b = rgb[:, 0], rgb[:, 1], rgb[:, 2]
+    hue = np.where(mx == r, ((g - b) / d) % 6, np.where(mx == g, (b - r) / d + 2, (r - g) / d + 4)) / 6
+    key = (hue * 12).astype(int) % 12
+    key[fallback | (mx - mn < 6)] = -1
+    return key
+
+
+def steady_track(track: np.ndarray, frames: int = STEADY_FRAMES, jump: float = STEADY_JUMP) -> np.ndarray:
+    """``track`` with colour flicker removed: a colour run shorter than
+    ``frames`` takes the previous run's colour at its own brightness, unless
+    it arrives with a brightness jump of at least ``jump``."""
+    if len(track) < 2 or frames < 2:
+        return track
+    out = track.astype(np.float32).copy()
+    level = out.max(1) / 255.0
+    key = _colour_key(track)
+    starts = np.flatnonzero(np.r_[True, key[1:] != key[:-1]])
+    ends = np.r_[starts[1:], len(track)]
+    held: np.ndarray | None = None  # chroma (0-1, max channel 1) of the colour on now
+    for start, end in zip(starts, ends):
+        chroma = out[start] / max(out[start].max(), 1.0)
+        short = end - start < frames
+        action = start > 0 and abs(level[start] - level[start - 1]) >= jump
+        if held is not None and short and not action:
+            out[start:end] = held[None, :] * (level[start:end] * 255.0)[:, None]
+        else:
+            held = chroma
+    return out.clip(0, 255).astype(np.uint8)
+
+
 def razer_packet(raw: list[int]) -> str:
     """A razer payload with its xor checksum, base64 for the ``pt`` field."""
     x = 0
@@ -637,6 +688,7 @@ class LightSync:
         if track is None:
             self.reason = "The light track couldn't be read."
             return
+        track = steady_track(track)
         if self._sender is None:
             self._sender = self.sender_factory()
         key = pb.rating_key

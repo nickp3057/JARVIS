@@ -2991,6 +2991,15 @@ prototype in `~/Developer/projects/light-sync` (2026-11-09).
 - **Flash limiter** (new): colour may change fast, but at most 3 big
   brightness jumps (a one-direction move of more than 25% of full) in any
   second, 2 at Subtle; over budget a run is held to a small step, keeping the hue.
+- **Colour steadying** (`steady_track`, applied when a track loads, no
+  rebuild): in dim scenes the builder's 3% "vivid" test flips neighbouring
+  frames between a hue and the warm-white fallback (The Hunger Games at
+  30:11: dark blue / grey ten times in 2 s at the same brightness, which Nick
+  saw as strobing). A colour (12 hue bins or the fallback) must hold 0.5 s
+  (`STEADY_FRAMES` 5) before the lights follow it; a shorter run takes the
+  previous colour at its own brightness, unless it arrives with a brightness
+  jump of 25%+ (explosions, cuts still punch through). On that film: windows
+  with 6+ colour flips per 2 s 5,683 → 173, brightness untouched.
 - **Intensity** (`memory/light_sync.json`, with the auto switch; the iPad
   sets both): Medium = the prototype's tuned values (strip 0.35, desk 0.35,
   lamp 0.6, blend 80 ms); Subtle dimmer and softer; Intense brighter and snappier.
