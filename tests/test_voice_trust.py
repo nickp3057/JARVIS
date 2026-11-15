@@ -181,6 +181,15 @@ class SpeakerIdTests(unittest.TestCase):
         self.assertIsNone(voice_presence.current()["enroll"])
         self.assertNotIn("bed mic", speaker_id.status_text())
 
+    def test_any_mic_that_knows_nick_counts(self) -> None:
+        self.enroll()  # the desk print (positive clips)
+        # The desk answered with a clip it can't place, but the mini heard Nick clearly.
+        self.assertFalse(speaker_id.identify(clip(False)).verified)
+        verdict = speaker_id.identify(clip(False), also={"bed": clip(True)})
+        self.assertTrue(verdict.verified)
+        # Nobody's mic knows the voice: still a guest.
+        self.assertFalse(speaker_id.identify(clip(False), also={"bed": clip(False)}).verified)
+
     def test_cancel_clears_the_ipad_card(self) -> None:
         from brain import voice_presence
         self.addCleanup(voice_presence.reset_for_tests)

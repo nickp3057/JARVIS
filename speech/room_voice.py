@@ -409,6 +409,21 @@ class RoomVoice:
         self._quiet_listen, self._enroll_started = self._enroll_started, True
         return True
 
+    def _other_mics(self, seconds: float) -> dict[str, np.ndarray]:
+        """The same moment on every mic but the one that answered, for voice
+        ID: any mic that knows Nick's voice counts (``speaker_id.identify``)."""
+        source = self._source
+        clips: dict[str, np.ndarray] = {}
+        try:
+            if source is not None and getattr(self, "stream", None) is not None:
+                clips["desk"] = self.stream.get_recent_audio(seconds)
+            for sat in satellites.connected():
+                if sat is not source:
+                    clips[sat.name] = sat.get_recent_audio(seconds)
+        except Exception:  # noqa: BLE001 - the answering mic alone still decides
+            log.debug("Voice ID: other mics unavailable", exc_info=True)
+        return {name: clip for name, clip in clips.items() if clip.size}
+
     def enroll_from(self, mic: str) -> None:
         self._enroll_mic, self._enroll_started = mic, False
 
@@ -652,9 +667,11 @@ class RoomVoice:
         # transcript is on its way back from the cloud, not after it.
         verdict: list = []
 
+        also = self._other_mics(len(audio) / SAMPLE_RATE)
+
         def who() -> None:
             try:
-                verdict.append(speaker_id.identify(audio))
+                verdict.append(speaker_id.identify(audio, also=also) if also else speaker_id.identify(audio))
             except Exception:  # noqa: BLE001 - decided below: an unknown voice is a guest
                 log.exception("Voice ID failed")
 

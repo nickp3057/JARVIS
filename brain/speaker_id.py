@@ -227,23 +227,33 @@ def score(audio: np.ndarray) -> float | None:
     return best[0] if best else None
 
 
-def identify(audio: np.ndarray) -> voice_trust.Speaker:
+def identify(audio: np.ndarray, also: dict[str, np.ndarray] | None = None) -> voice_trust.Speaker:
     """Nick or a guest, for one room-voice command. Every verdict is marked
     ``room``: an unmeasured "Nick" (voice ID off, nothing enrolled) still
-    can't move money (``voice_trust.may_move_money``)."""
+    can't move money (``voice_trust.may_move_money``).
+
+    ``also``: the same moment as the other mics heard it ({"desk" or a
+    satellite's name: clip}). Any one of them matching counts: the desk can
+    take the wake word while Nick is in bed, too far for the desk to know
+    him, while the mini beside him does."""
     if not enabled():
         return voice_trust.Speaker("nick", True, reason="voice ID off", room=True)
     if not enrolled():
         return voice_trust.Speaker("nick", True, reason="no voiceprint enrolled", room=True)
-    best = best_score(audio)
-    if best is None:
+    results: list[tuple[float, str, str]] = []  # (score, print, heard on)
+    for heard_on, clip in [("answering mic", audio), *((also or {}).items())]:
+        best = best_score(clip)
+        if best is not None:
+            results.append((best[0], best[1], heard_on))
+    if not results:
         reason = "clip too short" if np.asarray(audio).size < _SAMPLE_RATE * _MIN_SECONDS else "model unavailable"
         log.info("Voice ID: guest (%s)", reason)
         return voice_trust.guest(reason)
-    value, mic = best
+    value, mic, heard_on = max(results)
     verdict = value >= _threshold()
-    log.info("Voice ID: %s (score %.2f on the %s print, threshold %.2f)", "Nick" if verdict else "guest",
-             value, mic, _threshold())
+    others = "".join(f"; {h} {v:.2f} on {m}" for v, m, h in results if h != heard_on)
+    log.info("Voice ID: %s (score %.2f on the %s print, %s, threshold %.2f%s)", "Nick" if verdict else "guest",
+             value, mic, heard_on, _threshold(), others)
     if verdict:
         return voice_trust.Speaker("nick", True, score=value, reason="voiceprint match", room=True)
     return voice_trust.guest("voiceprint mismatch", score=value)
