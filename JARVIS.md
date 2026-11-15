@@ -2965,7 +2965,10 @@ prototype in `~/Developer/projects/light-sync` (2026-11-09).
   Both require `playback:write`. Responses are consumed to reuse Android's
   HTTP connection pool. Core maps time with the lowest-RTT sample in a rolling
   minute, then slews small phase errors by at most 5 ms/report. Seeks >700 ms,
-  state/speed changes and new films re-anchor. Players start from TV only;
+  state/speed changes and new films re-anchor. A ten-report linear fit
+  estimates the decoder media clock rate (bounded to ±10% of its stated
+  speed), with a bounded phase correction. Live TCL transcoding drift required
+  this rate fit (6.62 / 304). Players start from TV only;
   a stale TV releases the stream, never lets Plex steer it. Plex positions
   remain available in status before TV connects, but supply only metadata
   to a running player. Transient TV failures retry after 1 s (401/403: 5 min).

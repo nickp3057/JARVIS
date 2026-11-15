@@ -1375,6 +1375,15 @@ class FilteredClockTests(TrackStoreDir):
         self.report(105)
         self.assertAlmostEqual(self.clock.current().position(self.t), 5.01)
 
+    def test_decoder_clock_rate_is_fitted_without_repeated_reanchors(self):
+        for second in range(121):
+            self.report(100 + second, position=second * 980)
+            error = self.clock.current().position(self.t) - (self.t - 100) * .98
+            if second >= 3:
+                self.assertLess(abs(error), .03)
+        self.assertEqual(len(self.clock.reanchors), 1)
+        self.assertAlmostEqual(self.clock.tv.speed, .98, places=5)
+
 
 class SetupAndPartTests(ControllerBase):
     def metadata(self, part="9", fmt="1080/sdr/h264/directplay/aac"):

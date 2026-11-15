@@ -427,6 +427,8 @@ class PlaybackClock:
         self.last_sent = None
         self.stream_id = None
         self.report_id = None
+        self.position_samples = deque(maxlen=10)
+        self.reported_speed = None
         self.session_info: dict[str, Any] = {}
         self.source_lock: str | None = None
 
@@ -445,6 +447,8 @@ class PlaybackClock:
             return {"source": self.source_lock or ("tv" if self.tv else "plex"),
                     "synchronized": bool(self.sync_samples),
                     "drift_ms": round(self.errors[-1], 2) if self.errors else None,
+                    "estimated_rate": round(self.tv.speed, 6) if self.tv else None,
+                    "last_report": list(self.position_samples[-1]) if self.position_samples else None,
                     "jitter_p50_ms": round(float(np.percentile(self.jitter, 50)), 2) if self.jitter else 0,
                     "jitter_p95_ms": round(float(np.percentile(self.jitter, 95)), 2) if self.jitter else 0,
                     "rtt_ms": round(min(self.sync_samples, key=lambda x: x[1])[1] * 1000, 2) if self.sync_samples else None,
@@ -473,6 +477,7 @@ class PlaybackClock:
                 self.sync_samples.clear()
                 self.last_elapsed = self.last_sent = None
                 self.tv = None
+                self.position_samples.clear()
             if report_id is not None:
                 if self.report_id is not None:
                     if report_id <= self.report_id:
@@ -514,22 +519,40 @@ class PlaybackClock:
             pos = max(0.0, position_ms / 1000)
             error = pos - old.position(at) if old else 0
             self.errors.append(error * 1000)
-            changed = old is None or old.rating_key != key or old.state != state or old.speed != speed
+            changed = old is None or old.rating_key != key or old.state != state or self.reported_speed != speed
+            self.reported_speed = speed
             if elapsed_ms is not None and (old is None or old.state == "stopped" or old.rating_key != key):
                 # Fetch this launch's selected Part before starting, even when
                 # the same ratingKey was just played using another version.
                 self.session_info = {}
                 self.plex_polled_at = -1e9
             if changed or abs(error) > 0.7:
+                self.position_samples.clear()
+                self.position_samples.append((at, pos))
                 why = "state/film" if changed else "seek"
                 entry = {"at": round(now, 3), "ms": round(error * 1000, 2), "reason": why}
                 self.reanchors.append(entry)
                 log.info("Light sync clock re-anchor: %s", entry)
                 self.tv = Playback(key, title or "", state, pos, speed, at, "tv")
             else:
-                # A bounded phase correction rejects noisy reports without a visible jump.
-                correction = max(-0.005, min(0.005, error * 0.15))
-                self.tv = Playback(key, title or "", state, old.position(at) + correction, speed, at, "tv")
+                self.position_samples.append((at, pos))
+                rate = speed
+                phase_error = error
+                if speed > 0 and len(self.position_samples) >= 3:
+                    samples = np.asarray(self.position_samples, dtype=float)
+                    x = samples[:, 0] - at
+                    y = samples[:, 1]
+                    centered = x - x.mean()
+                    variance = float(centered @ centered)
+                    if variance > 0.25:
+                        fitted = float(centered @ (y - y.mean()) / variance)
+                        # A decoder's media clock need not advance at exactly 1x.
+                        # Bound the fit so one bad reading cannot run away.
+                        rate = max(speed * .9, min(speed * 1.1, fitted))
+                        fitted_position = float(y.mean() - rate * x.mean())
+                        phase_error = fitted_position - old.position(at)
+                correction = max(-0.005, min(0.005, phase_error * 0.15))
+                self.tv = Playback(key, title or "", state, old.position(at) + correction, rate, at, "tv")
 
     def plex_report(self, session: dict[str, Any] | None) -> None:
         now = self.now()
