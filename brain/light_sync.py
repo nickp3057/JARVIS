@@ -586,7 +586,7 @@ def _same_title(a: str, b: str) -> bool:
     return bool(a and b) and _title_key(a) == _title_key(b)
 
 
-def pick_session(sessions: list[dict[str, Any]], player: str = "") -> dict[str, Any] | None:
+def pick_session(sessions: list[dict[str, Any]], player: str = "", tv: Playback | None = None) -> dict[str, Any] | None:
     """The room TV's movie session: the one whose player matches
     ``LIGHT_SYNC_PLEX_PLAYER`` (title, product or machineIdentifier), else
     the only movie playing on any player."""
@@ -599,6 +599,14 @@ def pick_session(sessions: list[dict[str, Any]], player: str = "") -> dict[str, 
             if wanted in names or wanted in names[0]:
                 return s
         return None
+    if tv is not None and tv.state != "stopped":
+        matches = [s for s in movies if (tv.rating_key and str(s.get("rating_key")) == tv.rating_key)
+                   or _same_title(str(s.get("title") or ""), tv.title)]
+        if len(matches) == 1:
+            return matches[0]
+        android_tv = [s for s in matches if "android" in str((s.get("player") or {}).get("product", "")).lower()
+                      and "tv" in str((s.get("player") or {}).get("product", "")).lower()]
+        return android_tv[0] if len(android_tv) == 1 else None
     return movies[0] if len(movies) == 1 else None
 
 
@@ -803,7 +811,8 @@ class LightSync:
         if not ok:
             log.debug("Light sync: Plex sessions unavailable: %s", found)
             return
-        self.clock.plex_report(pick_session(found, os.getenv("LIGHT_SYNC_PLEX_PLAYER", "")))
+        self.clock.plex_report(pick_session(found, os.getenv("LIGHT_SYNC_PLEX_PLAYER", ""),
+                                            self.clock.tv if self.clock.tv_fresh() else None))
         self._apply_offset()
 
     def tv_report(self, **report: Any) -> None:

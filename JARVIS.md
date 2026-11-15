@@ -2969,6 +2969,9 @@ prototype in `~/Developer/projects/light-sync` (2026-11-09).
   a stale TV releases the stream, never lets Plex steer it. Plex positions
   remain available in status before TV connects, but supply only metadata
   to a running player. Transient TV failures retry after 1 s (401/403: 5 min).
+  Companion 6.61 / 303 follow-up: when no player is configured, select Plex
+  metadata by the TV report's ratingKey/title; Android TV breaks a same-film
+  tie. Another movie playing on the Mac no longer blocks TV Part discovery.
 - **Part identity and precision**: the session retains the selected Media/Part
   ids and Part URL. New tracks record those plus container `start_time_s` and
   `fps` and decode at 30fps; legacy 10fps tracks remain readable. When a Part

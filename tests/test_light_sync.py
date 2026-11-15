@@ -1442,3 +1442,23 @@ class CalibrationTimelineTests(unittest.TestCase):
         self.assertTrue(all(c["frames"] >= 39 for c in cuts[:-1]))
         self.assertEqual(cuts[-1]["rgb"], [0, 0, 0])
         self.assertEqual(cuts, timeline())
+
+
+class TVSessionSelectionTests(unittest.TestCase):
+    def test_tv_title_selects_metadata_when_another_movie_is_playing_on_mac(self):
+        mac = {"type": "movie", "rating_key": "9347", "title": "The Lego Ninjago Movie",
+               "player": {"product": "Plex for Mac"}}
+        tv = {"type": "movie", "rating_key": "9234", "title": "Light Sync Test",
+              "player": {"product": "Plex for Android (TV)"}}
+        report = light_sync.Playback("", "Light Sync Test", "playing", 0, 1, 100, "tv")
+        self.assertIs(light_sync.pick_session([mac, tv], tv=report), tv)
+        self.assertIsNone(light_sync.pick_session([mac], tv=report))
+        self.assertIsNone(light_sync.pick_session([mac, tv], player="some other room", tv=report))
+
+    def test_same_film_on_two_players_uses_android_tv_metadata(self):
+        tv = {"type": "movie", "rating_key": "1", "title": "Up",
+              "player": {"product": "Plex for Android (TV)"}}
+        mac = {**tv, "player": {"product": "Plex for Mac"}}
+        report = light_sync.Playback("1", "Up", "playing", 0, 1, 100, "tv")
+        self.assertIs(light_sync.pick_session([mac, tv], tv=report), tv)
+        self.assertIsNone(light_sync.pick_session([mac, mac], tv=report))
