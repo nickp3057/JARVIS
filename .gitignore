@@ -40,3 +40,10 @@ memory/*.p8
 memory/voiceprint.json
 models/
 memory/alert_repeats.json
+
+# personal data: never commit (scrubbed from history 2026-11-16)
+memory/profile.json
+memory/price_watches.json
+memory/history.db
+.claude/settings.local.json
+test.wav
