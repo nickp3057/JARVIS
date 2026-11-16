@@ -1838,6 +1838,7 @@ class TVPlaybackReport(BaseModel):
     title: str = Field(default="", max_length=300)
     rating_key: str | None = Field(default=None, max_length=40)
     elapsed_ms: float | None = Field(default=None, ge=0, allow_inf_nan=False)
+    sample_elapsed_ms: float | None = Field(default=None, ge=0, allow_inf_nan=False)
     exchange: TVClockExchange | None = None
     stream_id: str | None = Field(default=None, max_length=40)
     report_id: int | None = Field(default=None, ge=0)
@@ -1856,7 +1857,7 @@ def tv_playback(report: TVPlaybackReport, _: None = Depends(require_scope("playb
     light_sync.controller.tv_report(state=report.state, position_ms=report.position_ms, speed=report.speed,
                                     title=report.title, rating_key=key, elapsed_ms=report.elapsed_ms,
                                     exchange=report.exchange.model_dump() if report.exchange else None,
-                                    stream_id=report.stream_id, report_id=report.report_id)
+                                    stream_id=report.stream_id, report_id=report.report_id, sample_elapsed_ms=report.sample_elapsed_ms)
     return {"ok": True, "used": True, "core_receive_ms": received, "core_send_ms": time.monotonic() * 1000}
 
 

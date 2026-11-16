@@ -24,8 +24,8 @@ import java.util.List;
  * Light sync: tells Core where Plex is in the film ({@code POST /api/tv/playback},
  * token scope playback:write), on every playback change and every second
  * while playing (every 5 s while paused). Plex's media session is read
- * through MediaListener's grant, like Music. The position is advanced to the
- * moment of sending, timestamped with elapsedRealtime and a four-stamp clock exchange.
+ * through MediaListener's grant, like Music. The original position/update timestamp pair is preserved;
+ * heartbeat send time and the four-stamp clock exchange are separate.
  *
  * A 403 (the token hasn't been granted playback:write yet) or a 401 backs off
  * quietly for 5 minutes; transient failures retry after 1 s. Never spams.
@@ -166,9 +166,6 @@ final class PlaybackReport {
         if (state != null) {
             position = state.getPosition();
             speed = state.getPlaybackSpeed();
-            if (state.getState() == PlaybackState.STATE_PLAYING && state.getLastPositionUpdateTime() > 0) {
-                position += (long) ((now - state.getLastPositionUpdateTime()) * speed);
-            }
         }
         String title = "", key = "";
         MediaMetadata meta = plex != null ? plex.getMetadata() : null;
@@ -183,6 +180,8 @@ final class PlaybackReport {
                     .put("package", PLEX).put("state", name)
                     .put("position_ms", Math.max(0, position)).put("speed", Math.max(0, speed))
                     .put("title", title).put("elapsed_ms", now)
+                    .put("sample_elapsed_ms", state != null && state.getLastPositionUpdateTime() > 0
+                            ? state.getLastPositionUpdateTime() : now)
                     .put("stream_id", streamId).put("report_id", ++reportId);
             if (exchange != null) body.put("exchange", exchange);
             if (!key.isEmpty()) body.put("rating_key", key);

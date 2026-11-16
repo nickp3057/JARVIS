@@ -1096,12 +1096,14 @@ class CalibrationTests(ControllerBase):
         self.tick(movie=False)
         self.assertTrue(self.sync.running)
         self.assertTrue(self.sync.armed())
-        # Nudges go to the global offset while calibrating.
+        # Calibration requires the TV's current format, never another player's default.
+        self.assertFalse(self.sync.nudge(25)[0])
+        self.sync.clock.session_info = {"rating_key": "50", "format_key": "1080/sdr/h264/directplay/aac"}
         ok, said = self.sync.nudge(25)
-        self.assertIn("globally", said)
-        self.assertEqual((self.sync.global_offset(), light_tracks.film_offset("50")), (25, 0))
+        self.assertIn("1080/sdr/h264/directplay/aac", said)
+        self.assertEqual((self.sync.global_offset(), light_tracks.film_offset("50")), (0, 0))
         self.assertEqual(FakePlayer.instances[0].lead_ms, 25)
-        self.assertEqual(self.sync.status()["offset"]["scope"], "global")
+        self.assertEqual(self.sync.status()["offset"]["scope"], "format")
         ok, said = self.sync.end_calibration()
         self.assertTrue(ok)
         self.assertIn("+25 ms", said)
@@ -1383,6 +1385,28 @@ class FilteredClockTests(TrackStoreDir):
                 self.assertLess(abs(error), .03)
         self.assertEqual(len(self.clock.reanchors), 1)
         self.assertAlmostEqual(self.clock.tv.speed, .98, places=5)
+
+    def test_native_media_sample_is_fitted_once_while_heartbeats_stay_fresh(self):
+        self.t = 103.01
+        args = dict(state="playing", rating_key="1", title="Up", position_ms=1000,
+                    sample_elapsed_ms=21000, exchange=self.exchange(102.9))
+        self.clock.tv_report(**args, elapsed_ms=23000)
+        self.assertAlmostEqual(self.clock.current().position(self.t), 3.01, places=5)
+        for sent in range(104, 120):
+            self.t = sent + .01
+            self.clock.tv_report(**{**args, "exchange": self.exchange(sent - .1)}, elapsed_ms=(sent - 80) * 1000)
+        self.assertEqual(len(self.clock.position_samples), 1)
+        self.assertEqual(len(self.clock.errors), 1)
+        self.assertTrue(self.clock.tv_fresh())
+        self.assertAlmostEqual(self.clock.current().position(self.t), self.t - 100, places=5)
+
+    def test_native_paused_sample_can_be_old_without_becoming_stale(self):
+        self.t = 110.01
+        self.clock.tv_report(state="paused", rating_key="1", title="Up", position_ms=1000,
+                             sample_elapsed_ms=21000, elapsed_ms=30000, exchange=self.exchange(109.9))
+        self.assertEqual(self.clock.current().position(self.t), 1)
+        self.assertTrue(self.clock.tv_fresh())
+
 
 
 class SetupAndPartTests(ControllerBase):

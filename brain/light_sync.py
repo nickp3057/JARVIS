@@ -429,6 +429,7 @@ class PlaybackClock:
         self.report_id = None
         self.position_samples = deque(maxlen=10)
         self.reported_speed = None
+        self.last_media_stamp = None
         self.session_info: dict[str, Any] = {}
         self.source_lock: str | None = None
 
@@ -461,7 +462,7 @@ class PlaybackClock:
     def tv_report(self, *, state: str, position_ms: float, speed: float = 1.0, title: str = "",
                   rating_key: str = "", elapsed_ms: float | None = None,
                   exchange: dict[str, float] | None = None, stream_id: str | None = None,
-                  report_id: int | None = None) -> None:
+                  report_id: int | None = None, sample_elapsed_ms: float | None = None) -> None:
         state = state if state in ("playing", "paused", "buffering", "stopped") else "stopped"
         key = str(rating_key or "")
         if not key and title:
@@ -478,6 +479,7 @@ class PlaybackClock:
                 self.last_elapsed = self.last_sent = None
                 self.tv = None
                 self.position_samples.clear()
+                self.last_media_stamp = None
             if report_id is not None:
                 if self.report_id is not None:
                     if report_id <= self.report_id:
@@ -486,7 +488,7 @@ class PlaybackClock:
                     self.dropped += report_id - self.report_id - 1
                 self.report_id = report_id
             # elapsedRealtime resets on reboot; an HTTP retry may arrive out of order.
-            if elapsed_ms is not None and self.last_elapsed is not None and elapsed_ms <= self.last_elapsed:
+            if elapsed_ms is not None and self.last_elapsed is not None and elapsed_ms < self.last_elapsed:
                 if self.last_elapsed - elapsed_ms < 60_000:
                     self.dropped += 1
                     return
@@ -506,10 +508,15 @@ class PlaybackClock:
                 self.dropped += 1
                 return  # timestamped clients must establish a mapping, never use arrival time
             if elapsed_ms is not None and self.sync_samples:
-                at = elapsed_ms / 1000 + min(self.sync_samples, key=lambda x: x[1])[2]
-                if not now - 3 <= at <= now + 0.05:
+                offset = min(self.sync_samples, key=lambda x: x[1])[2]
+                sent_at = elapsed_ms / 1000 + offset
+                if not now - 3 <= sent_at <= now + 0.05:
                     self.dropped += 1
                     return
+                if sample_elapsed_ms is not None and sample_elapsed_ms > elapsed_ms + 1:
+                    self.dropped += 1
+                    return
+                at = (sample_elapsed_ms if sample_elapsed_ms is not None else elapsed_ms) / 1000 + offset
             if self.last_sent is not None and elapsed_ms is not None:
                 self.jitter.append(abs((now - self.received_at) - (elapsed_ms - self.last_sent) / 1000) * 1000)
             self.last_sent = elapsed_ms
@@ -518,9 +525,13 @@ class PlaybackClock:
             speed = float(speed) if state == "playing" else 0.0
             pos = max(0.0, position_ms / 1000)
             error = pos - old.position(at) if old else 0
-            self.errors.append(error * 1000)
             changed = old is None or old.rating_key != key or old.state != state or self.reported_speed != speed
             self.reported_speed = speed
+            if (sample_elapsed_ms is not None and self.last_media_stamp is not None
+                    and sample_elapsed_ms <= self.last_media_stamp and not changed):
+                return  # heartbeat only: never fit the same MediaSession measurement repeatedly
+            self.last_media_stamp = sample_elapsed_ms
+            self.errors.append(error * 1000)
             if elapsed_ms is not None and (old is None or old.state == "stopped" or old.rating_key != key):
                 # Fetch this launch's selected Part before starting, even when
                 # the same ratingKey was just played using another version.
@@ -1037,7 +1048,7 @@ class LightSync:
     def format_key(self) -> str | None:
         pb = self.clock.current()
         info = self.clock.session_info
-        return info.get("format_key") if pb and info.get("rating_key") == pb.rating_key else None
+        return info.get("format_key") if pb and pb.source == "tv" and info.get("rating_key") == pb.rating_key else None
 
     def setup_offset(self) -> int:
         state = load_state()
@@ -1070,7 +1081,7 @@ class LightSync:
         scope = (scope or "").strip().lower()
         if scope in ("film", "global", "format"):
             return scope
-        if self.format_key() or (self.calibration and self.clock.stream_id):
+        if self.format_key() or self.calibration is not None:
             return "format"
         return "global" if self.calibration is not None or self._target_film() is None else "film"
 
