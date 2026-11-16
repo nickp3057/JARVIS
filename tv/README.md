@@ -50,14 +50,14 @@ every deploy, so edit the repo copy, not the TV's.
   logcat, sends the rest to Core `POST /chat`, shows the reply as a banner
   (read aloud only if turned on in Settings), and backs out of any Google app
   the Assistant opened. Other speech that names a Plex title opens it in Plex.
-- **Light sync** (`PlaybackReport`, 9.10): the Core player uses a mapped TV
+- **Light sync** (`PlaybackReport`, 9.11): the Core player uses a mapped TV
   monotonic clock. It preserves Plex's original MediaSession position and
   update time (`sample_elapsed_ms`), separately from the heartbeat
   `elapsed_ms`, and sends a process UUID, report sequence
   and previous four-stamp exchange in `POST /api/tv/playback` (scope
   `playback:write`). Three `GET /api/tv/clock` probes warm the pool and select
   the initial lowest RTT. Successful responses are drained and closed without
-  disconnecting so HTTP sockets can be reused. Every change, 1s playing, 5s
+  disconnecting so HTTP sockets can be reused. Every change, 250ms playing, 5s
   paused/buffering. Core filters queueing jitter and slews small position
   errors, never falls back to Plex timing while syncing. It releases the
   lights on stale TV heartbeat. Failures retry after 1s; 401/403 back off 5min.

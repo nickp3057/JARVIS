@@ -152,7 +152,7 @@ See JARVIS.md Recently Shipped.
 
 ### Light sync overhaul (2026-11-15): physical acceptance checks
 
-Clock overhaul implemented (Core + TV 9.9, companion 6.59/301). See JARVIS.md **Light sync**.
+Clock overhaul implemented (Core + TV 9.11, companion 6.67/309). See JARVIS.md **Light sync**.
 Remaining acceptance needs Nick's eyes or a camera: five launches without nudges
 within ±50ms, a two-minute run without wobble, 1080p/4K profiles, pause/resume,
 seek, Barn Door and physical light latency. Simulated clocks do not prove screen timing.

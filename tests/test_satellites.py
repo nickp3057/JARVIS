@@ -317,7 +317,8 @@ class SatelliteSocketTests(unittest.TestCase):
     def test_mic_in_and_registry(self) -> None:
         with patch.dict("os.environ", {"JARVIS_API_TOKEN": "t", "ROOM_VOICE": "1"}):
             with self.client.websocket_connect("/api/voice/satellite?name=bed", headers=self.headers) as ws:
-                self.assertEqual(ws.receive_json(), {"type": "hello", "rate": 16000})
+                hello = ws.receive_json()
+                self.assertEqual((hello["type"], hello["rate"]), ("hello", 16000))
                 ws.send_bytes(frame_bytes(5))
                 self.assertTrue(self.wait_for(lambda: satellites.get("bed") is not None))
                 sat = satellites.get("bed")

@@ -522,7 +522,11 @@ def _run_build(film: dict[str, Any], exe: str, quiet: bool = False) -> None:
     requeue = False
     try:
         if film.get("part_id"):
-            probe = subprocess.run([exe, "-hide_banner", "-i", url], capture_output=True, timeout=30)
+            try:
+                probe = subprocess.run([exe, "-hide_banner", "-i", url], capture_output=True, timeout=30)
+            except subprocess.TimeoutExpired:
+                # TimeoutExpired includes argv (and the Plex token) in its text.
+                raise RuntimeError("Plex media probe timed out") from None
             import re
             start = re.search(r"start: (-?[0-9.]+)", probe.stderr.decode("utf-8", "replace"))
             film["start_time_s"] = float(start.group(1)) if start else None

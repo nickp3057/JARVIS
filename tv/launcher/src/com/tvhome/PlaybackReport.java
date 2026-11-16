@@ -33,7 +33,7 @@ import java.util.List;
 final class PlaybackReport {
     private static final String TAG = "TvHomePlayback";
     private static final String PLEX = "com.plexapp.android";
-    private static final long PLAYING_MS = 1000, PAUSED_MS = 5000;
+    private static final long PLAYING_MS = 250, PAUSED_MS = 5000;
     private static final long NOT_ALLOWED_BACKOFF_MS = 5 * 60 * 1000, DOWN_BACKOFF_MS = 1000;
 
     private static PlaybackReport instance;

@@ -1341,9 +1341,11 @@ class FilteredClockTests(TrackStoreDir):
         self.assertAlmostEqual(self.clock.diagnostics()["rtt_ms"], 4, places=4)
 
     def test_small_media_position_noise_slews_at_most_five_ms(self):
-        self.report(100)
-        self.report(101, position=1080)
-        self.assertAlmostEqual(self.clock.current().position(self.t), 1.015, places=5)
+        for second in range(10):
+            self.report(100 + second)
+        predicted = self.clock.current().position(110)
+        self.report(110, position=10080)
+        self.assertLessEqual(abs(self.clock.current().position(110) - predicted), .005001)
         self.assertEqual(len(self.clock.reanchors), 1)
 
     def test_seek_pause_resume_anchor_immediately(self):
@@ -1408,6 +1410,24 @@ class FilteredClockTests(TrackStoreDir):
         self.assertTrue(self.clock.tv_fresh())
 
 
+    def test_clock_skew_does_not_become_periodic_false_seeks(self):
+        tv_rate = 1.013
+        for second in range(181):
+            sent = 100 + second
+            self.t = sent + .01
+            ping = sent - .1
+            def tv_stamp(core):
+                return (20 + (core - 100) * tv_rate) * 1000
+            exchange = {"tv_send_ms": tv_stamp(ping), "core_receive_ms": (ping+.002)*1000,
+                        "core_send_ms": (ping+.002)*1000, "tv_receive_ms": tv_stamp(ping+.004)}
+            self.clock.tv_report(state="playing", rating_key="1", title="Up", position_ms=second*1000,
+                                 elapsed_ms=tv_stamp(sent), sample_elapsed_ms=tv_stamp(sent), exchange=exchange)
+            if second >= 6:
+                self.assertLess(abs(self.clock.current().position(self.t)-(self.t-100)), .03)
+        self.assertEqual(len(self.clock.reanchors), 1)
+        self.assertAlmostEqual(self.clock.clock_rate, 1/tv_rate, places=5)
+
+
 
 class SetupAndPartTests(ControllerBase):
     def metadata(self, part="9", fmt="1080/sdr/h264/directplay/aac"):
@@ -1457,6 +1477,18 @@ class SetupAndPartTests(ControllerBase):
         self.tick()
         self.assertFalse(self.sync.running)
         self.assertIn("TV clock", self.sync.reason)
+
+    def test_initial_clock_acquisition_holds_lights_until_three_seconds(self):
+        for i in range(4):
+            self.t = 1000 + i
+            self.sync.clock.tv_report(state="playing", title="Up", rating_key="1", position_ms=(10+i)*1000,
+                                      elapsed_ms=(920+i)*1000, sample_elapsed_ms=(920+i)*1000,
+                                      exchange=FilteredClockTests.exchange(self.t-.1))
+            source=self.metadata()
+            if i == 0:
+                light_tracks.save("1", np.zeros((300,3),np.uint8), "Up", source={**source,"fps":30})
+            self.tick()
+            self.assertEqual(self.sync.running, i >= 3)
 
     def test_strip_latency_persists_separately(self):
         with patch.dict(os.environ, {"LIGHT_SYNC_STRIPS": "strip,desk"}):

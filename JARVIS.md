@@ -2972,6 +2972,12 @@ prototype in `~/Developer/projects/light-sync` (2026-11-09).
   TV 9.10 / companion 6.66 (308): native MediaSession position and
   sample_elapsed_ms are reported separately from heartbeat elapsed_ms. Only
   a new media sample enters the fit; repeated snapshots refresh liveness only.
+  TV 9.11 / companion 6.67 (309) sends 250ms playing heartbeats (5s paused)
+  and holds the lights for the initial 3s clock acquisition. Low-RTT exchange
+  midpoints also fit the TV/Core clock-rate difference (affine mapping),
+  preventing an offset-winner change from becoming a false seek. Decoder startup
+  phase is fitted before the player takes the strips; later phase corrections
+  remain bounded.
   The fit estimates the decoder media clock rate (bounded to ±10% of its stated
   speed), with a bounded phase correction. Live TCL transcoding drift required
   this rate fit (6.62 / 304). Players start from TV only;

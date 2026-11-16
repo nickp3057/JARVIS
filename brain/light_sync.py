@@ -405,7 +405,8 @@ class PlaybackClock:
     """TV monotonic clock, minimum-RTT mapping and bounded phase correction.
 
     The four timestamps use RFC 5905's offset/delay equations. The lowest
-    RTT from the last minute rejects Wi-Fi queueing. Small position errors
+    RTT exchanges from the last minute reject Wi-Fi queueing and fit clock
+    skew. Small position errors
     slew by at most 5ms/report; seeks over 700ms and state changes re-anchor.
     Plex positions are available to callers before a TV connects, but a
     player only starts from TV and never falls back to Plex mid-run.
@@ -418,7 +419,8 @@ class PlaybackClock:
         self.plex_polled_at = -1e9
         self._lock = threading.Lock()
         self.received_at = -1e9
-        self.sync_samples = deque(maxlen=32)
+        self.sync_samples = deque(maxlen=128)
+        self.clock_rate = 1.0
         self.errors = deque(maxlen=120)
         self.jitter = deque(maxlen=120)
         self.reanchors = deque(maxlen=120)
@@ -430,8 +432,33 @@ class PlaybackClock:
         self.position_samples = deque(maxlen=10)
         self.reported_speed = None
         self.last_media_stamp = None
+        self.acquire_until = 0.0
         self.session_info: dict[str, Any] = {}
         self.source_lock: str | None = None
+
+    def _map_tv_time(self, stamp_s: float) -> float:
+        """Affine clock mapping: minimum-delay exchanges also estimate skew.
+
+        Treating both clocks as exactly 1x lets the minimum-RTT winner's
+        age become phase error. Fit low-delay midpoints in centered seconds
+        so replacing that winner doesn't step the playback clock.
+        """
+        best = sorted(self.sync_samples, key=lambda sample: sample[1])
+        selected = [s for s in best if s[1] <= best[0][1] + .010]
+        if len(selected) < 4:
+            selected = best[:4]
+        if len(selected) >= 4:
+            points = np.asarray([(s[3], s[4]) for s in selected], dtype=float)
+            x, y = points[:, 0], points[:, 1]
+            dx = x - x.mean()
+            variance = float(dx @ dx)
+            if x.max() - x.min() >= 1.5 and variance > .25:
+                rate = float(dx @ (y - y.mean()) / variance)
+                if .9 <= rate <= 1.1:
+                    self.clock_rate = rate
+                    return float(y.mean() + rate * (stamp_s - x.mean()))
+        self.clock_rate = 1.0
+        return stamp_s + best[0][2]
 
     def begin_session(self) -> None:
         with self._lock:
@@ -449,6 +476,7 @@ class PlaybackClock:
                     "synchronized": bool(self.sync_samples),
                     "drift_ms": round(self.errors[-1], 2) if self.errors else None,
                     "estimated_rate": round(self.tv.speed, 6) if self.tv else None,
+                    "clock_rate": round(self.clock_rate, 8),
                     "last_report": list(self.position_samples[-1]) if self.position_samples else None,
                     "jitter_p50_ms": round(float(np.percentile(self.jitter, 50)), 2) if self.jitter else 0,
                     "jitter_p95_ms": round(float(np.percentile(self.jitter, 95)), 2) if self.jitter else 0,
@@ -500,7 +528,7 @@ class PlaybackClock:
                 t0, t1, t2, t3 = (exchange[k] / 1000 for k in ("tv_send_ms", "core_receive_ms", "core_send_ms", "tv_receive_ms"))
                 rtt = (t3 - t0) - (t2 - t1)
                 if 0 <= rtt <= 2 and t2 >= t1 and 0 <= now - t2 < 30:
-                    self.sync_samples.append((now, rtt, ((t1 - t0) + (t2 - t3)) / 2))
+                    self.sync_samples.append((now, rtt, ((t1 - t0) + (t2 - t3)) / 2, (t0 + t3) / 2, (t1 + t2) / 2))
             while self.sync_samples and now - self.sync_samples[0][0] > 60:
                 self.sync_samples.popleft()
             at = now
@@ -508,15 +536,14 @@ class PlaybackClock:
                 self.dropped += 1
                 return  # timestamped clients must establish a mapping, never use arrival time
             if elapsed_ms is not None and self.sync_samples:
-                offset = min(self.sync_samples, key=lambda x: x[1])[2]
-                sent_at = elapsed_ms / 1000 + offset
+                sent_at = self._map_tv_time(elapsed_ms / 1000)
                 if not now - 3 <= sent_at <= now + 0.05:
                     self.dropped += 1
                     return
                 if sample_elapsed_ms is not None and sample_elapsed_ms > elapsed_ms + 1:
                     self.dropped += 1
                     return
-                at = (sample_elapsed_ms if sample_elapsed_ms is not None else elapsed_ms) / 1000 + offset
+                at = self._map_tv_time((sample_elapsed_ms if sample_elapsed_ms is not None else elapsed_ms) / 1000)
             if self.last_sent is not None and elapsed_ms is not None:
                 self.jitter.append(abs((now - self.received_at) - (elapsed_ms - self.last_sent) / 1000) * 1000)
             self.last_sent = elapsed_ms
@@ -537,6 +564,7 @@ class PlaybackClock:
                 # the same ratingKey was just played using another version.
                 self.session_info = {}
                 self.plex_polled_at = -1e9
+                self.acquire_until = now + 3.0
             if changed or abs(error) > 0.7:
                 self.position_samples.clear()
                 self.position_samples.append((at, pos))
@@ -550,7 +578,10 @@ class PlaybackClock:
                 rate = speed
                 phase_error = error
                 if speed > 0 and len(self.position_samples) >= 3:
-                    samples = np.asarray(self.position_samples, dtype=float)
+                    # Drop decoder startup latency from the fit quickly. The
+                    # lights wait for acquisition before this clock is exposed.
+                    window = list(self.position_samples)[-3:] if now < self.acquire_until + 3 else self.position_samples
+                    samples = np.asarray(window, dtype=float)
                     x = samples[:, 0] - at
                     y = samples[:, 1]
                     centered = x - x.mean()
@@ -562,7 +593,8 @@ class PlaybackClock:
                         rate = max(speed * .9, min(speed * 1.1, fitted))
                         fitted_position = float(y.mean() - rate * x.mean())
                         phase_error = fitted_position - old.position(at)
-                correction = max(-0.005, min(0.005, phase_error * 0.15))
+                correction = (phase_error if now < self.acquire_until
+                              else max(-0.005, min(0.005, phase_error * 0.15)))
                 self.tv = Playback(key, title or "", state, old.position(at) + correction, rate, at, "tv")
 
     def plex_report(self, session: dict[str, Any] | None) -> None:
@@ -908,6 +940,8 @@ class LightSync:
         if self.clock.sync_samples and (self.clock.session_info.get("rating_key") != pb.rating_key
                                        or not self.clock.session_info.get("part_id")):
             return False, "Waiting for Plex to identify the playing video Part."
+        if self.session is None and self.now() < self.clock.acquire_until:
+            return False, "Acquiring the TV playback clock."
         track_key = self._track_key(pb)
         if not light_tracks.has_track(track_key):
             if track_key != pb.rating_key and light_tracks.has_track(pb.rating_key) and not light_tracks.pending(track_key):
