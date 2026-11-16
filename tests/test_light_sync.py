@@ -417,6 +417,16 @@ class PlayerTests(unittest.TestCase):
         player.stop()
         return sender, player, exited
 
+    def test_live_strip_change_remains_limited_and_releases_every_target(self):
+        calls = 0
+        def tune():
+            nonlocal calls
+            calls += 1
+            return _tune(strips=("old",) if calls == 1 else ("new",), lamp="")
+        sender, player, _ = self._run(lambda: (1.0, 1.0), tune=tune, seconds=1.15)
+        self.assertIn(("disable", ("old", "new")), sender.log)
+        self.assertTrue(any(row[0] == "strip" and row[1] == "new" for row in sender.log))
+
     def test_streams_then_disables_on_stop(self) -> None:
         sender, _, exited = self._run(lambda: (1.0, 1.0))
         kinds = [e[0] for e in sender.log]
@@ -1477,6 +1487,20 @@ class SetupAndPartTests(ControllerBase):
         self.tick()
         self.assertFalse(self.sync.running)
         self.assertIn("TV clock", self.sync.reason)
+
+    def test_buffering_does_not_count_as_playing_clock_acquisition(self):
+        self.sync.clock.tv_report(state="buffering", title="Up", rating_key="1", position_ms=0,
+                                  elapsed_ms=920000, sample_elapsed_ms=920000,
+                                  exchange=FilteredClockTests.exchange(999.9))
+        self.t = 1010
+        self.sync.clock.tv_report(state="playing", title="Up", rating_key="1", position_ms=0,
+                                  elapsed_ms=930000, sample_elapsed_ms=930000,
+                                  exchange=FilteredClockTests.exchange(1009.9))
+        self.assertEqual(self.sync.clock.acquire_until, 1013)
+        self.metadata()
+        self.tick()
+        self.assertFalse(self.sync.running)
+        self.assertIn("Acquiring", self.sync.reason)
 
     def test_initial_clock_acquisition_holds_lights_until_three_seconds(self):
         for i in range(4):

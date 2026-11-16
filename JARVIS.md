@@ -2973,7 +2973,9 @@ prototype in `~/Developer/projects/light-sync` (2026-11-09).
   sample_elapsed_ms are reported separately from heartbeat elapsed_ms. Only
   a new media sample enters the fit; repeated snapshots refresh liveness only.
   TV 9.11 / companion 6.67 (309) sends 250ms playing heartbeats (5s paused)
-  and holds the lights for the initial 3s clock acquisition. Low-RTT exchange
+  and holds the lights for 3s after playing starts; buffering does not count
+  toward acquisition (6.68 / 310). Startup-only fit points are discarded as
+  decoding settles; the steady fit spans up to 40 native updates (~10s). Low-RTT exchange
   midpoints also fit the TV/Core clock-rate difference (affine mapping),
   preventing an offset-winner change from becoming a false seek. Decoder startup
   phase is fitted before the player takes the strips; later phase corrections

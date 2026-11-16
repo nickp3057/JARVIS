@@ -152,11 +152,19 @@ See JARVIS.md Recently Shipped.
 
 ### Light sync overhaul (2026-11-15): physical acceptance checks
 
-Clock overhaul implemented (Core + TV 9.11, companion 6.67/309). See JARVIS.md **Light sync**.
+Clock overhaul implemented (Core + TV 9.11, companion 6.68/310). See JARVIS.md **Light sync**.
 Remaining acceptance needs Nick's eyes or a camera: five launches without nudges
 within ±50ms, a two-minute run without wobble, 1080p/4K profiles, pause/resume,
 seek, Barn Door and physical light latency. Simulated clocks do not prove screen timing.
 New Part builds may take several minutes the first time a version is played.
+Live smoke verified Part 12929 at 30fps, TV source with no switches or dropped
+reports, pause/resume, seek state updates and Done releasing the player. The
+pre-final five-launch traces still showed startup residuals above ±30ms and
+periodic ~1s MediaSession discontinuities. Native timestamps, affine clock
+mapping, faster heartbeats and playing-state acquisition are now implemented;
+the final acquisition correction was verified offline. Nick asked about the
+repeated test playback, so the loop was stopped. No further video tests were
+run, and the ±50ms visual / final live-drift acceptance remains unverified.
 - [ ] Check `diagnostics`: drift within ±30ms after 3s; source remains TV.
 - [ ] Calibrate each display format using the 180s irregular-cut clip; nudges now save the format.
 - [ ] Measure independent strip/desk latency if needed through the per-light API.

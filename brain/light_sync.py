@@ -429,7 +429,8 @@ class PlaybackClock:
         self.last_sent = None
         self.stream_id = None
         self.report_id = None
-        self.position_samples = deque(maxlen=10)
+        self.position_samples = deque(maxlen=40)
+        self.acquired = False
         self.reported_speed = None
         self.last_media_stamp = None
         self.acquire_until = 0.0
@@ -565,6 +566,12 @@ class PlaybackClock:
                 self.session_info = {}
                 self.plex_polled_at = -1e9
                 self.acquire_until = now + 3.0
+                self.acquired = False
+            if elapsed_ms is not None and state == "playing" and old is not None and old.state != "playing":
+                # Buffering is not clock acquisition: the decoder has not
+                # started presenting. Resume gets a shorter phase lock.
+                self.acquire_until = now + (1.0 if old.state == "paused" else 3.0)
+                self.acquired = False
             if changed or abs(error) > 0.7:
                 self.position_samples.clear()
                 self.position_samples.append((at, pos))
@@ -574,14 +581,18 @@ class PlaybackClock:
                 log.info("Light sync clock re-anchor: %s", entry)
                 self.tv = Playback(key, title or "", state, pos, speed, at, "tv")
             else:
+                if not self.acquired and now >= self.acquire_until:
+                    # Discard startup points measured before decoding settled.
+                    self.position_samples = deque((p for p in self.position_samples if at-p[0] <= 1.5), maxlen=40)
+                    self.acquired = True
                 self.position_samples.append((at, pos))
                 rate = speed
                 phase_error = error
                 if speed > 0 and len(self.position_samples) >= 3:
                     # Drop decoder startup latency from the fit quickly. The
                     # lights wait for acquisition before this clock is exposed.
-                    window = list(self.position_samples)[-3:] if now < self.acquire_until + 3 else self.position_samples
-                    samples = np.asarray(window, dtype=float)
+                    window = [p for p in self.position_samples if at-p[0] <= 1.5] if not self.acquired else self.position_samples
+                    samples = np.asarray(window if len(window) >= 3 else self.position_samples, dtype=float)
                     x = samples[:, 0] - at
                     y = samples[:, 1]
                     centered = x - x.mean()
@@ -791,8 +802,10 @@ class Player:
                 self.sender.enable(tune.strips)
                 self.retake, enabled_at = False, now
             prev_tgt = tgt
-            rgb = cur.astype(int)
+            self.strips = tuple(dict.fromkeys(self.strips + tune.strips))
             for ip in tune.strips:
+                if ip not in strip_limiters:
+                    strip_limiters[ip] = FlashLimiter(tune.jumps_per_s)
                 # Each strip can have its own transport latency, without changing the display profile.
                 extra = self.light_offsets.get(ip, 0)
                 if extra:
@@ -940,8 +953,9 @@ class LightSync:
         if self.clock.sync_samples and (self.clock.session_info.get("rating_key") != pb.rating_key
                                        or not self.clock.session_info.get("part_id")):
             return False, "Waiting for Plex to identify the playing video Part."
-        if self.session is None and self.now() < self.clock.acquire_until:
-            return False, "Acquiring the TV playback clock."
+        if self.session is None and self.clock.last_elapsed is not None:
+            if pb.state == "buffering" or self.now() < self.clock.acquire_until:
+                return False, "Acquiring the TV playback clock."
         track_key = self._track_key(pb)
         if not light_tracks.has_track(track_key):
             if track_key != pb.rating_key and light_tracks.has_track(pb.rating_key) and not light_tracks.pending(track_key):
