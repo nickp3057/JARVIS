@@ -102,6 +102,7 @@ Review checklist when home:
 
 ### Room, scenes and screens
 
+- [ ] **GPS presence for "away"** (asked 2026-11-17): the room goes quiet today when Peace ran and every light is off (`status_hub.room_away`). Use the iPhone's location (HA `person.nick` / companion app zone, or a geofence in JarvisCompanion) as the real away signal, so the room mutes when Nick leaves whatever the scene, and wakes up again when he's home.
 - [ ] **Plex movie picker in iPad movie mode** (asked 2026-10-29): grid of Plex posters with search; a tap starts it on the TV's Plex app (Plex client `playMedia` or HA `media_player.play_media`). Needs Core endpoints for the library and play.
 - [ ] Govee effects (Aurora, Candlelight, Starry Sky...) in the light sheet.
 - [ ] Scenes on the iPhone Home Screen / Control Center (widget target).

@@ -304,7 +304,7 @@
 				CODE_SIGN_ENTITLEMENTS = JarvisCompanion.entitlements;
 				"CODE_SIGN_ENTITLEMENTS[sdk=macosx*]" = "JarvisCompanion-Mac.entitlements";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 314;
+				CURRENT_PROJECT_VERSION = 315;
 				DERIVE_MACCATALYST_PRODUCT_BUNDLE_IDENTIFIER = NO;
 				DEVELOPMENT_TEAM = 47543PU92M;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -326,7 +326,7 @@
 					"@executable_path/Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
-				MARKETING_VERSION = 6.72;
+				MARKETING_VERSION = 6.73;
 				PRODUCT_BUNDLE_IDENTIFIER = com.nickolaspearson.JarvisCompanion;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SUPPORTS_MACCATALYST = YES;
@@ -345,7 +345,7 @@
 				CODE_SIGN_ENTITLEMENTS = JarvisCompanion.entitlements;
 				"CODE_SIGN_ENTITLEMENTS[sdk=macosx*]" = "JarvisCompanion-Mac.entitlements";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 314;
+				CURRENT_PROJECT_VERSION = 315;
 				DERIVE_MACCATALYST_PRODUCT_BUNDLE_IDENTIFIER = NO;
 				DEVELOPMENT_TEAM = 47543PU92M;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -367,7 +367,7 @@
 					"@executable_path/Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
-				MARKETING_VERSION = 6.72;
+				MARKETING_VERSION = 6.73;
 				PRODUCT_BUNDLE_IDENTIFIER = com.nickolaspearson.JarvisCompanion;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SUPPORTS_MACCATALYST = YES;

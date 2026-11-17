@@ -912,6 +912,29 @@ def _resting_scenes() -> set[str]:
     return {e.strip().lower() for e in raw.split(",") if e.strip()}
 
 
+def room_away() -> bool:
+    """Nick is out and the room is resting: the last scene run is an away
+    scene (``AWAY_SCENES``, default ``scene.peace``) and every room light is
+    still off, which is also when the iPads go dark. The room voice stays
+    silent on its own then (alerts, reminders, announcements still reach the
+    phone), so nobody home alone gets a voice out of the dark. A light
+    coming on ends it. Fails open: when HA can't be read, it's False."""
+    raw = os.getenv("AWAY_SCENES", "scene.peace")
+    away = {e.strip().lower() for e in raw.split(",") if e.strip()}
+    try:
+        scenes = home_scenes()
+        if scenes.get("error") or str(scenes.get("last") or "").lower() not in away:
+            return False
+        listing = home_entities()
+    except Exception:  # noqa: BLE001 - a broken read never mutes JARVIS
+        log.debug("room_away check failed", exc_info=True)
+        return False
+    lights = [e for e in listing.get("entities", []) if e.get("domain") == "light"]
+    if listing.get("error") or not lights:
+        return False
+    return all(e.get("state") != "on" for e in lights)
+
+
 def _scene_matches(entity_id: str) -> bool:
     """Every entity in the saved scene is on/off (and each dropdown on its
     option) the way the scene sets it. Brightness and colour don't count."""

@@ -126,12 +126,13 @@ class RoomAlertTests(unittest.TestCase):
         fields.update(over)
         return Alert(**fields)
 
-    def _run(self, alert, quiet=False, env=None):
+    def _run(self, alert, quiet=False, env=None, away=False):
         from unittest import mock
         from speech import room_voice
         voice = mock.Mock()
         with mock.patch.object(room_voice, "_voice", voice), \
                 mock.patch.object(room_voice.room_volume, "quiet_now", return_value=quiet), \
+                mock.patch.object(status_hub, "room_away", return_value=away), \
                 mock.patch.dict("os.environ", env or {}, clear=False):
             room_voice._on_alert(alert)
         return voice.broadcast.call_args_list
@@ -148,6 +149,67 @@ class RoomAlertTests(unittest.TestCase):
         self.assertEqual(self._run(self._alert(kind="wake_up")), [])
         self.assertEqual(self._run(self._alert(), env={"ROOM_ALERTS": "0"}), [])
 
+    def test_silent_while_away(self) -> None:
+        self.assertEqual(self._run(self._alert(), away=True), [])
+        self.assertEqual(len(self._run(self._alert(), away=True, env={"ROOM_AWAY_MUTE": "0"})), 1)
+
     def test_title_when_no_message(self) -> None:
         calls = self._run(self._alert(message=""))
         self.assertEqual(calls[0].args[0], "Dune is ready in 4K")
+
+
+class RoomAwayTests(unittest.TestCase):
+    """Peace scene + every light off = away (app/status_hub.room_away)."""
+
+    def _away(self, last="scene.peace", states=("off", "off"), error="", env=None):
+        entities = [{"entity_id": f"light.l{i}", "domain": "light", "state": st} for i, st in enumerate(states)]
+        entities.append({"entity_id": "switch.x", "domain": "switch", "state": "on"})
+        with patch.object(status_hub, "home_scenes", return_value={"error": "", "last": last}), \
+                patch.object(status_hub, "home_entities", return_value={"error": error, "entities": entities}), \
+                patch.dict(os.environ, env or {}, clear=False):
+            return status_hub.room_away()
+
+    def test_peace_with_lights_off_is_away(self) -> None:
+        self.assertTrue(self._away())
+
+    def test_a_light_on_or_another_scene_is_home(self) -> None:
+        self.assertFalse(self._away(states=("off", "on")))
+        self.assertFalse(self._away(last="scene.movie"))
+        self.assertFalse(self._away(last=None))
+
+    def test_fails_open(self) -> None:
+        self.assertFalse(self._away(error="HA down"))
+        self.assertFalse(self._away(states=()))
+
+    def test_away_scenes_setting(self) -> None:
+        self.assertTrue(self._away(last="scene.goodnight", env={"AWAY_SCENES": "scene.peace,scene.goodnight"}))
+
+
+class RoomDeliverAwayTests(unittest.TestCase):
+    """Reminders/announcements stay silent when away; timers still ring."""
+
+    def _deliver(self, item, away=True):
+        from unittest import mock
+        from speech import room_voice
+        voice = room_voice.RoomVoice.__new__(room_voice.RoomVoice)
+        voice._chime_and_say = mock.Mock()
+        voice._say = mock.Mock()
+        voice._sound = mock.Mock()
+        with mock.patch.object(status_hub, "room_away", return_value=away), \
+                mock.patch.object(room_voice.room_volume, "prepare"), \
+                mock.patch.object(room_voice.room_volume, "quiet_now", return_value=False):
+            voice._deliver(item)
+        return voice
+
+    def test_reminder_silent_when_away(self) -> None:
+        from brain.reminders import Reminder
+        item = Reminder(id="r1", text="bins")
+        self.assertFalse(self._deliver(item)._chime_and_say.called)
+        self.assertTrue(self._deliver(item, away=False)._chime_and_say.called)
+
+    def test_timer_still_rings_when_away(self) -> None:
+        from brain.timers import Timer
+        item = Timer.__new__(Timer)
+        item.message = "pasta"
+        item.id = "t1"
+        self.assertTrue(self._deliver(item)._say.called)

@@ -28,6 +28,9 @@ Smart-speaker extras:
   timer is done") until "Hey JARVIS" (or stop, or the app) dismisses them,
   for at most ``ROOM_ALARM_RING_S`` (120). Reminders and broadcasts get a
   chime and are spoken; other announcements wait out ``ROOM_QUIET_HOURS``.
+  Away (the Peace scene, every light off): alerts, reminders and
+  announcements stay silent in the room (``away_hush``, ``ROOM_AWAY_MUTE``);
+  timers someone set, the wake-up ring and broadcasts Nick sends still sound.
   Core's room voice owns ``runtime.pop_due_reminders()`` in server mode.
 - Barge-in: "Hey JARVIS" while he's talking cuts him off and listens
   (``VOICE_BARGE_IN``, on by default).
@@ -476,6 +479,8 @@ class RoomVoice:
             self._sound("alarm", wait=True)
             self._say(f"Sir, your {label} timer is done." if label else "Sir, your timer is done.")
             voice_presence.update("speaking", reply="Time's up")
+        elif away_hush():
+            log.info("Room is away (Peace, lights off): not saying %s", type(item).__name__)
         elif isinstance(item, Reminder):
             self._chime_and_say(f"Reminder, sir: {item.message}")
         elif not room_volume.quiet_now() and os.getenv("ROOM_ANNOUNCEMENTS", "1").strip().lower() not in (
@@ -1053,18 +1058,28 @@ def _alert_line(title: str, message: str) -> str:
     return " ".join(sentences[:2])[:300]
 
 
+def away_hush() -> bool:
+    """Peace scene, lights all off (``status_hub.room_away``): the room keeps
+    its own counsel. ``ROOM_AWAY_MUTE=0`` turns this off."""
+    if os.getenv("ROOM_AWAY_MUTE", "1").strip().lower() in ("0", "off", "false", "no"):
+        return False
+    from app import status_hub
+    return status_hub.room_away()
+
+
 def _on_alert(alert) -> None:  # noqa: ANN001 - brain.event_bus.Alert
     """Bus subscriber: an alert that buzzes the phone is also said in the
     room (chime first, desk and iPads together), so a notification sound
     never comes without words. Not passive ones, not the wake-up alarm (it
-    has its own ring), not in quiet hours; ``ROOM_ALERTS=0`` turns it off."""
+    has its own ring), not in quiet hours, not while the room is away
+    (``away_hush``); ``ROOM_ALERTS=0`` turns it off."""
     if _voice is None or not alert.push or alert.grouping.get("passive"):
         return
     if alert.kind.startswith("wake"):
         return
     if os.getenv("ROOM_ALERTS", "1").strip().lower() in ("0", "off", "false", "no"):
         return
-    if room_volume.quiet_now():
+    if room_volume.quiet_now() or away_hush():
         return
     line = _alert_line(alert.title, alert.message)
     if line:
