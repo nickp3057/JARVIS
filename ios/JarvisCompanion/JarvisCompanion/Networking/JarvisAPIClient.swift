@@ -1050,7 +1050,9 @@ struct JarvisAPIClient {
 
     func putShoppingPhoto(id: Int, jpeg: Data) async throws -> ShoppingItem {
         var r = request(path: "api/shopping/items/\(id)/photo", method: "PUT")
-        r.setValue("image/jpeg", forHTTPHeaderField: "Content-Type")
+        // A JPEG photo, or a transparent PNG cut-out ("Remove background").
+        r.setValue(jpeg.starts(with: [0x89, 0x50, 0x4E, 0x47]) ? "image/png" : "image/jpeg",
+                   forHTTPHeaderField: "Content-Type")
         r.timeoutInterval = 60
         let data: Data
         let response: URLResponse
@@ -1077,7 +1079,7 @@ struct JarvisAPIClient {
             components.queryItems = [URLQueryItem(name: "v", value: String(version))]
             r.url = components.url
         }
-        r.setValue("image/jpeg", forHTTPHeaderField: "Accept")
+        r.setValue("image/jpeg, image/png", forHTTPHeaderField: "Accept")
         let (data, response) = try await session.data(for: r)
         if (response as? HTTPURLResponse)?.statusCode == 404 { return nil }
         _ = try validate(response, data: data)

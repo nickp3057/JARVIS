@@ -800,7 +800,8 @@ def shopping_undo_bought(item_id: int, _: None = Depends(authorize)) -> dict[str
 
 @app.put("/api/shopping/items/{item_id}/photo")
 async def shopping_put_photo(item_id: int, request: Request, _: None = Depends(authorize)) -> dict[str, object]:
-    """A product photo as a raw JPEG body (the app shrinks it first)."""
+    """A product photo as a raw JPEG body (the app shrinks it first), or a PNG
+    cut-out when the app removed its background."""
     from brain import shopping
     data = await request.body()
     try:
@@ -822,7 +823,7 @@ def shopping_get_photo(item_id: int, _: None = Depends(authorize)) -> Response:
     if not path.is_file():
         raise HTTPException(status_code=404, detail="No photo")
     # The app adds ?v=<photo_version>, so a replaced photo is a new URL.
-    return Response(content=path.read_bytes(), media_type="image/jpeg",
+    return Response(content=path.read_bytes(), media_type=shopping.photo_media_type(path),
                     headers={"Cache-Control": "private, max-age=604800"})
 
 

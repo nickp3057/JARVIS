@@ -6,7 +6,8 @@ catalog items flagged ``on_list``. Typing "face lotion" suggests the saved
 "CeraVe PM face lotion" with its photo; ticking it off ("bought") takes it off
 the list, counts the purchase and keeps it in the catalog for next time.
 
-Database: memory/shopping.db. Photos: memory/shopping_photos/<id>.jpg.
+Database: memory/shopping.db. Photos: memory/shopping_photos/<id>.jpg, or <id>.png for a
+transparent cut-out.
 """
 
 from __future__ import annotations
@@ -259,28 +260,51 @@ def delete_item(item_id: int) -> bool:
     with _db() as conn:
         deleted = conn.execute("DELETE FROM shopping_items WHERE id = ?", (item_id,)).rowcount > 0
     if deleted:
-        photo_path(item_id).unlink(missing_ok=True)
+        _remove_photos(item_id)
     return deleted
 
 
 # --- Photos ------------------------------------------------------------------
 
+_PNG_MAGIC = b"\x89PNG\r\n\x1a\n"
+_SUFFIXES = (".jpg", ".png")  # .png: a cut-out with its background removed (transparent)
+
+
 def photo_path(item_id: int) -> Path:
-    return _PHOTO_DIR / f"{int(item_id)}.jpg"
+    """The item's photo file: the PNG cut-out when there is one, else the JPEG."""
+    png = _PHOTO_DIR / f"{int(item_id)}.png"
+    return png if png.is_file() else _PHOTO_DIR / f"{int(item_id)}.jpg"
+
+
+def photo_media_type(path: Path) -> str:
+    return "image/png" if path.suffix == ".png" else "image/jpeg"
+
+
+def _remove_photos(item_id: int) -> None:
+    for suffix in _SUFFIXES:
+        (_PHOTO_DIR / f"{int(item_id)}{suffix}").unlink(missing_ok=True)
 
 
 def set_photo(item_id: int, data: bytes) -> dict[str, Any] | None:
+    """Store a JPEG photo, or a PNG cut-out (the app's "remove background")."""
     if get_item(item_id) is None:
         return None
     if not data or len(data) > MAX_PHOTO_BYTES:
-        raise ValueError("photo must be a JPEG under 4 MB")
-    if not data.startswith(b"\xff\xd8"):
-        raise ValueError("photo must be a JPEG")
+        raise ValueError("photo must be a JPEG or PNG under 4 MB")
+    if data.startswith(b"\xff\xd8"):
+        suffix = ".jpg"
+    elif data.startswith(_PNG_MAGIC):
+        suffix = ".png"
+    else:
+        raise ValueError("photo must be a JPEG or PNG")
     _PHOTO_DIR.mkdir(parents=True, exist_ok=True)
-    path = photo_path(item_id)
+    path = _PHOTO_DIR / f"{int(item_id)}{suffix}"
     tmp = path.with_suffix(".tmp")
     tmp.write_bytes(data)
     tmp.replace(path)
+    for other in _SUFFIXES:
+        if other != suffix:
+            (_PHOTO_DIR / f"{int(item_id)}{other}").unlink(missing_ok=True)
     with _db() as conn:
         conn.execute(
             "UPDATE shopping_items SET has_photo = 1, photo_version = photo_version + 1 WHERE id = ?",
@@ -292,7 +316,7 @@ def set_photo(item_id: int, data: bytes) -> dict[str, Any] | None:
 def clear_photo(item_id: int) -> dict[str, Any] | None:
     if get_item(item_id) is None:
         return None
-    photo_path(item_id).unlink(missing_ok=True)
+    _remove_photos(item_id)
     with _db() as conn:
         conn.execute("UPDATE shopping_items SET has_photo = 0 WHERE id = ?", (item_id,))
     return get_item(item_id)

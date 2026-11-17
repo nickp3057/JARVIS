@@ -10,6 +10,7 @@ import brain.shopping as shopping
 from brain.tools import execute_tool
 
 _JPEG = b"\xff\xd8\xff\xe0" + b"0" * 64
+_PNG = b"\x89PNG\r\n\x1a\n" + b"0" * 64
 
 
 class ShoppingTestCase(unittest.TestCase):
@@ -69,6 +70,22 @@ class StoreTests(ShoppingTestCase):
         self.assertEqual(updated["photo_version"], 1)
         self.assertTrue(shopping.photo_path(item["id"]).exists())
         self.assertTrue(shopping.delete_item(item["id"]))
+        self.assertFalse(shopping.photo_path(item["id"]).exists())
+
+    def test_png_cutout_replaces_jpeg_and_back(self) -> None:
+        item = shopping.create_item("Lotion")
+        shopping.set_photo(item["id"], _JPEG)
+        updated = shopping.set_photo(item["id"], _PNG)
+        self.assertEqual(updated["photo_version"], 2)
+        path = shopping.photo_path(item["id"])
+        self.assertEqual(path.suffix, ".png")
+        self.assertEqual(shopping.photo_media_type(path), "image/png")
+        self.assertFalse(path.with_suffix(".jpg").exists())
+        shopping.set_photo(item["id"], _JPEG)
+        self.assertEqual(shopping.photo_path(item["id"]).suffix, ".jpg")
+        self.assertFalse(path.exists())
+        shopping.set_photo(item["id"], _PNG)
+        shopping.clear_photo(item["id"])
         self.assertFalse(shopping.photo_path(item["id"]).exists())
 
     def test_list_groups_by_store_with_unassigned_last(self) -> None:

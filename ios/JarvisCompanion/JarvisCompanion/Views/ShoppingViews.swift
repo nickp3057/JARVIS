@@ -375,6 +375,8 @@ struct ShoppingItemEditor: View {
     @State private var photo: ShoppingPhotoChange = .keep
     @State private var preview: UIImage?
     @State private var picked: PhotosPickerItem?
+    @State private var cuttingOut = false
+    @State private var cutOut = false
     @State private var showingCamera = false
     @State private var saving = false
     @State private var error: String?
@@ -503,6 +505,7 @@ struct ShoppingItemEditor: View {
                     Button(role: .destructive) {
                         preview = nil
                         photo = .remove
+                        cutOut = false
                     } label: { Label("Remove", systemImage: "trash") }
                         .buttonStyle(.bordered)
                         .labelStyle(.iconOnly)
@@ -510,14 +513,46 @@ struct ShoppingItemEditor: View {
             }
             .font(.subheadline.weight(.medium))
             .tint(JarvisTheme.cyan)
+            if preview != nil && !cutOut {
+                Button(action: removeBackground) {
+                    if cuttingOut {
+                        ProgressView().controlSize(.small)
+                    } else {
+                        Label("Remove background", systemImage: "wand.and.stars")
+                    }
+                }
+                .buttonStyle(.bordered)
+                .font(.subheadline.weight(.medium))
+                .tint(JarvisTheme.cyan)
+                .disabled(cuttingOut)
+            }
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, 8)
     }
 
+    /// Lifts the product off its background (Walmart's white, a shelf) on the
+    /// device, and saves it as a transparent PNG.
+    private func removeBackground() {
+        guard let preview, !cuttingOut else { return }
+        cuttingOut = true
+        Task {
+            defer { cuttingOut = false }
+            guard let cut = await BackgroundRemover.cutOut(preview), let png = cut.pngData() else {
+                error = "Couldn't find the product in that photo."
+                return
+            }
+            self.preview = cut
+            photo = .replace(png)
+            cutOut = true
+            error = nil
+        }
+    }
+
     private func use(_ image: UIImage) {
         let small = image.shrunk(maxSide: 1200)
         preview = small
+        cutOut = false
         if let jpeg = small.jpegData(compressionQuality: 0.75) { photo = .replace(jpeg) }
     }
 

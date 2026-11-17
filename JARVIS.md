@@ -137,7 +137,7 @@ Pearson-Stark-Jarvis/
 │   ├── shopping.db          Saved shopping items; on_list = on the list now
 │   ├── donna.db             Donna's sessions, notes, case file, follow-ups, moods, check-ins (private)
 │   ├── usage.db             One row per model call: agent, model, token counts, estimated $
-│   ├── shopping_photos/     <item id>.jpg product photos from the companion
+│   ├── shopping_photos/     <item id>.jpg product photos from the companion (.png = background-removed cut-out)
 │   ├── profile.json         Long-term memory facts (auto-created)
 │   ├── habits.json          Bounded per-turn usage log for habit learning
 │   ├── memory_proposals.json Low-confidence facts awaiting approval
@@ -2014,7 +2014,9 @@ there, so edit files with a `sudo python3` one-shot or vi.
   (`ListRoute`, `MaintenanceRoute`); long-press a tile to jump into adding.
   Shopping (`ShoppingViews.swift`): type to see saved items with photos and
   tap to list one, Return lists an exact match or saves a new item, the
-  editor takes a photo (camera or library, shrunk to 1200 px JPEG), note,
+  editor takes a photo (camera or library, shrunk to 1200 px JPEG; since
+  6.71 "Remove background" lifts the product out on the device with Vision
+  (`BackgroundRemover.swift`) and saves a transparent PNG, ≤900 px), note,
   store and quantity; ticking off removes it with an Undo; Saved items is a
   searchable photo grid. Control: needs-attention, repairs, camera + TV
   remote side by side, switches, then Now (reminders dropped from Now; they
