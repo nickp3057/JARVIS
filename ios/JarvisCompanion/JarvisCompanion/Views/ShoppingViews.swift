@@ -1,4 +1,5 @@
 import PhotosUI
+import UniformTypeIdentifiers
 import SwiftUI
 import UIKit
 
@@ -513,18 +514,31 @@ struct ShoppingItemEditor: View {
             }
             .font(.subheadline.weight(.medium))
             .tint(JarvisTheme.cyan)
-            if preview != nil && !cutOut {
-                Button(action: removeBackground) {
-                    if cuttingOut {
-                        ProgressView().controlSize(.small)
-                    } else {
-                        Label("Remove background", systemImage: "wand.and.stars")
+            HStack(spacing: 10) {
+                // A screenshot or "Copy image" from Safari, without saving it to Photos first.
+                // PasteButton reads the clipboard without iOS's "Allow Paste?" prompt.
+                PasteButton(supportedContentTypes: [.image]) { providers in
+                    guard let provider = providers.first else { return }
+                    provider.loadDataRepresentation(forTypeIdentifier: UTType.image.identifier) { data, _ in
+                        guard let data, let image = UIImage(data: data) else { return }
+                        Task { @MainActor in use(image) }
                     }
                 }
-                .buttonStyle(.bordered)
-                .font(.subheadline.weight(.medium))
+                .buttonBorderShape(.capsule)
                 .tint(JarvisTheme.cyan)
-                .disabled(cuttingOut)
+                if preview != nil && !cutOut {
+                    Button(action: removeBackground) {
+                        if cuttingOut {
+                            ProgressView().controlSize(.small)
+                        } else {
+                            Label("Remove background", systemImage: "wand.and.stars")
+                        }
+                    }
+                    .buttonStyle(.bordered)
+                    .font(.subheadline.weight(.medium))
+                    .tint(JarvisTheme.cyan)
+                    .disabled(cuttingOut)
+                }
             }
         }
         .frame(maxWidth: .infinity)

@@ -2016,7 +2016,9 @@ there, so edit files with a `sudo python3` one-shot or vi.
   tap to list one, Return lists an exact match or saves a new item, the
   editor takes a photo (camera or library, shrunk to 1200 px JPEG; since
   6.71 "Remove background" lifts the product out on the device with Vision
-  (`BackgroundRemover.swift`) and saves a transparent PNG, ≤900 px), note,
+  (`BackgroundRemover.swift`) and saves a transparent PNG, ≤900 px; since
+  6.72 a Paste button takes a copied image or screenshot straight from the
+  clipboard), note,
   store and quantity; ticking off removes it with an Undo; Saved items is a
   searchable photo grid. Control: needs-attention, repairs, camera + TV
   remote side by side, switches, then Now (reminders dropped from Now; they
