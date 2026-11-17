@@ -54,8 +54,10 @@ struct DonnaView: View {
         }
         .tint(DonnaTheme.rose)
         .task {
-            await model.load()
+            // Unwind straight away; the load can take seconds (Core writes an
+            // idle session's note first) and the rings used to sit until it returned.
             withAnimation(reduceMotion ? nil : .spring(duration: 1.1, bounce: 0.15)) { unwound = true }
+            await model.load()
         }
         .onChange(of: scenePhase) { _, phase in
             if phase == .active { Task { await model.refresh() } }
