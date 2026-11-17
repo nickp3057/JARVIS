@@ -1,4 +1,4 @@
-"""Radarr integration: look movies up and (after confirmation) add them.
+"""Radarr integration: look movies up, add them, and change their quality.
 
 Thin wrapper over :mod:`integrations.servarr_common`. Two-step by design:
 ``find_movie`` only searches and reports candidates; ``add_movie`` is the only
@@ -14,6 +14,7 @@ from typing import Any
 
 from integrations import servarr_common as servarr
 from integrations import media_selections
+from integrations import qbittorrent
 from jarvis_logger import get_logger
 
 log = get_logger(__name__)
@@ -236,3 +237,132 @@ def upcoming(days: int = 14) -> str:
         f"{item.get('title', 'Unknown')}: {item.get('digitalRelease') or item.get('physicalRelease') or item.get('inCinemas') or 'date unknown'}"
         for item in records[:30]
     )
+
+
+# --- Changing a movie's quality profile -------------------------------
+
+def _allowed_quality_ids(profile: dict[str, Any]) -> set[int]:
+    """Quality ids a profile accepts, flattening grouped items."""
+    allowed: set[int] = set()
+    for item in profile.get("items", []):
+        if not item.get("allowed"):
+            continue
+        members = item.get("items") or [item]
+        for member in members:
+            quality = member.get("quality") or {}
+            if quality.get("id") is not None:
+                allowed.add(int(quality["id"]))
+    return allowed
+
+
+def _library_matches(title: str) -> tuple[bool, list[dict[str, Any]] | str]:
+    ok, results = candidates(title)
+    if not ok:
+        return False, results
+    return True, [m for m in results if m.get("id")]
+
+
+def _source_torrent_hashes(movie_id: int, file_path: str) -> list[str]:
+    """qBittorrent hashes of the download(s) that produced the current file.
+
+    Prefers the import whose destination is this exact file; falls back to
+    the most recent import, since the file on disk is whatever landed last.
+    """
+    ok, events = servarr.request(_SERVICE, "GET", "/api/v3/history/movie",
+                                 params={"movieId": movie_id})
+    if not ok or not isinstance(events, list):
+        return []
+    imports = [e for e in events if e.get("eventType") == "downloadFolderImported" and e.get("downloadId")]
+    if not imports:
+        return []
+    exact = [e for e in imports if (e.get("data") or {}).get("importedPath") == file_path]
+    chosen = exact or [max(imports, key=lambda e: str(e.get("date") or ""))]
+    return sorted({str(e["downloadId"]).lower() for e in chosen})
+
+
+def change_movie_quality(title: str, quality: str, session_id: str | None = None) -> str:
+    """Move a movie in the library to another quality profile.
+
+    Radarr never downgrades on its own: a 4K file outranks every 1080p
+    release, so just switching profiles leaves the big file in place. When
+    the current file isn't allowed by the new profile, this deletes it in
+    Radarr, removes its source torrent and data in qBittorrent (imports are
+    hardlinked, so the space stays used otherwise), and searches for a copy
+    that fits. When the file still fits (an upgrade), it only switches and
+    searches.
+    """
+    title = (title or "").strip()
+    if not title:
+        return "Which movie, sir?"
+    if not (quality or "").strip():
+        return "Which quality profile, sir?"
+    if not servarr.is_configured(_SERVICE):
+        return "Radarr isn't configured, sir."
+
+    ok, matches = _library_matches(title)
+    if not ok:
+        return str(matches)
+    if not matches:
+        return f"'{title}' isn't in your Radarr library, sir."
+    if len(matches) > 1:
+        listing = "; ".join(_describe(m) for m in matches[:_MAX_CANDIDATES])
+        return f"Several library movies match '{title}': {listing}. Which one? Say it with the year."
+
+    profile_id, profile_name = servarr.resolve_quality(_SERVICE, quality)
+    if profile_id is None:
+        return profile_name
+    ok, profiles = servarr.get_quality_profiles(_SERVICE)
+    if not ok:
+        return str(profiles)
+    profile = next((p for p in profiles if p.get("id") == profile_id), {})
+
+    ok, movie = servarr.request(_SERVICE, "GET", f"/api/v3/movie/{matches[0]['id']}")
+    if not ok or not isinstance(movie, dict):
+        return str(movie)
+    name = f"{movie.get('title', title)} ({movie.get('year', '?')})"
+    if movie.get("qualityProfileId") == profile_id:
+        return f"{name} is already on the {profile_name} profile, sir."
+
+    movie_file = movie.get("movieFile") if movie.get("hasFile") else None
+    file_quality = ((movie_file or {}).get("quality") or {}).get("quality") or {}
+    replace = bool(movie_file) and file_quality.get("id") not in _allowed_quality_ids(profile)
+
+    def run() -> str:
+        body = dict(movie)
+        body["qualityProfileId"] = profile_id
+        body.pop("movieFile", None)
+        outcome = servarr.call(_SERVICE, "PUT", f"/api/v3/movie/{movie['id']}", json=body)
+        if not outcome.ok:
+            return f"I couldn't switch {name} to {profile_name}: {outcome.payload}"
+        parts = [f"Switched {name} to {profile_name}"]
+
+        if replace:
+            hashes = _source_torrent_hashes(movie["id"], movie_file.get("path", ""))
+            outcome = servarr.call(_SERVICE, "DELETE", f"/api/v3/moviefile/{movie_file['id']}")
+            if not outcome.ok:
+                return f"{parts[0]}, but deleting the {file_quality.get('name', 'old')} file failed: {outcome.payload}"
+            parts.append(f"deleted the {file_quality.get('name', 'old')} file (Radarr's recycle bin holds it for a week)")
+            if hashes and qbittorrent.is_configured():
+                removed = []
+                for torrent_hash in hashes:
+                    reply = qbittorrent.manage_torrent("delete", torrent_hash, confirmed=True, delete_files=True)
+                    if reply.startswith("Delete accepted"):
+                        removed.append(torrent_hash)
+                if removed:
+                    parts.append("removed its torrent and data from qBittorrent")
+            else:
+                log.info("No seeding torrent found for %s", name)
+
+        search = servarr.call(_SERVICE, "POST", "/api/v3/command",
+                              json={"name": "MoviesSearch", "movieIds": [movie["id"]]})
+        parts.append("searching for a new copy" if search.ok else f"but the search didn't start ({search.payload})")
+        return ", ".join(parts) + ", sir."
+
+    if replace:
+        from brain import confirm_gate
+        return confirm_gate.act(
+            session_id,
+            f"switch {name} to {profile_name} and delete its {file_quality.get('name', 'current')} file",
+            run,
+        )
+    return run()

@@ -84,7 +84,7 @@ _PLAYBOOKS: dict[str, dict[str, Any]] = {
     },
     "radarr": {
         "label": "Radarr",
-        "tools": ("find_movie", "add_movie", "list_quality_profiles", "temporary_4k"),
+        "tools": ("find_movie", "add_movie", "change_movie_quality", "list_quality_profiles", "temporary_4k"),
         "env": ("RADARR_URL", "RADARR_API_KEY"),
         "url_env": "RADARR_URL",
         "commands": ("restart_radarr",),

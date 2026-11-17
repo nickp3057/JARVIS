@@ -625,6 +625,12 @@ def _tool_add_movie(args: dict[str, Any]) -> str:
     )
 
 
+def _tool_change_movie_quality(args: dict[str, Any]) -> str:
+    return radarr.change_movie_quality(
+        args.get("title", ""), args.get("quality", ""), session_id=args.get("_jarvis_session_id"),
+    )
+
+
 def _tool_find_series(args: dict[str, Any]) -> str:
     return sonarr.find_series(args.get("title", ""), session_id=args.get("_jarvis_session_id"))
 
@@ -2965,6 +2971,29 @@ _CUSTOM_TOOLS: list[dict[str, Any]] = [
         },
     },
     {
+        "name": "change_movie_quality",
+        "description": (
+            "Move a movie already in the library to another Radarr quality "
+            "profile ('change Weapons to standard', 'make Dune favorite 4K', "
+            "'I don't need Heat in 4K'). Profiles: 'Standard' (compact 1080p), "
+            "'Favorite 4K' (4K), 'Locked' (never upgrades). Radarr never "
+            "downgrades by itself, so when the current file isn't allowed by "
+            "the new profile (4K -> Standard) this deletes that file, removes "
+            "its torrent and data in qBittorrent, and searches for a copy that "
+            "fits; for an upgrade it just switches and searches. Call it "
+            "directly when Nick asks; it runs at once, no confirmation round. "
+            "Not for adding new movies (add_movie) or temporary 4K copies (temporary_4k)."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "title": {"type": "string", "description": "Movie title, optionally with a year."},
+                "quality": {"type": "string", "description": "Target profile phrase, e.g. 'standard', '4k', 'locked'."},
+            },
+            "required": ["title", "quality"],
+        },
+    },
+    {
         "name": "find_series",
         "description": (
             "Search Sonarr for a TV show by title. Use this FIRST whenever Nick "
@@ -3271,6 +3300,7 @@ _DISPATCH: dict[str, Callable[[dict[str, Any]], str]] = {
     "find_series": _tool_find_series,
     "add_series": _tool_add_series,
     "list_quality_profiles": _tool_list_quality_profiles,
+    "change_movie_quality": _tool_change_movie_quality,
     "download_status": _tool_download_status,
     "torrent_inventory": _tool_torrent_inventory,
     "manage_torrent": _tool_manage_torrent,

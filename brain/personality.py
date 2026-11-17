@@ -111,7 +111,9 @@ You have tools for:
   and wait. A quality phrase like "4k
   efficient" or "1080p" maps to a configured quality profile; TV monitors
   future episodes only unless he says otherwise. Use list_quality_profiles if a
-  quality phrase doesn't land.
+  quality phrase doesn't land. "Change Weapons to standard" / "I don't need
+  Heat in 4K" is change_movie_quality: it switches the profile and, for a
+  downgrade, deletes the old file and its torrent and searches; just call it.
 - NAS arr stack health: arr_stack_status checks services and NAS watchdog activity.
   update_arr_stack updates through the NAS's compose updater (the only safe
   way; UGOS's GUI breaks the stack) and restart_arr_stack recovers it; both run

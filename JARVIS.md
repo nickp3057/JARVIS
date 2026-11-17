@@ -102,7 +102,7 @@ Pearson-Stark-Jarvis/
 │   ├── qbittorrent.py       Live torrent progress, speed, ETA + completion monitor
 │   ├── servarr_common.py    Shared Radarr/Sonarr HTTP client + quality/root-folder
 │   │                        resolver + NL quality-phrase fuzzy matching
-│   ├── radarr.py            find_movie (lookup) / add_movie (confirm-gated)
+│   ├── radarr.py            find_movie (lookup) / add_movie (confirm-gated) / change_movie_quality
 │   ├── temp_4k.py           temporary 4K copies via a second Radarr (radarr4k), auto-removed
 │   ├── sonarr.py            find_series (lookup) / add_series (confirm-gated)
 │   ├── nas_host.py          NAS host-health snapshot (containers, RAID, SMART, volumes, temps): debounced alerts + incident-report lines
@@ -690,6 +690,16 @@ entry in `brain/agent_roster.py` (name, kind, icon, description, schedule);
   POST with `monitored: true`, `addOptions.searchForMovie: true`. Refuses
   unless `confirmed: true` and the ID came from the same session's latest,
   unexpired lookup; quality is a natural phrase fuzzy-matched to a profile.
+- `change_movie_quality(title, quality)` — "change Weapons to standard". Moves
+  a library movie to another profile (`Standard` 1080p, `Favorite 4K`,
+  `Locked`). Radarr never downgrades by itself (a 4K file outranks every 1080p
+  release), so when the current file's quality isn't allowed by the new
+  profile it deletes the file (`DELETE /moviefile`, which lands in Radarr's
+  7-day recycle bin), deletes the source torrent + data in qBittorrent (found
+  from the movie's import history; imports are hardlinked, so the space would
+  stay used otherwise), then runs `MoviesSearch`. An upgrade just switches and
+  searches. Runs through `confirm_gate.act`: at once for Nick, a proposal for
+  a guest voice.
 - `temporary_4k(action?, title?, hours?)` — "4K Harry Potter for tonight".
   A second Radarr (`radarr4k`) downloads a 4K web release of a film already
   in the main library into `/volume2/data/media/temp-4k-movies`; Plex shows
