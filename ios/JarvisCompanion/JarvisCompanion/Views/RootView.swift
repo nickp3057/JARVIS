@@ -161,7 +161,7 @@ struct RootView: View {
         }
         .overlay {
             if donna.showing {
-                DonnaView(settings: settings)
+                DonnaLock { DonnaView(settings: settings) }
                     .environmentObject(settings)
                     .transition(.opacity)
                     .zIndex(10)

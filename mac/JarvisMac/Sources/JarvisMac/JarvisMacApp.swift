@@ -116,7 +116,7 @@ struct RootView: View {
                     case .chat: ChatView(model: chat)
                     case .home: HomeView(model: home)
                     case .alerts: AlertsView(model: alerts)
-                    case .donna: DonnaView(model: donna)
+                    case .donna: DonnaLock { DonnaView(model: donna) }
                     }
                 }
             }

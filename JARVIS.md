@@ -1360,7 +1360,7 @@ there, so edit files with a `sudo python3` one-shot or vi.
 - **Room volume on a loudness-matched scale (companion 6.20 / build 262, 2026-11-13).** `speech/room_volume.py` runs `amixer -M`, so "volume 8" is about -6 dB instead of -12.75 dB (raw steps made 8 sound like a quarter of 10 on the Surface). Stored levels keep their numbers, so they get louder: the night level (7 on the Surface) is now about -9 dB; say "night volume 5" for roughly the old loudness. `ROOM_VOLUME_MAPPED=0` restores raw steps.
 - **Temporary 4K live (2026-11-13).** NAS side set up (see "Temporary 4K Radarr setup"); first end-to-end run: Michael (2026), asked by voice, 24.3 GB iTunes DV/HDR WEB-DL in about 25 minutes, ready alert, Plex chose the 4K version.
 - **Temporary 4K movies (2026-11-12).** "Get a 4K file of Harry Potter for tonight": `temporary_4k` tool + temp-4K monitor (`integrations/temp_4k.py`) over a second Radarr whose folder is `temp-4k-movies`; alert when ready, auto-removed 2 days after it lands; the 1080p copy is never touched. NAS side done 2026-11-13 except the Plex folder and Core `.env`: "Temporary 4K Radarr setup".
-- **JARVIS for Mac (companion 6.16 / build 258, 2026-11-10).** A dedicated native macOS app, not the iPad app ported over (`mac/JarvisMac/`, SwiftUI, Swift Package, no Xcode project). `mac/JarvisMac/build.sh` builds it and installs an ad-hoc-signed `~/Applications/JARVIS.app` (`--open` also launches it; it quits a running copy first). It is a thin client of Core's existing API with the companion token, so no server change. Mac-style layout: a sidebar with **Chat**, **Home**, **Alerts** and, under Private, **Donna**; ⌘1–⌘4 switch sections, ⌘N starts a new chat, ⌘R refreshes, ⌘, opens Settings.
+- **JARVIS for Mac (companion 6.16 / build 258, 2026-11-10).** A dedicated native macOS app, not the iPad app ported over (`mac/JarvisMac/`, SwiftUI, Swift Package, no Xcode project). `mac/JarvisMac/build.sh` builds it and installs an ad-hoc-signed `~/Applications/JARVIS.app` (`--open` also launches it; it quits a running copy first). It is a thin client of Core's existing API with the companion token, so no server change. Mac-style layout: a sidebar with **Chat**, **Home**, **Alerts** and, under Private, **Donna** (Touch ID locked, see Donna mode); ⌘1–⌘4 switch sections, ⌘N starts a new chat, ⌘R refreshes, ⌘, opens Settings.
   - **Chat:** history list (`GET /sessions`, shared with the phone; right-click to delete) beside the transcript. Replies stream (`POST /chat/stream` with `X-Jarvis-Stream-Segments: 1`, so each `ROUND_BREAK` starts a new bubble) and render inline markdown. Like the phone (6.17), the reader hands text to the UI on a 40 ms timer rather than when the next byte arrives; Core often receives a round from Claude in one burst, and the byte-driven check showed a word or two and then held the rest until the stream closed.
   - **Home:** scene tiles (`/api/home/scenes`, the current scene outlined; click runs it, or leaves it if it is current) and device tiles grouped by domain from `/api/home/entities` with on/off switches (`/api/home/control`) and a brightness slider for dimmable lights (`/api/home/light`, sent when the drag ends). Refreshes every 15 s while open.
   - **Alerts:** `/api/alerts/recent` (24 h), with Re-check (`/api/alerts/refresh`) and Clear (with a confirmation). Warnings and criticals badge the sidebar, polled every 60 s.
@@ -1968,7 +1968,13 @@ there, so edit files with a `sudo python3` one-shot or vi.
   logo on the Chat tab (title or the empty-chat orb; a plain hold no longer
   opens her, since 6.9); the app fades to rose, the rings unwind
   into one line, and the tab bar is covered (`DonnaPresenter`, overlay in
-  `RootView`). Hold the line or tap the chevron to leave. Memory works like a
+  `RootView`). Hold the line or tap the chevron to leave. Since 6.69 the
+  door only hides her; `DonnaLock` is the lock: Face ID (passcode fallback)
+  before `DonnaView` is even built, relocking whenever the app backgrounds and
+  covering her while inactive so the app switcher snapshot stays blank. The
+  Mac app's Donna section has the same gate with Touch ID (login-password
+  fallback), relocking on leaving the section, screen lock/sleep, or 5 min in
+  the background (`mac/JarvisMac/Sources/JarvisMac/DonnaLock.swift`). Memory works like a
   therapist's notes: each request sends her prompt, a per-session context
   block (case file, last 3 session notes, open follow-ups, recent moods) and
   this session's messages only, all prompt-cached. Ending a session (menu, or
