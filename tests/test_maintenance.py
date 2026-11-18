@@ -185,6 +185,9 @@ class EndpointTests(MaintenanceTestCase):
             todo = self.client.post("/api/todos", headers=self.headers, json={"text": "Buy filters"}).json()["todo"]
             self.assertEqual(todo["text"], "Buy filters")
             self.assertEqual([r.text for r in reminders.active_reminders()], ["Buy filters"])
+            renamed = self.client.put(f"/api/todos/{todo['id']}", headers=self.headers, json={"text": " Buy HEPA filters "})
+            self.assertEqual(renamed.json()["todo"]["text"], "Buy HEPA filters")
+            self.assertEqual(self.client.put("/api/todos/nope", headers=self.headers, json={"text": "x"}).status_code, 404)
             self.assertEqual(self.client.post(f"/api/todos/{todo['id']}/done", headers=self.headers).status_code, 204)
             self.assertEqual(reminders.active_reminders(include_done=True), [])
             self.assertEqual(self.client.post(f"/api/todos/{todo['id']}/done", headers=self.headers).status_code, 404)

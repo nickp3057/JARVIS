@@ -117,6 +117,18 @@ class _ReminderStore:
                     return f"Marked done: {r.text}"
         return f"No reminder with id {reminder_id}."
 
+    def rename(self, reminder_id: str, text: str) -> Reminder | None:
+        reminder_id, text = (reminder_id or "").strip(), (text or "").strip()
+        if not text:
+            return None
+        with self._lock:
+            for r in self._items:
+                if r.id == reminder_id:
+                    r.text = text
+                    self._persist_locked()
+                    return r
+        return None
+
     def delete(self, reminder_id: str) -> bool:
         reminder_id = (reminder_id or "").strip()
         with self._lock:
@@ -161,6 +173,10 @@ def complete_reminder(reminder_id: str) -> str:
 def delete_reminder(reminder_id: str) -> str:
     reminder_id = (reminder_id or "").strip()
     return f"Deleted reminder {reminder_id}." if _store.delete(reminder_id) else f"No reminder with id {reminder_id}."
+
+def rename_reminder(reminder_id: str, text: str) -> Reminder | None:
+    """New wording for a reminder (the companion's rename in place)."""
+    return _store.rename(reminder_id, text)
 
 def remove_reminder(reminder_id: str) -> bool:
     """Delete outright (the companion's to-do check: done means gone)."""

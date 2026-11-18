@@ -5,6 +5,8 @@ import SwiftUI
 /// rose space, and nothing here touches JARVIS's chat or memory.
 struct DonnaView: View {
     @ObservedObject var model: DonnaModel
+    /// Ending the session closes Donna (back to Chat), like on the phone.
+    var onEnd: () -> Void = {}
     @State private var showingMemory = false
     @State private var confirmingEnd = false
 
@@ -33,7 +35,7 @@ struct DonnaView: View {
             }
         }
         .confirmationDialog("End this session?", isPresented: $confirmingEnd) {
-            Button("End Session") { Task { await model.endSession() } }
+            Button("End Session") { Task { if await model.endSession() { onEnd() } } }
         } message: {
             Text("Donna writes her note now; your next message starts a fresh session.")
         }

@@ -92,6 +92,11 @@ def _connect() -> sqlite3.Connection:
             """
         )
         _schema_ready.add(str(_DB_PATH))
+        # Owner-only: nobody else on the box reads her notes.
+        try:
+            os.chmod(_DB_PATH, 0o600)
+        except OSError as exc:
+            log.warning("Couldn't lock down Donna's database: %s", exc)
     return conn
 
 

@@ -12,11 +12,12 @@ enum ListRoute: Hashable {
 
 // MARK: - Shopping list
 
-/// What to buy, one section per store, working the way Reminders does: every
-/// section ends in a "New Item" row (Return keeps you there for the next
-/// one), tap a name to rename it in place, tick the circle and it's bought.
-/// Typing in a New Item row also offers saved items (photos and all), and
-/// pasted text or a copied image becomes items straight away.
+/// What to buy, one section per store, working the way Reminders does: the
+/// New Item button opens a row at the end of the section you were last in
+/// (Return keeps it open for the next one), tap a name to rename it in
+/// place, tick the circle and it's bought. Typing a new item also offers
+/// saved items (photos and all), and pasted text or a copied image becomes
+/// items straight away.
 struct ShoppingListView: View {
     @ObservedObject var model: HubViewModel
     var startAdding = false
@@ -31,8 +32,8 @@ struct ShoppingListView: View {
     @State private var drafts: [String: String] = [:]
     /// Names being edited in place, by item id; committed when focus leaves.
     @State private var renames: [Int: String] = [:]
-    /// Empty store sections made from the menu, until something lands in them.
-    @State private var newStores: [String] = []
+    /// The section showing the New Item row, if any.
+    @State private var addingStore: String?
     /// The section New Item / Paste add to.
     @State private var lastStore = ""
     @State private var editing: ShoppingEditorTarget?
@@ -46,20 +47,22 @@ struct ShoppingListView: View {
     private var list: [ShoppingItem] { model.shopping.value?.list ?? [] }
     private var catalog: [ShoppingItem] { model.shopping.value?.catalog ?? [] }
 
-    /// The stores on the list, then any empty ones just made, then the
-    /// unsorted section, which is always there to type into.
+    /// The stores on the list, then the one being added to if it's new,
+    /// then the unsorted items.
     private var sections: [ShoppingGrouping.Section] {
         var out = ShoppingGrouping.sections(list).filter { !$0.store.isEmpty }
-        for store in newStores where !out.contains(where: { $0.store.caseInsensitiveCompare(store) == .orderedSame }) {
+        if let store = addingStore, !store.isEmpty,
+           !out.contains(where: { $0.store.caseInsensitiveCompare(store) == .orderedSame }) {
             out.append(.init(store: store, items: []))
         }
-        out.append(.init(store: "", items: list.filter { $0.store.trimmingCharacters(in: .whitespaces).isEmpty }))
+        let loose = list.filter { $0.store.trimmingCharacters(in: .whitespaces).isEmpty }
+        if !loose.isEmpty || addingStore == "" { out.append(.init(store: "", items: loose)) }
         return out
     }
 
     private var allStores: [String] {
         var seen = Set<String>()
-        return (catalog.map(\.store) + newStores)
+        return (catalog.map(\.store) + [addingStore ?? ""])
             .map { $0.trimmingCharacters(in: .whitespaces) }
             .filter { !$0.isEmpty && seen.insert($0.lowercased()).inserted }
             .sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
@@ -70,9 +73,9 @@ struct ShoppingListView: View {
             ForEach(sections) { section in
                 Section {
                     ForEach(section.items) { row($0) }
-                        .dropDestination(for: String.self) { ids, _ in move(ids, to: section.store) }
-                    addRow(section.store)
-                    if focus == .add(section.store) {
+                        .dropDestination(for: String.self) { ids, _ in _ = move(ids, to: section.store) }
+                    if addingStore == section.store {
+                        addRow(section.store)
                         ForEach(suggestions(for: section.store)) { suggestionRow($0, store: section.store) }
                     }
                 } header: {
@@ -90,7 +93,13 @@ struct ShoppingListView: View {
         .scrollDismissesKeyboard(.interactively)
         .background { JarvisBackdrop() }
         .overlay {
-            if model.shopping.value == nil {
+            if model.shopping.value != nil && list.isEmpty && addingStore == nil {
+                ContentUnavailableView {
+                    Label("Nothing to buy", systemImage: "cart")
+                } description: {
+                    Text("Tap New Item, paste a list, or tell JARVIS “add face lotion to my shopping list.”")
+                }
+            } else if model.shopping.value == nil {
                 if let error = model.shopping.failureText {
                     ContentUnavailableView("Couldn’t load the list", systemImage: "wifi.exclamationmark",
                                            description: Text(error))
@@ -137,14 +146,7 @@ struct ShoppingListView: View {
             Button("Add") {
                 let name = storeName.trimmingCharacters(in: .whitespaces)
                 guard !name.isEmpty else { return }
-                if !allStores.contains(where: { $0.caseInsensitiveCompare(name) == .orderedSame }) {
-                    newStores.append(name)
-                }
-                let existing = allStores.first { $0.caseInsensitiveCompare(name) == .orderedSame } ?? name
-                Task {
-                    try? await Task.sleep(for: .milliseconds(350))
-                    focus = .add(existing)
-                }
+                startAdding(allStores.first { $0.caseInsensitiveCompare(name) == .orderedSame } ?? name, after: 350)
             }
         }
         .sheet(item: $editing) { target in
@@ -153,15 +155,10 @@ struct ShoppingListView: View {
         }
         .refreshable { await model.refreshShopping() }
         .task { await model.refreshShopping() }
-        .onAppear {
-            guard startAdding else { return }
-            Task {
-                try? await Task.sleep(for: .milliseconds(450))
-                focus = .add("")
-            }
-        }
+        .onAppear { if startAdding { startAdding("", after: 450) } }
         .onChange(of: focus) { old, new in
             if case .item(let id) = old, old != new { commitRename(id) }
+            if case .add(let store) = old, old != new { closeAddRow(store) }
             if case .add(let store) = new { lastStore = store }
             if case .item(let id) = new, let item = list.first(where: { $0.id == id }) { lastStore = item.store }
         }
@@ -236,8 +233,8 @@ struct ShoppingListView: View {
         }
     }
 
-    /// The faint "New Item" row at the bottom of each section, like
-    /// Reminders'. Return adds and keeps the field ready for the next item.
+    /// The New Item row at the end of a section, like Reminders'. Return
+    /// adds and keeps the field ready for the next item.
     private func addRow(_ store: String) -> some View {
         HStack(spacing: 12) {
             Image(systemName: "circle")
@@ -250,8 +247,29 @@ struct ShoppingListView: View {
                 .onSubmit { submit(store) }
         }
         .padding(.vertical, 2)
-        .contentShape(Rectangle())
-        .onTapGesture { focus = .add(store) }
+    }
+
+    /// Open the New Item row in a section and put the cursor in it.
+    private func startAdding(_ store: String, after delay: Int = 60) {
+        withAnimation(.snappy) { addingStore = store }
+        lastStore = store
+        Task {
+            try? await Task.sleep(for: .milliseconds(delay))
+            focus = .add(store)
+        }
+    }
+
+    /// Focus left the New Item row: an empty one goes away (after a beat,
+    /// since Return hands focus straight back).
+    private func closeAddRow(_ store: String) {
+        Task {
+            try? await Task.sleep(for: .milliseconds(150))
+            guard focus != .add(store), addingStore == store else { return }
+            let typed = (drafts[store] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            if !typed.isEmpty { addNamed(typed, to: store) }
+            drafts[store] = ""
+            withAnimation(.snappy) { addingStore = nil }
+        }
     }
 
     private func suggestions(for store: String) -> [ShoppingItem] {
@@ -315,7 +333,7 @@ struct ShoppingListView: View {
                 .transition(.move(edge: .bottom).combined(with: .opacity))
             }
             if focus == nil {
-                Button { focus = .add(lastStore) } label: {
+                Button { startAdding(sectionStillThere(lastStore)) } label: {
                     Label("New Item", systemImage: "plus.circle.fill")
                         .font(.headline)
                         .foregroundStyle(JarvisTheme.cyan)
@@ -333,6 +351,11 @@ struct ShoppingListView: View {
     }
 
     // MARK: Actions
+
+    /// The last section used, or the unsorted one if it has emptied.
+    private func sectionStillThere(_ store: String) -> String {
+        store.isEmpty || list.contains { $0.store.caseInsensitiveCompare(store) == .orderedSame } ? store : ""
+    }
 
     private func draftBinding(_ store: String) -> Binding<String> {
         Binding(get: { drafts[store] ?? "" }, set: { drafts[store] = $0 })
@@ -399,7 +422,7 @@ struct ShoppingListView: View {
     /// so a list copied from Notes or a text works); an image opens a new
     /// item with that photo.
     private func paste(_ providers: [NSItemProvider]) {
-        let store = lastStore
+        let store = sectionStillThere(lastStore)
         guard let provider = providers.first else { return }
         if provider.hasItemConformingToTypeIdentifier(UTType.image.identifier) {
             provider.loadDataRepresentation(forTypeIdentifier: UTType.image.identifier) { data, _ in
@@ -436,7 +459,7 @@ struct ShoppingListView: View {
 }
 
 /// Reminders' completion circle: an outline, then a filled dot in a ring.
-private struct TickCircle: View {
+struct TickCircle: View {
     let ticked: Bool
 
     var body: some View {

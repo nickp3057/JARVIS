@@ -289,15 +289,19 @@ final class DonnaModel: ObservableObject {
     }
 
     /// End now: she writes her note; the next message starts a new session.
-    func endSession() async {
-        guard !messages.isEmpty, !thinking else { return }
+    /// True when the session ended (the caller closes Donna).
+    @discardableResult
+    func endSession() async -> Bool {
+        guard !messages.isEmpty, !thinking else { return false }
         do {
             try await JarvisAPI.make(settings).donnaEnd()
             messages = []
             hasCaseFile = true
             error = nil
+            return true
         } catch {
             self.error = error.localizedDescription
+            return false
         }
     }
 

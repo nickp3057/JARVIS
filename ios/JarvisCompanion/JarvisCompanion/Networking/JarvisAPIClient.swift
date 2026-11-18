@@ -749,6 +749,11 @@ struct JarvisAPIClient {
         return try await postJSON(Envelope.self, path: "api/todos", body: TodoBody(text: text)).todo
     }
 
+    func renameTodo(id: String, text: String) async throws -> NowReminder {
+        struct Envelope: Decodable { let todo: NowReminder }
+        return try await sendJSON(Envelope.self, path: "api/todos/\(id)", method: "PUT", body: TodoBody(text: text)).todo
+    }
+
     func completeTodo(id: String) async throws {
         var request = request(path: "api/todos/\(id)/done", method: "POST")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")

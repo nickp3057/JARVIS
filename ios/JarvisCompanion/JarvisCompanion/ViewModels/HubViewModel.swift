@@ -348,6 +348,21 @@ final class HubViewModel: ObservableObject {
         return true
     }
 
+    /// New wording, typed in place on the list.
+    @discardableResult
+    func renameTodo(id: String, text: String) async -> Bool {
+        let text = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return false }
+        do {
+            _ = try await client().renameTodo(id: id, text: text)
+        } catch {
+            actionError = error.localizedDescription
+            return false
+        }
+        await refreshNow()
+        return true
+    }
+
     /// Checked means gone: hide it now, delete it on the server, and bring
     /// it back only if that fails.
     func completeTodo(id: String) {

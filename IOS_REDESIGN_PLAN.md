@@ -43,14 +43,19 @@ and a new photo shopping list kept separate (and no dedicated checklist tab).
   chores; maintenance has its own sectioned list.
 - Shopping: `brain/shopping.py` catalog + `on_list`; photos per item, Saved
   items grid, JARVIS tools. Since 6.75 the list works like Apple Reminders:
-  one section per store, each ending in a "New Item" row (Return keeps the
-  field for the next item; saved items are suggested as you type), tap a
+  one section per store and a single floating New Item button (6.77) that
+  opens a row at the end of the section last used (Return keeps the field
+  for the next item; saved items are suggested as you type), tap a
   name to rename in place (ⓘ opens details; clearing a name takes it off the
   list), ring tick with Undo, swipe Delete/Details, drag a row onto another
-  store (or long-press → Move to), New Store Section in the ⋯ menu, a
-  floating New Item button, and a toolbar Paste: copied text becomes one item
+  store (or long-press → Move to), New Store Section in the ⋯ menu, and a
+  toolbar Paste: copied text becomes one item
   per line (bullets/checkboxes stripped), a copied image starts a new item
   with that photo. Paste also sits in the item editor's photo area.
+- To do (6.77) works the same way: floating New Item button, rows cut off at
+  one line with "…" (tap to open the whole text and edit it in place; empty
+  it to delete), ring tick with Undo (untimed ones), swipe Delete, toolbar
+  Paste (one to-do per line). Core: `PUT /api/todos/{id}` renames.
 - Control: attention and repairs first, camera/TV remote as a two-up row,
   switches, Now (without reminders).
 - Settings: native grouped list with drill-down pages.

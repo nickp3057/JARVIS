@@ -664,7 +664,7 @@ entry in `brain/agent_roster.py` (name, kind, icon, description, schedule);
   → asks which; anything new is saved for next time
 - `shopping_list` — what's on it, grouped by store
 - `mark_shopping_bought(items[], not_bought?)` — tick off (kept in the catalog)
-- Companion (6.75+): a Reminders-style list per store — inline New Item rows,
+- Companion (6.75+): a Reminders-style list per store — one New Item button,
   rename in place, drag between stores, toolbar Paste (lines → items, image →
   new item with photo)
 - Companion API: `GET /api/shopping` (list + catalog), `GET /api/shopping/suggest?q=`,
@@ -2304,7 +2304,7 @@ there, so edit files with a `sudo python3` one-shot or vi.
   (opens Hub). Below that, the next assessment day (every assessment on the
   soonest day) and a To do list with quick add. To-dos are JARVIS's open
   reminders (so "remind me to..." lands there too). The app adds them with
-  `POST /api/todos {text}`, and `POST /api/todos/{id}/done` deletes one for
+  `POST /api/todos {text}`, renames with `PUT /api/todos/{id} {text}`, and `POST /api/todos/{id}/done` deletes one for
   good (`reminders.remove_reminder`). Due and overdue maintenance chores also
   appear as to-dos; checking one logs it. Hub holds everything Home used to:
   alerts, repairs, Now, maintenance and switches. The reactor animates with

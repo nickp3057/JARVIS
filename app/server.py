@@ -703,6 +703,16 @@ def todo_create(request: TodoRequest, _: None = Depends(authorize)) -> dict[str,
     return {"todo": {"id": item.id, "text": item.text, "due_at": None, "is_due": False}}
 
 
+@app.put("/api/todos/{todo_id}")
+def todo_rename(todo_id: str, request: TodoRequest, _: None = Depends(authorize)) -> dict[str, object]:
+    from brain.reminders import rename_reminder
+    item = rename_reminder(todo_id, request.text)
+    if item is None:
+        raise HTTPException(status_code=404, detail="Unknown to-do")
+    status_hub.invalidate("now")
+    return {"todo": {"id": item.id, "text": item.text, "due_at": item.due_at, "is_due": item.is_due()}}
+
+
 @app.post("/api/todos/{todo_id}/done")
 def todo_done(todo_id: str, _: None = Depends(authorize)) -> Response:
     from brain.reminders import remove_reminder
