@@ -12,227 +12,416 @@ enum ListRoute: Hashable {
 
 // MARK: - Shopping list
 
-/// What to buy, grouped by store. Typing in the add field suggests saved
-/// items (with their photos); tapping one puts it on the list. Ticking an
-/// item off takes it off the list (it stays saved), with an Undo.
+/// What to buy, one section per store, working the way Reminders does: every
+/// section ends in a "New Item" row (Return keeps you there for the next
+/// one), tap a name to rename it in place, tick the circle and it's bought.
+/// Typing in a New Item row also offers saved items (photos and all), and
+/// pasted text or a copied image becomes items straight away.
 struct ShoppingListView: View {
     @ObservedObject var model: HubViewModel
     var startAdding = false
-    @State private var query = ""
-    @FocusState private var adding: Bool
+
+    private enum Field: Hashable {
+        case add(String)
+        case item(Int)
+    }
+
+    @FocusState private var focus: Field?
+    /// What's typed in each section's New Item row, by store.
+    @State private var drafts: [String: String] = [:]
+    /// Names being edited in place, by item id; committed when focus leaves.
+    @State private var renames: [Int: String] = [:]
+    /// Empty store sections made from the menu, until something lands in them.
+    @State private var newStores: [String] = []
+    /// The section New Item / Paste add to.
+    @State private var lastStore = ""
     @State private var editing: ShoppingEditorTarget?
     @State private var lastBought: ShoppingItem?
     @State private var undoTask: Task<Void, Never>?
     /// Rows ticked a moment ago: drawn checked while they leave.
     @State private var ticking: Set<Int> = []
+    @State private var namingStore = false
+    @State private var storeName = ""
 
     private var list: [ShoppingItem] { model.shopping.value?.list ?? [] }
+    private var catalog: [ShoppingItem] { model.shopping.value?.catalog ?? [] }
 
-    /// Saved items matching what's typed, best first, items already on the
-    /// list last (tapping one of those just bumps nothing).
-    private var suggestions: [ShoppingItem] {
-        let q = query.trimmingCharacters(in: .whitespaces)
-        guard !q.isEmpty else { return [] }
-        return (model.shopping.value?.catalog ?? [])
-            .filter { $0.matches(q) }
-            .sorted { ($0.onList ? 1 : 0, -$0.matchScore(q)) < ($1.onList ? 1 : 0, -$1.matchScore(q)) }
-            .prefix(8).map { $0 }
+    /// The stores on the list, then any empty ones just made, then the
+    /// unsorted section, which is always there to type into.
+    private var sections: [ShoppingGrouping.Section] {
+        var out = ShoppingGrouping.sections(list).filter { !$0.store.isEmpty }
+        for store in newStores where !out.contains(where: { $0.store.caseInsensitiveCompare(store) == .orderedSame }) {
+            out.append(.init(store: store, items: []))
+        }
+        out.append(.init(store: "", items: list.filter { $0.store.trimmingCharacters(in: .whitespaces).isEmpty }))
+        return out
+    }
+
+    private var allStores: [String] {
+        var seen = Set<String>()
+        return (catalog.map(\.store) + newStores)
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty && seen.insert($0.lowercased()).inserted }
+            .sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
     }
 
     var body: some View {
         List {
-            Section {
-                addField
-                if !query.trimmingCharacters(in: .whitespaces).isEmpty {
-                    ForEach(suggestions) { suggestionRow($0) }
-                    Button { newItem() } label: {
-                        Label("New item “\(query.trimmingCharacters(in: .whitespaces))”…", systemImage: "plus.square.dashed")
-                            .font(.subheadline.weight(.medium))
+            ForEach(sections) { section in
+                Section {
+                    ForEach(section.items) { row($0) }
+                        .dropDestination(for: String.self) { ids, _ in move(ids, to: section.store) }
+                    addRow(section.store)
+                    if focus == .add(section.store) {
+                        ForEach(suggestions(for: section.store)) { suggestionRow($0, store: section.store) }
                     }
-                    .foregroundStyle(JarvisTheme.cyan)
-                }
-            }
-
-            if query.isEmpty {
-                ForEach(ShoppingGrouping.sections(list)) { section in
-                    Section(section.title) {
-                        ForEach(section.items) { listRow($0) }
+                } header: {
+                    if !section.store.isEmpty || !section.items.isEmpty {
+                        Text(section.store.isEmpty ? "Anywhere" : section.store)
+                            .font(.title3.bold())
+                            .foregroundStyle(.primary)
+                            .textCase(nil)
                     }
                 }
             }
         }
         .listStyle(.insetGrouped)
         .scrollContentBackground(.hidden)
+        .scrollDismissesKeyboard(.interactively)
         .background { JarvisBackdrop() }
         .overlay {
-            if list.isEmpty && query.isEmpty {
-                if let error = model.shopping.failureText, model.shopping.value == nil {
+            if model.shopping.value == nil {
+                if let error = model.shopping.failureText {
                     ContentUnavailableView("Couldn’t load the list", systemImage: "wifi.exclamationmark",
                                            description: Text(error))
-                } else if model.shopping.value != nil {
-                    ContentUnavailableView {
-                        Label("Nothing to buy", systemImage: "cart")
-                    } description: {
-                        Text("Type above, or tell JARVIS: “add face lotion to my shopping list.”")
-                    }
-                    .padding(.top, 80)
                 } else {
                     ProgressView()
                 }
             }
         }
-        .overlay(alignment: .bottom) { undoBar }
+        .safeAreaInset(edge: .bottom, spacing: 0) { bottomBar }
         .animation(.snappy, value: list.map(\.id))
-        .animation(.snappy, value: query.isEmpty)
+        .animation(.snappy, value: list.map(\.store))
         .navigationTitle("Shopping")
         .toolbar(.visible, for: .navigationBar)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
-                NavigationLink(value: ListRoute.savedItems) {
-                    Label("Saved items", systemImage: "square.grid.2x2")
+                PasteButton(supportedContentTypes: [.image, .plainText]) { providers in paste(providers) }
+                    .labelStyle(.iconOnly)
+                    .buttonBorderShape(.circle)
+                    .tint(JarvisTheme.cyan)
+            }
+            ToolbarItem(placement: .topBarTrailing) {
+                Menu {
+                    Button("New Store Section", systemImage: "rectangle.stack.badge.plus") {
+                        storeName = ""
+                        namingStore = true
+                    }
+                    NavigationLink(value: ListRoute.savedItems) {
+                        Label("Saved Items", systemImage: "square.grid.2x2")
+                    }
+                } label: {
+                    Label("More", systemImage: "ellipsis.circle")
+                }
+            }
+            ToolbarItem(placement: .keyboard) {
+                HStack {
+                    Spacer()
+                    Button("Done") { focus = nil }.fontWeight(.semibold)
+                }
+            }
+        }
+        .alert("New Store Section", isPresented: $namingStore) {
+            TextField("Costco, Target…", text: $storeName)
+            Button("Cancel", role: .cancel) {}
+            Button("Add") {
+                let name = storeName.trimmingCharacters(in: .whitespaces)
+                guard !name.isEmpty else { return }
+                if !allStores.contains(where: { $0.caseInsensitiveCompare(name) == .orderedSame }) {
+                    newStores.append(name)
+                }
+                let existing = allStores.first { $0.caseInsensitiveCompare(name) == .orderedSame } ?? name
+                Task {
+                    try? await Task.sleep(for: .milliseconds(350))
+                    focus = .add(existing)
                 }
             }
         }
         .sheet(item: $editing) { target in
-            ShoppingItemEditor(model: model, item: target.item, startName: target.name)
+            ShoppingItemEditor(model: model, item: target.item, startName: target.name,
+                               startStore: target.store, startImage: target.image)
         }
         .refreshable { await model.refreshShopping() }
         .task { await model.refreshShopping() }
-        .onAppear { if startAdding { adding = true } }
+        .onAppear {
+            guard startAdding else { return }
+            Task {
+                try? await Task.sleep(for: .milliseconds(450))
+                focus = .add("")
+            }
+        }
+        .onChange(of: focus) { old, new in
+            if case .item(let id) = old, old != new { commitRename(id) }
+            if case .add(let store) = new { lastStore = store }
+            if case .item(let id) = new, let item = list.first(where: { $0.id == id }) { lastStore = item.store }
+        }
         .sensoryFeedback(.success, trigger: lastBought?.id)
     }
 
-    private var addField: some View {
-        HStack(spacing: 12) {
-            Image(systemName: "plus.circle.fill")
-                .font(.title3)
-                .foregroundStyle(JarvisTheme.cyan)
-                .frame(width: 44)
-            TextField("Add an item", text: $query)
-                .focused($adding)
-                .submitLabel(.done)
-                .autocorrectionDisabled()
-                .onSubmit(submit)
-            if !query.isEmpty {
-                Button { query = "" } label: {
-                    Image(systemName: "xmark.circle.fill").foregroundStyle(.tertiary)
+    // MARK: Rows
+
+    private func row(_ item: ShoppingItem) -> some View {
+        let ticked = ticking.contains(item.id)
+        let isEditing = focus == .item(item.id)
+        return HStack(alignment: .center, spacing: 12) {
+            Button { tick(item) } label: { TickCircle(ticked: ticked) }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Bought \(item.name)")
+            VStack(alignment: .leading, spacing: 2) {
+                TextField("Item", text: nameBinding(item))
+                    .font(.body)
+                    .focused($focus, equals: .item(item.id))
+                    .submitLabel(.done)
+                    .strikethrough(ticked)
+                    .foregroundStyle(ticked ? .secondary : .primary)
+                    .onSubmit { focus = nil }
+                if let detail = detail(item) {
+                    Text(detail).font(.subheadline).foregroundStyle(.secondary).lineLimit(2)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            if isEditing {
+                Button { focus = nil; editing = ShoppingEditorTarget(item: item) } label: {
+                    Image(systemName: "info.circle").font(.title3).foregroundStyle(JarvisTheme.cyan)
                 }
                 .buttonStyle(.plain)
-                .accessibilityLabel("Clear")
+                .accessibilityLabel("Details for \(item.name)")
+                .transition(.opacity)
+            }
+            if item.hasPhoto {
+                Button { editing = ShoppingEditorTarget(item: item) } label: {
+                    ShoppingThumb(model: model, item: item, size: 44)
+                }
+                .buttonStyle(.plain)
             }
         }
         .padding(.vertical, 2)
+        .opacity(ticked ? 0.6 : 1)
+        .animation(.snappy, value: isEditing)
+        .draggable(String(item.id)) {
+            Label(item.name, systemImage: "circle")
+                .padding(.horizontal, 14).padding(.vertical, 10)
+                .background(.regularMaterial, in: .capsule)
+        }
+        .swipeActions(edge: .trailing) {
+            Button("Delete", systemImage: "trash", role: .destructive) {
+                Task { await model.unlistShopping(item) }
+            }
+            Button("Details", systemImage: "info.circle") { editing = ShoppingEditorTarget(item: item) }
+                .tint(.gray)
+        }
+        .contextMenu {
+            Button("Details", systemImage: "info.circle") { editing = ShoppingEditorTarget(item: item) }
+            Menu("Move to", systemImage: "arrow.right.square") {
+                ForEach(allStores.filter { $0.caseInsensitiveCompare(item.store) != .orderedSame }, id: \.self) { store in
+                    Button(store) { Task { await model.updateShopping(item) { $0.store = store } } }
+                }
+                if !item.store.isEmpty {
+                    Button("Anywhere") { Task { await model.updateShopping(item) { $0.store = "" } } }
+                }
+            }
+            Button("Remove from List", systemImage: "trash", role: .destructive) {
+                Task { await model.unlistShopping(item) }
+            }
+        }
     }
 
-    private func suggestionRow(_ item: ShoppingItem) -> some View {
+    /// The faint "New Item" row at the bottom of each section, like
+    /// Reminders'. Return adds and keeps the field ready for the next item.
+    private func addRow(_ store: String) -> some View {
+        HStack(spacing: 12) {
+            Image(systemName: "circle")
+                .font(.title2.weight(.light))
+                .foregroundStyle(.tertiary)
+                .frame(width: 28, height: 28)
+            TextField("New Item", text: draftBinding(store))
+                .focused($focus, equals: .add(store))
+                .submitLabel(.next)
+                .onSubmit { submit(store) }
+        }
+        .padding(.vertical, 2)
+        .contentShape(Rectangle())
+        .onTapGesture { focus = .add(store) }
+    }
+
+    private func suggestions(for store: String) -> [ShoppingItem] {
+        let q = (drafts[store] ?? "").trimmingCharacters(in: .whitespaces)
+        guard !q.isEmpty else { return [] }
+        return catalog
+            .filter { !$0.onList && $0.matches(q) }
+            .sorted { $0.matchScore(q) > $1.matchScore(q) }
+            .prefix(5).map { $0 }
+    }
+
+    private func suggestionRow(_ item: ShoppingItem, store: String) -> some View {
         Button {
-            Task { await model.listShopping(item) }
-            query = ""
+            drafts[store] = ""
+            add(item, to: store)
         } label: {
             HStack(spacing: 12) {
-                ShoppingThumb(model: model, item: item, size: 44)
-                VStack(alignment: .leading, spacing: 2) {
+                ShoppingThumb(model: model, item: item, size: 28)
+                VStack(alignment: .leading, spacing: 1) {
                     Text(item.name).font(.subheadline.weight(.medium)).foregroundStyle(.primary)
-                    detailText(item, showsBought: true)
+                    let parts = [item.note, item.store].filter { !$0.isEmpty }
+                    if !parts.isEmpty {
+                        Text(parts.joined(separator: " · ")).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                    }
                 }
                 Spacer(minLength: 4)
-                if item.onList {
-                    Text("On list").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
-                } else {
-                    Image(systemName: "plus.circle").font(.title3).foregroundStyle(JarvisTheme.cyan)
-                }
+                Image(systemName: "plus.circle").foregroundStyle(JarvisTheme.cyan)
             }
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .disabled(item.onList)
-        .accessibilityLabel(item.onList ? "\(item.name), already on the list" : "Add \(item.name)")
+        .listRowBackground(JarvisTheme.cyan.opacity(0.06))
+        .accessibilityLabel("Add saved \(item.name)")
     }
 
-    private func listRow(_ item: ShoppingItem) -> some View {
-        let ticked = ticking.contains(item.id)
-        return HStack(spacing: 12) {
-            Button { tick(item) } label: {
-                Image(systemName: ticked ? "checkmark.circle.fill" : "circle")
-                    .font(.title2)
-                    .foregroundStyle(ticked ? JarvisTheme.success : JarvisTheme.cyan)
-                    .contentTransition(.symbolEffect(.replace))
-                    .frame(width: 44, height: 44)
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel("Bought \(item.name)")
-            Button { editing = ShoppingEditorTarget(item: item) } label: {
+    private func detail(_ item: ShoppingItem) -> String? {
+        let parts = (item.quantity > 1 ? ["×\(item.quantity)"] : []) + (item.note.isEmpty ? [] : [item.note])
+        return parts.isEmpty ? nil : parts.joined(separator: " · ")
+    }
+
+    // MARK: Bottom bar (New Item, Undo)
+
+    private var bottomBar: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            if let item = lastBought {
                 HStack(spacing: 12) {
-                    ShoppingThumb(model: model, item: item, size: 44)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(item.quantity > 1 ? "\(item.name)  ×\(item.quantity)" : item.name)
-                            .font(.body.weight(.medium))
-                            .strikethrough(ticked)
-                            .foregroundStyle(ticked ? .secondary : .primary)
-                        if !item.note.isEmpty {
-                            Text(item.note).font(.caption).foregroundStyle(.secondary).lineLimit(1)
-                        }
+                    Image(systemName: "checkmark.circle.fill").foregroundStyle(JarvisTheme.success)
+                    Text("Got \(item.name)").font(.subheadline.weight(.medium)).lineLimit(1)
+                    Spacer(minLength: 8)
+                    Button("Undo") {
+                        undoTask?.cancel()
+                        withAnimation(.snappy) { lastBought = nil }
+                        Task { await model.undoBoughtShopping(item) }
                     }
-                    Spacer(minLength: 0)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(JarvisTheme.cyan)
                 }
-                .contentShape(Rectangle())
+                .padding(.horizontal, 16)
+                .padding(.vertical, 12)
+                .background(.regularMaterial, in: .capsule)
+                .transition(.move(edge: .bottom).combined(with: .opacity))
             }
-            .buttonStyle(.plain)
-        }
-        .listRowInsets(EdgeInsets(top: 4, leading: 4, bottom: 4, trailing: 16))
-        .swipeActions(edge: .leading) {
-            Button("Bought", systemImage: "checkmark") { tick(item) }.tint(JarvisTheme.success)
-        }
-        .swipeActions(edge: .trailing) {
-            Button("Remove", systemImage: "minus.circle") {
-                Task { await model.unlistShopping(item) }
+            if focus == nil {
+                Button { focus = .add(lastStore) } label: {
+                    Label("New Item", systemImage: "plus.circle.fill")
+                        .font(.headline)
+                        .foregroundStyle(JarvisTheme.cyan)
+                        .padding(.horizontal, 14).padding(.vertical, 10)
+                        .background(.regularMaterial, in: .capsule)
+                }
+                .buttonStyle(.plain)
+                .transition(.opacity)
             }
-            .tint(.gray)
         }
-        .contextMenu {
-            Button("Edit", systemImage: "pencil") { editing = ShoppingEditorTarget(item: item) }
-            Button("Remove from list", systemImage: "minus.circle") { Task { await model.unlistShopping(item) } }
+        .padding(.horizontal, 16)
+        .padding(.bottom, 8)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .animation(.snappy, value: focus == nil)
+    }
+
+    // MARK: Actions
+
+    private func draftBinding(_ store: String) -> Binding<String> {
+        Binding(get: { drafts[store] ?? "" }, set: { drafts[store] = $0 })
+    }
+
+    private func nameBinding(_ item: ShoppingItem) -> Binding<String> {
+        Binding(get: { renames[item.id] ?? item.name }, set: { renames[item.id] = $0 })
+    }
+
+    /// Focus left a row: save a changed name; an emptied one comes off the
+    /// list, the way clearing a reminder deletes it.
+    private func commitRename(_ id: Int) {
+        guard let text = renames.removeValue(forKey: id),
+              let item = list.first(where: { $0.id == id }) else { return }
+        let name = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        if name.isEmpty {
+            Task { await model.unlistShopping(item) }
+        } else if name != item.name {
+            Task { await model.updateShopping(item) { $0.name = name } }
         }
     }
 
-    @ViewBuilder
-    private func detailText(_ item: ShoppingItem, showsBought: Bool) -> some View {
-        let parts = [item.note, item.store].filter { !$0.isEmpty }
-            + (showsBought && item.timesBought > 0 ? ["bought \(item.timesBought)×"] : [])
-        if !parts.isEmpty {
-            Text(parts.joined(separator: " · ")).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+    /// Return in a New Item row: a saved item of that name goes back on the
+    /// list, anything else is a new item in this section. The field stays put.
+    private func submit(_ store: String) {
+        let text = (drafts[store] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { focus = nil; return }
+        drafts[store] = ""
+        addNamed(text, to: store)
+        focus = .add(store)
+    }
+
+    private func addNamed(_ name: String, to store: String) {
+        if let saved = catalog.first(where: { $0.name.caseInsensitiveCompare(name) == .orderedSame }) {
+            add(saved, to: store)
+            return
+        }
+        var draft = ShoppingItemDraft()
+        draft.name = name
+        draft.store = store
+        Task { _ = await model.saveShopping(draft, editing: nil, photo: .keep) }
+    }
+
+    /// A saved item onto the list, in the section it was added from.
+    private func add(_ item: ShoppingItem, to store: String) {
+        Task {
+            if !store.isEmpty && item.store.caseInsensitiveCompare(store) != .orderedSame {
+                await model.updateShopping(item) { $0.store = store }
+            }
+            if !item.onList { await model.listShopping(item) }
         }
     }
 
-    @ViewBuilder private var undoBar: some View {
-        if let item = lastBought {
-            HStack(spacing: 12) {
-                Image(systemName: "checkmark.circle.fill").foregroundStyle(JarvisTheme.success)
-                Text("Got \(item.name)").font(.subheadline.weight(.medium)).lineLimit(1)
-                Spacer(minLength: 8)
-                Button("Undo") {
-                    undoTask?.cancel()
-                    lastBought = nil
-                    Task { await model.undoBoughtShopping(item) }
-                }
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(JarvisTheme.cyan)
+    /// Dragged onto another store's section.
+    private func move(_ ids: [String], to store: String) -> Bool {
+        let items = ids.compactMap { id in list.first { String($0.id) == id } }
+            .filter { $0.store.caseInsensitiveCompare(store) != .orderedSame }
+        guard !items.isEmpty else { return false }
+        for item in items { Task { await model.updateShopping(item) { $0.store = store } } }
+        return true
+    }
+
+    /// Paste: lines of text become items (bullets and checkboxes stripped,
+    /// so a list copied from Notes or a text works); an image opens a new
+    /// item with that photo.
+    private func paste(_ providers: [NSItemProvider]) {
+        let store = lastStore
+        guard let provider = providers.first else { return }
+        if provider.hasItemConformingToTypeIdentifier(UTType.image.identifier) {
+            provider.loadDataRepresentation(forTypeIdentifier: UTType.image.identifier) { data, _ in
+                guard let data, let image = UIImage(data: data) else { return }
+                Task { @MainActor in editing = ShoppingEditorTarget(item: nil, store: store, image: image) }
             }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 12)
-            .background(.regularMaterial, in: .capsule)
-            .padding(.horizontal, 16)
-            .padding(.bottom, 12)
-            .transition(.move(edge: .bottom).combined(with: .opacity))
+            return
+        }
+        _ = provider.loadObject(ofClass: String.self) { text, _ in
+            guard let text else { return }
+            let names = ShoppingPaste.lines(text)
+            Task { @MainActor in for name in names { addNamed(name, to: store) } }
         }
     }
 
     /// Check, hold the tick for a beat so the eye sees it, then it leaves.
     private func tick(_ item: ShoppingItem) {
         guard !ticking.contains(item.id) else { return }
+        if focus == .item(item.id) { focus = nil }
         ticking.insert(item.id)
         Task {
-            try? await Task.sleep(for: .milliseconds(450))
+            try? await Task.sleep(for: .milliseconds(700))
             let done = await model.boughtShopping(item)
             ticking.remove(item.id)
             guard done != nil else { return }
@@ -244,33 +433,31 @@ struct ShoppingListView: View {
             }
         }
     }
+}
 
-    /// Return: an exact saved name goes on the list; anything else becomes
-    /// a new item right away (photo and store can be added later).
-    private func submit() {
-        let text = query.trimmingCharacters(in: .whitespaces)
-        guard !text.isEmpty else { return }
-        query = ""
-        adding = true
-        if let saved = model.shopping.value?.catalog.first(where: { $0.name.caseInsensitiveCompare(text) == .orderedSame }) {
-            if !saved.onList { Task { await model.listShopping(saved) } }
-            return
+/// Reminders' completion circle: an outline, then a filled dot in a ring.
+private struct TickCircle: View {
+    let ticked: Bool
+
+    var body: some View {
+        ZStack {
+            Circle().strokeBorder(ticked ? JarvisTheme.cyan : Color.secondary.opacity(0.6), lineWidth: 1.5)
+            if ticked {
+                Circle().fill(JarvisTheme.cyan).padding(4).transition(.scale.combined(with: .opacity))
+            }
         }
-        var draft = ShoppingItemDraft()
-        draft.name = text
-        Task { _ = await model.saveShopping(draft, editing: nil, photo: .keep) }
-    }
-
-    private func newItem() {
-        let name = query.trimmingCharacters(in: .whitespaces)
-        query = ""
-        editing = ShoppingEditorTarget(item: nil, name: name)
+        .frame(width: 24, height: 24)
+        .frame(width: 28, height: 28)
+        .contentShape(Rectangle().inset(by: -8))
+        .animation(.snappy(duration: 0.2), value: ticked)
     }
 }
 
 struct ShoppingEditorTarget: Identifiable {
     var item: ShoppingItem?
     var name = ""
+    var store = ""
+    var image: UIImage?
     var id: String { item.map { "item-\($0.id)" } ?? "new-\(name)" }
 }
 
@@ -370,6 +557,9 @@ struct ShoppingItemEditor: View {
     @ObservedObject var model: HubViewModel
     let item: ShoppingItem?
     var startName = ""
+    var startStore = ""
+    /// A pasted image to start a new item with.
+    var startImage: UIImage?
     var listByDefault = true
     @Environment(\.dismiss) private var dismiss
     @State private var draft = ShoppingItemDraft()
@@ -470,7 +660,9 @@ struct ShoppingItemEditor: View {
                     if item.hasPhoto, let data = await model.shoppingPhoto(item) { preview = UIImage(data: data) }
                 } else {
                     draft.name = startName
+                    draft.store = startStore
                     draft.onList = listByDefault
+                    if let startImage { use(startImage) }
                 }
             }
         }
@@ -524,6 +716,7 @@ struct ShoppingItemEditor: View {
                         Task { @MainActor in use(image) }
                     }
                 }
+                .labelStyle(.titleAndIcon)
                 .buttonBorderShape(.capsule)
                 .tint(JarvisTheme.cyan)
                 if preview != nil && !cutOut {

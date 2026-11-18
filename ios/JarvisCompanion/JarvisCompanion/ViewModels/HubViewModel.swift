@@ -575,6 +575,19 @@ final class HubViewModel: ObservableObject {
         return saved
     }
 
+    /// A quick in-place edit (rename, move to another store), shown at once.
+    @discardableResult
+    func updateShopping(_ item: ShoppingItem, _ change: (inout ShoppingItemDraft) -> Void) async -> ShoppingItem? {
+        var draft = ShoppingItemDraft(item)
+        change(&draft)
+        var shown = item
+        shown.name = draft.name
+        shown.note = draft.note
+        shown.store = draft.store
+        shown.quantity = draft.quantity
+        return await shoppingAction(shown) { try await $0.updateShoppingItem(id: item.id, draft) }
+    }
+
     @discardableResult
     func deleteShopping(_ item: ShoppingItem) async -> Bool {
         let before = shopping.value

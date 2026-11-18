@@ -41,8 +41,16 @@ and a new photo shopping list kept separate (and no dedicated checklist tab).
 - Home: reactor, Lists row (To do / Shopping / Maintenance tiles → pushed
   lists), next-up strip, scenes, portfolio. To-dos no longer include due
   chores; maintenance has its own sectioned list.
-- Shopping: `brain/shopping.py` catalog + `on_list`; suggestions while
-  typing, photos per item, tick off with Undo, Saved items grid, JARVIS tools.
+- Shopping: `brain/shopping.py` catalog + `on_list`; photos per item, Saved
+  items grid, JARVIS tools. Since 6.75 the list works like Apple Reminders:
+  one section per store, each ending in a "New Item" row (Return keeps the
+  field for the next item; saved items are suggested as you type), tap a
+  name to rename in place (ⓘ opens details; clearing a name takes it off the
+  list), ring tick with Undo, swipe Delete/Details, drag a row onto another
+  store (or long-press → Move to), New Store Section in the ⋯ menu, a
+  floating New Item button, and a toolbar Paste: copied text becomes one item
+  per line (bullets/checkboxes stripped), a copied image starts a new item
+  with that photo. Paste also sits in the item editor's photo area.
 - Control: attention and repairs first, camera/TV remote as a two-up row,
   switches, Now (without reminders).
 - Settings: native grouped list with drill-down pages.

@@ -102,6 +102,23 @@ enum ShoppingGrouping {
     }
 }
 
+/// Pasted text as item names: one per line, list bullets, numbering and
+/// checkboxes stripped, blanks and repeats dropped.
+enum ShoppingPaste {
+    static func lines(_ text: String) -> [String] {
+        var seen = Set<String>()
+        return text.components(separatedBy: .newlines).compactMap { raw in
+            var line = raw.trimmingCharacters(in: .whitespaces)
+            if let range = line.range(of: #"^(\[[ xX]?\]\s*|[-*•◦▪☐☑✓✔]\s*|\d+[.)]\s+)"#, options: .regularExpression) {
+                line.removeSubrange(range)
+            }
+            line = line.trimmingCharacters(in: .whitespaces)
+            guard !line.isEmpty, seen.insert(line.lowercased()).inserted else { return nil }
+            return String(line.prefix(120))
+        }
+    }
+}
+
 /// What the editor does to an item's photo on save.
 enum ShoppingPhotoChange {
     case keep

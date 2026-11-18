@@ -39,4 +39,9 @@ final class ShoppingModelTests: XCTestCase {
         XCTAssertEqual(sections.map(\.title), ["Costco", "Walmart", "Anywhere"])
         XCTAssertEqual(sections[1].items.map(\.name), ["Eggs", "Milk"])
     }
+
+    func testPastedLinesBecomeItemNames() {
+        let text = "- Eggs\n• milk\n\n[ ] Paper towels\n2. Coffee\n1.5L water\nEGGS\n  Bread  "
+        XCTAssertEqual(ShoppingPaste.lines(text), ["Eggs", "milk", "Paper towels", "Coffee", "1.5L water", "Bread"])
+    }
 }

@@ -664,6 +664,9 @@ entry in `brain/agent_roster.py` (name, kind, icon, description, schedule);
   → asks which; anything new is saved for next time
 - `shopping_list` — what's on it, grouped by store
 - `mark_shopping_bought(items[], not_bought?)` — tick off (kept in the catalog)
+- Companion (6.75+): a Reminders-style list per store — inline New Item rows,
+  rename in place, drag between stores, toolbar Paste (lines → items, image →
+  new item with photo)
 - Companion API: `GET /api/shopping` (list + catalog), `GET /api/shopping/suggest?q=`,
   `POST/PUT/DELETE /api/shopping/items[/{id}]`, `POST|DELETE …/{id}/list`,
   `POST|DELETE …/{id}/bought` (DELETE = undo), `PUT|GET|DELETE …/{id}/photo` (raw JPEG)
