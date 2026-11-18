@@ -32,6 +32,9 @@ _LIGHT_SYNC = re.compile(r"^(?:(?P<verb>start|stop|begin|end|resume|turn on|turn
                          r"enable|disable|cancel|kill)\s+)?lights?\s?sync(?:\s+(?P<tail>on|off))?$")
 _LIGHT_SYNC_ON = {"start", "begin", "resume", "turn on", "switch on", "enable", "on"}
 _SCENE_VERBS = re.compile(r"^(?:run|start|activate|set|turn on|do|it's|its|time for)\s+")
+# Everything up to the wake word: "Google. Hey, Jarvis. Set bedroom lights to 35",
+# "Oh. Hey, Jarvis, turn my fan off" — what came before it isn't the command.
+_BEFORE_WAKE = re.compile(r"^.*\bjarvis\b[\s,.!?:;]*", re.IGNORECASE | re.DOTALL)
 
 
 @dataclass
@@ -77,7 +80,9 @@ def _match_entity(target: str, entities: list[dict]) -> dict | None:
 
 def run(text: str) -> QuickResult | None:
     """Run ``text`` if it is plainly a scene, an on/off, a brightness or a fan speed; else None."""
-    text = normalize(text)
+    command = _BEFORE_WAKE.sub("", text or "")
+    # "Good night, Jarvis": nothing after the name, so the whole thing is the command.
+    text = normalize(command if normalize(command) else text)
     if not text or len(text.split()) > 8:
         return None
     sync = _LIGHT_SYNC.match(text)

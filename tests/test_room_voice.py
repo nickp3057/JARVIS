@@ -60,6 +60,17 @@ class QuickCommandTests(unittest.TestCase):
         quick_commands.run("set the bedroom light to 40 percent")
         self.light.assert_called_with("light.bedroom_lights", brightness_pct=40)
 
+    def test_words_before_the_wake_word_are_ignored(self) -> None:
+        # Heard on the Surface, 2026-11-17: the leading "Google." sent this to the slow path.
+        result = quick_commands.run("Google. Hey, Jarvis. Set bedroom lights to 35")
+        self.assertTrue(result and result.ok)
+        self.light.assert_called_once_with("light.bedroom_lights", brightness_pct=35)
+        result = quick_commands.run("Oh. Hey, Jarvis, set my fan to 35")
+        self.assertTrue(result and result.ok)
+        self.fan.assert_called_once_with("fan.nicks_fan", 35)
+        quick_commands.run("Like, hey Jarvis, turn my fan off")
+        self.control.assert_called_with("fan.nicks_fan", "off", settle=False)
+
     def test_fan_speed_never_touches_the_fan_light(self) -> None:
         for said in ("Set fan to 30", "Set fan to 30%.", "fan at 30 percent"):
             self.fan.reset_mock()

@@ -1829,7 +1829,7 @@ there, so edit files with a `sudo python3` one-shot or vi.
   `hey_jarvis` → soft "listen" sound → record to ~0.55 s of silence while a
   tiny Whisper (`VOICE_LIVE_MODEL`) captions live → final transcript
   (`WHISPER_MODEL`, base.en recommended on the i5-6500T) →
-  `speech/quick_commands.py` runs plain scenes / on-off / "X to 40%" / "fan to 30" (fan speed, `status_hub.set_fan`; a bare "fan" never means the fan light) straight
+  `speech/quick_commands.py` runs plain scenes / on-off / "X to 40%" / "fan to 30" (fan speed, `status_hub.set_fan`; a bare "fan" never means the fan light); anything heard before "Jarvis" ("Google. Hey, Jarvis, …") is ignored straight
   through `status_hub` with a jingle (`speech/room_sounds.py`, no words);
   anything else is `runtime.respond(text, spoken=True)`, which adds a
   "spoken reply: one short sentence, 'Done.' after a home action" hint to the
