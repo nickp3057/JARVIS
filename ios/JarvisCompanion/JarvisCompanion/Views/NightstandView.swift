@@ -40,13 +40,14 @@ struct NightstandPanel: View {
             if wide {
                 VStack(spacing: 18) {
                     HStack(spacing: 24) {
-                        jarvis(size: min(geo.size.height * 0.56, geo.size.width * 0.34))
-                            .frame(width: geo.size.width * 0.40)
+                        // JARVIS gave the clock a little of his column (Nick, 2026-11-19: bigger clock).
+                        jarvis(size: min(geo.size.height * 0.54, geo.size.width * 0.32))
+                            .frame(width: geo.size.width * 0.36)
                         Group {
                             if talking {
                                 dialoguePanel
                             } else {
-                                clock(width: geo.size.width * 0.52, height: geo.size.height)
+                                clock(width: geo.size.width * 0.57, height: geo.size.height)
                             }
                         }
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -69,7 +70,7 @@ struct NightstandPanel: View {
                 }
             }
         }
-        .sheet(isPresented: $showingRoom) { NightstandRoomSheet(model: model) }
+        .sheet(isPresented: $showingRoom) { NightstandRoomSheet(model: model).idleDismiss() }
     }
 
     // MARK: - JARVIS
@@ -108,7 +109,7 @@ struct NightstandPanel: View {
             Spacer(minLength: 0)
             TimelineView(.everyMinute) { context in
                 VStack(spacing: 6) {
-                    NightstandTime(date: context.date, size: min(width * 0.30, height * 0.26), color: .primary)
+                    NightstandTime(date: context.date, size: min(width * 0.37, height * 0.33), color: .primary)
                         .frame(maxWidth: width)
                     HStack(spacing: 12) {
                         Text(context.date, format: .dateTime.weekday(.wide).month(.wide).day())
@@ -305,7 +306,7 @@ struct NightstandRoomSheet: View {
             .navigationTitle("Room")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Done") { dismiss() } } }
-            .sheet(item: $lightSheet) { LightSheet(model: model, entityID: $0.id) }
+            .sheet(item: $lightSheet) { LightSheet(model: model, entityID: $0.id).idleDismiss() }
         }
         .tint(JarvisTheme.cyan)
     }

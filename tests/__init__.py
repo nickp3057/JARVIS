@@ -7,13 +7,15 @@ tool would otherwise write Nick's live file. Tests that need the file patch
 import tempfile
 from pathlib import Path
 
-from brain import event_bus, lessons, memory_extractor, tool_health, usage, watches
+from brain import event_bus, lessons, memory_extractor, movie_exit, tool_health, usage, watches
 
 _TMP = tempfile.mkdtemp(prefix="jarvis-tests-")
 tool_health._FILE = Path(_TMP) / "tool_health.json"
 event_bus._REPEATS_FILE = Path(_TMP) / "alert_repeats.json"  # and off memory/alert_repeats.json
 lessons._FILE = Path(_TMP) / "lessons.json"  # and off memory/lessons.json
 watches._FILE = Path(_TMP) / "watches.json"  # and off memory/watches.json
+movie_exit._DIR = Path(_TMP)  # a faked Movie scene never snapshots into memory/movie_before*.json
+movie_exit._SNAPSHOTS = False  # ...nor asks the real HA for one (tests/test_movie_exit.py turns it on)
 usage._DB_PATH = Path(_TMP) / "usage.db"  # every faked model response would otherwise hit the real ledger
 memory_extractor._core_client = lambda: None  # an import never reaches the real API to distil the core profile
 

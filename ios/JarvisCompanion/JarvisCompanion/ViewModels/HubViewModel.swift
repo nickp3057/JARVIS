@@ -451,6 +451,23 @@ final class HubViewModel: ObservableObject {
         }
     }
 
+    /// Exit Movie (the nightstand's movie remote): the room as it was before.
+    func exitMovie() {
+        guard runningScene == nil else { return }
+        runningScene = "scene.movie"
+        Task {
+            defer { runningScene = nil }
+            do {
+                let error = try await client().exitMovieScene()
+                if !error.isEmpty { actionError = error }
+            } catch {
+                actionError = error.localizedDescription
+            }
+            await refreshScenes()
+            await refreshEntities()
+        }
+    }
+
     // MARK: - Light sync
 
     private var lastLightSyncRevision: Int?

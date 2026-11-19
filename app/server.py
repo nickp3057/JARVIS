@@ -1729,6 +1729,14 @@ def home_scene_activate(request: SceneRequest, _: None = Depends(authorize)) -> 
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
+@app.post("/api/home/scenes/exit-movie")
+def home_scene_exit_movie(_: None = Depends(authorize)) -> dict[str, object]:
+    """The movie remote's Exit Movie: the room back to how it was before the
+    Movie scene (brain/movie_exit.py), light sync let go."""
+    from brain import movie_exit
+    return movie_exit.exit_movie()
+
+
 # --- Light sync (brain/light_sync.py, brain/light_tracks.py) ----------------
 
 

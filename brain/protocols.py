@@ -140,24 +140,25 @@ def _is_on(entity: str) -> bool:
     return bool(ok and isinstance(state, dict) and state.get("state") == "on")
 
 
-def _save_fan(strip: str) -> None:
-    """Whether the fan ring was in its rainbow (on, with the strip on) before Barn Door."""
-    _FAN_FILE.parent.mkdir(parents=True, exist_ok=True)
-    _FAN_FILE.write_text(json.dumps({"rainbow": _is_on(strip) and _is_on("light.nicks_fan")}))
+def _save_fan(strip: str, path: Path = _FAN_FILE) -> None:
+    """Whether the fan ring was in its rainbow (on, with the strip on) before
+    Barn Door (or Movie: ``brain/movie_exit.py`` passes its own file)."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({"rainbow": _is_on(strip) and _is_on("light.nicks_fan")}))
 
 
-def _fan_back() -> None:
+def _fan_back(path: Path = _FAN_FILE) -> None:
     try:
-        rainbow = json.loads(_FAN_FILE.read_text()).get("rainbow", False)
+        rainbow = json.loads(path.read_text()).get("rainbow", False)
     except (OSError, ValueError):
         rainbow = False
-    _FAN_FILE.unlink(missing_ok=True)
+    path.unlink(missing_ok=True)
     home_assistant.call_service("automation", "turn_on", _FOLLOW)
     if rainbow:
         home_assistant.call_service("scene", "turn_on", _FAN_RAINBOW)
 
 
-def _save_effects(entities: list[str]) -> None:
+def _save_effects(entities: list[str], path: Path = _EFFECTS_FILE) -> None:
     """Each light's running effect (and each configured DIY-scene dropdown's
     pick), which scene snapshots don't bring back."""
     running = {}
@@ -171,8 +172,8 @@ def _save_effects(entities: list[str]) -> None:
         effect = (state.get("attributes") or {}).get("effect") if ok and isinstance(state, dict) else None
         if effect and str(effect).lower() != "none":
             running[entity] = effect
-    _EFFECTS_FILE.parent.mkdir(parents=True, exist_ok=True)
-    _EFFECTS_FILE.write_text(json.dumps(running))
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(running))
 
 
 def _configured_effects() -> dict[str, str]:
@@ -184,10 +185,10 @@ def _configured_effects() -> dict[str, str]:
     return effects
 
 
-def _effects_to_restore() -> dict[str, str]:
+def _effects_to_restore(path: Path = _EFFECTS_FILE) -> dict[str, str]:
     effects = _configured_effects()
     try:
-        effects.update(json.loads(_EFFECTS_FILE.read_text()))  # what was actually running wins
+        effects.update(json.loads(path.read_text()))  # what was actually running wins
     except (OSError, ValueError):
         pass
     return effects

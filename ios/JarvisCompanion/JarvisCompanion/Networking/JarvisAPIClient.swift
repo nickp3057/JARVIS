@@ -1370,6 +1370,14 @@ struct JarvisAPIClient {
                                   body: Body(entityID: entityID, toggle: toggle)).error
     }
 
+    /// The movie remote's Exit Movie: Core puts the room back the way it was
+    /// before the Movie scene (`brain/movie_exit.py`). Returns HA's error, or "".
+    func exitMovieScene() async throws -> String {
+        struct Empty: Encodable {}
+        struct Result: Decodable { let error: String }
+        return try await postJSON(Result.self, path: "api/home/scenes/exit-movie", body: Empty()).error
+    }
+
     func homeControl(entityID: String, turnOn: Bool) async throws -> HomeControlResult {
         try await postJSON(
             HomeControlResult.self,

@@ -202,16 +202,18 @@ struct RoomView: View {
         .statusBarHidden(fullScreen && !RootView.isMac)
         .persistentSystemOverlays(fullScreen && !RootView.isMac ? .hidden : .automatic)
         .refreshable { await refresh() }
-        .sheet(isPresented: $showingRemote) { TVRemoteView() }
+        // Every pop-up closes itself after a while untouched (`idleDismiss`).
+        .sheet(isPresented: $showingRemote) { TVRemoteView().idleDismiss() }
         .sheet(isPresented: $showingSettings) {
             RoomSettingsView(model: model, wakeLightChoices: wakeLightChoices)
                 .environmentObject(settings)
+                .idleDismiss()
         }
         .sheet(isPresented: $showingWake) {
-            NavigationStack { WakeScheduleView() }
+            NavigationStack { WakeScheduleView() }.idleDismiss()
         }
         .sheet(item: $lightSheet) { item in
-            LightSheet(model: model, entityID: item.id)
+            LightSheet(model: model, entityID: item.id).idleDismiss()
         }
         .onChange(of: holding) { was, now in
             // The finger lifted after a hold: no drag means the panel stays open to use.
@@ -224,6 +226,7 @@ struct RoomView: View {
                let entity = model.entities.value?.first(where: { $0.entityID == id }) {
                 LevelPanel(model: model, dragger: dragger, entity: entity, symbol: Self.symbol(for: entity),
                            interactive: dragger.panelID == id)
+                    .idleDismiss { dragger.closePanel() }
                     .transition(.opacity.combined(with: .scale(scale: 0.96)))
             }
         }
@@ -509,12 +512,10 @@ struct RoomView: View {
                 if !RootView.isMac { BatteryBadge() }
                 TimelineView(.everyMinute) { context in
                     VStack(alignment: .leading, spacing: 2) {
-                        // One line: "11:47 PM" used to drop the PM below.
-                        Text(context.date, format: .dateTime.hour().minute())
-                            .font(.system(size: 64, weight: .thin, design: .rounded))
-                            .monospacedDigit()
-                            .lineLimit(1)
-                            .minimumScaleFactor(0.6)
+                        // The nightstand's clock (2026-11-19 makeover): big rounded
+                        // semibold digits with a small AM/PM, on one line.
+                        NightstandTime(date: context.date, size: fill ? 104 : 88)
+                            .frame(maxWidth: .infinity, alignment: .leading)
                         HStack(spacing: 12) {
                             Text(context.date, format: .dateTime.weekday(.wide).month(.wide).day())
                                 .lineLimit(1)
@@ -539,40 +540,48 @@ struct RoomView: View {
             } else {
                 core(size: 170)
             }
+            Text(voice.active ? "Listening" : "Say \u{201C}Hey JARVIS\u{201D}")
+                .font(.footnote)
+                .foregroundStyle(.tertiary)
+                .frame(maxWidth: .infinity)
             Divider().overlay(JarvisTheme.border)
             if let event = model.now.value?.nextEvent {
                 infoRow("calendar", title: "Next up", value: eventText(event))
             }
             ForEach(timers.prefix(2)) { timerRow($0) }
             RoomVolumeControl()
+            // The nightstand's bar: the remote big, TV power, and one menu
+            // for the rarely used things (settings, JARVIS's memory).
             HStack(spacing: 10) {
                 Button { showingRemote = true } label: {
                     Label("TV remote", systemImage: "appletvremote.gen4")
                         .font(.headline)
-                        .frame(maxWidth: .infinity, minHeight: 52)
-                        .background(JarvisTheme.cyan.opacity(0.14), in: .rect(cornerRadius: 14))
-                        .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(JarvisTheme.cyan.opacity(0.4)))
+                        .foregroundStyle(JarvisTheme.cyan)
+                        .frame(maxWidth: .infinity, minHeight: 64)
+                        .background(JarvisTheme.cyan.opacity(0.14), in: .rect(cornerRadius: 20))
+                        .overlay(RoundedRectangle(cornerRadius: 20).strokeBorder(JarvisTheme.cyan.opacity(0.4)))
                 }
                 .buttonStyle(CockpitButtonStyle())
-                TVPowerButton()  // the TV on or off in one tap
+                TVPowerButton(size: 64)  // the TV on or off in one tap
+                Menu {
+                    Button { showingSettings = true } label: { Label("Room settings", systemImage: "gearshape") }
+                    // The wake-up row lives here now (more room for JARVIS), its time in the label.
+                    Button { showingWake = true } label: { Label("Wake-up · \(wakeText)", systemImage: "alarm") }
+                    Divider()
+                    Button { roomCover = .memoryMap } label: { Label("Memory map", systemImage: "point.3.connected.trianglepath.dotted") }
+                    Button { roomCover = .linkMap } label: { Label("Link map", systemImage: "dot.radiowaves.left.and.right") }
+                    Button { roomCover = .agentMap } label: { Label("Agents", systemImage: "person.3.sequence") }
+                    Button { showingImport = true } label: { Label("Import memory", systemImage: "square.and.arrow.down") }
+                } label: {
+                    Image(systemName: "ellipsis")
+                        .font(.title3.weight(.semibold))
+                        .frame(width: 64, height: 64)
+                        .jarvisSurface(in: .rect(cornerRadius: 20))
+                        .overlay(RoundedRectangle(cornerRadius: 20).strokeBorder(JarvisTheme.border))
+                }
+                .buttonStyle(CockpitButtonStyle())
+                .accessibilityLabel("Menu")
             }
-            // One menu for the rarely used things: settings, and JARVIS's memory.
-            Menu {
-                Button { showingSettings = true } label: { Label("Room settings", systemImage: "gearshape") }
-                // The wake-up row lives here now (more room for JARVIS), its time in the label.
-                Button { showingWake = true } label: { Label("Wake-up · \(wakeText)", systemImage: "alarm") }
-                Divider()
-                Button { roomCover = .memoryMap } label: { Label("Memory map", systemImage: "point.3.connected.trianglepath.dotted") }
-                Button { roomCover = .linkMap } label: { Label("Link map", systemImage: "dot.radiowaves.left.and.right") }
-                Button { roomCover = .agentMap } label: { Label("Agents", systemImage: "person.3.sequence") }
-                Button { showingImport = true } label: { Label("Import memory", systemImage: "square.and.arrow.down") }
-            } label: {
-                Label("Menu", systemImage: "line.3.horizontal")
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, minHeight: 40)
-            }
-            .buttonStyle(CockpitButtonStyle())
         }
         .roomPanel(fill: fill)
     }
@@ -921,6 +930,25 @@ private struct MovieModeView: View {
                     .font(.headline)
                     .foregroundStyle(JarvisTheme.amber.opacity(0.8))
                 Spacer()
+                // Out of the Movie scene in one tap: the room goes back to
+                // how it was before (Core's snapshot, brain/movie_exit.py).
+                Button { model.exitMovie() } label: {
+                    HStack(spacing: 6) {
+                        if model.runningScene == "scene.movie" {
+                            ProgressView().controlSize(.small)
+                        } else {
+                            Image(systemName: "arrow.uturn.backward")
+                        }
+                        Text("Exit movie")
+                    }
+                    .font(.subheadline.weight(.semibold))
+                    .padding(.horizontal, 16).padding(.vertical, 10)
+                    .background(Color.white.opacity(0.06), in: .capsule)
+                }
+                .buttonStyle(CockpitButtonStyle())
+                .foregroundStyle(.secondary)
+                .disabled(model.runningScene != nil)
+                .accessibilityHint("Ends the Movie scene and puts the lights back the way they were")
                 Button(action: backToPanel) {
                     Label("Back to panel", systemImage: "square.grid.2x2")
                         .font(.subheadline.weight(.semibold))
@@ -1260,6 +1288,7 @@ private struct RoomSettingsView: View {
     @AppStorage(RoomView.nightClockKey) private var nightClock = true
     @AppStorage(RoomView.darkClockKey) private var darkClockLevel = NightstandDarkClock.defaultLevel
     @AppStorage(RoomView.nightstandWakeLightKey) private var nightstandWakeLight = ""
+    @AppStorage(TouchActivity.timeoutKey) private var popupTimeout = TouchActivity.defaultTimeout
 
     private var nightstand: Bool { PadRole.resolve(padRoleRaw) == .nightstand }
     @AppStorage(RoomView.maxBrightnessKey) private var maxBrightness = true
@@ -1359,6 +1388,11 @@ private struct RoomSettingsView: View {
                         }
                     }
                     Toggle("Back to Room after 3 min on another tab", isOn: $autoReturn)
+                    if !RootView.isMac {
+                        Picker("Pop-ups close after", selection: $popupTimeout) {
+                            ForEach(TouchActivity.choices, id: \.seconds) { Text($0.name).tag($0.seconds) }
+                        }
+                    }
                 }
                 NightVolumePanel(inForm: true)
                 Section {
@@ -1447,20 +1481,24 @@ private struct RoomMemoryCovers: ViewModifier {
     func body(content: Content) -> some View {
         content
             .fullScreenCover(item: $cover) { cover in
-                switch cover {
-                case .memoryMap:
-                    // After the map has finished closing: a sheet can't open mid-dismiss.
-                    MemoryMapView { path in DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { openNote = path } }
-                case .linkMap: LinkMapView()
-                case .agentMap: AgentMapView()
+                Group {
+                    switch cover {
+                    case .memoryMap:
+                        // After the map has finished closing: a sheet can't open mid-dismiss.
+                        MemoryMapView { path in DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { openNote = path } }
+                    case .linkMap: LinkMapView()
+                    case .agentMap: AgentMapView()
+                    }
                 }
+                .idleDismiss()
             }
-            .sheet(isPresented: $showingImport) { ImportMemoryView() }
+            .sheet(isPresented: $showingImport) { ImportMemoryView().idleDismiss() }
             .sheet(item: Binding(get: { openNote.map(NotePath.init) }, set: { openNote = $0?.id })) { note in
                 NavigationStack {
                     NoteDetail(path: note.id)
                         .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { openNote = nil } } }
                 }
+                .idleDismiss()
             }
     }
 }

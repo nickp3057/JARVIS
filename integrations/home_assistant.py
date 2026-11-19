@@ -693,6 +693,14 @@ def activate_home_action(kind: str, name: str) -> str:
     if not success:
         return entity_or_message
 
+    if kind == "scene" and entity_or_message == "scene.movie":
+        try:
+            from app import status_hub
+            from brain import movie_exit
+            movie_exit.before_movie(status_hub.home_scenes().get("current"))
+        except Exception:  # noqa: BLE001 - Movie runs regardless
+            pass
+
     success, message = call_service(
         kind,
         _ACTION_SERVICES[kind],

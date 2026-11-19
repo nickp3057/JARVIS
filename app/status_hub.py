@@ -901,6 +901,13 @@ def _home_scenes_uncached() -> dict[str, Any]:
     ran = [s for s in scenes if s["last_activated"]]
     last = max(ran, key=lambda s: s["last_activated"])["entity_id"] if ran else None
     current = last if last and last not in _resting_scenes() else None
+    if current == "scene.movie":
+        # Exit Movie (brain/movie_exit.py) put the room back; HA still says Movie ran last.
+        from brain import movie_exit
+        movie = next(s for s in scenes if s["entity_id"] == current)
+        exited, previous = movie_exit.current_override(movie["last_activated"])
+        if exited:
+            current = previous if previous in {s["entity_id"] for s in scenes} else None
     return {"error": "", "scenes": scenes, "last": last, "current": current}
 
 
@@ -1066,7 +1073,11 @@ def activate_scene(entity_id: str, toggle: bool = False) -> dict[str, Any]:
         if entity_id not in _scene_ids(home_scenes()):
             raise ValueError("not a saved Home Assistant scene")
     invalidate("scenes")
-    left = bool(toggle) and home_scenes().get("current") == entity_id and _scene_matches(entity_id)
+    room_scene = home_scenes().get("current") if toggle or entity_id == "scene.movie" else None
+    left = bool(toggle) and room_scene == entity_id and _scene_matches(entity_id)
+    if entity_id == "scene.movie" and not left:
+        from brain import movie_exit
+        movie_exit.before_movie(room_scene)  # so Exit Movie can put the room back
     message = _leave_scene(entity_id) if left else call_discovered_service("scene", "turn_on", entity_id=entity_id)
     invalidate("scenes")
     invalidate("entities")

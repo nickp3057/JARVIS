@@ -1355,6 +1355,18 @@ class LightSync:
                 log.warning("Light sync couldn't stop the test clip", exc_info=True)
         return True, f"Calibration done, sir. The setup timing is {_ms(self.setup_offset())}."
 
+    def release_for_movie_exit(self) -> None:
+        """Exit Movie: stop syncing this film (and don't start again for it)
+        without putting the Movie scene back; ``brain/movie_exit.py``
+        restores the room as it was before the film."""
+        with self._lock:
+            self.movie_mode = False
+            if self.calibration is None:
+                self.manual_key = None
+            if self.session is not None:
+                self.suppressed_key = self.session.rating_key
+                self._stop_session(restore=False)
+
     def release_for_barn_door(self) -> None:
         """Barn Door is engaging: let go of the strips now (not at the next
         tick), so its red reaches them. No Movie scene: Barn Door owns the room."""
@@ -1518,6 +1530,13 @@ def monitor_pass() -> float:
             controller.poll_plex()
     controller.tick(movie_mode=movie_mode, barn_door=barn_door)
     return 1.0 if controller.armed() else 5.0
+
+
+def release_for_movie_exit() -> None:
+    try:
+        controller.release_for_movie_exit()
+    except Exception:  # noqa: BLE001 - the room goes back regardless
+        log.exception("Light sync couldn't release for Exit Movie")
 
 
 def release_for_barn_door() -> None:

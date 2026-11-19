@@ -158,6 +158,10 @@ Check these on the phone first. Some of the "weird" may already be gone.
   6.35: two iPads, two roles (`PadRole`): the nightstand mini gets movie mode,
   a dim night clock and the camera's Bed angle; the door Air keeps the panel
   (dimmed during movies) and the Door angle. The phone's camera view shows both.
+  6.78: Exit movie on the movie remote (Core restores the room from a snapshot
+  taken when Movie ran); every Room pop-up closes after a minute untouched
+  (`IdleDismiss`, Room settings › Pop-ups close after); the mini's clock ~20%
+  bigger; the door Air borrows the mini's clock, caption and bottom bar.
   5.33: polling trimmed: no light/theme polls while the home stream is up, Room
   skips Hub-only sections, portfolio every 5 s only in market hours.
 - Next: an iOS Home Screen / Control Center widget for scenes (needs a
