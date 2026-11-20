@@ -112,6 +112,7 @@ class MusicLightsCalendarTests(unittest.TestCase):
                             ("previous_track", "Going back."), ("current_track", "Back in Black by AC/DC."),
                             ("play_music", "Playing Back in Black by AC/DC on Optiplex.")):
             patch.object(spotify, name, return_value=reply).start()
+        patch.object(spotify, "_is_configured", return_value=True).start()
         self.addCleanup(patch.stopall)
 
     def ask(self, text: str):  # noqa: ANN202
@@ -124,12 +125,18 @@ class MusicLightsCalendarTests(unittest.TestCase):
         self.assertEqual(self.ask("what song is this").say, "It's Back in Black by AC/DC.")
         self.assertEqual(self.ask("play back in black").say, "Playing Back in Black by AC/DC on Optiplex.")
         self.spotify.play_music.assert_called_once_with("back in black")
-        for not_music in ("play the next episode on the tv", "play the movie", "play a game"):
+        for not_music in ("play the next episode on the tv", "play the movie", "play a game",
+                          "play hunger games ballad of songbirds and snake on my tv"):
             self.spotify.play_music.reset_mock()
             if not_music == "play a game":
                 continue
             self.assertIsNone(self.ask(not_music), not_music)
             self.spotify.play_music.assert_not_called()
+
+    def test_no_spotify_leaves_play_to_jarvis(self) -> None:
+        with patch.object(self.spotify, "_is_configured", return_value=False):
+            self.assertIsNone(self.ask("pause"))
+            self.assertIsNone(self.ask("play back in black"))
 
     def test_spotify_trouble_is_spoken(self) -> None:
         with patch.object(self.spotify, "pause_music", return_value="Spotify error: no active device"):

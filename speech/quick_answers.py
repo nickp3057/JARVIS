@@ -158,7 +158,7 @@ _PREVIOUS = re.compile(r"^(?:previous|previous song|previous track|last song|go 
 _NOW_PLAYING = re.compile(r"^(?:what's playing|whats playing|what is playing|what song is this|what's this song|"
                           r"whats this song|what is this song|who sings this|who is this|what am i listening to)$")
 _PLAY = re.compile(r"^play (?P<q>.+?)(?: on spotify)?$")
-_NOT_SPOTIFY = re.compile(r"\b(?:on|in) (?:the )?(?:tv|television|plex|netflix|youtube|disney|hulu|max)\b|"
+_NOT_SPOTIFY = re.compile(r"\b(?:on|in) (?:the |my )?(?:tv|television|plex|netflix|youtube|disney|hulu|max)\b|"
                           r"\b(?:episode|movie|season|show)\b")
 _ALL_LIGHTS = re.compile(r"^(?:turn|switch|shut|put) (?P<a>on|off) (?:all )?(?:of )?(?:the |my )?lights$|"
                          r"^(?:turn|switch|shut) (?:all )?(?:the |my )?lights (?P<b>on|off)$|"
@@ -334,6 +334,8 @@ def _spotify_reply(result: str, quiet_ok: bool) -> Answer:
 
 def _music(said: str) -> Answer | None:
     from integrations import spotify
+    if not spotify._is_configured():  # noqa: SLF001 - no Spotify: "play"/"pause" are for the model (the TV, Plex)
+        return None
     if _PAUSE.match(said):
         return _spotify_reply(spotify.pause_music(), quiet_ok=True)
     if _RESUME.match(said):
