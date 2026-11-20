@@ -32,8 +32,12 @@ struct HubView: View {
     }
     @State private var holdsPolling = false
     @State private var schwabLoggingIn = false
-    /// Long-pressed light: its brightness/colour/rainbow sheet.
+    /// Held light or fan tile: the big level page (`LevelSheet`, with a
+    /// Colours button for colour lights).
     @State private var lightSheet: LightSheetID?
+    /// The tile being held past the long press: it buzzed and opens on release.
+    @State private var heldTile: String?
+    @State private var holdBuzz = 0
     @State private var showingRemote = false
     private let focus: HubFocus
 
@@ -123,7 +127,13 @@ struct HubView: View {
             }
             .sheet(isPresented: $showingSettings) { SettingsView() }
             .sheet(isPresented: $showingRemote) { TVRemoteView() }
-            .sheet(item: $lightSheet) { LightSheet(model: model, entityID: $0.id) }
+            .sheet(item: $lightSheet) { item in
+                if let entity = model.entities.value?.first(where: { $0.entityID == item.id }) {
+                    LevelSheet(model: model, entity: entity)
+                        .presentationDetents([.height(LevelSheet.height(entity))])
+                        .presentationDragIndicator(.visible)
+                }
+            }
             .sheet(isPresented: $schwabLoggingIn) {
                 SchwabLoginView { Task { await model.refreshPortfolio() } }
             }
@@ -1314,6 +1324,7 @@ struct HubView: View {
         let adjustable = LevelDragger.adjustable(entity)
         return VStack(alignment: .leading, spacing: 6) {
             Button {
+                if heldTile == entity.entityID { heldTile = nil }  // a hold the system cancelled
                 guard !holds.swallows(entity.entityID) else { return }
                 model.toggle(entity, to: !on)
             } label: {
@@ -1343,11 +1354,21 @@ struct HubView: View {
             }
             .buttonStyle(CockpitButtonStyle())
             .disabled(!entity.isToggleable || pending != nil || model.entities.failureText != nil)
-            .simultaneousGesture(LongPressGesture(minimumDuration: 0.45).onEnded { _ in
-                guard entity.light?.dimmable == true else { return }
-                holds.hold(entity.entityID)  // the release mustn't toggle it
-                lightSheet = LightSheetID(id: entity.entityID)
-            })
+            // Quick tap: on/off. Hold: a buzz says "let go", and letting go
+            // opens the big level page (Nick, 2026-11-19).
+            .simultaneousGesture(LongPressGesture(minimumDuration: 0.45)
+                .sequenced(before: DragGesture(minimumDistance: 0))
+                .onChanged { value in
+                    guard adjustable, case .second(true, _) = value, heldTile != entity.entityID else { return }
+                    heldTile = entity.entityID
+                    holds.hold(entity.entityID)  // the release mustn't toggle it
+                    holdBuzz += 1
+                }
+                .onEnded { _ in
+                    guard heldTile == entity.entityID else { return }
+                    heldTile = nil
+                    lightSheet = LightSheetID(id: entity.entityID)
+                })
             .accessibilityLabel(entity.friendlyName)
             .accessibilityValue(entity.state.capitalized)
             .accessibilityAddTraits(on ? .isSelected : [])
@@ -1363,6 +1384,7 @@ struct HubView: View {
         .background((on ? JarvisTheme.amber.opacity(0.14) : JarvisTheme.cyan.opacity(0.05)), in: .rect(cornerRadius: 12))
         .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(on ? JarvisTheme.amber.opacity(0.4) : JarvisTheme.border))
         .animation(.easeOut(duration: 0.2), value: on)
+        .sensoryFeedback(.impact(weight: .medium), trigger: holdBuzz)
     }
 
     private var linksCard: some View {

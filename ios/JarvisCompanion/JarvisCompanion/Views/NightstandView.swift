@@ -396,6 +396,7 @@ private struct NightstandDeviceTile: View {
     @ObservedObject var model: HubViewModel
     let entity: HomeEntity
     let openSheet: () -> Void
+    @State private var holdBuzz = 0
 
     var body: some View {
         let pending = model.pendingEntityStates[entity.entityID]
@@ -427,7 +428,7 @@ private struct NightstandDeviceTile: View {
             .buttonStyle(CockpitButtonStyle())
             .disabled(!entity.isToggleable || pending != nil)
             .simultaneousGesture(LongPressGesture(minimumDuration: 0.35).onEnded { _ in
-                if LevelDragger.adjustable(entity) { openSheet() }
+                if LevelDragger.adjustable(entity) { holdBuzz += 1; openSheet() }
             })
             .accessibilityLabel(entity.friendlyName)
             .accessibilityValue(on ? "On" : "Off")
@@ -444,6 +445,7 @@ private struct NightstandDeviceTile: View {
         .overlay(RoundedRectangle(cornerRadius: 18)
             .strokeBorder(on ? JarvisTheme.amber.opacity(0.45) : JarvisTheme.border))
         .sensoryFeedback(.impact(weight: .light), trigger: on)
+        .sensoryFeedback(.impact(weight: .medium), trigger: holdBuzz)
     }
 
     private func state(on: Bool) -> String {

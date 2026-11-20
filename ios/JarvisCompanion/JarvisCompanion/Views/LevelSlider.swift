@@ -77,7 +77,7 @@ struct LevelBar: View {
         .buttonStyle(.plain)
         .sheet(isPresented: $open) {
             LevelSheet(model: model, entity: entity)
-                .presentationDetents([.height(300)])
+                .presentationDetents([.height(LevelSheet.height(entity))])
                 .presentationDragIndicator(.visible)
         }
         .accessibilityLabel(entity.domain == "fan" ? "\(entity.friendlyName) speed" : "\(entity.friendlyName) brightness")
@@ -95,6 +95,15 @@ struct LevelSheet: View {
     @State private var dragging = false
     @State private var tick = 0
     @State private var send: Task<Void, Never>?
+    @State private var showingColours = false
+
+    /// Taller when there's a Colours button.
+    static func height(_ entity: HomeEntity) -> CGFloat { hasColours(entity) ? 370 : 300 }
+
+    static func hasColours(_ entity: HomeEntity) -> Bool {
+        guard let light = entity.light else { return false }
+        return light.color || light.temperature || light.rainbow == true
+    }
 
     var body: some View {
         VStack(spacing: 22) {
@@ -120,8 +129,18 @@ struct LevelSheet: View {
                 }
                 nudge("plus", 1)
             }
+            if Self.hasColours(entity) {
+                Button { showingColours = true } label: {
+                    Label("Colour & Rainbow", systemImage: "paintpalette")
+                        .font(.headline)
+                        .frame(maxWidth: .infinity, minHeight: 48)
+                        .background(JarvisTheme.cyan.opacity(0.1), in: .rect(cornerRadius: 14))
+                }
+                .buttonStyle(CockpitButtonStyle())
+            }
         }
         .padding(24)
+        .sheet(isPresented: $showingColours) { LightSheet(model: model, entityID: entity.entityID) }
         .sensoryFeedback(.selection, trigger: tick)
         .onAppear {
             let on = model.pendingEntityStates[entity.entityID] ?? entity.isOn
