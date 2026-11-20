@@ -299,18 +299,24 @@ def ffmpeg_command(exe: str, source: str, fps: int = FPS, *, hdr: bool = False,
                    hwaccel: str | None = None) -> list[str]:
     """Decode at the requested fps to 64x27 rgb24 on stdout. HTTP reconnects ride out a
     Wi-Fi blip over a two-hour read; audio, subtitles and data are skipped.
-    ``hdr`` tonemaps PQ/HLG to SDR; ``hwaccel`` decodes on the GPU (frames
-    come back to system memory, so the filters are the same)."""
+    ``hdr`` tonemaps PQ/HLG to SDR; ``hwaccel`` decodes on the GPU.
+    VAAPI also shrinks the frame on the GPU (``scale_vaapi`` to 480x200)
+    before it comes back: copying every full 4K frame back made the GPU
+    slower than software (91 vs 141 fps); shrunk first it ran at 261 fps,
+    same colours (Surface, 4K HDR HEVC, 2026-11-19)."""
     command = [exe, "-v", "error", "-nostdin"]
+    gpu_scale = ""
     if hwaccel == "vaapi":
-        command += ["-hwaccel", "vaapi", "-hwaccel_device", _VAAPI_DEVICE]
+        command += ["-hwaccel", "vaapi", "-hwaccel_device", _VAAPI_DEVICE, "-hwaccel_output_format", "vaapi"]
+        surface = "p010" if hdr else "nv12"
+        gpu_scale = f"scale_vaapi=w=480:h=200:format={surface},hwdownload,format={surface}{'le' if hdr else ''},"
     elif hwaccel:
         command += ["-hwaccel", hwaccel]
     command += ["-threads", build_threads()]
     if source.startswith("http"):
         command += ["-reconnect", "1", "-reconnect_streamed", "1", "-reconnect_delay_max", "10"]
-    vf = (f"fps={fps},scale={W}:{H + H % 2}:flags=area,{_TONEMAP},scale={W}:{H}:flags=area" if hdr
-          else f"fps={fps},scale={W}:{H}:flags=area")
+    vf = (f"fps={fps},{gpu_scale}scale={W}:{H + H % 2}:flags=area,{_TONEMAP},scale={W}:{H}:flags=area" if hdr
+          else f"fps={fps},{gpu_scale}scale={W}:{H}:flags=area")
     return command + ["-i", source, "-an", "-sn", "-dn", "-vf", vf,
                       "-f", "rawvideo", "-pix_fmt", "rgb24", "-"]
 

@@ -102,6 +102,12 @@ class FrameColourTests(unittest.TestCase):
         command = light_tracks.ffmpeg_command("ffmpeg", "/tmp/film.mkv", hwaccel="vaapi")
         self.assertEqual(command[command.index("-hwaccel") + 1], "vaapi")
         self.assertEqual(command[command.index("-hwaccel_device") + 1], "/dev/dri/renderD128")
+        self.assertEqual(command[command.index("-hwaccel_output_format") + 1], "vaapi")
+        self.assertIn("fps=10,scale_vaapi=w=480:h=200:format=nv12,hwdownload,format=nv12,scale=64:27",
+                      command[command.index("-vf") + 1])
+        hdr = light_tracks.ffmpeg_command("ffmpeg", "/tmp/film.mkv", 30, hdr=True, hwaccel="vaapi")
+        self.assertIn("scale_vaapi=w=480:h=200:format=p010,hwdownload,format=p010le,scale=64:28",
+                      hdr[hdr.index("-vf") + 1])
         self.assertLess(command.index("-hwaccel"), command.index("-i"))
 
     def test_build_hwaccel_picks_vaapi_only_when_the_gpu_is_usable(self) -> None:

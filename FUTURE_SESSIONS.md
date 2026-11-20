@@ -172,7 +172,7 @@ run, and the ±50ms visual / final live-drift acceptance remains unverified.
 - [ ] Measure independent strip/desk latency if needed through the per-light API.
 One-time on the Surface, after pulling and before restarting Core:
 `cd ~/jarvis && .venv/bin/pip install imageio-ffmpeg && .venv/bin/python -m app.client_tokens grant nicks-room-tv playback:write`
-- [ ] "Hey Jarvis, create a light sync for Cars 2": the build starts, the iPad's Light sync menu shows "Building… N%", and a push says it's ready. Note how long it took on the Surface (the Mac took ~3 min with VideoToolbox; software decode measured 139 fps on 4K HEVC with 8 threads, about 34 min for a 2.5 h film; check the GPU decode once `intel-media-va-driver` and the render group are set up: the build log says `vaapi decode`). If Core feels sluggish meanwhile, lower `LIGHT_SYNC_BUILD_THREADS`.
+- [ ] "Hey Jarvis, create a light sync for Cars 2": the build starts, the iPad's Light sync menu shows "Building… N%", and a push says it's ready. Note how long it took on the Surface (the Mac took ~3 min with VideoToolbox; software decode measured 139 fps on 4K HEVC with 8 threads, about 34 min for a 2.5 h film; GPU decode set up 2026-11-19 and measured at 251 fps on 4K HDR, ~18 min a film; the build log says `vaapi decode`). If Core feels sluggish meanwhile, lower `LIGHT_SYNC_BUILD_THREADS`.
 - [ ] Movie scene on, play Cars 2 on the TV: the strip, desk lights and lamp follow within a second; the fan ring stops following the strip (its automation is paused).
 - [ ] Pause holds the colour; resume picks up (one strip blip on resume is expected); a seek catches up within ~1 s.
 - [ ] Stop playback: the lights go back to the Movie scene (no strip stuck in streaming mode) and the fan automation is back on.
