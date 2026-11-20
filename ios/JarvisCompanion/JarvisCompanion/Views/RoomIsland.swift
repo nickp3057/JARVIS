@@ -74,7 +74,7 @@ struct RoomIsland: View {
         HStack(spacing: 14) {
             switch activity {
             case .tv(let title, let paused, let buffering, let synced):
-                badge(paused ? "pause.fill" : "play.fill")
+                badge("tv.fill")
                 VStack(alignment: .leading, spacing: 1) {
                     Text(title).font(.headline).lineLimit(1)
                     Text([buffering ? "Loading" : paused ? "Paused" : "Playing on the TV",
@@ -82,11 +82,11 @@ struct RoomIsland: View {
                         .font(.subheadline).foregroundStyle(.white.opacity(0.6)).lineLimit(1)
                 }
                 Spacer(minLength: 8)
-                control("gobackward", "Rewind", key: "rewind")
+                control("backward.fill", "Rewind", key: "rewind")
                 control(paused ? "play.fill" : "pause.fill", paused ? "Play" : "Pause", key: "play_pause", big: true) {
                     expectPaused = !paused
                 }
-                control("goforward", "Fast forward", key: "fast_forward")
+                control("forward.fill", "Fast forward", key: "fast_forward")
                 movieButton
             case .movieScene:
                 badge("film.fill")

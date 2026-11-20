@@ -40,15 +40,17 @@ struct TVPowerButton: View {
         return HStack(spacing: 10) {
             if busy { ProgressView() } else {
                 Image(systemName: "power").font(.title3.weight(.semibold))
-                    .foregroundStyle(lit ? JarvisTheme.backgroundDeep : JarvisTheme.cyan)
+                    .foregroundStyle(JarvisTheme.cyan)
             }
             Text(lit ? "\(caption) on" : caption).font(.headline).lineLimit(1)
-                .foregroundStyle(lit ? JarvisTheme.backgroundDeep : Color.primary)
+                .foregroundStyle(Color.primary)
         }
         .frame(maxWidth: width ?? .infinity, minHeight: height ?? size, maxHeight: height ?? size)
-        .background(lit ? JarvisTheme.cyan.opacity(0.9) : Color.clear, in: .rect(cornerRadius: 18))
+        // On: the glass with the accent's wash and edge, like Peace (no solid red slab).
+        .background(lit ? JarvisTheme.cyan.opacity(0.12) : Color.clear, in: .rect(cornerRadius: 18))
         .jarvisSurface(in: .rect(cornerRadius: 18))
-        .overlay(RoundedRectangle(cornerRadius: 18).strokeBorder(lit ? JarvisTheme.cyan.opacity(0.45) : JarvisTheme.border))
+        .overlay(RoundedRectangle(cornerRadius: 18)
+            .strokeBorder(lit ? JarvisTheme.cyan.opacity(0.7) : JarvisTheme.border, lineWidth: lit ? 1.5 : 1))
     }
 
     private var square: some View {
