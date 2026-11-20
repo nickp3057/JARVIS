@@ -79,6 +79,36 @@ _JINGLE_REPLIES = {"done", "yes sir", "yes, sir", "ok", "okay"}
 _GUEST_ALARM_LINE = "That alarm is Nick's to stop, I'm afraid. He can end it from his phone."
 _DISMISS = re.compile(r"\b(stop|cancel|dismiss|enough|off|okay|ok|thanks|thank you|got it|i'm up|i'm awake|shut up|quiet)\b")
 # "I'm up, leave the lights" while the wake-up rings: stop the alarm only.
+_JARVIS = re.compile(r"\bjarvis\b", re.IGNORECASE)
+
+
+def _tv_playing() -> bool:
+    """The Movie scene is on, or the room TV reports a film playing."""
+    try:
+        from app import status_hub
+        if status_hub.home_scenes().get("current") == "scene.movie":
+            return True
+        from brain import light_sync
+        playback = light_sync.controller.clock.current()
+        return bool(playback and playback.moving)
+    except Exception:  # noqa: BLE001 - unknown: treat it as not playing
+        return False
+
+
+def _sounds_like_the_tv(text: str, speaker) -> bool:  # noqa: ANN001
+    """A wake while the TV plays that is nothing like Nick's voice (score
+    under ``VOICE_TV_FLOOR``, default 0.30; his own turns score 0.44 and up,
+    the film's 0.1-0.2) and never says "Jarvis" in the transcript. Those
+    were the film's own dialogue setting him off. 0 turns it off."""
+    try:
+        floor = float(os.getenv("VOICE_TV_FLOOR", "0.30"))
+    except ValueError:
+        floor = 0.30
+    if floor <= 0 or speaker.score is None or speaker.score >= floor or _JARVIS.search(text):
+        return False
+    return _tv_playing()
+
+
 _KEEP_LIGHTS = re.compile(r"\b(leave|keep|don'?t (?:turn|touch|change)|no)\b.*\blights?\b")
 
 
@@ -693,6 +723,12 @@ class RoomVoice:
             return False
         # Nick, or a guest who can't use locked tools.
         speaker = verdict[0] if verdict else voice_trust.guest("voice ID failed")
+        if _sounds_like_the_tv(text, speaker):
+            # The film said something like "Jarvis" (Hunger Games, 2026-11-19):
+            # nobody in the room talked, so say nothing at all.
+            log.info("Room voice ignored %r: TV playing, voice score %.2f, no 'Jarvis'", text, speaker.score or 0.0)
+            voice_presence.update("idle")
+            return False
 
         # A staged proposal (a trade, a fix) is waiting on a bare "yes": the
         # answer goes to the gate, never to a fast path that would leave it armed.

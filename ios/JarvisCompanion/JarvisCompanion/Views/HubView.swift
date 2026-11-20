@@ -1290,7 +1290,8 @@ struct HubView: View {
         .padding(.vertical, 4)
     }
 
-    /// Small tap-to-toggle tiles, three across. Lit means on.
+    /// Small tap-to-toggle tiles, three across. Lit means on; lights and the
+    /// fan carry a slider for their level.
     private var quickActionsCard: some View {
         CockpitPanel("Home", symbol: "house.lodge") {
             if let error = model.entities.failureText { errorRow(error) }
@@ -1310,40 +1311,58 @@ struct HubView: View {
         let pending = model.pendingEntityStates[entity.entityID]
         let on = pending ?? entity.isOn
         let tint = on ? JarvisTheme.amber : Color.secondary
-        return Button {
-            guard !holds.swallows(entity.entityID) else { return }
-            model.toggle(entity, to: !on)
-        } label: {
-            VStack(alignment: .leading, spacing: 6) {
-                HStack {
-                    Image(systemName: Self.homeIcon(for: entity.domain))
-                        .font(.subheadline)
-                        .foregroundStyle(tint)
-                    Spacer(minLength: 0)
-                    if pending != nil { ProgressView().controlSize(.mini) }
+        let adjustable = LevelDragger.adjustable(entity)
+        return VStack(alignment: .leading, spacing: 6) {
+            Button {
+                guard !holds.swallows(entity.entityID) else { return }
+                model.toggle(entity, to: !on)
+            } label: {
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack {
+                        Image(systemName: Self.homeIcon(for: entity.domain))
+                            .font(.subheadline)
+                            .foregroundStyle(tint)
+                        Spacer(minLength: 0)
+                        if pending != nil {
+                            ProgressView().controlSize(.mini)
+                        } else if adjustable, on {
+                            Text("\(LevelDragger.level(of: entity, on: on))%")
+                                .font(.caption2.weight(.semibold))
+                                .monospacedDigit()
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    Text(entity.friendlyName)
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(.primary)
+                        .lineLimit(2, reservesSpace: true)
+                        .multilineTextAlignment(.leading)
                 }
-                Text(entity.friendlyName)
-                    .font(.caption.weight(.medium))
-                    .foregroundStyle(.primary)
-                    .lineLimit(2, reservesSpace: true)
-                    .multilineTextAlignment(.leading)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
             }
-            .padding(10)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background((on ? JarvisTheme.amber.opacity(0.14) : JarvisTheme.cyan.opacity(0.05)), in: .rect(cornerRadius: 12))
-            .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(on ? JarvisTheme.amber.opacity(0.4) : JarvisTheme.border))
+            .buttonStyle(CockpitButtonStyle())
+            .disabled(!entity.isToggleable || pending != nil || model.entities.failureText != nil)
+            .simultaneousGesture(LongPressGesture(minimumDuration: 0.45).onEnded { _ in
+                guard entity.light?.dimmable == true else { return }
+                holds.hold(entity.entityID)  // the release mustn't toggle it
+                lightSheet = LightSheetID(id: entity.entityID)
+            })
+            .accessibilityLabel(entity.friendlyName)
+            .accessibilityValue(entity.state.capitalized)
+            .accessibilityAddTraits(on ? .isSelected : [])
+            // Brightness or fan speed on the tile itself (Nick, 2026-11-19).
+            if adjustable {
+                Spacer(minLength: 0)
+                LevelSlider(model: model, entity: entity, compact: true)
+            }
         }
-        .buttonStyle(CockpitButtonStyle())
-        .disabled(!entity.isToggleable || pending != nil || model.entities.failureText != nil)
-        .simultaneousGesture(LongPressGesture(minimumDuration: 0.45).onEnded { _ in
-            guard entity.light?.dimmable == true else { return }
-            holds.hold(entity.entityID)  // the release mustn't toggle it
-            lightSheet = LightSheetID(id: entity.entityID)
-        })
+        .padding(10)
+        // Every tile in a row the same height, slider or not.
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .background((on ? JarvisTheme.amber.opacity(0.14) : JarvisTheme.cyan.opacity(0.05)), in: .rect(cornerRadius: 12))
+        .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(on ? JarvisTheme.amber.opacity(0.4) : JarvisTheme.border))
         .animation(.easeOut(duration: 0.2), value: on)
-        .accessibilityLabel(entity.friendlyName)
-        .accessibilityValue(entity.state.capitalized)
-        .accessibilityAddTraits(on ? .isSelected : [])
     }
 
     private var linksCard: some View {

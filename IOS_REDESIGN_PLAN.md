@@ -162,6 +162,8 @@ Check these on the phone first. Some of the "weird" may already be gone.
   taken when Movie ran); every Room pop-up closes after a minute untouched
   (`IdleDismiss`, Room settings › Pop-ups close after); the mini's clock ~20%
   bigger; the door Air borrows the mini's clock, caption and bottom bar.
+  6.79: level sliders on the mini's Room page tiles and the phone's Home
+  tiles (`LevelSlider`); the mini's clock a size smaller and nudged left.
   5.33: polling trimmed: no light/theme polls while the home stream is up, Room
   skips Hub-only sections, portfolio every 5 s only in market hours.
 - Next: an iOS Home Screen / Control Center widget for scenes (needs a

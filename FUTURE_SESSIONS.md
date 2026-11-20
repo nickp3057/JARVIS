@@ -83,6 +83,7 @@ Review checklist when home:
 ### Voice ID and "he just knows I'm talking to him"
 
 - [ ] **Re-enrol voice ID on the Surface** (it scores Nick as a guest there, 0.41/0.46 vs 0.55). Nick said hold until he has the better mic and the Surface sits at his desk. Then watch scores a few days, test his sister (her score sets the threshold), tune `VOICE_ID_THRESHOLD`. Money tools by room voice now need a positive voiceprint match, so this matters for trading by voice.
+- [ ] **Wake word misses and false fires** (Nick, 2026-11-19: "sometimes Hey JARVIS doesn't hear me the first time; sometimes I'm not saying anything and he activates; Hunger Games set him off"). Shipped: the TV filter (`VOICE_TV_FLOOR`, `speech/room_voice._sounds_like_the_tv`): while the TV plays, a turn that scores under 0.30 on voice ID and never says "Jarvis" is dropped silently (the film scored 0.13-0.21, Nick 0.44+). Next: watch `Room voice ignored` lines in jarvis.log; misses leave no log line today, so log near-misses (scores 0.4-0.6) to see if `WAKE_THRESHOLD`/`WAKE_CONSECUTIVE` should drop on the satellites; consider a custom-trained openWakeWord "Hey JARVIS" on Nick's own recordings (the dataset in ~/jarvis-voice could help) and ducking/AEC against the TV's audio.
 - [ ] **Better room mic**: a far-field array (ReSpeaker XVF3800 or similar) beats the CMTECK for across-the-room speech and voice ID.
 - [ ] **Always listening, and he knows when Nick is talking to him** (asked 2026-11-06): addressee detection on the follow-up transcript (cheap classifier or Haiku: "is this said to JARVIS?"), and close the follow-up window when more than one voice is heard.
 - [ ] The goodnight alarm *answer* isn't voice-checked (whoever answers right after Nick's goodnight); a guest's goodnight already skips the question (2026-11-14).
@@ -248,6 +249,15 @@ corrections.
   the top few recent lessons ride in the dynamic block.
 - Distinct from standing orders (Nick's explicit rules) and facts (about
   Nick). Lessons are about JARVIS's own mistakes and decay unless reinforced.
+
+**Nick, 2026-11-19 (backburner, high on his list):** "I want JARVIS to
+create new skills if he doesn't have them... instead of erroring out, or
+even just storing it... eventually one day I don't wanna come to Claude to
+adjust JARVIS." So the first slice: when a turn needs a capability no tool
+covers, JARVIS says so plainly and files a **skill request** (what Nick
+asked, when, why it failed) to a `memory/skill_requests.json` store visible
+in the companion (not the to-do list); then this self-patch flow drafts the
+tool for the most-asked requests and asks Nick to approve it.
 
 ### 3. Skill acquisition from repetition
 `brain/habits.py` already notices patterns. Next step: when the same

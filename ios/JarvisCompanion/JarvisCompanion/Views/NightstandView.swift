@@ -47,7 +47,9 @@ struct NightstandPanel: View {
                             if talking {
                                 dialoguePanel
                             } else {
-                                clock(width: geo.size.width * 0.57, height: geo.size.height)
+                                // Down a size from 6.78 and nudged left a little (Nick, 2026-11-19).
+                                clock(width: geo.size.width * 0.54, height: geo.size.height)
+                                    .padding(.trailing, 36)
                             }
                         }
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -109,7 +111,7 @@ struct NightstandPanel: View {
             Spacer(minLength: 0)
             TimelineView(.everyMinute) { context in
                 VStack(spacing: 6) {
-                    NightstandTime(date: context.date, size: min(width * 0.37, height * 0.33), color: .primary)
+                    NightstandTime(date: context.date, size: min(width * 0.34, height * 0.30), color: .primary)
                         .frame(maxWidth: width)
                     HStack(spacing: 12) {
                         Text(context.date, format: .dateTime.weekday(.wide).month(.wide).day())
@@ -388,8 +390,8 @@ struct NightstandDarkClock: View {
     static let defaultLevel = 0.17
 }
 
-/// One light or switch on the Room page: tap toggles; hold a light or the
-/// fan for its sheet (brightness, colour, Rainbow).
+/// One light or switch on the Room page: tap toggles, the slider under a
+/// light or the fan sets its level; hold for its sheet (colour, Rainbow).
 private struct NightstandDeviceTile: View {
     @ObservedObject var model: HubViewModel
     let entity: HomeEntity
@@ -398,41 +400,50 @@ private struct NightstandDeviceTile: View {
     var body: some View {
         let pending = model.pendingEntityStates[entity.entityID]
         let on = pending ?? entity.isOn
-        Button { model.toggle(entity, to: !on) } label: {
-            HStack(spacing: 12) {
-                Image(systemName: RoomView.symbol(for: entity))
-                    .font(.title2)
-                    .foregroundStyle(on ? JarvisTheme.amber : Color.secondary)
-                    .frame(width: 32)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(entity.friendlyName)
-                        .font(.headline)
-                        .lineLimit(2)
-                        .minimumScaleFactor(0.85)
-                        .multilineTextAlignment(.leading)
-                    Text(state(on: on))
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                        .monospacedDigit()
+        VStack(spacing: 10) {
+            Button { model.toggle(entity, to: !on) } label: {
+                HStack(spacing: 12) {
+                    Image(systemName: RoomView.symbol(for: entity))
+                        .font(.title2)
+                        .foregroundStyle(on ? JarvisTheme.amber : Color.secondary)
+                        .frame(width: 32)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(entity.friendlyName)
+                            .font(.headline)
+                            .lineLimit(2)
+                            .minimumScaleFactor(0.85)
+                            .multilineTextAlignment(.leading)
+                        Text(state(on: on))
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                            .monospacedDigit()
+                    }
+                    Spacer(minLength: 0)
+                    if pending != nil { ProgressView() }
                 }
-                Spacer(minLength: 0)
-                if pending != nil { ProgressView() }
+                .frame(maxWidth: .infinity, minHeight: 48, alignment: .leading)
+                .contentShape(Rectangle())
             }
-            .padding(16)
-            .frame(maxWidth: .infinity, minHeight: 80, alignment: .leading)
-            .background(on ? JarvisTheme.amber.opacity(0.16) : JarvisTheme.cyan.opacity(0.05), in: .rect(cornerRadius: 18))
-            .overlay(RoundedRectangle(cornerRadius: 18)
-                .strokeBorder(on ? JarvisTheme.amber.opacity(0.45) : JarvisTheme.border))
+            .buttonStyle(CockpitButtonStyle())
+            .disabled(!entity.isToggleable || pending != nil)
+            .simultaneousGesture(LongPressGesture(minimumDuration: 0.35).onEnded { _ in
+                if LevelDragger.adjustable(entity) { openSheet() }
+            })
+            .accessibilityLabel(entity.friendlyName)
+            .accessibilityValue(on ? "On" : "Off")
+            .accessibilityHint(LevelDragger.adjustable(entity) ? "Hold for colour" : "")
+            // Brightness or fan speed right on the tile (hold still opens colours).
+            if LevelDragger.adjustable(entity) {
+                LevelSlider(model: model, entity: entity)
+            }
         }
-        .buttonStyle(CockpitButtonStyle())
-        .disabled(!entity.isToggleable || pending != nil)
-        .simultaneousGesture(LongPressGesture(minimumDuration: 0.35).onEnded { _ in
-            if LevelDragger.adjustable(entity) { openSheet() }
-        })
+        .padding(16)
+        // Every tile in a row the same height, slider or not.
+        .frame(maxWidth: .infinity, minHeight: 80, maxHeight: .infinity, alignment: .topLeading)
+        .background(on ? JarvisTheme.amber.opacity(0.16) : JarvisTheme.cyan.opacity(0.05), in: .rect(cornerRadius: 18))
+        .overlay(RoundedRectangle(cornerRadius: 18)
+            .strokeBorder(on ? JarvisTheme.amber.opacity(0.45) : JarvisTheme.border))
         .sensoryFeedback(.impact(weight: .light), trigger: on)
-        .accessibilityLabel(entity.friendlyName)
-        .accessibilityValue(on ? "On" : "Off")
-        .accessibilityHint(LevelDragger.adjustable(entity) ? "Hold for brightness and colour" : "")
     }
 
     private func state(on: Bool) -> String {
