@@ -551,9 +551,12 @@ struct RoomView: View {
                     .foregroundStyle(.secondary)
                 }
             }
+            // JARVIS sits high in his space (Nick, 2026-11-20: "scooted up a
+            // smidge"), the same size, always a circle (one size for both sides).
             GeometryReader { box in
                 core(size: max(140, min(box.size.width, box.size.height - 24)))
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                    .padding(.top, 4)
             }
             .frame(minHeight: 160)
             VStack(alignment: .leading, spacing: 8) {
