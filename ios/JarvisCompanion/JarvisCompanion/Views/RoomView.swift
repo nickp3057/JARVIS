@@ -2,12 +2,13 @@ import SwiftUI
 import UIKit
 
 /// The iPad's Room tab: a wall-panel for Nick's room, all on one screen (no
-/// scrolling in landscape). Left: the clock and battery, the reactor (three
-/// quick taps: Barn Door Protocol), what's next, the TV remote and the
-/// panel's settings (a sheet, to keep the toggles out of sight). The battery
-/// sits above the clock (top left). Right: the light/switch tiles with a
-/// Peace square in the top corner, and Nick's favourite scenes (Game Time,
-/// Movie, Study) in one row; the rest are voice-only. Portrait (iPad mini)
+/// scrolling in landscape). Landscape (`doorPanel`, 2026-11-19 refresh):
+/// left, straight on the backdrop, the battery, clock, date and weather, the
+/// reactor (three quick taps: Barn Door Protocol), the wake-up capsule and
+/// what's next; right, the light/switch tiles with a Peace square in the top
+/// corner, and Nick's favourite scenes (Game Time, Movie, Study) in one row
+/// (the rest are voice-only); across the bottom, JARVIS volume, the TV remote,
+/// TV power and the menu (settings live in a sheet). Portrait
 /// stacks and scrolls. Drag a light or the fan up or down (in portrait, hold
 /// first, since the panel scrolls) and the big level panel (`LevelPanel`)
 /// opens while brightness or speed follows the finger (`LevelDragger`); hold
@@ -161,22 +162,7 @@ struct RoomView: View {
             } else if padRole == .nightstand && !RootView.isMac {
                 nightstandPanel
             } else if wide {
-                HStack(alignment: .top, spacing: 18) {
-                    clockPanel(fill: true)
-                        .frame(width: min(400, geo.size.width * 0.34))
-                    // The lights card stretches so the column ends flush with the
-                    // clock's, no gap under Scenes.
-                    VStack(spacing: 18) {
-                        if talking {
-                            dialoguePanel
-                        } else {
-                            devicesPanel
-                            scenesPanel
-                        }
-                    }
-                    .frame(maxHeight: .infinity)
-                }
-                .padding(20)
+                doorPanel(geo.size)
             } else {
                 ScrollView {
                     VStack(spacing: 18) {
@@ -510,7 +496,141 @@ struct RoomView: View {
         wake = try? await JarvisAPIClient.make(from: settings).wakeSchedule()
     }
 
-    // MARK: - Clock and what's next
+    // MARK: - Door panel (landscape)
+
+    /// The door iPad on its side (2026-11-19 refresh): no cards inside cards.
+    /// The time and JARVIS sit straight on the backdrop on the left, as on
+    /// the nightstand; the lights and scenes on the right; one bar across the
+    /// bottom (JARVIS volume, the TV remote, TV power, the menu), the
+    /// nightstand's bar. Only the tiles have edges.
+    private func doorPanel(_ size: CGSize) -> some View {
+        VStack(spacing: 18) {
+            HStack(alignment: .top, spacing: 32) {
+                glanceColumn
+                    .frame(width: min(380, size.width * 0.32))
+                Group {
+                    if talking { dialoguePanel } else { controlsColumn }
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+            }
+            .frame(maxHeight: .infinity)
+            doorBar
+        }
+        .padding(.horizontal, 28)
+        .padding(.vertical, 22)
+    }
+
+    /// The time, JARVIS, and what's coming: the wake-up (tap to edit), the
+    /// next event and running timers.
+    private var glanceColumn: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            if !RootView.isMac { BatteryBadge() }
+            TimelineView(.everyMinute) { context in
+                VStack(alignment: .leading, spacing: 4) {
+                    NightstandTime(date: context.date, size: 96)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    HStack(spacing: 12) {
+                        Text(context.date, format: .dateTime.weekday(.wide).month(.wide).day())
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.8)
+                        weatherBadge
+                    }
+                    .font(.title3)
+                    .foregroundStyle(.secondary)
+                }
+            }
+            GeometryReader { box in
+                core(size: max(150, min(box.size.width, box.size.height)))
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+            .frame(minHeight: 150)
+            Text(voice.active ? "Listening" : "Say \u{201C}Hey JARVIS\u{201D}")
+                .font(.footnote)
+                .foregroundStyle(.tertiary)
+                .frame(maxWidth: .infinity)
+            wakeCapsule
+            if let event = model.now.value?.nextEvent {
+                infoRow("calendar", title: "Next up", value: eventText(event))
+            }
+            ForEach(timers.prefix(2)) { timerRow($0) }
+        }
+    }
+
+    /// The next wake-up as a capsule (the nightstand's); tap for the schedule.
+    private var wakeCapsule: some View {
+        let on = wake?.enabled == true && wake?.nextAt != nil
+        return Button { showingWake = true } label: {
+            HStack(spacing: 10) {
+                Image(systemName: on ? "alarm.fill" : "alarm")
+                    .foregroundStyle(on ? JarvisTheme.amber : Color.secondary)
+                Text(on ? wakeText : "No wake-up set")
+                    .font(.headline)
+                    .monospacedDigit()
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+                Image(systemName: "chevron.right").font(.caption).foregroundStyle(.tertiary)
+            }
+            .padding(.horizontal, 18)
+            .frame(minHeight: 46)
+            .jarvisSurface(in: .capsule)
+            .overlay(Capsule().strokeBorder(JarvisTheme.border))
+        }
+        .buttonStyle(CockpitButtonStyle())
+        .accessibilityLabel(on ? "Wake-up, \(wakeText)" : "No wake-up set")
+        .accessibilityHint("Opens the wake-up schedule")
+    }
+
+    /// Lights and switches, then the favourite scenes, as plain sections.
+    private var controlsColumn: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack {
+                sectionTitle("Lights & switches")
+                Spacer()
+                peaceSquare
+            }
+            .frame(minHeight: 50)
+            // More tiles than fit (a long dashboard list): scroll rather than spill.
+            ViewThatFits(in: .vertical) {
+                devicesGrid
+                ScrollView { devicesGrid }.scrollIndicators(.hidden)
+            }
+            Spacer(minLength: 10)
+            HStack(alignment: .firstTextBaseline, spacing: 10) {
+                sectionTitle("Scenes")
+                if let other = otherCurrentScene {
+                    Text("Now: \(other.name)")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+            }
+            scenesRow
+        }
+    }
+
+    /// Volume, TV remote, TV power and the menu, the height of the nightstand's bar.
+    private var doorBar: some View {
+        HStack(spacing: 12) {
+            RoomVolumeControl()
+                .padding(.horizontal, 18)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .jarvisSurface(in: .rect(cornerRadius: 20))
+                .overlay(RoundedRectangle(cornerRadius: 20).strokeBorder(JarvisTheme.border))
+            remoteButton.frame(width: 220)
+            TVPowerButton(size: 64)
+            roomMenu
+        }
+        .frame(height: 64)
+    }
+
+    private func sectionTitle(_ title: String) -> some View {
+        Text(title)
+            .font(.title3.weight(.semibold))
+            .foregroundStyle(.primary)
+            .accessibilityAddTraits(.isHeader)
+    }
+
+    // MARK: - Clock and what's next (portrait)
 
     private func clockPanel(fill: Bool) -> some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -559,37 +679,45 @@ struct RoomView: View {
             // The nightstand's bar: the remote big, TV power, and one menu
             // for the rarely used things (settings, JARVIS's memory).
             HStack(spacing: 10) {
-                Button { showingRemote = true } label: {
-                    Label("TV remote", systemImage: "appletvremote.gen4")
-                        .font(.headline)
-                        .foregroundStyle(JarvisTheme.cyan)
-                        .frame(maxWidth: .infinity, minHeight: 64)
-                        .background(JarvisTheme.cyan.opacity(0.14), in: .rect(cornerRadius: 20))
-                        .overlay(RoundedRectangle(cornerRadius: 20).strokeBorder(JarvisTheme.cyan.opacity(0.4)))
-                }
-                .buttonStyle(CockpitButtonStyle())
+                remoteButton
                 TVPowerButton(size: 64)  // the TV on or off in one tap
-                Menu {
-                    Button { showingSettings = true } label: { Label("Room settings", systemImage: "gearshape") }
-                    // The wake-up row lives here now (more room for JARVIS), its time in the label.
-                    Button { showingWake = true } label: { Label("Wake-up · \(wakeText)", systemImage: "alarm") }
-                    Divider()
-                    Button { roomCover = .memoryMap } label: { Label("Memory map", systemImage: "point.3.connected.trianglepath.dotted") }
-                    Button { roomCover = .linkMap } label: { Label("Link map", systemImage: "dot.radiowaves.left.and.right") }
-                    Button { roomCover = .agentMap } label: { Label("Agents", systemImage: "person.3.sequence") }
-                    Button { showingImport = true } label: { Label("Import memory", systemImage: "square.and.arrow.down") }
-                } label: {
-                    Image(systemName: "ellipsis")
-                        .font(.title3.weight(.semibold))
-                        .frame(width: 64, height: 64)
-                        .jarvisSurface(in: .rect(cornerRadius: 20))
-                        .overlay(RoundedRectangle(cornerRadius: 20).strokeBorder(JarvisTheme.border))
-                }
-                .buttonStyle(CockpitButtonStyle())
-                .accessibilityLabel("Menu")
+                roomMenu
             }
         }
         .roomPanel(fill: fill)
+    }
+
+    private var remoteButton: some View {
+        Button { showingRemote = true } label: {
+            Label("TV remote", systemImage: "appletvremote.gen4")
+                .font(.headline)
+                .foregroundStyle(JarvisTheme.cyan)
+                .frame(maxWidth: .infinity, minHeight: 64)
+                .background(JarvisTheme.cyan.opacity(0.14), in: .rect(cornerRadius: 20))
+                .overlay(RoundedRectangle(cornerRadius: 20).strokeBorder(JarvisTheme.cyan.opacity(0.4)))
+        }
+        .buttonStyle(CockpitButtonStyle())
+    }
+
+    /// One menu for the rarely used things (settings, JARVIS's memory).
+    private var roomMenu: some View {
+        Menu {
+            Button { showingSettings = true } label: { Label("Room settings", systemImage: "gearshape") }
+            Button { showingWake = true } label: { Label("Wake-up · \(wakeText)", systemImage: "alarm") }
+            Divider()
+            Button { roomCover = .memoryMap } label: { Label("Memory map", systemImage: "point.3.connected.trianglepath.dotted") }
+            Button { roomCover = .linkMap } label: { Label("Link map", systemImage: "dot.radiowaves.left.and.right") }
+            Button { roomCover = .agentMap } label: { Label("Agents", systemImage: "person.3.sequence") }
+            Button { showingImport = true } label: { Label("Import memory", systemImage: "square.and.arrow.down") }
+        } label: {
+            Image(systemName: "ellipsis")
+                .font(.title3.weight(.semibold))
+                .frame(width: 64, height: 64)
+                .jarvisSurface(in: .rect(cornerRadius: 20))
+                .overlay(RoundedRectangle(cornerRadius: 20).strokeBorder(JarvisTheme.border))
+        }
+        .buttonStyle(CockpitButtonStyle())
+        .accessibilityLabel("Menu")
     }
 
     private func core(size: CGFloat) -> some View {
@@ -625,11 +753,11 @@ struct RoomView: View {
                     if model.runningScene == peace.entityID {
                         ProgressView()
                     } else {
-                        Image(systemName: "hand.wave.fill").font(.title)
+                        Image(systemName: "hand.wave.fill").font(.title2)
                     }
                 }
                 .foregroundStyle(JarvisTheme.amber)
-                .frame(width: 58, height: 58)
+                .frame(width: 50, height: 50)
                 .background(JarvisTheme.amber.opacity(0.14), in: .rect(cornerRadius: 14))
                 .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(JarvisTheme.amber.opacity(0.5)))
             }
@@ -712,20 +840,24 @@ struct RoomView: View {
                 Spacer()
                 peaceSquare
             }
-            if let entities = model.entities.value, !entities.isEmpty {
-                LazyVGrid(columns: [GridItem(.adaptive(minimum: 160), spacing: 12)], spacing: 12) {
-                    ForEach(entities) { deviceTile($0) }
-                }
-            } else if let failure = model.entities.failureText {
-                Text(failure).font(.subheadline).foregroundStyle(JarvisTheme.amber)
-            } else if model.entities.isLoading {
-                ProgressView().frame(maxWidth: .infinity)
-            } else {
-                Text("No devices on the dashboard list (HOME_DASHBOARD_ENTITIES).")
-                    .font(.subheadline).foregroundStyle(.secondary)
-            }
+            devicesGrid
         }
         .roomPanel(fill: wideLayout)
+    }
+
+    @ViewBuilder private var devicesGrid: some View {
+        if let entities = model.entities.value, !entities.isEmpty {
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 200), spacing: 12)], spacing: 12) {
+                ForEach(entities) { deviceTile($0) }
+            }
+        } else if let failure = model.entities.failureText {
+            Text(failure).font(.subheadline).foregroundStyle(JarvisTheme.amber)
+        } else if model.entities.isLoading {
+            ProgressView().frame(maxWidth: .infinity)
+        } else {
+            Text("No devices on the dashboard list (HOME_DASHBOARD_ENTITIES).")
+                .font(.subheadline).foregroundStyle(.secondary)
+        }
     }
 
     private func deviceTile(_ entity: HomeEntity) -> some View {
@@ -736,27 +868,35 @@ struct RoomView: View {
             guard !holds.swallows(entity.entityID) else { return }
             model.toggle(entity, to: !on)
         } label: {
-            VStack(alignment: .leading, spacing: 12) {
-                HStack {
-                    Image(systemName: Self.symbol(for: entity))
-                        .font(.title2)
-                        .foregroundStyle(on ? JarvisTheme.amber : Color.secondary)
-                    Spacer(minLength: 0)
-                    if pending != nil { ProgressView() }
+            // Apple Home's shape (2026-11-19 refresh): the icon in a circle that
+            // lights up like a scene tile's, the name and state beside it.
+            HStack(spacing: 12) {
+                ZStack {
+                    if pending != nil {
+                        ProgressView()
+                    } else {
+                        Image(systemName: Self.symbol(for: entity))
+                            .font(.title3.weight(.semibold))
+                    }
                 }
+                .frame(width: 46, height: 46)
+                .background(on ? JarvisTheme.amber.opacity(0.9) : JarvisTheme.panelRaised, in: Circle())
+                .foregroundStyle(on ? JarvisTheme.backgroundDeep : Color.secondary)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(entity.friendlyName)
                         .font(.headline)
-                        .lineLimit(2, reservesSpace: true)
+                        .lineLimit(2)
+                        .minimumScaleFactor(0.85)
                         .multilineTextAlignment(.leading)
                     Text(live.map { $0 > 0 ? "On · \($0)%" : "Off" } ?? statusText(entity, on: on))
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                         .monospacedDigit()
                 }
+                Spacer(minLength: 0)
             }
-            .padding(16)
-            .frame(maxWidth: .infinity, minHeight: 108, alignment: .topLeading)
+            .padding(14)
+            .frame(maxWidth: .infinity, minHeight: 78, alignment: .leading)
             // While dragged, the tile fills from the bottom to the new level.
             .background(alignment: .bottom) {
                 if let live {
@@ -768,10 +908,10 @@ struct RoomView: View {
                     .clipShape(.rect(cornerRadius: 18))
                 }
             }
-            .background(on ? JarvisTheme.amber.opacity(0.16) : JarvisTheme.cyan.opacity(0.05),
-                        in: .rect(cornerRadius: 18))
+            .background(on ? JarvisTheme.amber.opacity(0.14) : Color.clear, in: .rect(cornerRadius: 18))
+            .jarvisSurface(in: .rect(cornerRadius: 18))
             .overlay(RoundedRectangle(cornerRadius: 18)
-                .strokeBorder(on ? JarvisTheme.amber.opacity(0.45) : JarvisTheme.border))
+                .strokeBorder(on ? JarvisTheme.amber.opacity(0.4) : JarvisTheme.border))
         }
         .buttonStyle(CockpitButtonStyle())
         .disabled(!entity.isToggleable || pending != nil)
@@ -879,21 +1019,28 @@ struct RoomView: View {
                         .lineLimit(1)
                 }
             }
-            if let scenes = model.scenes.value, !scenes.scenes.isEmpty {
-                let favorites = favoriteIDs.compactMap { id in scenes.scenes.first { $0.entityID == id } }
-                if favorites.isEmpty {
-                    SceneFocusMenu(model: model, scenes: scenes, title: "Scene").frame(minHeight: 76)
-                } else {
-                    HStack(spacing: 12) {
-                        ForEach(favorites) { SceneTile(model: model, scene: $0, lit: $0.entityID == scenes.current, large: true) }
-                    }
-                }
-            } else {
-                Text("No scenes yet. Make one in Home Assistant (Settings › Automations & Scenes › Scenes) and it shows up here.")
-                    .font(.subheadline).foregroundStyle(.secondary)
-            }
+            scenesRow
         }
         .roomPanel(fill: false)
+    }
+
+    @ViewBuilder private var scenesRow: some View {
+        if let scenes = model.scenes.value, !scenes.scenes.isEmpty {
+            let favorites = favoriteIDs.compactMap { id in scenes.scenes.first { $0.entityID == id } }
+            if favorites.isEmpty {
+                SceneFocusMenu(model: model, scenes: scenes, title: "Scene").frame(minHeight: 76)
+            } else {
+                HStack(spacing: 12) {
+                    ForEach(favorites) {
+                        SceneTile(model: model, scene: $0, lit: $0.entityID == scenes.current, large: true)
+                            .jarvisSurface(in: .rect(cornerRadius: 18))
+                    }
+                }
+            }
+        } else {
+            Text("No scenes yet. Make one in Home Assistant (Settings › Automations & Scenes › Scenes) and it shows up here.")
+                .font(.subheadline).foregroundStyle(.secondary)
+        }
     }
 
     private func heading(_ title: String, symbol: String) -> some View {
