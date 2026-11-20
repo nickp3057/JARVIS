@@ -682,7 +682,11 @@ entry in `brain/agent_roster.py` (name, kind, icon, description, schedule);
   Jul 1, Oct 1; a missed date stays overdue, doing it a little early counts),
   `interval` (N days/months/years after the last time), or `log_only`;
   optional `last_done` starts an interval countdown from then. The companion
-  editor's Repeats picker is On dates / After last done / Log. On 2026-11-19
+  editor's Repeats picker is On dates / After last done / Log. Calendar
+  tasks can have a season (`season_start`/`season_end` months, may wrap the
+  year; "Only part of the year" in the editor) that skips dates outside it.
+  The companion's Maintenance list shows only overdue, due and due-within-
+  a-week tasks; the rest sit behind "Show all". On 2026-11-19
   existing every-3/6-months tasks moved onto Jan 1-anchored dates once
   (`PRAGMA user_version` 1); switching one back to rolling sticks
 - `remove_maintenance_task(name|task_id)`

@@ -462,6 +462,13 @@ final class CompanionTests: XCTestCase {
         draft.calendarPeriod = 6
         draft.fixedMonth = 7
         XCTAssertEqual(draft.calendarMonths, [1, 7])
+        draft.calendarPeriod = 1
+        draft.seasonStart = 3
+        draft.seasonEnd = 10
+        XCTAssertEqual(draft.calendarMonths, Array(3...10))
+        let seasonal = try JSONSerialization.jsonObject(with: JSONEncoder().encode(draft)) as? [String: Any]
+        XCTAssertEqual(seasonal?["season_start"] as? Int, 3)
+        XCTAssertEqual(seasonal?["season_end"] as? Int, 10)
     }
 
     func testStudyBriefGroupsEventsAndExcludesFinishedTimedAssessments() {

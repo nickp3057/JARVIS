@@ -546,6 +546,9 @@ struct MaintenanceTask: Codable, Identifiable, Hashable {
     let intervalUnit: String?
     let fixedMonth: Int?
     let fixedDay: Int?
+    /// Calendar tasks only: dates outside these months are skipped.
+    let seasonStart: Int?
+    let seasonEnd: Int?
     let notes: String
     let lastDone: String?
     let lastNote: String?
@@ -558,6 +561,9 @@ struct MaintenanceTask: Codable, Identifiable, Hashable {
     let scheduleLabel: String
 
     var isOverdue: Bool { status == "overdue" }
+    /// Overdue, due, or due within the week: the only ones the list shows
+    /// until "Show all".
+    var isVisibleByDefault: Bool { status == "overdue" || status == "due" || status == "soon" }
     var needsAttention: Bool { status == "overdue" || status == "due" }
     var lastDoneDate: Date? { lastDone.flatMap(MaintenanceTask.parse) }
 
@@ -605,6 +611,8 @@ struct MaintenanceTask: Codable, Identifiable, Hashable {
         case intervalUnit = "interval_unit"
         case fixedMonth = "fixed_month"
         case fixedDay = "fixed_day"
+        case seasonStart = "season_start"
+        case seasonEnd = "season_end"
         case lastDone = "last_done"
         case lastNote = "last_note"
         case logCount = "log_count"
@@ -646,6 +654,9 @@ struct MaintenanceTaskDraft: Encodable {
     var calendarPeriod = 3
     var fixedMonth: Int? = 1
     var fixedDay: Int? = 1
+    /// Calendar only: limit the dates to these months (e.g. Mar–Oct).
+    var seasonStart: Int?
+    var seasonEnd: Int?
     var notes = ""
     var lastDone: String?
 
@@ -662,21 +673,29 @@ struct MaintenanceTaskDraft: Encodable {
         }
         fixedMonth = task.fixedMonth ?? 1
         fixedDay = task.fixedDay
+        seasonStart = task.seasonStart
+        seasonEnd = task.seasonEnd
         notes = task.notes
+    }
+
+    func inSeason(_ month: Int) -> Bool {
+        guard let start = seasonStart, let end = seasonEnd else { return true }
+        return start <= end ? (start...end).contains(month) : (month >= start || month <= end)
     }
 
     /// The months a calendar schedule lands in, January first.
     var calendarMonths: [Int] {
         let first = ((fixedMonth ?? 1) - 1) % calendarPeriod + 1
-        return Array(stride(from: first, through: 12, by: calendarPeriod))
+        return stride(from: first, through: 12, by: calendarPeriod).filter(inSeason)
     }
 
     /// "Jan 1 · Apr 1 · Jul 1 · Oct 1", matching what Core will show.
     var calendarPreview: String {
         let names = calendarMonths.map { Calendar.current.shortMonthSymbols[$0 - 1] }
-        if calendarPeriod == 1 {
+        if calendarPeriod == 1 && seasonStart == nil {
             return fixedDay == 31 ? "The last day of every month" : "The \(Self.ordinal(fixedDay ?? 1)) of every month"
         }
+        if names.isEmpty { return "None of these dates fall in that season" }
         if fixedDay == 31 { return "Last day of " + names.joined(separator: ", ") }
         return names.map { "\($0) \(fixedDay ?? 1)" }.joined(separator: " · ")
     }
@@ -694,6 +713,8 @@ struct MaintenanceTaskDraft: Encodable {
         case intervalUnit = "interval_unit"
         case fixedMonth = "fixed_month"
         case fixedDay = "fixed_day"
+        case seasonStart = "season_start"
+        case seasonEnd = "season_end"
         case lastDone = "last_done"
     }
 
@@ -712,6 +733,8 @@ struct MaintenanceTaskDraft: Encodable {
             try values.encode(calendarPeriod, forKey: .intervalValue)
             try values.encodeIfPresent(fixedMonth, forKey: .fixedMonth)
             try values.encodeIfPresent(fixedDay, forKey: .fixedDay)
+            try values.encodeIfPresent(seasonStart, forKey: .seasonStart)
+            try values.encodeIfPresent(seasonEnd, forKey: .seasonEnd)
         default: break
         }
     }

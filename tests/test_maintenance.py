@@ -79,6 +79,23 @@ class DateMathTests(unittest.TestCase):
         # A week early counts for that month.
         self.assertEqual(maintenance.next_due(rent, date(2027, 2, 24), date(2027, 2, 25)), date(2027, 3, 31))
 
+    def test_season_skips_winter(self) -> None:
+        fertilize = {"schedule_type": "fixed_calendar", "interval_value": 1, "fixed_month": 1, "fixed_day": 1,
+                     "season_start": 3, "season_end": 10, "created_at": "2026-11-19T00:00:00"}
+        self.assertEqual(maintenance.next_due(fertilize, None, date(2026, 11, 19)), date(2027, 3, 1))
+        # Done Oct 1: nothing until March.
+        self.assertEqual(maintenance.next_due(fertilize, date(2027, 10, 1), date(2027, 10, 2)), date(2028, 3, 1))
+        # Mid-season: monthly as usual; a missed month stays overdue.
+        self.assertEqual(maintenance.next_due(fertilize, date(2027, 5, 1), date(2027, 5, 20)), date(2027, 6, 1))
+        self.assertEqual(maintenance.next_due(fertilize, date(2027, 5, 1), date(2027, 6, 20)), date(2027, 6, 1))
+        # Missed October is still overdue in December.
+        self.assertEqual(maintenance.next_due(fertilize, date(2027, 9, 1), date(2027, 12, 5)), date(2027, 10, 1))
+        self.assertEqual(maintenance.schedule_label(fertilize), "Monthly on the 1st, Mar\u2013Oct")
+        # Wrapping seasons work too.
+        winter = {**fertilize, "season_start": 11, "season_end": 2, "created_at": "2027-03-01T00:00:00"}
+        self.assertEqual(maintenance.calendar_months(winter), [1, 2, 11, 12])
+        self.assertEqual(maintenance.next_due(winter, None, date(2027, 3, 5)), date(2027, 11, 1))
+
     def test_schedule_labels(self) -> None:
         label = maintenance.schedule_label
         self.assertEqual(label({"schedule_type": "interval", "interval_value": 3, "interval_unit": "months"}),
@@ -144,6 +161,7 @@ class StoreTests(MaintenanceTestCase):
         self.assertEqual(tasks["Trim bonsai"]["schedule_label"], "Quarterly (Jan 1, Apr 1, Jul 1, Oct 1)")
         self.assertEqual(tasks["Rotate mattress"]["schedule_label"], "Twice a year (Jan 1, Jul 1)")
         self.assertEqual(tasks["HVAC filter"]["schedule_type"], "interval")
+        self.assertIn("season_start", tasks["HVAC filter"])
         # Runs once: a task switched back to rolling stays rolling.
         maintenance.update_task(tasks["Trim bonsai"]["id"], {"schedule_type": "interval", "interval_value": 3,
                                                              "interval_unit": "months"})
@@ -189,6 +207,19 @@ class StoreTests(MaintenanceTestCase):
         task = maintenance.create_task({"name": "Gutters", "schedule_type": "fixed_calendar",
                                         "interval_value": 3, "fixed_month": 11, "fixed_day": 1})
         self.assertEqual(task["fixed_month"], 2)
+        with self.assertRaises(ValueError):
+            maintenance.create_task({"name": "x", "schedule_type": "fixed_calendar", "interval_value": 12,
+                                     "fixed_month": 1, "season_start": 3, "season_end": 10})
+        with self.assertRaises(ValueError):
+            maintenance.create_task({"name": "x", "schedule_type": "fixed_calendar", "interval_value": 1,
+                                     "fixed_month": 1, "season_start": 3})
+        seasonal = maintenance.create_task({"name": "Fertilize bonsai", "schedule_type": "fixed_calendar",
+                                            "interval_value": 1, "fixed_month": 1, "fixed_day": 1,
+                                            "season_start": 3, "season_end": 10})
+        self.assertEqual(seasonal["season_start"], 3)
+        rolled = maintenance.update_task(seasonal["id"], {"schedule_type": "interval", "interval_value": 1,
+                                                          "interval_unit": "months"})
+        self.assertIsNone(rolled["season_start"])
 
     def test_tools(self) -> None:
         reply = execute_tool("log_maintenance", {"name": "car scent", "note": "vanilla"})

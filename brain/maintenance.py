@@ -8,7 +8,9 @@ Three schedule types:
   months (1, 2, 3, 4, 6 or 12; 12 when unset) anchored on ``fixed_month`` and
   ``fixed_day`` (day 31 = the month's last day). Quarterly from Jan 1 is Jan 1,
   Apr 1, Jul 1, Oct 1. Doing it a little before a date (``_grace_days``)
-  counts for that date; a missed date stays overdue until it's done.
+  counts for that date; a missed date stays overdue until it's done. An
+  optional season (``season_start``..``season_end`` months, may wrap the
+  new year) skips dates outside it, e.g. fertilizing only Mar-Oct.
 - ``log_only``: no due date, just "last done N days ago".
 
 Days are local calendar days, computed here so every client shows the same
@@ -39,7 +41,7 @@ SOON_DAYS = 7
 CALENDAR_PERIODS = (1, 2, 3, 4, 6, 12)
 _PERIOD_NAMES = {1: "Monthly", 2: "Every 2 months", 3: "Quarterly", 4: "Every 4 months",
                  6: "Twice a year", 12: "Every year"}
-_SCHEMA_VERSION = 1
+_SCHEMA_VERSION = 2
 
 # (name, months between, anchored on Jan 1)
 _SEEDS: tuple[tuple[str, int], ...] = (
@@ -91,6 +93,8 @@ def _ensure_schema(conn: sqlite3.Connection) -> None:
             interval_unit  TEXT,
             fixed_month    INTEGER,
             fixed_day      INTEGER,
+            season_start   INTEGER,
+            season_end     INTEGER,
             notes          TEXT    NOT NULL DEFAULT '',
             created_at     TEXT    NOT NULL
         );
@@ -104,6 +108,10 @@ def _ensure_schema(conn: sqlite3.Connection) -> None:
             ON maintenance_log(task_id, completed_at);
         """
     )
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(maintenance_tasks)")}
+    for column in ("season_start", "season_end"):
+        if column not in columns:
+            conn.execute(f"ALTER TABLE maintenance_tasks ADD COLUMN {column} INTEGER")
     if not existed:
         stamp = _stamp()
         conn.executemany(
@@ -165,11 +173,25 @@ def _grace_days(period: int) -> int:
     return min(30, period * 7)
 
 
+def in_season(task: dict[str, Any], month: int) -> bool:
+    start, end = task.get("season_start"), task.get("season_end")
+    if not start or not end:
+        return True
+    return start <= month <= end if start <= end else (month >= start or month <= end)
+
+
 def calendar_months(task: dict[str, Any]) -> list[int]:
-    """The months a calendar task falls in, January first."""
+    """The months a calendar task falls in (within its season), January first."""
     period = calendar_period(task)
     first = (int(task["fixed_month"]) - 1) % period + 1
-    return list(range(first, 13, period))
+    return [m for m in range(first, 13, period) if in_season(task, m)]
+
+
+def season_text(task: dict[str, Any]) -> str:
+    start, end = task.get("season_start"), task.get("season_end")
+    if not start or not end:
+        return ""
+    return f"{calendar.month_abbr[start]}\u2013{calendar.month_abbr[end]}"
 
 
 def _month_occurrence(index: int, day: int | None) -> date:
@@ -188,12 +210,22 @@ def next_due(task: dict[str, Any], last_done: date | None, today: date) -> date 
         residue = (int(task["fixed_month"]) - 1) % period
         # Month indexes (year * 12 + month - 1) share the anchor's residue
         # because every period divides 12.
+        if not calendar_months(task):
+            return None  # a season that holds none of its dates
+
+        def step(index: int, direction: int) -> int:
+            """The nearest in-season date index from ``index`` onward (or back)."""
+            while not in_season(task, index % 12 + 1):
+                index += direction * period
+            return index
+
         index = today.year * 12 + today.month - 1
         index += (residue - index) % period
         if _month_occurrence(index, day) < today:
             index += period
+        index = step(index, 1)
         upcoming = _month_occurrence(index, day)
-        previous = _month_occurrence(index - period, day)
+        previous = _month_occurrence(step(index - period, -1), day)
         grace = timedelta(days=_grace_days(period))
 
         def satisfied(due: date) -> bool:
@@ -204,7 +236,7 @@ def next_due(task: dict[str, Any], last_done: date | None, today: date) -> date 
         if created <= previous and not satisfied(previous):
             return previous
         if satisfied(upcoming):
-            return _month_occurrence(index + period, day)
+            return _month_occurrence(step(index + period, 1), day)
         return upcoming
     return None
 
@@ -230,10 +262,11 @@ def schedule_label(task: dict[str, Any]) -> str:
         return f"Every {unit[:-1]}" if value == 1 else f"Every {value} {unit}"
     if kind == "fixed_calendar":
         period, day = calendar_period(task), task["fixed_day"]
+        season = f", {season_text(task)}" if season_text(task) else ""
         if period == 1:
             if day == 31:
-                return "Monthly on the last day"
-            return f"Monthly on the {_ordinal(day or 1)}"
+                return "Monthly on the last day" + season
+            return f"Monthly on the {_ordinal(day or 1)}{season}"
         if period == 12:
             return f"Every year on {calendar_dates_text(task)}" if day == 31 else f"Every {calendar_dates_text(task)}"
         return f"{_PERIOD_NAMES[period]} ({calendar_dates_text(task)})"
@@ -266,6 +299,8 @@ def _validated(fields: dict[str, Any]) -> dict[str, Any]:
         "interval_unit": None,
         "fixed_month": None,
         "fixed_day": None,
+        "season_start": None,
+        "season_end": None,
         "notes": str(fields.get("notes") or "").strip()[:2000],
     }
     if kind == "interval":
@@ -286,8 +321,18 @@ def _validated(fields: dict[str, Any]) -> dict[str, Any]:
             raise ValueError("fixed_month must be 1-12.")
         if day is not None and (not isinstance(day, int) or not 1 <= day <= 31):
             raise ValueError("fixed_day must be 1-31.")
+        start, end = fields.get("season_start"), fields.get("season_end")
+        if (start is None) != (end is None):
+            raise ValueError("A season needs both season_start and season_end (months 1-12).")
+        if start is not None:
+            if not all(isinstance(m, int) and not isinstance(m, bool) and 1 <= m <= 12 for m in (start, end)):
+                raise ValueError("season_start and season_end must be months 1-12.")
+            if not calendar_months({"interval_value": period, "fixed_month": month,
+                                    "season_start": start, "season_end": end}):
+                raise ValueError("None of the task's dates fall in that season.")
         # Store the anchor as the year's first date in the cycle.
-        clean.update(interval_value=period, fixed_month=(month - 1) % period + 1, fixed_day=day)
+        clean.update(interval_value=period, fixed_month=(month - 1) % period + 1, fixed_day=day,
+                     season_start=start, season_end=end)
     return clean
 
 
@@ -408,9 +453,11 @@ def create_task(fields: dict[str, Any]) -> dict[str, Any]:
     with _db() as conn:
         cursor = conn.execute(
             "INSERT INTO maintenance_tasks (name, schedule_type, interval_value, interval_unit,"
-            " fixed_month, fixed_day, notes, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            " fixed_month, fixed_day, season_start, season_end, notes, created_at)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (clean["name"], clean["schedule_type"], clean["interval_value"], clean["interval_unit"],
-             clean["fixed_month"], clean["fixed_day"], clean["notes"], _stamp()),
+             clean["fixed_month"], clean["fixed_day"], clean["season_start"], clean["season_end"],
+             clean["notes"], _stamp()),
         )
         task_id = int(cursor.lastrowid)
         if stamp:
@@ -431,9 +478,11 @@ def update_task(task_id: int, fields: dict[str, Any]) -> dict[str, Any] | None:
     with _db() as conn:
         conn.execute(
             "UPDATE maintenance_tasks SET name = ?, schedule_type = ?, interval_value = ?,"
-            " interval_unit = ?, fixed_month = ?, fixed_day = ?, notes = ? WHERE id = ?",
+            " interval_unit = ?, fixed_month = ?, fixed_day = ?, season_start = ?, season_end = ?,"
+            " notes = ? WHERE id = ?",
             (clean["name"], clean["schedule_type"], clean["interval_value"], clean["interval_unit"],
-             clean["fixed_month"], clean["fixed_day"], clean["notes"], task_id),
+             clean["fixed_month"], clean["fixed_day"], clean["season_start"], clean["season_end"],
+             clean["notes"], task_id),
         )
     return get_task(task_id)
 

@@ -1267,6 +1267,9 @@ class MaintenanceTaskRequest(BaseModel):
     interval_unit: str | None = Field(default=None, pattern="^(days|months|years)$")
     fixed_month: int | None = Field(default=None, ge=1, le=12)
     fixed_day: int | None = Field(default=None, ge=1, le=31)
+    # fixed_calendar only: skip dates outside these months (may wrap the year).
+    season_start: int | None = Field(default=None, ge=1, le=12)
+    season_end: int | None = Field(default=None, ge=1, le=12)
     notes: str = Field(default="", max_length=2_000)
     last_done: str | None = Field(default=None, max_length=10)
 

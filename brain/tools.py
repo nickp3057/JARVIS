@@ -2865,6 +2865,10 @@ _CUSTOM_TOOLS: list[dict[str, Any]] = [
                 "interval_unit": {"type": "string", "enum": ["days", "months", "years"]},
                 "fixed_month": {"type": "integer", "minimum": 1, "maximum": 12},
                 "fixed_day": {"type": "integer", "minimum": 1, "maximum": 31},
+                "season_start": {"type": "integer", "minimum": 1, "maximum": 12,
+                                 "description": "fixed_calendar only: first month of the season (e.g. 3 for "
+                                                "fertilizing Mar-Oct); dates outside it are skipped."},
+                "season_end": {"type": "integer", "minimum": 1, "maximum": 12},
                 "notes": {"type": "string"},
                 "last_done": {"type": "string", "description": "YYYY-MM-DD if Nick says when he last did it."},
             },

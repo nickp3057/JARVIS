@@ -26,22 +26,42 @@ enum MaintenanceRoute: Hashable {
     case task(Int)
 }
 
-/// Every task, pushed from Home's Maintenance tile: due, coming up, and
-/// plain logs. Swipe right to log one done.
+/// Tasks pushed from Home's Maintenance tile. Only what's overdue, due, or
+/// due within the week shows; the rest waits behind "Show all". Swipe
+/// right to log one done.
 struct MaintenanceListView: View {
     @ObservedObject var model: HubViewModel
     @State private var editing = false
     @State private var completing: MaintenanceTask?
+    @State private var showingAll = false
 
     var body: some View {
         let tasks = model.maintenance.value ?? []
         let due = tasks.filter(\.needsAttention)
-        let upcoming = tasks.filter { !$0.needsAttention && $0.status != "log" }
+        let soon = tasks.filter { $0.status == "soon" }
+        let later = tasks.filter { $0.status == "ok" }
         let logs = tasks.filter { $0.status == "log" }
+        let hidden = later.count + logs.count
         List {
             section("Due", due)
-            section("Coming up", upcoming)
-            section("Log", logs)
+            section("This week", soon)
+            if due.isEmpty, soon.isEmpty, !tasks.isEmpty {
+                Section {
+                    Label("Nothing due this week", systemImage: "checkmark.seal")
+                        .foregroundStyle(.secondary)
+                }
+            }
+            if showingAll {
+                section("Later", later)
+                section("Log", logs)
+            }
+            if hidden > 0 {
+                Section {
+                    Button(showingAll ? "Hide later tasks" : "Show all (\(hidden) more)") {
+                        withAnimation { showingAll.toggle() }
+                    }
+                }
+            }
         }
         .listStyle(.insetGrouped)
         .scrollContentBackground(.hidden)
@@ -334,7 +354,9 @@ struct MaintenanceEditor: View {
                     .listRowInsets(EdgeInsets())
                 }
                 switch draft.scheduleType {
-                case "fixed_calendar": calendarSection
+                case "fixed_calendar":
+                    calendarSection
+                    seasonSection
                 case "interval": intervalSection
                 default:
                     Section {
@@ -394,6 +416,29 @@ struct MaintenanceEditor: View {
             Text("Due on")
         } footer: {
             Text(draft.calendarPreview + ". Doing it a little early counts for the next date.")
+        }
+    }
+
+    private var seasonOn: Binding<Bool> {
+        Binding(get: { draft.seasonStart != nil }, set: { on in
+            draft.seasonStart = on ? 3 : nil
+            draft.seasonEnd = on ? 10 : nil
+        })
+    }
+
+    private var seasonSection: some View {
+        Section {
+            Toggle("Only part of the year", isOn: seasonOn.animation())
+            if draft.seasonStart != nil {
+                Picker("From", selection: Binding(get: { draft.seasonStart ?? 3 }, set: { draft.seasonStart = $0 })) {
+                    ForEach(1...12, id: \.self) { Text(Calendar.current.monthSymbols[$0 - 1]).tag($0) }
+                }
+                Picker("Through", selection: Binding(get: { draft.seasonEnd ?? 10 }, set: { draft.seasonEnd = $0 })) {
+                    ForEach(1...12, id: \.self) { Text(Calendar.current.monthSymbols[$0 - 1]).tag($0) }
+                }
+            }
+        } footer: {
+            if draft.seasonStart != nil { Text("Dates outside these months are skipped, like fertilizing in winter.") }
         }
     }
 
