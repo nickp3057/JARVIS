@@ -176,8 +176,9 @@ every deploy, so edit the repo copy, not the TV's.
   (`theme_override` pref) and is shared on the first refresh after
   `tv/provision.sh` is re-run.
 - **Settings button** (`RemoteBridgeService.openSettings`, 9.12): Google
-  TV's own handler (launcherx) is disabled, so the bridge catches
-  `KEYCODE_SETTINGS` from the log. On a console (HDMI, `com.tcl.tv`
+  TV's own handler (launcherx) is disabled, so the bridge catches the key
+  from the log. TCL's remote sends the gear as `KEYCODE_NOTIFICATION` (scan
+  code 233, 9.13), not `KEYCODE_SETTINGS`; both are handled. On a console (HDMI, `com.tcl.tv`
   TVActivity) it opens TCL's Game Bar (`com.tcl.gamebar.main`, the game
   mode screen); pressed again over the Game Bar, TCL's full picture settings
   (`com.android.tv.settings/com.tcl.settings.PictureActivity`); anywhere

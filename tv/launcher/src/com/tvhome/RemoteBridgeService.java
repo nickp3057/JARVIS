@@ -147,7 +147,8 @@ public class RemoteBridgeService extends Service {
     }
 
     private void handleKey(String keyCode) {
-        if ("KEYCODE_SETTINGS".equals(keyCode)) {
+        // TCL's remote sends its gear button as KEYCODE_NOTIFICATION (scan 233).
+        if ("KEYCODE_SETTINGS".equals(keyCode) || "KEYCODE_NOTIFICATION".equals(keyCode)) {
             new Thread(this::openSettings, "settings-key").start();
             return;
         }
