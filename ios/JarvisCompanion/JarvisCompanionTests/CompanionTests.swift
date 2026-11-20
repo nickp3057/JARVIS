@@ -454,7 +454,14 @@ final class CompanionTests: XCTestCase {
         draft.fixedMonth = 4
         let body = try JSONSerialization.jsonObject(with: JSONEncoder().encode(draft)) as? [String: Any]
         XCTAssertEqual(body?["fixed_month"] as? Int, 4)
-        XCTAssertNil(body?["interval_value"], "Only the chosen schedule's fields are sent")
+        XCTAssertEqual(body?["interval_value"] as? Int, 3, "Calendar tasks send the months between dates")
+        XCTAssertNil(body?["interval_unit"], "Only the chosen schedule's fields are sent")
+        draft.fixedMonth = 1
+        draft.fixedDay = 1
+        XCTAssertEqual(draft.calendarMonths, [1, 4, 7, 10])
+        draft.calendarPeriod = 6
+        draft.fixedMonth = 7
+        XCTAssertEqual(draft.calendarMonths, [1, 7])
     }
 
     func testStudyBriefGroupsEventsAndExcludesFinishedTimedAssessments() {

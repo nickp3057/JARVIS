@@ -676,9 +676,15 @@ entry in `brain/agent_roster.py` (name, kind, icon, description, schedule);
 - `log_maintenance(name|task_id, note?, completed_on?)` — "I rotated the
   mattress"; resets the countdown, optionally backdated
 - `list_maintenance` — every task, last done, next due
-- `add_maintenance_task(name, schedule_type, ...)` — `interval` (every N
-  days/months/years), `fixed_calendar` (month + optional day yearly), or
-  `log_only`; optional `last_done` starts the countdown from then
+- `add_maintenance_task(name, schedule_type, ...)` — `fixed_calendar` (set
+  dates: `interval_value` = months between them, 1/2/3/4/6/12, anchored on
+  `fixed_month`/`fixed_day`, day 31 = last day; quarterly = Jan 1, Apr 1,
+  Jul 1, Oct 1; a missed date stays overdue, doing it a little early counts),
+  `interval` (N days/months/years after the last time), or `log_only`;
+  optional `last_done` starts an interval countdown from then. The companion
+  editor's Repeats picker is On dates / After last done / Log. On 2026-11-19
+  existing every-3/6-months tasks moved onto Jan 1-anchored dates once
+  (`PRAGMA user_version` 1); switching one back to rolling sticks
 - `remove_maintenance_task(name|task_id)`
 
 ### Spotify

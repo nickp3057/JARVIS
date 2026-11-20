@@ -4,8 +4,11 @@ of every time it was done.
 Three schedule types:
 - ``interval``: due ``interval_value`` days/months/years after the last
   completion; never done means due today.
-- ``fixed_calendar``: due on a month (and optional day) every year. Doing it
-  up to ``_EARLY_GRACE_DAYS`` before the date counts for that year.
+- ``fixed_calendar``: due on set calendar dates, every ``interval_value``
+  months (1, 2, 3, 4, 6 or 12; 12 when unset) anchored on ``fixed_month`` and
+  ``fixed_day`` (day 31 = the month's last day). Quarterly from Jan 1 is Jan 1,
+  Apr 1, Jul 1, Oct 1. Doing it a little before a date (``_grace_days``)
+  counts for that date; a missed date stays overdue until it's done.
 - ``log_only``: no due date, just "last done N days ago".
 
 Days are local calendar days, computed here so every client shows the same
@@ -32,12 +35,17 @@ SCHEDULE_TYPES = ("interval", "fixed_calendar", "log_only")
 INTERVAL_UNITS = ("days", "months", "years")
 # Within this many days of the due date a task counts as "soon".
 SOON_DAYS = 7
-_EARLY_GRACE_DAYS = 30
+# Months between dates for a calendar schedule: they must divide the year.
+CALENDAR_PERIODS = (1, 2, 3, 4, 6, 12)
+_PERIOD_NAMES = {1: "Monthly", 2: "Every 2 months", 3: "Quarterly", 4: "Every 4 months",
+                 6: "Twice a year", 12: "Every year"}
+_SCHEMA_VERSION = 1
 
-_SEEDS: tuple[tuple[str, int, str], ...] = (
-    ("Rotate mattress", 6, "months"),
-    ("Replace car scent", 3, "months"),
-    ("Trim bonsai", 3, "months"),
+# (name, months between, anchored on Jan 1)
+_SEEDS: tuple[tuple[str, int], ...] = (
+    ("Rotate mattress", 6),
+    ("Replace car scent", 3),
+    ("Trim bonsai", 3),
 )
 
 _lock = Lock()
@@ -99,10 +107,22 @@ def _ensure_schema(conn: sqlite3.Connection) -> None:
     if not existed:
         stamp = _stamp()
         conn.executemany(
-            "INSERT INTO maintenance_tasks (name, schedule_type, interval_value, interval_unit, created_at)"
-            " VALUES (?, 'interval', ?, ?, ?)",
-            [(name, value, unit, stamp) for name, value, unit in _SEEDS],
+            "INSERT INTO maintenance_tasks (name, schedule_type, interval_value, fixed_month, fixed_day,"
+            " created_at) VALUES (?, 'fixed_calendar', ?, 1, 1, ?)",
+            [(name, period, stamp) for name, period in _SEEDS],
         )
+    elif conn.execute("PRAGMA user_version").fetchone()[0] < 1:
+        # 2026-11-19: Nick wants quarterly chores due Jan 1, Apr 1, Jul 1,
+        # Oct 1 and twice-yearly ones on Jan 1 / Jul 1, not counted from the
+        # last time. Rolling schedules are still there to switch back to.
+        moved = conn.execute(
+            "UPDATE maintenance_tasks SET schedule_type = 'fixed_calendar', interval_unit = NULL,"
+            " fixed_month = 1, fixed_day = 1"
+            " WHERE schedule_type = 'interval' AND interval_unit = 'months' AND interval_value IN (3, 6)"
+        ).rowcount
+        if moved:
+            log.info("Maintenance: moved %d quarterly/twice-yearly task(s) onto calendar dates", moved)
+    conn.execute(f"PRAGMA user_version = {_SCHEMA_VERSION}")
     conn.commit()
     _schema_ready_paths.add(str(_DB_PATH))
 
@@ -133,6 +153,30 @@ def _occurrence(year: int, month: int, day: int | None) -> date:
     return date(year, month, min(day or 1, calendar.monthrange(year, month)[1]))
 
 
+def calendar_period(task: dict[str, Any]) -> int:
+    """Months between a calendar task's dates (older rows had none: yearly)."""
+    value = task.get("interval_value")
+    return int(value) if value in CALENDAR_PERIODS else 12
+
+
+def _grace_days(period: int) -> int:
+    """How early a completion still counts for the coming date: a week for
+    monthly, three weeks for quarterly, a month for twice a year or yearly."""
+    return min(30, period * 7)
+
+
+def calendar_months(task: dict[str, Any]) -> list[int]:
+    """The months a calendar task falls in, January first."""
+    period = calendar_period(task)
+    first = (int(task["fixed_month"]) - 1) % period + 1
+    return list(range(first, 13, period))
+
+
+def _month_occurrence(index: int, day: int | None) -> date:
+    year, month = divmod(index, 12)
+    return _occurrence(year, month + 1, day)
+
+
 def next_due(task: dict[str, Any], last_done: date | None, today: date) -> date | None:
     kind = task["schedule_type"]
     if kind == "interval":
@@ -140,35 +184,59 @@ def next_due(task: dict[str, Any], last_done: date | None, today: date) -> date 
             return today
         return _add_interval(last_done, int(task["interval_value"]), str(task["interval_unit"]))
     if kind == "fixed_calendar":
-        month, day = int(task["fixed_month"]), task["fixed_day"]
-        upcoming = _occurrence(today.year, month, day)
-        if upcoming < today:
-            upcoming = _occurrence(today.year + 1, month, day)
-        previous = _occurrence(upcoming.year - 1, month, day)
+        period, day = calendar_period(task), task["fixed_day"]
+        residue = (int(task["fixed_month"]) - 1) % period
+        # Month indexes (year * 12 + month - 1) share the anchor's residue
+        # because every period divides 12.
+        index = today.year * 12 + today.month - 1
+        index += (residue - index) % period
+        if _month_occurrence(index, day) < today:
+            index += period
+        upcoming = _month_occurrence(index, day)
+        previous = _month_occurrence(index - period, day)
+        grace = timedelta(days=_grace_days(period))
 
         def satisfied(due: date) -> bool:
-            return last_done is not None and last_done >= due - timedelta(days=_EARLY_GRACE_DAYS)
+            return last_done is not None and last_done >= due - grace
 
         # A date that passed since the task existed and wasn't done is overdue.
         created = date.fromisoformat(str(task["created_at"])[:10])
         if created <= previous and not satisfied(previous):
             return previous
         if satisfied(upcoming):
-            return _occurrence(upcoming.year + 1, month, day)
+            return _month_occurrence(index + period, day)
         return upcoming
     return None
+
+
+def _ordinal(day: int) -> str:
+    suffix = "th" if 11 <= day % 100 <= 13 else {1: "st", 2: "nd", 3: "rd"}.get(day % 10, "th")
+    return f"{day}{suffix}"
+
+
+def calendar_dates_text(task: dict[str, Any]) -> str:
+    """"Jan 1, Apr 1, Jul 1, Oct 1" or "the last day of Jan, Jul"."""
+    names = [calendar.month_abbr[m] for m in calendar_months(task)]
+    day = task["fixed_day"]
+    if day == 31:
+        return "the last day of " + ", ".join(names)
+    return ", ".join(f"{name} {day}" if day else name for name in names)
 
 
 def schedule_label(task: dict[str, Any]) -> str:
     kind = task["schedule_type"]
     if kind == "interval":
         value, unit = int(task["interval_value"]), str(task["interval_unit"])
-        if value == 3 and unit == "months":
-            return "Every quarter"
         return f"Every {unit[:-1]}" if value == 1 else f"Every {value} {unit}"
     if kind == "fixed_calendar":
-        month = calendar.month_abbr[int(task["fixed_month"])]
-        return f"Every {month} {task['fixed_day']}" if task["fixed_day"] else f"Every {month}"
+        period, day = calendar_period(task), task["fixed_day"]
+        if period == 1:
+            if day == 31:
+                return "Monthly on the last day"
+            return f"Monthly on the {_ordinal(day or 1)}"
+        if period == 12:
+            return f"Every year on {calendar_dates_text(task)}" if day == 31 else f"Every {calendar_dates_text(task)}"
+        return f"{_PERIOD_NAMES[period]} ({calendar_dates_text(task)})"
     return "Log only"
 
 
@@ -209,11 +277,17 @@ def _validated(fields: dict[str, Any]) -> dict[str, Any]:
         clean.update(interval_value=value, interval_unit=unit)
     elif kind == "fixed_calendar":
         month, day = fields.get("fixed_month"), fields.get("fixed_day")
+        period = fields.get("interval_value")
+        if period is None:
+            period = 12
+        if period not in CALENDAR_PERIODS or isinstance(period, bool):
+            raise ValueError("For calendar dates, interval_value is the months between them: 1, 2, 3, 4, 6 or 12.")
         if not isinstance(month, int) or not 1 <= month <= 12:
             raise ValueError("fixed_month must be 1-12.")
         if day is not None and (not isinstance(day, int) or not 1 <= day <= 31):
             raise ValueError("fixed_day must be 1-31.")
-        clean.update(fixed_month=month, fixed_day=day)
+        # Store the anchor as the year's first date in the cycle.
+        clean.update(interval_value=period, fixed_month=(month - 1) % period + 1, fixed_day=day)
     return clean
 
 

@@ -289,8 +289,9 @@ struct MaintenanceCompleteSheet: View {
     }
 }
 
-/// Create or edit a task. Most chores are "every N months"; a fixed date
-/// and a plain log are there for the rest.
+/// Create or edit a task. Like the family chore tracker's repeat picker:
+/// most chores land on set dates (quarterly = Jan 1, Apr 1, Jul 1, Oct 1),
+/// some count from the last time, and some are just a log.
 struct MaintenanceEditor: View {
     @ObservedObject var model: HubViewModel
     let task: MaintenanceTask?
@@ -298,7 +299,6 @@ struct MaintenanceEditor: View {
     @State private var draft: MaintenanceTaskDraft
     @State private var hasLastDone = false
     @State private var lastDone = Date()
-    @State private var hasDay = false
     @State private var saving = false
     @State private var error: String?
 
@@ -306,11 +306,14 @@ struct MaintenanceEditor: View {
         self.model = model
         self.task = task
         _draft = State(initialValue: task.map(MaintenanceTaskDraft.init) ?? MaintenanceTaskDraft())
-        _hasDay = State(initialValue: task?.fixedDay != nil)
     }
 
     private var monthBinding: Binding<Int> {
         Binding(get: { draft.fixedMonth ?? 1 }, set: { draft.fixedMonth = $0 })
+    }
+
+    private var dayBinding: Binding<Int> {
+        Binding(get: { draft.fixedDay ?? 1 }, set: { draft.fixedDay = $0 })
     }
 
     var body: some View {
@@ -320,42 +323,26 @@ struct MaintenanceEditor: View {
                     TextField("Name", text: $draft.name)
                         .textInputAutocapitalization(.sentences)
                 }
-                Section("Schedule") {
-                    Picker("Repeats", selection: $draft.scheduleType) {
-                        Text("Every…").tag("interval")
-                        Text("Same date yearly").tag("fixed_calendar")
-                        Text("Just a log").tag("log_only")
+                Section {
+                    Picker("Repeats", selection: $draft.scheduleType.animation()) {
+                        Text("On dates").tag("fixed_calendar")
+                        Text("After last done").tag("interval")
+                        Text("Log").tag("log_only")
                     }
-                    switch draft.scheduleType {
-                    case "interval":
-                        Stepper(value: Binding(get: { draft.intervalValue ?? 1 }, set: { draft.intervalValue = $0 }),
-                                in: 1...365) {
-                            Text("Every \(draft.intervalValue ?? 1)")
-                        }
-                        Picker("Unit", selection: Binding(get: { draft.intervalUnit ?? "months" },
-                                                          set: { draft.intervalUnit = $0 })) {
-                            Text("Days").tag("days")
-                            Text("Months").tag("months")
-                            Text("Years").tag("years")
-                        }
-                        .pickerStyle(.segmented)
-                    case "fixed_calendar":
-                        Picker("Month", selection: monthBinding) {
-                            ForEach(1...12, id: \.self) { Text(Calendar.current.monthSymbols[$0 - 1]).tag($0) }
-                        }
-                        Toggle("Specific day", isOn: $hasDay)
-                        if hasDay {
-                            Stepper(value: Binding(get: { draft.fixedDay ?? 1 }, set: { draft.fixedDay = $0 }),
-                                    in: 1...31) {
-                                Text("Day \(draft.fixedDay ?? 1)")
-                            }
-                        }
-                    default:
+                    .pickerStyle(.segmented)
+                    .listRowBackground(Color.clear)
+                    .listRowInsets(EdgeInsets())
+                }
+                switch draft.scheduleType {
+                case "fixed_calendar": calendarSection
+                case "interval": intervalSection
+                default:
+                    Section {
                         Text("No countdown — just a record of when it was done.")
                             .font(.footnote).foregroundStyle(.secondary)
                     }
                 }
-                if task == nil {
+                if task == nil, draft.scheduleType != "fixed_calendar" {
                     Section {
                         Toggle("I've done this before", isOn: $hasLastDone.animation())
                         if hasLastDone {
@@ -389,14 +376,54 @@ struct MaintenanceEditor: View {
         }
     }
 
+    private var calendarSection: some View {
+        Section {
+            Picker("How often", selection: $draft.calendarPeriod.animation()) {
+                ForEach(MaintenanceTaskDraft.calendarPeriods, id: \.months) { Text($0.name).tag($0.months) }
+            }
+            if draft.calendarPeriod > 1 {
+                Picker(draft.calendarPeriod == 12 ? "Month" : "Starting", selection: monthBinding) {
+                    ForEach(1...12, id: \.self) { Text(Calendar.current.monthSymbols[$0 - 1]).tag($0) }
+                }
+            }
+            Picker("Day", selection: dayBinding) {
+                ForEach(1...30, id: \.self) { Text(MaintenanceTaskDraft.ordinal($0)).tag($0) }
+                Text("Last day").tag(31)
+            }
+        } header: {
+            Text("Due on")
+        } footer: {
+            Text(draft.calendarPreview + ". Doing it a little early counts for the next date.")
+        }
+    }
+
+    private var intervalSection: some View {
+        Section {
+            Stepper(value: Binding(get: { draft.intervalValue ?? 1 }, set: { draft.intervalValue = $0 }),
+                    in: 1...365) {
+                Text("Every \(draft.intervalValue ?? 1)")
+            }
+            Picker("Unit", selection: Binding(get: { draft.intervalUnit ?? "months" },
+                                              set: { draft.intervalUnit = $0 })) {
+                Text("Days").tag("days")
+                Text("Months").tag("months")
+                Text("Years").tag("years")
+            }
+            .pickerStyle(.segmented)
+        } footer: {
+            Text("Counted from the last time you marked it done.")
+        }
+    }
+
     private func save() {
         var body = draft
         body.name = body.name.trimmingCharacters(in: .whitespacesAndNewlines)
         if body.scheduleType == "fixed_calendar" {
             body.fixedMonth = body.fixedMonth ?? 1
-            body.fixedDay = hasDay ? (body.fixedDay ?? 1) : nil
+            body.fixedDay = body.fixedDay ?? 1
         }
-        body.lastDone = task == nil && hasLastDone ? HubViewModel.dayString(lastDone) : nil
+        body.lastDone = task == nil && hasLastDone && body.scheduleType != "fixed_calendar"
+            ? HubViewModel.dayString(lastDone) : nil
         saving = true
         Task {
             defer { saving = false }

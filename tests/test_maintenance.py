@@ -51,13 +51,49 @@ class DateMathTests(unittest.TestCase):
         fresh = {**task, "created_at": "2026-11-10T00:00:00"}
         self.assertEqual(maintenance.next_due(fresh, None, date(2026, 11, 20)), date(2027, 11, 1))
 
+    def test_quarterly_calendar_dates(self) -> None:
+        task = {"schedule_type": "fixed_calendar", "interval_value": 3, "fixed_month": 1, "fixed_day": 1,
+                "created_at": "2026-10-27T00:00:00"}
+        # Never done, made after Oct 1: next is Jan 1, not today.
+        self.assertEqual(maintenance.next_due(task, None, date(2026, 11, 19)), date(2027, 1, 1))
+        # Done in late December counts for Jan 1: next is Apr 1.
+        self.assertEqual(maintenance.next_due(task, date(2026, 12, 20), date(2026, 12, 21)), date(2027, 4, 1))
+        # Missed Jan 1: overdue until done; done late, next is Apr 1.
+        self.assertEqual(maintenance.next_due(task, date(2026, 10, 27), date(2027, 1, 15)), date(2027, 1, 1))
+        self.assertEqual(maintenance.next_due(task, date(2027, 1, 15), date(2027, 1, 16)), date(2027, 4, 1))
+        # Due today on the date itself.
+        self.assertEqual(maintenance.next_due(task, date(2027, 1, 2), date(2027, 4, 1)), date(2027, 4, 1))
+        # Still showing the missed Jan 1 on Apr 1 if Jan was never done.
+        self.assertEqual(maintenance.next_due(task, date(2026, 10, 27), date(2027, 4, 1)), date(2027, 1, 1))
+        # Done months early doesn't skip a quarter.
+        self.assertEqual(maintenance.next_due(task, date(2027, 2, 1), date(2027, 2, 2)), date(2027, 4, 1))
+
+    def test_twice_a_year_and_monthly_last_day(self) -> None:
+        mattress = {"schedule_type": "fixed_calendar", "interval_value": 6, "fixed_month": 7, "fixed_day": 1,
+                    "created_at": "2026-01-01T00:00:00"}
+        self.assertEqual(maintenance.calendar_months(mattress), [1, 7])
+        self.assertEqual(maintenance.next_due(mattress, date(2026, 7, 2), date(2026, 11, 19)), date(2027, 1, 1))
+        rent = {"schedule_type": "fixed_calendar", "interval_value": 1, "fixed_month": 1, "fixed_day": 31,
+                "created_at": "2027-02-01T00:00:00"}
+        self.assertEqual(maintenance.next_due(rent, None, date(2027, 2, 3)), date(2027, 2, 28))
+        # A week early counts for that month.
+        self.assertEqual(maintenance.next_due(rent, date(2027, 2, 24), date(2027, 2, 25)), date(2027, 3, 31))
+
     def test_schedule_labels(self) -> None:
-        self.assertEqual(maintenance.schedule_label(
-            {"schedule_type": "interval", "interval_value": 3, "interval_unit": "months"}), "Every quarter")
-        self.assertEqual(maintenance.schedule_label(
-            {"schedule_type": "interval", "interval_value": 1, "interval_unit": "years"}), "Every year")
-        self.assertEqual(maintenance.schedule_label(
-            {"schedule_type": "fixed_calendar", "fixed_month": 4, "fixed_day": None}), "Every Apr")
+        label = maintenance.schedule_label
+        self.assertEqual(label({"schedule_type": "interval", "interval_value": 3, "interval_unit": "months"}),
+                         "Every 3 months")
+        self.assertEqual(label({"schedule_type": "interval", "interval_value": 1, "interval_unit": "years"}),
+                         "Every year")
+        self.assertEqual(label({"schedule_type": "fixed_calendar", "fixed_month": 4, "fixed_day": None}), "Every Apr")
+        self.assertEqual(label({"schedule_type": "fixed_calendar", "interval_value": 3, "fixed_month": 1,
+                                "fixed_day": 1}), "Quarterly (Jan 1, Apr 1, Jul 1, Oct 1)")
+        self.assertEqual(label({"schedule_type": "fixed_calendar", "interval_value": 6, "fixed_month": 1,
+                                "fixed_day": 1}), "Twice a year (Jan 1, Jul 1)")
+        self.assertEqual(label({"schedule_type": "fixed_calendar", "interval_value": 1, "fixed_month": 1,
+                                "fixed_day": 15}), "Monthly on the 15th")
+        self.assertEqual(label({"schedule_type": "fixed_calendar", "interval_value": 1, "fixed_month": 1,
+                                "fixed_day": 31}), "Monthly on the last day")
 
 
 class StoreTests(MaintenanceTestCase):
@@ -65,22 +101,54 @@ class StoreTests(MaintenanceTestCase):
         names = [t["name"] for t in maintenance.list_tasks()]
         self.assertEqual(sorted(names), ["Replace car scent", "Rotate mattress", "Trim bonsai"])
         bonsai = maintenance.find_task("bonsai")
-        self.assertEqual(bonsai["schedule_label"], "Every quarter")
+        self.assertEqual(bonsai["schedule_label"], "Quarterly (Jan 1, Apr 1, Jul 1, Oct 1)")
         maintenance.delete_task(bonsai["id"])
         maintenance._schema_ready_paths.clear()
         self.assertIsNone(maintenance.find_task("bonsai"))
 
     def test_complete_resets_countdown_and_history_and_undo(self) -> None:
-        mattress = maintenance.find_task("mattress")
-        self.assertEqual(mattress["status"], "due")
-        done = maintenance.complete_task(mattress["id"], "flipped too")
+        oil = maintenance.create_task({"name": "Oil change", "schedule_type": "interval",
+                                       "interval_value": 6, "interval_unit": "months"})
+        self.assertEqual(oil["status"], "due")
+        done = maintenance.complete_task(oil["id"], "synthetic")
         self.assertEqual(done["status"], "ok")
-        self.assertEqual(done["last_note"], "flipped too")
+        self.assertEqual(done["last_note"], "synthetic")
         self.assertGreater(done["days_remaining"], 150)
-        entries = maintenance.history(mattress["id"])
+        entries = maintenance.history(oil["id"])
         self.assertEqual(len(entries), 1)
-        self.assertTrue(maintenance.delete_log_entry(mattress["id"], entries[0]["id"]))
-        self.assertEqual(maintenance.get_task(mattress["id"])["status"], "due")
+        self.assertTrue(maintenance.delete_log_entry(oil["id"], entries[0]["id"]))
+        self.assertEqual(maintenance.get_task(oil["id"])["status"], "due")
+
+    def test_seeds_wait_for_their_calendar_date(self) -> None:
+        mattress = maintenance.find_task("mattress")
+        self.assertEqual(mattress["schedule_type"], "fixed_calendar")
+        self.assertEqual(mattress["interval_value"], 6)
+        self.assertIn(mattress["next_due"][5:], ("01-01", "07-01"))
+
+    def test_migrates_rolling_quarterly_and_six_month_tasks(self) -> None:
+        import sqlite3
+        conn = sqlite3.connect(maintenance._DB_PATH)
+        conn.executescript("""
+            CREATE TABLE maintenance_tasks (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL,
+                schedule_type TEXT NOT NULL, interval_value INTEGER, interval_unit TEXT, fixed_month INTEGER,
+                fixed_day INTEGER, notes TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL);
+            INSERT INTO maintenance_tasks (name, schedule_type, interval_value, interval_unit, created_at) VALUES
+                ('Trim bonsai', 'interval', 3, 'months', '2026-10-27T13:07:31'),
+                ('Rotate mattress', 'interval', 6, 'months', '2026-10-27T13:07:31'),
+                ('HVAC filter', 'interval', 90, 'days', '2026-10-27T13:07:31');
+        """)
+        conn.commit()
+        conn.close()
+        maintenance._schema_ready_paths.clear()
+        tasks = {t["name"]: t for t in maintenance.list_tasks()}
+        self.assertEqual(tasks["Trim bonsai"]["schedule_label"], "Quarterly (Jan 1, Apr 1, Jul 1, Oct 1)")
+        self.assertEqual(tasks["Rotate mattress"]["schedule_label"], "Twice a year (Jan 1, Jul 1)")
+        self.assertEqual(tasks["HVAC filter"]["schedule_type"], "interval")
+        # Runs once: a task switched back to rolling stays rolling.
+        maintenance.update_task(tasks["Trim bonsai"]["id"], {"schedule_type": "interval", "interval_value": 3,
+                                                             "interval_unit": "months"})
+        maintenance._schema_ready_paths.clear()
+        self.assertEqual(maintenance.find_task("bonsai")["schedule_type"], "interval")
 
     def test_backdated_create_and_complete(self) -> None:
         last = date.today() - timedelta(days=20)
@@ -114,6 +182,13 @@ class StoreTests(MaintenanceTestCase):
                                      "interval_unit": "days"})
         with self.assertRaises(ValueError):
             maintenance.create_task({"name": "x", "schedule_type": "fixed_calendar", "fixed_month": 13})
+        with self.assertRaises(ValueError):
+            maintenance.create_task({"name": "x", "schedule_type": "fixed_calendar", "fixed_month": 1,
+                                     "interval_value": 5})
+        # Any month of the cycle is stored as the year's first one.
+        task = maintenance.create_task({"name": "Gutters", "schedule_type": "fixed_calendar",
+                                        "interval_value": 3, "fixed_month": 11, "fixed_day": 1})
+        self.assertEqual(task["fixed_month"], 2)
 
     def test_tools(self) -> None:
         reply = execute_tool("log_maintenance", {"name": "car scent", "note": "vanilla"})
@@ -193,6 +268,10 @@ class EndpointTests(MaintenanceTestCase):
             self.assertEqual(self.client.post(f"/api/todos/{todo['id']}/done", headers=self.headers).status_code, 404)
 
     def test_now_feed_lists_due_tasks(self) -> None:
+        for name in ("Rotate mattress", "Replace car scent", "Trim bonsai"):
+            task = maintenance.find_task(name)
+            maintenance.update_task(task["id"], {"schedule_type": "interval", "interval_value": 3,
+                                                 "interval_unit": "months"})
         status_hub.clear_cache()
         with patch.object(status_hub, "calendar_configured", return_value=False):
             snapshot = status_hub.now_status()

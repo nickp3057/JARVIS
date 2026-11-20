@@ -2847,16 +2847,21 @@ _CUSTOM_TOOLS: list[dict[str, Any]] = [
     {
         "name": "add_maintenance_task",
         "description": (
-            "Track a new recurring chore. interval: every N days/months/years after the last time "
-            "(\"once a quarter\" = 3 months). fixed_calendar: the same month (and optional day) every "
-            "year. log_only: no countdown, just a log of when it was done."
+            "Track a new recurring chore. fixed_calendar (the default for quarterly, twice-yearly, "
+            "monthly or yearly chores): due on set dates; interval_value = months between them "
+            "(1, 2, 3, 4, 6 or 12), fixed_month/fixed_day = one of the dates (day 31 = last day). "
+            "\"Once a quarter\" = 3 from Jan 1 (Jan 1, Apr 1, Jul 1, Oct 1); \"twice a year\" = 6 "
+            "from Jan 1 unless he names dates. interval: N days/months/years after the last time, "
+            "only when he says it's counted from when he last did it (or for days/weeks). "
+            "log_only: no countdown, just a log of when it was done."
         ),
         "input_schema": {
             "type": "object",
             "properties": {
                 "name": {"type": "string"},
                 "schedule_type": {"type": "string", "enum": ["interval", "fixed_calendar", "log_only"]},
-                "interval_value": {"type": "integer", "minimum": 1},
+                "interval_value": {"type": "integer", "minimum": 1,
+                                   "description": "interval: how many units; fixed_calendar: months between dates."},
                 "interval_unit": {"type": "string", "enum": ["days", "months", "years"]},
                 "fixed_month": {"type": "integer", "minimum": 1, "maximum": 12},
                 "fixed_day": {"type": "integer", "minimum": 1, "maximum": 31},

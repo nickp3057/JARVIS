@@ -1262,6 +1262,7 @@ def theme_put(request: ThemeRequest, _: None = Depends(require_scope("settings:w
 class MaintenanceTaskRequest(BaseModel):
     name: str = Field(min_length=1, max_length=120)
     schedule_type: str = Field(pattern="^(interval|fixed_calendar|log_only)$")
+    # interval: how many units; fixed_calendar: months between dates (1/2/3/4/6/12).
     interval_value: int | None = Field(default=None, ge=1, le=3650)
     interval_unit: str | None = Field(default=None, pattern="^(days|months|years)$")
     fixed_month: int | None = Field(default=None, ge=1, le=12)

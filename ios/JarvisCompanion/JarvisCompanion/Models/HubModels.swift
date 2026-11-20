@@ -631,12 +631,21 @@ struct MaintenanceLogEntry: Codable, Identifiable, Hashable {
 /// Body for creating or editing a task. `lastDone` (yyyy-MM-dd) only
 /// applies on create, so a new task can start from when it was last done.
 struct MaintenanceTaskDraft: Encodable {
+    /// Months between set dates, with the editor's names for them.
+    static let calendarPeriods: [(months: Int, name: String)] = [
+        (1, "Monthly"), (2, "Every 2 months"), (3, "Quarterly"), (4, "Every 4 months"),
+        (6, "Twice a year"), (12, "Every year"),
+    ]
+
     var name = ""
-    var scheduleType = "interval"
-    var intervalValue: Int? = 3
+    /// New tasks default to set dates: quarterly on Jan 1, Apr 1, Jul 1, Oct 1.
+    var scheduleType = "fixed_calendar"
+    var intervalValue: Int? = 6
     var intervalUnit: String? = "months"
-    var fixedMonth: Int?
-    var fixedDay: Int?
+    /// Months between dates for "fixed_calendar" (sent as interval_value).
+    var calendarPeriod = 3
+    var fixedMonth: Int? = 1
+    var fixedDay: Int? = 1
     var notes = ""
     var lastDone: String?
 
@@ -645,11 +654,37 @@ struct MaintenanceTaskDraft: Encodable {
     init(_ task: MaintenanceTask) {
         name = task.name
         scheduleType = task.scheduleType
-        intervalValue = task.intervalValue ?? 3
-        intervalUnit = task.intervalUnit ?? "months"
-        fixedMonth = task.fixedMonth
+        if task.scheduleType == "fixed_calendar" {
+            calendarPeriod = task.intervalValue ?? 12
+        } else {
+            intervalValue = task.intervalValue ?? 6
+            intervalUnit = task.intervalUnit ?? "months"
+        }
+        fixedMonth = task.fixedMonth ?? 1
         fixedDay = task.fixedDay
         notes = task.notes
+    }
+
+    /// The months a calendar schedule lands in, January first.
+    var calendarMonths: [Int] {
+        let first = ((fixedMonth ?? 1) - 1) % calendarPeriod + 1
+        return Array(stride(from: first, through: 12, by: calendarPeriod))
+    }
+
+    /// "Jan 1 · Apr 1 · Jul 1 · Oct 1", matching what Core will show.
+    var calendarPreview: String {
+        let names = calendarMonths.map { Calendar.current.shortMonthSymbols[$0 - 1] }
+        if calendarPeriod == 1 {
+            return fixedDay == 31 ? "The last day of every month" : "The \(Self.ordinal(fixedDay ?? 1)) of every month"
+        }
+        if fixedDay == 31 { return "Last day of " + names.joined(separator: ", ") }
+        return names.map { "\($0) \(fixedDay ?? 1)" }.joined(separator: " · ")
+    }
+
+    static func ordinal(_ day: Int) -> String {
+        let formatter = NumberFormatter()
+        formatter.numberStyle = .ordinal
+        return formatter.string(from: NSNumber(value: day)) ?? "\(day)"
     }
 
     enum CodingKeys: String, CodingKey {
@@ -674,6 +709,7 @@ struct MaintenanceTaskDraft: Encodable {
             try values.encodeIfPresent(intervalValue, forKey: .intervalValue)
             try values.encodeIfPresent(intervalUnit, forKey: .intervalUnit)
         case "fixed_calendar":
+            try values.encode(calendarPeriod, forKey: .intervalValue)
             try values.encodeIfPresent(fixedMonth, forKey: .fixedMonth)
             try values.encodeIfPresent(fixedDay, forKey: .fixedDay)
         default: break
