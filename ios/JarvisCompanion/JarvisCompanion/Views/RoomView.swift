@@ -632,6 +632,8 @@ struct RoomView: View {
             }
             .padding(.top, 8)
             scenesGrid(height: Self.rowHeight)
+            // Only while something's happening (the TV playing, the Movie scene on).
+            RoomIsland(model: model).padding(.top, 14)
             Spacer(minLength: 0)
             bottomButtons
         }
