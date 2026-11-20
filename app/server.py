@@ -1358,6 +1358,39 @@ def barn_door(request: ProtocolRequest, _: None = Depends(authorize)) -> dict[st
     return {"message": message}
 
 
+class Temp4kRequest(BaseModel):
+    tmdb_id: int
+    hours: float = Field(default=24, ge=1, le=336)
+
+
+@app.get("/api/media/temp4k")
+def media_temp4k(_: None = Depends(authorize)) -> dict[str, object]:
+    """Temporary 4K films (integrations/temp_4k.py) for the Media countdown."""
+    from integrations import temp_4k
+    if not temp_4k.configured():
+        return {"configured": False, "films": [], "keep_hours": temp_4k.keep_hours()}
+    return {"configured": True, "films": temp_4k.listing(), "keep_hours": temp_4k.keep_hours()}
+
+
+@app.post("/api/media/temp4k/extend")
+def media_temp4k_extend(request: Temp4kRequest, _: None = Depends(authorize)) -> dict[str, object]:
+    from integrations import temp_4k
+    try:
+        return {"error": "", "film": temp_4k.extend(request.tmdb_id, request.hours)}
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="not a temporary 4K film") from exc
+
+
+@app.post("/api/media/temp4k/remove")
+def media_temp4k_remove(request: Temp4kRequest, _: None = Depends(authorize)) -> dict[str, object]:
+    from integrations import temp_4k
+    try:
+        done, detail = temp_4k.remove_id(request.tmdb_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="not a temporary 4K film") from exc
+    return {"error": "" if done else detail}
+
+
 @app.get("/api/media/profiles")
 def media_profiles(kind: str, _: None = Depends(authorize)) -> dict[str, object]:
     """Quality profile names for a request's picker, and the default one."""

@@ -105,6 +105,24 @@ class TempFourKTests(unittest.TestCase):
         self.assertIn("already 4K", temp_4k.request("The Dark Knight"))
         self.assertEqual(self.arr.four_k, {})
 
+    def test_app_listing_extend_and_remove(self):
+        temp_4k.request("Chamber of Secrets", hours=24)
+        (film,) = temp_4k.listing()
+        self.assertEqual((film["tmdb_id"], film["state"], film["expires_at"]), (672, "searching", None))
+        self.assertEqual(temp_4k.extend(672, 24)["hours"], 48)  # pending: a longer keep once it lands
+        movie_id = temp_4k.entries()[0]["radarr4k_id"]
+        self.arr.four_k[movie_id]["hasFile"] = True
+        temp_4k.tick(self.alert, now=1_000)
+        with mock.patch.object(temp_4k.time, "time", return_value=1_000):
+            film = temp_4k.extend(672, 24)
+        self.assertEqual(film["state"], "ready")
+        self.assertEqual(film["expires_at"], 1_000 + 48 * 3600 + 24 * 3600)
+        with self.assertRaises(KeyError):
+            temp_4k.extend(999)
+        self.assertEqual(temp_4k.remove_id(672), (True, ""))
+        self.assertEqual(self.arr.deleted, [movie_id])
+        self.assertEqual(temp_4k.listing(), [])
+
     def test_ready_then_expired_is_deleted(self):
         temp_4k.request("Chamber of Secrets", hours=24)
         movie_id = temp_4k.entries()[0]["radarr4k_id"]

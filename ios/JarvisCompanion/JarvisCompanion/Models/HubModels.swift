@@ -236,6 +236,31 @@ struct MediaStatus: Decodable {
     let sonarr: ServarrSection
 }
 
+/// `GET /api/media/temp4k`: temporary 4K films and their countdowns
+/// (Core's `integrations/temp_4k.py`).
+struct Temp4kStatus: Decodable {
+    let configured: Bool
+    let films: [Temp4kFilm]
+}
+
+struct Temp4kFilm: Decodable, Identifiable {
+    let tmdbID: Int
+    let title: String
+    let year: Int?
+    /// searching / downloading / ready
+    let state: String
+    let progress: Double?
+    let expiresAt: Double?
+    let hours: Double
+
+    var id: Int { tmdbID }
+    var expires: Date? { expiresAt.map { Date(timeIntervalSince1970: $0) } }
+
+    enum CodingKeys: String, CodingKey {
+        case tmdbID = "tmdb_id", title, year, state, progress, expiresAt = "expires_at", hours
+    }
+}
+
 struct ServarrSection: Decodable {
     let error: String
     let queue: [MediaQueueItem]

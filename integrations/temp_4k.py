@@ -249,6 +249,56 @@ def status() -> str:
     return "Temporary 4K: " + "; ".join(lines) + "."
 
 
+def listing() -> list[dict[str, Any]]:
+    """The temporary 4K films for the app's Media countdown, soonest to go
+    first: ``state`` is searching / downloading / ready, ``expires_at``
+    (epoch seconds) is set once it lands."""
+    state = entries()
+    progress = _queue_progress() if any(not e.get("ready_at") for e in state) else {}
+    out = []
+    for entry in state:
+        pct = progress.get(entry.get("radarr4k_id"))
+        out.append({
+            "tmdb_id": entry.get("tmdb_id"),
+            "title": entry.get("title") or "",
+            "year": entry.get("year"),
+            "state": "ready" if entry.get("ready_at") else ("downloading" if pct is not None else "searching"),
+            "progress": round(pct, 1) if pct is not None else None,
+            "requested_at": entry.get("requested_at"),
+            "ready_at": entry.get("ready_at"),
+            "expires_at": entry.get("expires_at"),
+            "hours": entry.get("hours") or keep_hours(),
+            "adopted": bool(entry.get("adopted")),
+        })
+    out.sort(key=lambda e: (e["expires_at"] is None, e["expires_at"] or 0, e["title"]))
+    return out
+
+
+def extend(tmdb_id: Any, hours: float = 24) -> dict[str, Any]:
+    """The app's Extend: ``hours`` more on top of the current countdown (or
+    a longer keep once a pending one lands). KeyError if it isn't tracked."""
+    hours = max(1.0, min(float(hours), 24 * 14))
+    with _lock:
+        state = _load()
+        entry = next((e for e in state if e.get("tmdb_id") == tmdb_id), None)
+        if entry is None:
+            raise KeyError(tmdb_id)
+        if entry.get("ready_at"):
+            entry["expires_at"] = max(float(entry.get("expires_at") or 0), time.time()) + hours * 3600
+        else:
+            entry["hours"] = float(entry.get("hours") or keep_hours()) + hours
+        _save(state)
+    return next(e for e in listing() if e["tmdb_id"] == tmdb_id)
+
+
+def remove_id(tmdb_id: Any) -> tuple[bool, str]:
+    """The app's Remove now: drop one temporary 4K copy (1080p untouched)."""
+    entry = next((e for e in entries() if e.get("tmdb_id") == tmdb_id), None)
+    if entry is None:
+        raise KeyError(tmdb_id)
+    return _delete(entry)
+
+
 def _queue_progress() -> dict[int, float]:
     ok, queue = servarr.request(SERVICE, "GET", "/api/v3/queue", params={"pageSize": 50})
     records = queue.get("records", []) if ok and isinstance(queue, dict) else []

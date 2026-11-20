@@ -26,6 +26,9 @@ final class HubViewModel: ObservableObject {
     @Published var now = Section<NowStatus>()
     @Published var torrents = Section<TorrentsStatus>()
     @Published var media = Section<MediaStatus>()
+    /// Temporary 4K films (Media tab's countdown); empty or unconfigured hides the card.
+    @Published var temp4k = Section<Temp4kStatus>()
+    @Published var busyTemp4k: Set<Int> = []
     @Published var storage = Section<StorageStatus>()
     @Published var entities = Section<[HomeEntity]>()
     @Published var links = Section<[ServiceLink]>()
@@ -282,6 +285,35 @@ final class HubViewModel: ObservableObject {
             status.radarr.error.isEmpty || status.sonarr.error.isEmpty
                 ? "" : status.radarr.error
         }) { try await $0.mediaStatus() }
+        await refreshTemp4k()
+    }
+
+    func refreshTemp4k() async {
+        await load(\.temp4k) { try await $0.temp4kStatus() }
+    }
+
+    /// The 4K card's Extend (`hours` more) and Remove now.
+    func extendTemp4k(_ film: Temp4kFilm, hours: Double) {
+        temp4kAction(film) { try await $0.extendTemp4k(film.tmdbID, hours: hours); return "" }
+    }
+
+    func removeTemp4k(_ film: Temp4kFilm) {
+        temp4kAction(film) { try await $0.removeTemp4k(film.tmdbID) }
+    }
+
+    private func temp4kAction(_ film: Temp4kFilm, _ call: @escaping (JarvisAPIClient) async throws -> String) {
+        guard !busyTemp4k.contains(film.tmdbID) else { return }
+        busyTemp4k.insert(film.tmdbID)
+        Task {
+            defer { busyTemp4k.remove(film.tmdbID) }
+            do {
+                let error = try await call(client())
+                if !error.isEmpty { actionError = error }
+            } catch {
+                actionError = error.localizedDescription
+            }
+            await refreshTemp4k()
+        }
     }
 
     func refreshStorage() async {

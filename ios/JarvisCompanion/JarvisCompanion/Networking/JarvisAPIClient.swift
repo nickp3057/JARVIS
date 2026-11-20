@@ -1220,6 +1220,24 @@ struct JarvisAPIClient {
         try await getJSON(MediaStatus.self, path: "api/status/media")
     }
 
+    func temp4kStatus() async throws -> Temp4kStatus {
+        try await getJSON(Temp4kStatus.self, path: "api/media/temp4k")
+    }
+
+    /// Extend: `hours` more on a temporary 4K film's countdown.
+    func extendTemp4k(_ tmdbID: Int, hours: Double) async throws {
+        struct Body: Encodable { let tmdb_id: Int; let hours: Double }
+        struct Result: Decodable {}
+        _ = try await postJSON(Result.self, path: "api/media/temp4k/extend", body: Body(tmdb_id: tmdbID, hours: hours))
+    }
+
+    /// Remove now: the 4K copy goes, the 1080p one stays. Returns Core's error, or "".
+    func removeTemp4k(_ tmdbID: Int) async throws -> String {
+        struct Body: Encodable { let tmdb_id: Int; let hours: Double }
+        struct Result: Decodable { let error: String }
+        return try await postJSON(Result.self, path: "api/media/temp4k/remove", body: Body(tmdb_id: tmdbID, hours: 24)).error
+    }
+
     func storageStatus() async throws -> StorageStatus {
         try await getJSON(StorageStatus.self, path: "api/status/storage")
     }

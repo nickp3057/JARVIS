@@ -89,6 +89,7 @@ struct HubView: View {
                                 nowCard
                             case .media:
                                 requestMediaButton
+                                temp4kCard
                                 storageCard.highlight(highlightedCard == "storage").id("storage")
                                 torrentsCard
                                 mediaCard
@@ -1218,6 +1219,81 @@ struct HubView: View {
             .foregroundStyle(.secondary)
         }
         .padding(.vertical, 11)
+    }
+
+    /// Temporary 4K films: one line each with the countdown to 1080p and a
+    /// +1 day button; hold a row for more (+3 hours, +1 week, Remove now).
+    /// Nothing at all when there are none (Nick, 2026-11-19: not a lot of space).
+    @ViewBuilder private var temp4kCard: some View {
+        if let status = model.temp4k.value, status.configured, !status.films.isEmpty {
+            CockpitPanel("Temporary 4K", symbol: "4k.tv") {
+                VStack(spacing: 0) {
+                    ForEach(Array(status.films.enumerated()), id: \.element.id) { index, film in
+                        temp4kRow(film)
+                        if index < status.films.count - 1 { divider }
+                    }
+                }
+            }
+        }
+    }
+
+    private func temp4kRow(_ film: Temp4kFilm) -> some View {
+        let busy = model.busyTemp4k.contains(film.tmdbID)
+        return HStack(spacing: 10) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(film.title).font(.subheadline.weight(.medium)).lineLimit(1)
+                Group {
+                    if film.state == "ready", let expires = film.expires {
+                        TimelineView(.periodic(from: .now, by: 60)) { context in
+                            Text("1080p again in \(Self.countdown(to: expires, from: context.date))")
+                                .foregroundStyle(expires.timeIntervalSince(context.date) < 6 * 3600
+                                                 ? JarvisTheme.amber : Color.secondary)
+                        }
+                    } else if film.state == "downloading" {
+                        Text("Downloading \(Int(film.progress ?? 0))% · keeps \(Self.span(film.hours))")
+                            .foregroundStyle(JarvisTheme.cyan)
+                    } else {
+                        Text("Searching for 4K · keeps \(Self.span(film.hours))").foregroundStyle(.secondary)
+                    }
+                }
+                .font(.caption.monospacedDigit())
+            }
+            Spacer(minLength: 6)
+            Button { model.extendTemp4k(film, hours: 24) } label: {
+                Group {
+                    if busy { ProgressView().controlSize(.mini) } else { Text("+1 day") }
+                }
+                .font(.caption.weight(.semibold))
+                .frame(minWidth: 64, minHeight: 32)
+                .background(JarvisTheme.cyan.opacity(0.12), in: .capsule)
+            }
+            .buttonStyle(CockpitButtonStyle())
+            .disabled(busy)
+            .accessibilityLabel("Keep \(film.title) in 4K one more day")
+        }
+        .padding(.vertical, 9)
+        .contentShape(Rectangle())
+        .contextMenu {
+            Button { model.extendTemp4k(film, hours: 3) } label: { Label("+3 hours", systemImage: "clock") }
+            Button { model.extendTemp4k(film, hours: 24 * 7) } label: { Label("+1 week", systemImage: "calendar") }
+            Divider()
+            Button(role: .destructive) { model.removeTemp4k(film) } label: {
+                Label("Remove 4K now", systemImage: "trash")
+            }
+        }
+    }
+
+    /// "1d 4h", "3h 20m", "12m".
+    static func countdown(to date: Date, from now: Date) -> String {
+        let minutes = max(0, Int(date.timeIntervalSince(now) / 60))
+        let days = minutes / 1440, hours = (minutes % 1440) / 60, mins = minutes % 60
+        if days > 0 { return "\(days)d \(hours)h" }
+        if hours > 0 { return "\(hours)h \(mins)m" }
+        return minutes > 0 ? "\(mins)m" : "a moment"
+    }
+
+    static func span(_ hours: Double) -> String {
+        hours.truncatingRemainder(dividingBy: 24) == 0 ? "\(Int(hours / 24))d" : "\(Int(hours))h"
     }
 
     /// Opens the chat-free search -> pick -> confirm request flow.
