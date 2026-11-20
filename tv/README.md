@@ -175,6 +175,13 @@ every deploy, so edit the repo copy, not the TV's.
   If the token can't write (provisioned before 6.5), the pick stays TV-only
   (`theme_override` pref) and is shared on the first refresh after
   `tv/provision.sh` is re-run.
+- **Settings button** (`RemoteBridgeService.openSettings`, 9.12): Google
+  TV's own handler (launcherx) is disabled, so the bridge catches
+  `KEYCODE_SETTINGS` from the log. On a console (HDMI, `com.tcl.tv`
+  TVActivity) it opens TCL's Game Bar (`com.tcl.gamebar.main`, the game
+  mode screen); pressed again over the Game Bar, TCL's full picture settings
+  (`com.android.tv.settings/com.tcl.settings.PictureActivity`); anywhere
+  else, Android settings. All through self-adb `am start`.
 - **Debloat** (`BootCleanup`): firmware restores some TCL apps every boot;
   the launcher removes them again via self-adb. `tv/restore.sh` undoes it all.
 

@@ -147,6 +147,10 @@ public class RemoteBridgeService extends Service {
     }
 
     private void handleKey(String keyCode) {
+        if ("KEYCODE_SETTINGS".equals(keyCode)) {
+            new Thread(this::openSettings, "settings-key").start();
+            return;
+        }
         String target = Config.KEY_TARGETS.get(keyCode);
         if (target == null) return;
         Log.i(TAG, "key " + keyCode + " -> " + target);
@@ -254,6 +258,38 @@ public class RemoteBridgeService extends Service {
             return new JSONObject(out.toString(StandardCharsets.UTF_8.name()));
         } finally {
             c.disconnect();
+        }
+    }
+
+    /**
+     * The remote's gear button. Google TV's own handler (launcherx) is
+     * disabled by BootCleanup, so the button did nothing. On a console
+     * (HDMI, TCL's TVActivity): TCL's Game Bar, the game-mode screen; again
+     * while the Game Bar is up: TCL's full picture settings (brightness,
+     * contrast, HDR). Anywhere else: Android settings. Started through
+     * self-adb, which can open the TCL screens a background service can't.
+     */
+    private void openSettings() {
+        try (SelfAdb adb = SelfAdb.connect(this, 15_000)) {
+            String top = adb.shell("dumpsys activity activities | grep -m1 mResumedActivity");
+            String command;
+            if (top.contains("com.tcl.gamebar/")) {
+                command = "am start -n com.android.tv.settings/com.tcl.settings.PictureActivity";
+            } else if (top.contains("com.tcl.tv/")) {
+                command = "am start -a com.tcl.gamebar.main -p com.tcl.gamebar";
+            } else if (top.contains("com.android.tv.settings/")) {
+                return;  // already there: let Settings handle its own key
+            } else {
+                command = "am start -a android.settings.SETTINGS";
+            }
+            Log.i(TAG, "settings key on " + top.trim() + " -> " + command);
+            String out = adb.shell(command);
+            if (out.contains("Error")) {
+                Log.w(TAG, "settings key: " + out.trim() + "; opening Android settings");
+                adb.shell("am start -a android.settings.SETTINGS");
+            }
+        } catch (Exception e) {
+            Log.w(TAG, "settings key failed", e);
         }
     }
 
