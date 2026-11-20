@@ -258,24 +258,67 @@ def ffmpeg_exe() -> str | None:
     return shutil.which("ffmpeg")
 
 
-def ffmpeg_command(exe: str, source: str, fps: int = FPS) -> list[str]:
+_VAAPI_DEVICE = "/dev/dri/renderD128"
+_VAAPI_DRIVERS = ("/usr/lib/x86_64-linux-gnu/dri/iHD_drv_video.so", "/usr/lib/x86_64-linux-gnu/dri/i965_drv_video.so")
+# HDR to SDR, done on the 64x28 frame (nearly free): without it a 4K HDR
+# copy's colours came out washed out (saturation 0.35 vs 0.47 for the 1080p
+# SDR copy of the same minute; 0.43 with this, measured on the Surface
+# 2026-11-19). zscale needs even sizes, hence 28 then 27.
+_TONEMAP = ("zscale=t=linear:npl=100,format=gbrpf32le,zscale=p=bt709,tonemap=tonemap=hable:desat=0,"
+            "zscale=t=bt709:m=bt709:r=tv,format=gbrp")
+
+
+def build_hwaccel() -> str | None:
+    """The hardware decoder for builds, or None for software.
+    ``LIGHT_SYNC_HWACCEL``: unset/``auto`` uses VAAPI when the Intel GPU is
+    usable (render node readable and a VA driver installed: on the Surface,
+    ``intel-media-va-driver`` and the ``render`` group), ``off`` forces
+    software, anything else (``vaapi``, ``videotoolbox``) is passed to ffmpeg.
+    Never ffmpeg's own ``auto``: imageio-ffmpeg's build tries CUDA first and
+    aborts on the Surface (no NVIDIA driver)."""
+    choice = os.getenv("LIGHT_SYNC_HWACCEL", "").strip().lower()
+    if choice in ("off", "none", "software", "0", "false"):
+        return None
+    if choice and choice != "auto":
+        return choice
+    if (os.name == "posix" and os.access(_VAAPI_DEVICE, os.R_OK | os.W_OK)
+            and any(Path(p).exists() for p in _VAAPI_DRIVERS)):
+        return "vaapi"
+    return None
+
+
+def build_threads() -> str:
+    """ffmpeg decode threads: ``LIGHT_SYNC_BUILD_THREADS``, else every core
+    (up to 8). The build runs at nice 10, so the voice and API still come
+    first; 8 threads decode 4K HEVC ~27% faster than 4 on the Surface."""
+    value = os.getenv("LIGHT_SYNC_BUILD_THREADS", "").strip()
+    return value or str(min(8, os.cpu_count() or 4))
+
+
+def ffmpeg_command(exe: str, source: str, fps: int = FPS, *, hdr: bool = False,
+                   hwaccel: str | None = None) -> list[str]:
     """Decode at the requested fps to 64x27 rgb24 on stdout. HTTP reconnects ride out a
     Wi-Fi blip over a two-hour read; audio, subtitles and data are skipped.
-    Software decode by default: ``-hwaccel auto`` makes imageio-ffmpeg's
-    build try CUDA first and abort (exit -6, "Cannot load libcuda.so.1") on
-    the Surface, which has no NVIDIA driver. ``LIGHT_SYNC_HWACCEL`` (e.g.
-    ``vaapi``, ``videotoolbox``) opts back in where it works."""
-    threads = os.getenv("LIGHT_SYNC_BUILD_THREADS", "4").strip() or "4"
+    ``hdr`` tonemaps PQ/HLG to SDR; ``hwaccel`` decodes on the GPU (frames
+    come back to system memory, so the filters are the same)."""
     command = [exe, "-v", "error", "-nostdin"]
-    hwaccel = os.getenv("LIGHT_SYNC_HWACCEL", "").strip()
-    if hwaccel:
+    if hwaccel == "vaapi":
+        command += ["-hwaccel", "vaapi", "-hwaccel_device", _VAAPI_DEVICE]
+    elif hwaccel:
         command += ["-hwaccel", hwaccel]
-    command += ["-threads", threads]
+    command += ["-threads", build_threads()]
     if source.startswith("http"):
         command += ["-reconnect", "1", "-reconnect_streamed", "1", "-reconnect_delay_max", "10"]
-    return command + ["-i", source, "-an", "-sn", "-dn",
-                      "-vf", f"fps={fps},scale={W}:{H}:flags=area",
+    vf = (f"fps={fps},scale={W}:{H + H % 2}:flags=area,{_TONEMAP},scale={W}:{H}:flags=area" if hdr
+          else f"fps={fps},scale={W}:{H}:flags=area")
+    return command + ["-i", source, "-an", "-sn", "-dn", "-vf", vf,
                       "-f", "rawvideo", "-pix_fmt", "rgb24", "-"]
+
+
+def is_hdr(probe_text: str) -> bool:
+    """ffmpeg's ``-i`` description of a file says PQ (HDR10, Dolby Vision's
+    base layer) or HLG on the video stream."""
+    return any(t in probe_text for t in ("smpte2084", "arib-std-b67"))
 
 
 def building() -> dict[str, Any] | None:
@@ -508,6 +551,7 @@ def _run_build(film: dict[str, Any], exe: str, quiet: bool = False) -> None:
     started = time.monotonic()
     stderr_tail: list[bytes] = []
     requeue = False
+    hdr = False
     try:
         if film.get("part_id"):
             try:
@@ -516,24 +560,10 @@ def _run_build(film: dict[str, Any], exe: str, quiet: bool = False) -> None:
                 # TimeoutExpired includes argv (and the Plex token) in its text.
                 raise RuntimeError("Plex media probe timed out") from None
             import re
-            start = re.search(r"start: (-?[0-9.]+)", probe.stderr.decode("utf-8", "replace"))
+            described = probe.stderr.decode("utf-8", "replace")
+            start = re.search(r"start: (-?[0-9.]+)", described)
             film["start_time_s"] = float(start.group(1)) if start else None
-        # The decode and the colour maths run in their own process
-        # (brain/light_track_worker.py): in a thread here they held Core's
-        # interpreter lock for the whole film and the room voice fell behind.
-        proc = subprocess.Popen(worker_command(ffmpeg_command(exe, url, film["fps"])), stdout=subprocess.PIPE,
-                                stderr=subprocess.PIPE, stdin=subprocess.DEVNULL, cwd=str(_ROOT),
-                                preexec_fn=_nice if os.name == "posix" else None)
-        with _lock:
-            if _build is not None:
-                _build["proc"] = proc
-
-        def drain() -> None:  # ffmpeg's errors, bounded, so a full pipe never stalls it
-            for line in iter(proc.stderr.readline, b""):
-                stderr_tail.append(line)
-                del stderr_tail[:-20]
-
-        threading.Thread(target=drain, daemon=True, name="light-track-ffmpeg-err").start()
+            hdr = is_hdr(described)
 
         def progress(frames: int) -> None:
             if frames % 100:
@@ -548,10 +578,37 @@ def _run_build(film: dict[str, Any], exe: str, quiet: bool = False) -> None:
             if moved:
                 _changed()
 
-        track = read_track(proc.stdout, progress, _cancel)
-        if _cancel.is_set():
-            proc.terminate()
-        code = proc.wait(timeout=30)
+        def decode(accel: str | None) -> tuple[int | None, np.ndarray]:
+            # The decode and the colour maths run in their own process
+            # (brain/light_track_worker.py): in a thread here they held Core's
+            # interpreter lock for the whole film and the room voice fell behind.
+            stderr_tail.clear()
+            proc = subprocess.Popen(worker_command(ffmpeg_command(exe, url, film["fps"], hdr=hdr, hwaccel=accel)),
+                                    stdout=subprocess.PIPE, stderr=subprocess.PIPE, stdin=subprocess.DEVNULL,
+                                    cwd=str(_ROOT), preexec_fn=_nice if os.name == "posix" else None)
+            with _lock:
+                if _build is not None:
+                    _build["proc"] = proc
+
+            def drain() -> None:  # ffmpeg's errors, bounded, so a full pipe never stalls it
+                for line in iter(proc.stderr.readline, b""):
+                    stderr_tail.append(line)
+                    del stderr_tail[:-20]
+
+            threading.Thread(target=drain, daemon=True, name="light-track-ffmpeg-err").start()
+            frames = read_track(proc.stdout, progress, _cancel)
+            if _cancel.is_set():
+                proc.terminate()
+            return proc.wait(timeout=30), frames
+
+        accel = build_hwaccel()
+        code, track = decode(accel)
+        if accel and code != 0 and not len(track) and not _cancel.is_set() \
+                and not killed_from_outside(code, b"".join(stderr_tail).decode("utf-8", "replace")):
+            log.warning("Light track for %s: %s decode failed (exit %s); building in software instead",
+                        title, accel, code)
+            accel = None
+            code, track = decode(None)
         if _cancel.is_set():
             log.info("Light track for %s cancelled", title)
             return
@@ -576,7 +633,8 @@ def _run_build(film: dict[str, Any], exe: str, quiet: bool = False) -> None:
             return
         save(key, track, title, film.get("year"), source=film)
         minutes = (time.monotonic() - started) / 60
-        log.info("Light track for %s: %d frames in %.1f min", title, len(track), minutes)
+        log.info("Light track for %s: %d frames in %.1f min (%s decode%s)", title, len(track), minutes,
+                 accel or "software", ", HDR tonemapped" if hdr else "")
         if not quiet:
             _notify("Light sync ready", f"The light sync for {title} is ready, sir. "
                     "It'll run on its own when you play it in movie mode.", "info")

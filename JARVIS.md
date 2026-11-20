@@ -1182,8 +1182,8 @@ LIGHT_SYNC_LAMP_LEAD_MS=150 # the lamp reads ahead (it fades by itself)
 LIGHT_SYNC_STRIP_LEVEL=0.35 # strip/desk brightness at Medium (Subtle x0.6, Intense x1.6, max 1)
 LIGHT_SYNC_LAMP_LEVEL=0.6   # lamp brightness at Medium
 LIGHT_SYNC_PLEX_PLAYER=     # the room TV's Plex player (title, product or machineIdentifier); blank = the only movie playing
-LIGHT_SYNC_BUILD_THREADS=4  # ffmpeg decode threads for a track build (runs at nice 10)
-LIGHT_SYNC_HWACCEL=          # blank = software decode; e.g. vaapi to try the GPU (auto aborted on the Surface)
+LIGHT_SYNC_BUILD_THREADS=   # ffmpeg decode threads for a track build; blank = every core, up to 8 (runs at nice 10)
+LIGHT_SYNC_HWACCEL=          # blank/auto = VAAPI when the Intel GPU is usable (driver + render group), else software; off = software; or e.g. videotoolbox. Never ffmpeg's own "auto" (aborts on the Surface probing CUDA)
 TV_MEDIA_PLAYERS=media_player.nicks_room_tv,media_player.nicks_room_tv_2,media_player.nick_s_room_tv,media_player.nicks_room_group,media_player.nick_s_room_display   # on/off for these goes to the remote
 SCHWAB_POLL_SECONDS=30      # holdings/cash refresh in market hours (prices stream live regardless)
 JARVIS_THEME=arc            # arc | hotRod | malibu | crimson | mark85 | spiderMan | mcqueen | experimenting (markIII/graphite/stealth retired): default look until someone picks one on the phone or TV (then memory/theme.json via /api/theme)
@@ -1348,6 +1348,7 @@ there, so edit files with a `sudo python3` one-shot or vi.
 
 ## Recently Shipped
 
+- **Faster, truer light sync builds (2026-11-19, companion 6.90 / 332, Core).** Measured on the Surface with the temp-4K Songbirds file (3840x1608 HEVC Main 10, HDR PQ): software decode ran at 110 fps with 4 threads and 139 fps with 8 (a 2 h 37 min film: ~43 vs ~34 min). Builds now use every core by default (`LIGHT_SYNC_BUILD_THREADS` blank, up to 8). HDR files (`is_hdr`: smpte2084/arib-std-b67 in the probe) are tonemapped to SDR on the 64x28 frame (zscale + hable, nearly free): the plain 4K track came out washed out (saturation 0.35) against the 1080p SDR track's 0.47 for the same minute; tonemapped 0.43. Hardware decode: `build_hwaccel()` picks VAAPI when `/dev/dri/renderD128` is usable and an Intel VA driver is installed, and a failed GPU decode rebuilds in software at once; the success log says which decode ran. One-time on the Surface to turn the GPU on: `sudo apt install intel-media-va-driver && sudo usermod -aG render nick && sudo systemctl restart jarvis-api`. GPU speed not measured yet.
 - **Light sync builds can't stall "Hey JARVIS"; no builds on their own (2026-11-19, companion 6.89 / 331).** Playing the temp-4K Songbirds copy (a different Plex Part from the 1080p one that had a track) quietly queued a two-hour 4K build; its per-frame colour maths ran as Python inside Core, held the interpreter lock, and the room voice fell ~30 s behind (wake word heard, no answer in time). Now: (1) `brain/light_track_worker.py` runs ffmpeg and the colour maths in its own process at nice 10 and streams 3 bytes per frame; `light_tracks.read_track` only counts them. (2) `light_sync` never starts a build itself; the reason reads "…'s light sync is for another copy; make one for this copy from the menu" and status has `other_copy_has_track`. (3) `POST /api/lightsync/build {playing: true}` (`LightSyncController.build_playing`) builds the copy playing on the TV now; the iPad movie screen's Light sync menu button says **Make a light sync for this copy** in that case and sends it. (4) `resume()` drops queued copy builds that queued themselves (quiet + `base_rating_key`), so tonight's Songbirds 4K build doesn't restart. `cancel` accepts Part keys (`6699--<hash>`). Tests: `tests/test_light_sync.py`.
 - **Calm iPad orbs (2026-11-19, companion 6.88 / 330).** The iPads' Room orb no longer fires a thought for every house signal: `RoomView` opens `TrafficFeed` only when Room settings › Orb › **React to house traffic** is on (`room.houseTraffic`, default off), so by default the orb is calm like the phone's Home orb and moves only while JARVIS listens or thinks. The Link map still reads the feed while it's open.
 - **"Play X on my TV" reaches JARVIS, not Spotify (2026-11-19, Core only).** The room voice's music fast path (`speech/quick_answers._music`) grabbed "Play Hunger Games ... on my TV" (the TV guard knew "on the TV", not "on my TV") and, with Spotify not configured on the Surface, failed without trying the TV. Now `_NOT_SPOTIFY` also matches "on my …", and with no Spotify credentials the music fast path steps aside entirely so play/pause go to the model (Plex, the TV). Tests: `tests/test_room_smart.py`.
@@ -2965,9 +2966,10 @@ prototype in `~/Developer/projects/light-sync` (2026-11-09).
   for X" reads the film's file over HTTP from Plex (the media Part URL with
   the token, never logged; the Surface has no NAS mount; the smallest version,
   so a 1080p copy is read over a 4K one) through ffmpeg from
-  `imageio-ffmpeg` (`shutil.which("ffmpeg")` as fallback), software decode
-  (`-hwaccel auto` aborted on the Surface probing for CUDA; `LIGHT_SYNC_HWACCEL`
-  opts in, e.g. `vaapi`),
+  `imageio-ffmpeg` (`shutil.which("ffmpeg")` as fallback), VAAPI decode when
+  the Intel GPU is usable, else software (`build_hwaccel`; ffmpeg's own
+  `-hwaccel auto` aborted on the Surface probing for CUDA), every core,
+  HDR tonemapped to SDR, all in the `brain/light_track_worker.py` process,
   10 fps scaled to 64x27, no audio/subtitles, nice 10. Each 0.1 s becomes one
   colour: the biggest vivid hue region (18 hue bins, neighbours count half),
   warm white when nothing is vivid, brightness from each pixel's brightest

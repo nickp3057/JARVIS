@@ -99,10 +99,39 @@ class FrameColourTests(unittest.TestCase):
         self.assertEqual(len(light_tracks.analyze_stream(io.BytesIO(data), cancel=cancel)), 0)
 
     def test_ffmpeg_hwaccel_only_when_asked(self) -> None:
-        with patch.dict(os.environ, {"LIGHT_SYNC_HWACCEL": "vaapi"}):
-            command = light_tracks.ffmpeg_command("ffmpeg", "/tmp/film.mkv")
+        command = light_tracks.ffmpeg_command("ffmpeg", "/tmp/film.mkv", hwaccel="vaapi")
         self.assertEqual(command[command.index("-hwaccel") + 1], "vaapi")
+        self.assertEqual(command[command.index("-hwaccel_device") + 1], "/dev/dri/renderD128")
         self.assertLess(command.index("-hwaccel"), command.index("-i"))
+
+    def test_build_hwaccel_picks_vaapi_only_when_the_gpu_is_usable(self) -> None:
+        with patch.dict(os.environ, {"LIGHT_SYNC_HWACCEL": ""}), \
+                patch.object(light_tracks.os, "access", return_value=True), \
+                patch.object(light_tracks.Path, "exists", return_value=True):
+            self.assertEqual(light_tracks.build_hwaccel(), "vaapi")
+        with patch.dict(os.environ, {"LIGHT_SYNC_HWACCEL": "auto"}), \
+                patch.object(light_tracks.os, "access", return_value=False):
+            self.assertIsNone(light_tracks.build_hwaccel())  # no render group: software
+        with patch.dict(os.environ, {"LIGHT_SYNC_HWACCEL": "off"}), \
+                patch.object(light_tracks.os, "access", return_value=True):
+            self.assertIsNone(light_tracks.build_hwaccel())
+        with patch.dict(os.environ, {"LIGHT_SYNC_HWACCEL": "videotoolbox"}):
+            self.assertEqual(light_tracks.build_hwaccel(), "videotoolbox")
+
+    def test_hdr_is_tonemapped_on_the_small_frame(self) -> None:
+        self.assertTrue(light_tracks.is_hdr("Video: hevc (Main 10), yuv420p10le(tv, bt2020nc/bt2020/smpte2084)"))
+        self.assertFalse(light_tracks.is_hdr("Video: h264 (High), yuv420p(tv, bt709)"))
+        vf = light_tracks.ffmpeg_command("ffmpeg", "/tmp/f.mkv", 30, hdr=True)
+        vf = vf[vf.index("-vf") + 1]
+        self.assertTrue(vf.startswith("fps=30,scale=64:28:flags=area,zscale=t=linear"))
+        self.assertTrue(vf.endswith("format=gbrp,scale=64:27:flags=area"))
+
+    def test_build_threads_default_to_the_cores(self) -> None:
+        with patch.dict(os.environ, {"LIGHT_SYNC_BUILD_THREADS": ""}), \
+                patch.object(light_tracks.os, "cpu_count", return_value=8):
+            self.assertEqual(light_tracks.build_threads(), "8")
+        with patch.dict(os.environ, {"LIGHT_SYNC_BUILD_THREADS": "3"}):
+            self.assertEqual(light_tracks.build_threads(), "3")
 
     def test_ffmpeg_command_reads_http_decodes_at_10fps_without_audio(self) -> None:
         command = light_tracks.ffmpeg_command("ffmpeg", "http://plex/library/parts/1/file.mkv?X-Plex-Token=t")
@@ -172,6 +201,7 @@ class BuildBase(TrackStoreDir):
         light_tracks.set_notifier(lambda *a: self.notes.append(a))
         self.addCleanup(light_tracks.set_notifier, None)
         for p in (patch.object(light_tracks, "ffmpeg_exe", return_value="/bin/ffmpeg"),
+                  patch.object(light_tracks, "build_hwaccel", return_value=None),
                   patch.dict(os.environ, {"PLEX_URL": "http://plex:32400", "PLEX_TOKEN": "sekrit"})):
             p.start()
             self.addCleanup(p.stop)
@@ -196,6 +226,19 @@ class BuildTests(BuildBase):
         self.assertEqual(len(light_tracks.load("7")), 20)
         self.assertEqual(self.notes[-1][0], "Light sync ready")
         self.assertEqual(self.notes[-1][2], "info")
+
+    def test_a_failed_gpu_decode_falls_back_to_software(self) -> None:
+        procs = [_FakeProc(b"", code=1, err=b"Failed to initialise VAAPI connection\n"),
+                 _FakeProc(_frame((0, 0, 255)) * 20)]
+        with patch.object(light_tracks, "build_hwaccel", return_value="vaapi"), \
+                patch.object(light_tracks.subprocess, "Popen", side_effect=procs) as popen, \
+                self.assertLogs("jarvis.brain.light_tracks", level="INFO") as logs:
+            light_tracks.start_build(self.FILM)
+            self._wait()
+        self.assertIn("-hwaccel", popen.call_args_list[0].args[0])
+        self.assertNotIn("-hwaccel", popen.call_args_list[1].args[0])
+        self.assertEqual(len(light_tracks.load("7")), 20)
+        self.assertIn("software decode", " ".join(logs.output))
 
     def test_failure_alerts_in_persona_and_never_leaks_the_token(self) -> None:
         proc = _FakeProc(_frame((0, 0, 255)) * 2, code=1, err=b"http://plex?X-Plex-Token=sekrit: 404\n")
