@@ -240,7 +240,7 @@ class WakeBackupRingTests(unittest.TestCase):
         self.addCleanup(wake_alarm.stop_ring)
         self.addCleanup(wake_alarm._fired.clear)
         self.stop = __import__("threading").Event()
-        env = patch.dict("os.environ", {"WAKE_BACKUP_DELAY_S": "10"})
+        env = patch.dict("os.environ", {"WAKE_TV_ACK_S": "10"})
         env.start()
         self.addCleanup(env.stop)
         # Don't actually wait out the delay.
@@ -248,26 +248,39 @@ class WakeBackupRingTests(unittest.TestCase):
         wait.start()
         self.addCleanup(wait.stop)
 
-    def test_rings_when_tv_stays_off(self) -> None:
-        with patch("integrations.tv_remote.power", return_value=(False, "unavailable")) as power, \
-                patch.object(wake_alarm, "tv_is_on", return_value=False):
-            self.assertEqual(wake_alarm.wake_tv_with_backup(self.stop), "ringing")
-        power.assert_called_once_with(True)
+    def test_rings_when_tv_never_confirms(self) -> None:
+        from unittest.mock import Mock
+        resend = Mock()
+        with patch("integrations.tv_remote.power", return_value=(True, "ok")) as power:
+            self.assertEqual(wake_alarm.wake_tv_with_backup(self.stop, resend), "ringing")
+        # On isn't enough (2026-11-19): powered on twice, resent once, then the room rings.
+        self.assertEqual(power.call_count, 2)
+        resend.assert_called_once()
         self.assertTrue(wake_alarm.ringing())
 
-    def test_quiet_when_tv_comes_on(self) -> None:
-        with patch("integrations.tv_remote.power", return_value=(True, "ok")), \
-                patch.object(wake_alarm, "tv_is_on", return_value=True):
+    def test_quiet_when_tv_confirms(self) -> None:
+        self.assertTrue(wake_alarm.tv_acknowledged())
+        with patch("integrations.tv_remote.power", return_value=(True, "ok")) as power:
             self.assertEqual(wake_alarm.wake_tv_with_backup(self.stop), "tv")
+        power.assert_called_once_with(True)
         self.assertFalse(wake_alarm.ringing())
+
+    def test_resent_alarm_reaches_tv(self) -> None:
+        with patch("integrations.tv_remote.power", return_value=(True, "ok")):
+            outcome = wake_alarm.wake_tv_with_backup(self.stop, wake_alarm.tv_acknowledged)
+        self.assertEqual(outcome, "tv-resent")
+        self.assertFalse(wake_alarm.ringing())
+
+    def test_ack_without_an_alarm_is_ignored(self) -> None:
+        wake_alarm._fired.clear()
+        self.assertFalse(wake_alarm.tv_acknowledged())
 
     def test_quiet_when_already_answered_on_phone(self) -> None:
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
         with patch.object(wake_alarm, "_FILE", Path(tmp.name) / "w.json"):
             wake_alarm.awake()
-        with patch("integrations.tv_remote.power", return_value=(True, "ok")), \
-                patch.object(wake_alarm, "tv_is_on", return_value=False):
+        with patch("integrations.tv_remote.power", return_value=(True, "ok")):
             self.assertEqual(wake_alarm.wake_tv_with_backup(self.stop), "answered")
         self.assertFalse(wake_alarm.ringing())
 

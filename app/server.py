@@ -1167,6 +1167,14 @@ class WakeAwakeRequest(BaseModel):
     lights: bool = True
 
 
+@app.post("/api/wake/ack")
+def wake_ack(_: None = Depends(require_scope("wake:write"))) -> dict[str, object]:
+    """The TV took the alarm (its music is starting). Without this within
+    WAKE_TV_ACK_S, Core resends the alarm, then rings the room speaker."""
+    from brain import wake_alarm
+    return {"ok": wake_alarm.tv_acknowledged()}
+
+
 @app.post("/api/wake/awake")
 def wake_awake(payload: WakeAwakeRequest | None = None,
                _: None = Depends(require_scope("wake:write"))) -> dict[str, object]:

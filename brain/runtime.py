@@ -1264,16 +1264,24 @@ class JarvisRuntime:
             if alarm:
                 music = alarm["label"] or ("your music" if alarm["music"] else "whatever Spotify last played")
                 wake_alarm.alarm_fired(f"{music} is on the TV.")
+                context = {"music": alarm["music"], "volume": alarm["volume"],
+                           "label": alarm.get("label", "")}
+
+                def resend(music: str = music, context: dict = context) -> None:
+                    # A fresh event for a TV whose stream missed the first; no second push.
+                    from brain import event_bus
+                    event_bus.publish("wake_up", "Good morning, sir", f"{music} is on the TV.",
+                                      source="wake-up", severity="info", push=False, context=context)
+
                 # The bus event can't reach a TV that dropped off Wi-Fi in standby:
-                # power it on through HA, and ring the room speaker if it stays off.
-                threading.Thread(target=wake_alarm.wake_tv_with_backup, args=(self._stop_monitors,),
+                # power it on through HA, wait for the TV to confirm, resend, then
+                # ring the room speaker.
+                threading.Thread(target=wake_alarm.wake_tv_with_backup, args=(self._stop_monitors, resend),
                                  daemon=True, name="wake-tv").start()
                 # Info for the TV (no banner); the phone gets it with I'm up / Snooze buttons.
                 self.raise_alert("wake_up", "Good morning, sir", f"{music} is on the TV.",
                                  source="wake-up", severity="info", push=True, category="WAKE_UP",
-                                 collapse_id="wake-up",
-                                 context={"music": alarm["music"], "volume": alarm["volume"],
-                                          "label": alarm.get("label", "")})
+                                 collapse_id="wake-up", context=context)
             if self._stop_monitors.wait(20):
                 break
 

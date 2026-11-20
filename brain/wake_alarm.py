@@ -16,8 +16,13 @@ alarm is unanswered (``ringing_state``) the app opens on its alarm screen.
 I'm up stops the music.
 
 The event alone can't wake a TV that dropped off Wi-Fi in standby, so Core
-also powers it on through Home Assistant (``tv_remote.power``). If the TV
-still isn't on ``WAKE_BACKUP_DELAY_S`` (90) later and Nick hasn't answered,
+also powers it on through Home Assistant (``tv_remote.power``). The TV
+confirms it took the alarm (``POST /api/wake/ack`` -> ``tv_acknowledged``)
+once its music is starting; "the TV is on" isn't enough (2026-11-19: HA
+turned it on, but the wake_up went into an event stream that had died in
+standby, so it sat on the home screen in silence). No confirmation within
+``WAKE_TV_ACK_S`` (45): Core sends the wake_up again and powers the TV on
+again; still none after another ``WAKE_TV_ACK_S`` and Nick hasn't answered,
 the backup ring starts: the room voice beeps the room speaker on the Core
 host until I'm up, Snooze, "stop" by voice, or ``WAKE_BACKUP_RING_S`` (600)
 runs out.
@@ -258,6 +263,7 @@ SNOOZE_MINUTES = 9
 
 # Backup ring state (process-wide): set when the alarm fires, cleared by an answer.
 _answered = threading.Event()
+_tv_ack = threading.Event()  # the TV confirmed it's playing the current alarm
 _ring_until = 0.0
 _ring_lock = threading.Lock()
 # The alarm that's going off (wall-clock time it fired, what the push said), so
@@ -269,8 +275,19 @@ RINGING_WINDOW_S = 3600  # unanswered for an hour: it stops counting as ringing
 def alarm_fired(detail: str = "", now: float | None = None) -> None:
     """A new alarm went off: nobody has answered it yet."""
     _answered.clear()
+    _tv_ack.clear()
     with _ring_lock:
         _fired.update(at=now or time.time(), detail=detail)
+
+
+def tv_acknowledged() -> bool:
+    """The TV says it's playing the alarm (``POST /api/wake/ack``). False
+    when no alarm is going off."""
+    if not _recent(time.time()):
+        return False
+    _tv_ack.set()
+    log.info("Wake-up: the TV took the alarm")
+    return True
 
 
 def _recent(now: float) -> bool:
@@ -340,10 +357,7 @@ def tv_is_on() -> bool:
     return bool(ok and isinstance(state, dict) and state.get("state") == "on")
 
 
-def wake_tv_with_backup(stop: threading.Event) -> str:
-    """Run off the monitor thread when an alarm fires: power the TV on, give
-    it ``WAKE_BACKUP_DELAY_S`` to come up, then ring the speaker if it
-    didn't and nobody answered. Returns what happened (for logs and tests)."""
+def _power_tv_on() -> None:
     from integrations import tv_remote
     try:
         ok, detail = tv_remote.power(True)
@@ -351,23 +365,49 @@ def wake_tv_with_backup(stop: threading.Event) -> str:
         ok, detail = False, str(exc)
     if not ok:
         log.warning("Wake-up: couldn't power the TV on: %s", detail)
-    try:
-        delay = max(10.0, float(os.getenv("WAKE_BACKUP_DELAY_S", "90")))
-    except ValueError:
-        delay = 90.0
-    if stop.wait(delay):
-        return "stopped"
-    if _answered.is_set():
-        return "answered"
-    try:
-        on = tv_is_on()
-    except Exception:  # noqa: BLE001
-        on = False
-    if on:
+
+
+def _await_tv(stop: threading.Event, seconds: float) -> str | None:
+    """Wait for the TV's confirmation or an answer, a second at a time."""
+    for _ in range(max(1, int(seconds))):
+        if _tv_ack.is_set():
+            return "tv"
+        if _answered.is_set():
+            return "answered"
+        if stop.wait(1):
+            return "stopped"
+    if _tv_ack.is_set():
         return "tv"
+    return "answered" if _answered.is_set() else None
+
+
+def wake_tv_with_backup(stop: threading.Event, resend: Any = None) -> str:
+    """Run off the monitor thread when an alarm fires: power the TV on and
+    wait ``WAKE_TV_ACK_S`` for it to confirm the alarm; if it doesn't,
+    ``resend()`` the wake_up and power it on again; if it still doesn't,
+    ring the room speaker unless Nick answered. Returns what happened
+    ("tv", "tv-resent", "answered", "ringing", "stopped")."""
+    try:
+        wait = max(10.0, float(os.getenv("WAKE_TV_ACK_S", "45")))
+    except ValueError:
+        wait = 45.0
+    _power_tv_on()
+    outcome = _await_tv(stop, wait)
+    if outcome:
+        return outcome
+    log.warning("Wake-up: no word from the TV after %.0f s; sending the alarm again", wait)
+    if resend is not None:
+        try:
+            resend()
+        except Exception:  # noqa: BLE001
+            log.exception("Wake-up: resending the alarm failed")
+    _power_tv_on()
+    outcome = _await_tv(stop, wait)
+    if outcome:
+        return "tv-resent" if outcome == "tv" else outcome
     if not start_backup_ring():
         return "answered"
-    log.warning("Wake-up: the TV didn't come on; ringing the room speaker")
+    log.warning("Wake-up: the TV never took the alarm; ringing the room speaker")
     return "ringing"
 
 

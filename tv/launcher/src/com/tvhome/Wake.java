@@ -30,12 +30,64 @@ final class Wake {
     private static volatile long rangAt;
     /** When I'm up was last pressed (wall-clock ms): a wake still starting stops. */
     private static volatile long dismissedAt;
+    /** A wake is starting: Core's resend of the same alarm mustn't start a second one. */
+    private static volatile boolean starting;
+    /** Already told Core this alarm is playing. */
+    private static volatile boolean acked;
+
+    /**
+     * Tell Core the alarm is playing (POST /api/wake/ack). Without it Core
+     * resends the alarm after 45 s, then rings the room speaker.
+     */
+    private static void ack(Context c) {
+        if (acked) return;
+        acked = true;
+        new Thread(() -> {
+            for (int attempt = 0; attempt < 5; attempt++) {
+                try {
+                    java.net.HttpURLConnection conn = Jarvis.open(Jarvis.base(c), "/api/wake/ack",
+                            Jarvis.token(c), 4000);
+                    conn.setRequestMethod("POST");
+                    conn.setDoOutput(true);
+                    conn.getOutputStream().close();
+                    int code = conn.getResponseCode();
+                    conn.disconnect();
+                    Log.i(TAG, "told Core the alarm is playing (HTTP " + code + ")");
+                    return;
+                } catch (Exception e) {
+                    Log.w(TAG, "wake ack failed: " + e);
+                    try {
+                        Thread.sleep(3000);
+                    } catch (InterruptedException ignored) {
+                        return;
+                    }
+                }
+            }
+        }, "wake-ack").start();
+    }
 
     private Wake() {}
 
     /** Blocking; call off the main thread. {@code music}: spotify: URI, "search:words", or "" to resume. */
     static void run(Context c, String music, int volumePercent, String label) {
+        synchronized (Wake.class) {
+            // Core resends an alarm it heard nothing back about; one run is enough.
+            if (starting) {
+                Log.i(TAG, "already waking; ignoring the repeat");
+                return;
+            }
+            starting = true;
+        }
+        try {
+            runOnce(c, music, volumePercent, label);
+        } finally {
+            starting = false;
+        }
+    }
+
+    private static void runOnce(Context c, String music, int volumePercent, String label) {
         Log.i(TAG, "waking: music=" + music + " volume=" + volumePercent);
+        acked = false;
         long started = System.currentTimeMillis();
         rangAt = started;
         cancelSnooze(); // a snooze ending (ours or Core's) lands here
@@ -80,6 +132,7 @@ final class Wake {
                     if (!Music.now(c).playing) adb.shell("input keyevent 126");
                 }
             }
+            if (Music.now(c).playing) ack(c);
             Thread.sleep(1500);
             if (dismissedAt >= started) {
                 Music.pause(c);

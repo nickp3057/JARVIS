@@ -77,6 +77,7 @@ public class RemoteBridgeService extends Service {
             cleanupStarted = true;
             new Thread(() -> BootCleanup.run(this), "cleanup").start();
             AlertStream.start(this);
+            WifiWatchdog.start(this);  // rejoin when the router drops the TV in standby
             ThemeStream.start(this);
             PlaybackReport.start(this);  // light sync: where Plex is in the film
             NightlyRefresh.scheduleNext(this);
