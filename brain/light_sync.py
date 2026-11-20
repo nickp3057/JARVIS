@@ -958,10 +958,12 @@ class LightSync:
                 return False, "Acquiring the TV playback clock."
         track_key = self._track_key(pb)
         if not light_tracks.has_track(track_key):
-            if track_key != pb.rating_key and light_tracks.has_track(pb.rating_key) and not light_tracks.pending(track_key):
-                light_tracks.start_build({**self.clock.session_info, "rating_key": track_key,
-                                          "base_rating_key": pb.rating_key}, quiet=True)
-            return False, f"{pb.title or 'This film'} has no light sync for this Part yet."
+            # Never build on its own (a temp-4K copy started a quiet two-hour
+            # build that starved the room voice, 2026-11-19): the iPad's Make a
+            # light sync button builds this copy (build_playing).
+            if track_key != pb.rating_key and light_tracks.has_track(pb.rating_key):
+                return False, f"{pb.title or 'This film'}'s light sync is for another copy; make one for this copy from the menu."
+            return False, f"{pb.title or 'This film'} has no light sync yet."
         if self.barn_door:
             return False, "Barn Door has the lights."
         if self.calibration and self.calibration["rating_key"] == pb.rating_key:
@@ -1387,6 +1389,29 @@ class LightSync:
             if session.fan_was_on and not _barn_door_engaged():
                 _fan_on()
 
+    def build_playing(self) -> tuple[bool, str]:
+        """Make a light sync for the copy playing on the TV now (its own
+        Plex Part: a temp-4K copy needs its own track). (started, message)."""
+        from integrations import plex
+        with self._lock:
+            pb = self.clock.current()
+            if pb is None or not pb.rating_key:
+                return False, "Nothing is playing on the TV, sir."
+            track_key = self._track_key(pb)
+            info = dict(self.clock.session_info)
+        title = pb.title or "This film"
+        if light_tracks.has_track(track_key):
+            return False, f"{title} already has a light sync, sir."
+        if info.get("rating_key") == pb.rating_key and info.get("part_key"):
+            film = {**info, "rating_key": track_key, "title": info.get("title") or pb.title}
+            if track_key != pb.rating_key:
+                film["base_rating_key"] = pb.rating_key
+            return light_tracks.start_build(film)
+        ok, film = plex.movie(pb.rating_key)
+        if not ok or not isinstance(film, dict):
+            return False, str(film)
+        return light_tracks.start_build(film)
+
     def status(self) -> dict[str, Any]:
         state = load_state()
         pb = self.clock.current()
@@ -1407,6 +1432,10 @@ class LightSync:
             "movie_mode": self.movie_mode,
             "film": film,
             "has_track": bool(pb and light_tracks.has_track(self._track_key(pb))),
+            # A track exists, but for another copy of this film (the 1080p one while the temp 4K plays).
+            "other_copy_has_track": bool(pb and pb.rating_key and self._track_key(pb) != pb.rating_key
+                                         and not light_tracks.has_track(self._track_key(pb))
+                                         and light_tracks.has_track(pb.rating_key)),
             "building": light_tracks.building(),
             "queue": light_tracks.queue(),
             "tracks": light_tracks.listing(),

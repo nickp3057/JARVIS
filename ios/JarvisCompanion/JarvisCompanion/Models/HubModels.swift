@@ -985,6 +985,9 @@ struct LightSyncState: Decodable, Equatable {
     let paused: Bool
     let film: Film?
     let hasTrack: Bool
+    /// A track exists, but for another copy of this film (the 1080p one
+    /// while the temp 4K plays). Older Cores send none.
+    let otherCopyHasTrack: Bool?
     let building: Build?
     /// Older Cores send none of these three.
     let queue: [Queued]?
@@ -997,7 +1000,7 @@ struct LightSyncState: Decodable, Equatable {
 
     enum CodingKeys: String, CodingKey {
         case enabled, auto, intensity, running, paused, film, building, queue, offset, calibrating, diagnostics, reason, message
-        case hasTrack = "has_track"
+        case hasTrack = "has_track", otherCopyHasTrack = "other_copy_has_track"
     }
 
     static let intensities = ["subtle", "medium", "intense"]

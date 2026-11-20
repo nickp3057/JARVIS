@@ -7,8 +7,11 @@ white when nothing on screen is vivid. Brightness follows each pixel's
 brightest channel, not luma: luma counts pure blue as ~7% bright, so blue
 scenes came out black.
 
-Tracks are built on request ("make a light sync for Hunger Games"), never
-for the whole library. Asking for several films queues them (FIFO, one
+Tracks are built on request ("make a light sync for Hunger Games", or the
+iPad's Make a light sync button), never for the whole library and never
+on their own (a temp-4K copy used to start a quiet two-hour build just by
+playing). The decode and colour maths run in a separate worker process
+(``brain/light_track_worker.py``) so a build can't starve the room voice. Asking for several films queues them (FIFO, one
 ffmpeg at a time); the queue lives in ``memory/light_tracks/queue.json``
 so a Core restart resumes it, and the build that was interrupted starts
 again from scratch. The Surface (Core's host) has
@@ -31,23 +34,23 @@ import os
 from pathlib import Path
 import shutil
 import subprocess
+import sys
 import threading
 import time
 from typing import Any, Callable, IO
 
 import numpy as np
 
+from brain import light_track_worker
 from jarvis_logger import get_logger
 
 log = get_logger(__name__)
 
 FPS, W, H = 10, 64, 27
 _FRAME_BYTES = W * H * 3
-_BINS = 18
-_WARM_WHITE = np.array([1.0, 0.85, 0.7], np.float32)
-_LUMA = np.array([.2126, .7152, .0722], np.float32)
 
-_DIR = Path(__file__).resolve().parents[1] / "memory" / "light_tracks"
+_ROOT = Path(__file__).resolve().parents[1]
+_DIR = _ROOT / "memory" / "light_tracks"
 _lock = threading.RLock()
 
 # The one build that may run: {"rating_key", "title", "year", "percent", "started_at", "proc", "film"}.
@@ -65,31 +68,10 @@ _listeners: list[Callable[[], None]] = []
 
 
 # --- The colour of one frame (analyze.py, faithfully) ------------------------
+# The maths lives in brain/light_track_worker.py, the process that runs it
+# during a build; it's the same function here for tests and one-off use.
 
-def frame_colour(frame: bytes | np.ndarray) -> np.ndarray:
-    """One 64x27 rgb24 frame -> its main colour, 0-1 floats (already scaled by brightness)."""
-    px = np.frombuffer(bytes(frame), np.uint8) if not isinstance(frame, np.ndarray) else frame
-    px = px.reshape(-1, 3).astype(np.float32) / 255
-    mx, mn = px.max(1), px.min(1)
-    sat = np.where(mx > 0, (mx - mn) / np.maximum(mx, 1e-6), 0)
-    vivid = (sat > 0.3) & (mx > 0.15)
-    if vivid.sum() >= px.shape[0] * 0.03:
-        r, g, bl = px[:, 0], px[:, 1], px[:, 2]
-        d = np.maximum(mx - mn, 1e-6)
-        hue = np.where(mx == r, ((g - bl) / d) % 6, np.where(mx == g, (bl - r) / d + 2, (r - g) / d + 4)) / 6
-        hb = (hue * _BINS).astype(int) % _BINS
-        w = sat * mx * vivid
-        hist = np.bincount(hb, weights=w, minlength=_BINS)
-        hist = hist + 0.5 * (np.roll(hist, 1) + np.roll(hist, -1))  # neighbouring hues count too
-        best = int(hist.argmax())
-        sel = vivid & ((hb == best) | (hb == (best + 1) % _BINS) | (hb == (best - 1) % _BINS))
-        col = (px[sel] * w[sel, None]).sum(0) / max(w[sel].sum(), 1e-6)
-        col = col / max(col.max(), 1e-6)  # full-brightness hue
-    else:
-        col = _WARM_WHITE  # no vivid colour: warm white
-    # Brightness follows the scene, from each pixel's brightest channel (not luma).
-    level = min(1.0, 0.08 + float(mx.mean()) * 1.4)
-    return np.asarray(col * level, np.float32)
+frame_colour = light_track_worker.frame_colour
 
 
 def analyze_stream(stream: IO[bytes], on_frame: Callable[[int], None] | None = None,
@@ -456,6 +438,12 @@ def resume() -> int:
             key = str(film["rating_key"])
             if key in known or (has_track(key) and not row.get("rebuild")):
                 continue
+            if row.get("quiet") and film.get("base_rating_key"):
+                # A copy's build light sync queued on its own before 2026-11-19
+                # (nobody asked; Part builds from the iPad aren't quiet): drop it.
+                log.info("Light track for %s (another copy) dropped: builds only start on request",
+                         film.get("title") or key)
+                continue
             known.add(key)
             _queue.append({"film": film, "rebuild": bool(row.get("rebuild")), "quiet": bool(row.get("quiet"))})
             added += 1
@@ -530,8 +518,11 @@ def _run_build(film: dict[str, Any], exe: str, quiet: bool = False) -> None:
             import re
             start = re.search(r"start: (-?[0-9.]+)", probe.stderr.decode("utf-8", "replace"))
             film["start_time_s"] = float(start.group(1)) if start else None
-        proc = subprocess.Popen(ffmpeg_command(exe, url, film["fps"]), stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                                stdin=subprocess.DEVNULL, bufsize=_FRAME_BYTES * 64,
+        # The decode and the colour maths run in their own process
+        # (brain/light_track_worker.py): in a thread here they held Core's
+        # interpreter lock for the whole film and the room voice fell behind.
+        proc = subprocess.Popen(worker_command(ffmpeg_command(exe, url, film["fps"])), stdout=subprocess.PIPE,
+                                stderr=subprocess.PIPE, stdin=subprocess.DEVNULL, cwd=str(_ROOT),
                                 preexec_fn=_nice if os.name == "posix" else None)
         with _lock:
             if _build is not None:
@@ -557,7 +548,7 @@ def _run_build(film: dict[str, Any], exe: str, quiet: bool = False) -> None:
             if moved:
                 _changed()
 
-        track = analyze_stream(proc.stdout, progress, _cancel)
+        track = read_track(proc.stdout, progress, _cancel)
         if _cancel.is_set():
             proc.terminate()
         code = proc.wait(timeout=30)
@@ -620,7 +611,32 @@ def killed_from_outside(code: int | None, stderr_text: str) -> bool:
     return code is not None and (code < 0 or (code == 255 and not stderr_text.strip()))
 
 
-def _nice() -> None:  # in the ffmpeg child: Core's voice and API come first
+def worker_command(ffmpeg: list[str]) -> list[str]:
+    """Run ``ffmpeg`` under the build worker, with Core's own Python."""
+    return [sys.executable, "-m", "brain.light_track_worker", *ffmpeg]
+
+
+def read_track(stream: IO[bytes], on_frame: Callable[[int], None] | None = None,
+               cancel: threading.Event | None = None) -> np.ndarray:
+    """The worker's output (3 bytes per frame) -> uint8 N x 3 track.
+    Reads in big chunks: Core only counts frames, the worker does the work."""
+    data = bytearray()
+    reported = 0
+    while not (cancel and cancel.is_set()):
+        chunk = stream.read(3 * 300)
+        if not chunk:
+            break
+        data += chunk
+        frames = len(data) // 3
+        if on_frame:
+            for mark in range(reported + 100 - reported % 100, frames + 1, 100):
+                on_frame(mark)
+        reported = frames
+    usable = len(data) - len(data) % 3
+    return np.frombuffer(bytes(data[:usable]), np.uint8).reshape(-1, 3).copy()
+
+
+def _nice() -> None:  # in the build worker (and its ffmpeg): Core's voice and API come first
     try:
         os.nice(10)
     except OSError:

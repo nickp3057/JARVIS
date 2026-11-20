@@ -1844,7 +1844,9 @@ class LightSyncBuildRequest(BaseModel):
     title: str | None = Field(default=None, min_length=1, max_length=200)
     rating_key: str | None = Field(default=None, pattern=r"^\d{1,12}$")
     rebuild: bool = False
-    cancel: str | None = Field(default=None, pattern=r"^(all|\d{1,12})$")
+    cancel: str | None = Field(default=None, pattern=r"^(all|\d{1,12}(--[0-9a-f]{16})?)$")
+    # The copy playing on the TV now (its own Plex Part), whatever rating_key says.
+    playing: bool = False
 
 
 @app.post("/api/lightsync/build")
@@ -1859,8 +1861,12 @@ def lightsync_build(request: LightSyncBuildRequest, _: None = Depends(authorize)
                      else light_tracks.cancel(request.cancel))
         message = ("Cancelled " + ", ".join(cancelled) + ", sir.") if cancelled else "Nothing to cancel, sir."
         return {**_lightsync_state(), "started": False, "message": message}
+    if request.playing:
+        from brain import light_sync
+        started, message = light_sync.controller.build_playing()
+        return {**_lightsync_state(), "started": started, "message": message}
     if not (request.title or request.rating_key):
-        raise HTTPException(status_code=422, detail="Send a title, rating_key or cancel.")
+        raise HTTPException(status_code=422, detail="Send a title, rating_key, playing or cancel.")
     ok, film = plex.movie(request.rating_key) if request.rating_key else plex.find_movie(request.title or "")
     if not ok:
         return {**_lightsync_state(), "started": False, "message": str(film)}

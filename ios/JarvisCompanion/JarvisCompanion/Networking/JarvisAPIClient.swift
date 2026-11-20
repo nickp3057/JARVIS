@@ -1348,11 +1348,14 @@ struct JarvisAPIClient {
                                              lampNudgeMs: lampNudgeMs))
     }
 
-    /// Make a light sync for one film (Plex's ratingKey); Core alerts when it's ready.
+    /// Make a light sync for the film on the TV: the copy playing now
+    /// (`playing`, so a temp-4K copy gets its own); `ratingKey` is for older
+    /// Cores, which ignore `playing`. Core alerts when it's ready.
     func buildLightSync(ratingKey: String) async throws -> LightSyncState {
         struct Body: Encodable {
             let ratingKey: String
-            enum CodingKeys: String, CodingKey { case ratingKey = "rating_key" }
+            let playing = true
+            enum CodingKeys: String, CodingKey { case ratingKey = "rating_key", playing }
         }
         return try await postJSON(LightSyncState.self, path: "api/lightsync/build", body: Body(ratingKey: ratingKey))
     }

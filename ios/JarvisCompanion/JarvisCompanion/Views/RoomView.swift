@@ -1131,9 +1131,12 @@ private struct MovieModeView: View {
                     Button {} label: { Text("Next: \(film.title)") }.disabled(true)
                 }
                 if let film = state.film, !state.hasTrack, let key = film.ratingKey,
-                   state.building?.title != film.title, !queued.contains(where: { $0.ratingKey == key }) {
+                   state.building?.title != film.title,
+                   !queued.contains(where: { $0.ratingKey == key || $0.title == film.title }) {
                     Button { model.buildLightSync(ratingKey: key) } label: {
-                        Label("Make a light sync for \(film.title)", systemImage: "wand.and.stars")
+                        Label(state.otherCopyHasTrack == true ? "Make a light sync for this copy"
+                                                              : "Make a light sync for \(film.title)",
+                              systemImage: "wand.and.stars")
                     }
                 }
                 if state.calibrating == nil {

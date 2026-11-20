@@ -17,7 +17,7 @@ from fastapi.testclient import TestClient
 
 from app import client_tokens
 import app.server as server
-from brain import light_sync, light_tracks, tools
+from brain import light_sync, light_track_worker, light_tracks, tools
 from speech import quick_commands
 
 
@@ -141,9 +141,17 @@ class TrackStoreTests(TrackStoreDir):
         self.assertFalse(light_tracks.has_track(None))
 
 
+def _worker_output(frames: bytes) -> bytes:
+    """What brain/light_track_worker.py writes for these raw frames: 3 bytes each."""
+    size = light_track_worker.FRAME_BYTES
+    return b"".join(light_track_worker.colour_bytes(frames[i:i + size]) for i in range(0, len(frames), size))
+
+
 class _FakeProc:
+    """The build worker: ``data`` is the raw frames ffmpeg would decode."""
+
     def __init__(self, data: bytes, code: int = 0, err: bytes = b"") -> None:
-        self.stdout = io.BytesIO(data)
+        self.stdout = io.BytesIO(_worker_output(data))
         self.stderr = io.BytesIO(err)
         self.code = code
         self.terminated = False
@@ -847,6 +855,36 @@ class _GatedProc(_FakeProc):
         self.stdout = Out()
 
 
+class WorkerTests(unittest.TestCase):
+    """brain/light_track_worker.py for real, with a Python stand-in for ffmpeg."""
+
+    def run_worker(self, script: str) -> subprocess.CompletedProcess:
+        command = light_tracks.worker_command([__import__("sys").executable, "-c", script])
+        root = Path(light_tracks.__file__).resolve().parents[1]
+        return subprocess.run(command, capture_output=True, timeout=60, cwd=root)
+
+    def test_colours_every_frame_like_core_did(self) -> None:
+        frames = _frame((0, 0, 255)) * 3 + _frame((100, 100, 100)) * 2
+        script = f"import sys; sys.stdout.buffer.write(bytes.fromhex('{frames.hex()}'))"
+        done = self.run_worker(script)
+        self.assertEqual(done.returncode, 0, done.stderr)
+        track = light_tracks.read_track(io.BytesIO(done.stdout))
+        expected = (np.array([light_tracks.frame_colour(_frame((0, 0, 255)))] * 3
+                             + [light_tracks.frame_colour(_frame((100, 100, 100)))] * 2) * 255).clip(0, 255).astype(np.uint8)
+        np.testing.assert_array_equal(track, expected)
+
+    def test_passes_ffmpegs_exit_code_and_errors_through(self) -> None:
+        done = self.run_worker("import sys; sys.stderr.write('404 Not Found'); sys.exit(1)")
+        self.assertEqual(done.returncode, 1)
+        self.assertIn(b"404 Not Found", done.stderr)
+
+    def test_read_track_reports_progress_every_hundred_frames(self) -> None:
+        marks = []
+        track = light_tracks.read_track(io.BytesIO(bytes(3 * 250)), marks.append)
+        self.assertEqual(len(track), 250)
+        self.assertEqual(marks, [100, 200])
+
+
 class QueueTests(BuildBase):
     def film(self, key: str, title: str) -> dict:
         return {**self.FILM, "rating_key": key, "title": title, "part_key": f"/library/parts/{key}/f.mkv"}
@@ -947,6 +985,15 @@ class QueueTests(BuildBase):
         self.assertEqual(order, ["1", "2"])
         self.assertTrue(light_tracks.has_track("1") and light_tracks.has_track("2"))
         self.assertEqual(light_tracks.resume(), 0)  # drained
+
+    def test_resume_drops_a_copy_build_that_queued_itself(self) -> None:
+        import json
+        self.dir.mkdir(parents=True, exist_ok=True)
+        auto = {**self.film("1", "Songbirds"), "rating_key": "1--4251e5d3e550c3bb", "base_rating_key": "1"}
+        (self.dir / "queue.json").write_text(json.dumps([{"film": auto, "rebuild": False, "quiet": True}]))
+        with self.assertLogs("jarvis.brain.light_tracks", level="INFO"):
+            self.assertEqual(light_tracks.resume(), 0)
+        self.assertEqual(self._saved_queue(), [])
 
     def test_resume_skips_junk_and_films_that_have_tracks(self) -> None:
         import json
@@ -1467,13 +1514,19 @@ class SetupAndPartTests(ControllerBase):
         self.sync.reset_offset()
         self.assertEqual(self.sync.effective_offset("1"), 0)
 
-    def test_mismatched_part_queues_actual_file_and_does_not_play_wrong_track(self):
+    def test_mismatched_part_never_builds_on_its_own_and_does_not_play_wrong_track(self):
+        light_tracks.save("1", np.zeros((300, 3), np.uint8), "Up", source={**self.metadata(), "fps": 30})
         self.metadata(part="42")
         self.play()
         with patch.object(light_tracks, "start_build", return_value=(True, "Building")) as build:
             self.tick()
-        self.assertFalse(self.sync.running)
+            build.assert_not_called()  # playing a temp-4K copy must not start a build
+            self.assertFalse(self.sync.running)
+            self.assertTrue(self.sync.status()["other_copy_has_track"])
+            self.assertIn("another copy", self.sync.reason)
+            self.assertEqual(self.sync.build_playing(), (True, "Building"))  # the iPad's button
         film = build.call_args.args[0]
+        self.assertNotIn("quiet", build.call_args.kwargs)
         self.assertEqual((film["part_id"], film["base_rating_key"]), ("42", "1"))
         light_tracks.save(film["rating_key"], np.zeros((300, 3), np.uint8), "Up",
                           source={**film, "fps": 30, "start_time_s": 1.25})
