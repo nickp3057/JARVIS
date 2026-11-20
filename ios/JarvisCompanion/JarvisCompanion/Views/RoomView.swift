@@ -187,7 +187,7 @@ struct RoomView: View {
         .ignoresSafeArea(.container, edges: fullScreen && !RootView.isMac ? .all : [])
         .onGeometryChange(for: Bool.self) { $0.size.width > $0.size.height } action: { wideLayout = $0 }
         .modifier(RoomMemoryCovers(cover: $roomCover, showingImport: $showingImport, openNote: $openNote))
-        .background { JarvisBackdrop().ignoresSafeArea() }
+        .background { JarvisBackdrop(lift: 0.1).ignoresSafeArea() }
         .toolbar(fullScreen && !RootView.isMac ? .hidden : .automatic, for: .tabBar)
         .statusBarHidden(fullScreen && !RootView.isMac)
         .persistentSystemOverlays(fullScreen && !RootView.isMac ? .hidden : .automatic)
@@ -498,35 +498,40 @@ struct RoomView: View {
 
     // MARK: - Door panel (landscape)
 
-    /// The door iPad on its side (2026-11-19 refresh, second pass): one tile
-    /// shape everywhere and one accent. Left, straight on the backdrop: the
-    /// battery, clock, date and weather, JARVIS, then the wake-up, next event
-    /// and timers as identical rows. Right: Scenes, then Lights & switches,
-    /// as identical tiles in three columns, sized together to fill the height
-    /// (no gap). Bottom: JARVIS volume and four equal buttons (TV remote, TV
-    /// power, Peace, More), the nightstand's bar.
+    /// The door iPad on its side (2026-11-19/20 refresh). Two columns, each
+    /// ending in a 72 pt row so the bottom lines up:
+    /// - Left, straight on the backdrop: battery, clock, date and weather,
+    ///   JARVIS, the wake-up (tap for the schedule) and next event as plain
+    ///   lines, then JARVIS volume.
+    /// - Right, a three-column grid: Lights & switches with a big Peace in
+    ///   the top-right corner (one smack on the way out), the lights, the
+    ///   favourite scenes, and at the bottom TV remote, TV power and More.
+    /// Every tile is the same compact shape; "on" is the theme's accent.
     private func doorPanel(_ size: CGSize) -> some View {
-        VStack(spacing: Self.gap) {
-            HStack(alignment: .top, spacing: 28) {
-                glanceColumn
-                    .frame(width: min(360, size.width * 0.30))
-                Group {
-                    if talking { dialoguePanel } else { controlsColumn }
+        HStack(alignment: .top, spacing: 28) {
+            glanceColumn
+                .frame(width: min(360, size.width * 0.30))
+            Group {
+                if talking {
+                    VStack(spacing: Self.gap) {
+                        dialoguePanel
+                        bottomButtons
+                    }
+                } else {
+                    controlsColumn
                 }
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
             }
-            .frame(maxHeight: .infinity)
-            doorBar
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         }
         .padding(.horizontal, 28)
         .padding(.vertical, 22)
     }
 
-    /// Room tiles' one look (2026-11-19): spacing, corner, row height, and
-    /// the colour of "on" (the theme's accent, like a lit scene).
+    /// Room tiles' one look: spacing, corner, height, and the colour of "on"
+    /// (the theme's accent, like a lit scene).
     static let gap: CGFloat = 12
-    static let radius: CGFloat = 20
-    static let rowHeight: CGFloat = 64
+    static let radius: CGFloat = 18
+    static let rowHeight: CGFloat = 72
     static var onColor: Color { JarvisTheme.cyan }
 
     private var glanceColumn: some View {
@@ -551,81 +556,109 @@ struct RoomView: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
             .frame(minHeight: 160)
-            .overlay(alignment: .bottom) {
-                Text(voice.active ? "Listening" : "Say \u{201C}Hey JARVIS\u{201D}")
-                    .font(.footnote)
-                    .foregroundStyle(.tertiary)
-            }
-            let alarmOn = wake?.enabled == true && wake?.nextAt != nil
-            infoTile(alarmOn ? "alarm.fill" : "alarm", title: "Wake-up", lit: alarmOn,
-                     action: { showingWake = true }) {
-                Text(alarmOn ? wakeText : "Off").monospacedDigit()
-            }
-            if let event = model.now.value?.nextEvent {
-                infoTile("calendar", title: "Next up", lit: false) { Text(eventText(event)) }
-            }
-            ForEach(timers.prefix(2)) { timer in
-                let end = Date(timeIntervalSince1970: timer.expiresAt)
-                let done = timer.state == "alarming" || end <= .now
-                infoTile(done ? "alarm.waves.left.and.right.fill" : "timer",
-                         title: timer.label.isEmpty ? "Timer" : timer.label.capitalized, lit: done) {
-                    if done { Text("Time's up") } else {
-                        Text(timerInterval: Date.now...end, countsDown: true).monospacedDigit()
+            VStack(alignment: .leading, spacing: 8) {
+                let alarmOn = wake?.enabled == true && wake?.nextAt != nil
+                Button { showingWake = true } label: {
+                    glanceLine(alarmOn ? "alarm.fill" : "alarm", lit: alarmOn,
+                               text: alarmOn ? "Wake-up \(wakeText)" : "No wake-up set", chevron: true)
+                }
+                .buttonStyle(.plain)
+                .accessibilityHint("Opens the wake-up schedule")
+                if let event = model.now.value?.nextEvent {
+                    glanceLine("calendar", lit: false, text: eventText(event), chevron: false)
+                }
+                ForEach(timers.prefix(2)) { timer in
+                    let end = Date(timeIntervalSince1970: timer.expiresAt)
+                    let done = timer.state == "alarming" || end <= .now
+                    HStack(spacing: 10) {
+                        Image(systemName: done ? "alarm.waves.left.and.right.fill" : "timer")
+                            .foregroundStyle(done ? Self.onColor : Color.secondary)
+                            .frame(width: 22)
+                        Text(timer.label.isEmpty ? "Timer" : timer.label.capitalized)
+                        if done { Text("Time's up").foregroundStyle(Self.onColor) } else {
+                            Text(timerInterval: Date.now...end, countsDown: true).monospacedDigit()
+                        }
                     }
+                    .font(.callout.weight(.medium))
+                    .accessibilityElement(children: .combine)
                 }
             }
+            .padding(.horizontal, 4)
+            RoomVolumeControl()
+                .padding(.horizontal, 16)
+                .frame(maxWidth: .infinity, minHeight: Self.rowHeight, maxHeight: Self.rowHeight)
+                .roomTile(on: false)
         }
     }
 
-    /// A row on the left: an icon in a circle, a small title, the value.
-    private func infoTile<Value: View>(_ symbol: String, title: String, lit: Bool,
-                                       action: (() -> Void)? = nil,
-                                       @ViewBuilder value: () -> Value) -> some View {
-        Button { action?() } label: {
-            HStack(spacing: 12) {
-                tileIcon(symbol, on: lit, size: 40)
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(title).font(.caption.weight(.semibold)).foregroundStyle(.secondary)
-                    value().font(.headline).lineLimit(1).minimumScaleFactor(0.8)
-                }
-                Spacer(minLength: 0)
-                if action != nil {
-                    Image(systemName: "chevron.right").font(.caption).foregroundStyle(.tertiary)
-                }
+    /// One plain line under JARVIS: a small icon, the text (no card).
+    private func glanceLine(_ symbol: String, lit: Bool, text: String, chevron: Bool) -> some View {
+        HStack(spacing: 10) {
+            Image(systemName: symbol)
+                .foregroundStyle(lit ? Self.onColor : Color.secondary)
+                .frame(width: 22)
+            Text(text)
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+                .monospacedDigit()
+            if chevron {
+                Image(systemName: "chevron.right").font(.caption).foregroundStyle(.tertiary)
             }
-            .padding(.horizontal, 12)
-            .frame(maxWidth: .infinity, minHeight: Self.rowHeight, maxHeight: Self.rowHeight)
-            .roomTile(on: false)
+            Spacer(minLength: 0)
         }
-        .buttonStyle(CockpitButtonStyle())
-        .disabled(action == nil)
-        .accessibilityElement(children: .combine)
+        .font(.callout.weight(.medium))
+        .foregroundStyle(.secondary)
+        .contentShape(Rectangle())
     }
 
-    /// Scenes on top, lights under: one grid of three columns, every tile the
-    /// same height, which grows to fill the column (a long list scrolls).
     private var controlsColumn: some View {
-        GeometryReader { geo in
-            let count = model.entities.value?.count ?? 0
-            let lightRows = max(1, (count + 2) / 3)
-            let titles: CGFloat = 2 * (26 + Self.gap) + 10
-            let fit = (geo.size.height - titles - CGFloat(lightRows) * Self.gap) / CGFloat(lightRows + 1)
-            let height = min(150, max(100, fit))
-            VStack(alignment: .leading, spacing: Self.gap) {
-                HStack(alignment: .firstTextBaseline, spacing: 10) {
-                    sectionTitle("Scenes")
-                    if let other = otherCurrentScene {
-                        Text("Now: \(other.name)").font(.subheadline).foregroundStyle(.secondary).lineLimit(1)
-                    }
-                }
-                scenesGrid(height: height)
-                sectionTitle("Lights & switches").padding(.top, 10)
-                if fit < 100 {
-                    ScrollView { devicesGrid(height: height) }.scrollIndicators(.hidden)
-                } else {
-                    devicesGrid(height: height)
+        VStack(alignment: .leading, spacing: Self.gap) {
+            // Peace takes the third column of the top row: the corner.
+            LazyVGrid(columns: Self.threeColumns, spacing: Self.gap) {
+                sectionTitle("Lights & switches")
+                    .frame(maxWidth: .infinity, alignment: .bottomLeading)
+                Color.clear.frame(height: 1)
+                peaceButton
+            }
+            devicesGrid(height: Self.rowHeight)
+            HStack(alignment: .firstTextBaseline, spacing: 10) {
+                sectionTitle("Scenes")
+                if let other = otherCurrentScene {
+                    Text("Now: \(other.name)").font(.subheadline).foregroundStyle(.secondary).lineLimit(1)
                 }
             }
+            .padding(.top, 8)
+            scenesGrid(height: Self.rowHeight)
+            Spacer(minLength: 0)
+            bottomButtons
+        }
+    }
+
+    /// Heading out: everything off, plugs too (HA's Peace scene), then the
+    /// night screen. Big and in the top-right corner, to hit on the way out.
+    @ViewBuilder private var peaceButton: some View {
+        if let peace = model.scenes.value?.scenes.first(where: { $0.entityID == "scene.peace" }) {
+            Button { model.runScene(peace) } label: {
+                HStack(spacing: 12) {
+                    if model.runningScene == peace.entityID {
+                        ProgressView()
+                    } else {
+                        Image(systemName: "hand.wave.fill").font(.title2).foregroundStyle(Self.onColor)
+                    }
+                    Text("Peace").font(.title3.weight(.semibold)).foregroundStyle(Color.white)
+                }
+                .frame(maxWidth: .infinity, minHeight: Self.rowHeight, maxHeight: Self.rowHeight)
+                // The glass every tile has, the accent's edge to find it at a glance (no red slab).
+                .background(Self.onColor.opacity(0.12), in: .rect(cornerRadius: Self.radius))
+                .jarvisSurface(in: .rect(cornerRadius: Self.radius))
+                .overlay(RoundedRectangle(cornerRadius: Self.radius).strokeBorder(Self.onColor.opacity(0.7), lineWidth: 1.5))
+            }
+            .buttonStyle(CockpitButtonStyle())
+            .disabled(model.runningScene != nil)
+            .accessibilityLabel("Peace")
+            .accessibilityHint("Turns everything off for when you leave")
+        } else {
+            Color.clear.frame(height: Self.rowHeight)
         }
     }
 
@@ -658,24 +691,26 @@ struct RoomView: View {
         }
     }
 
-    /// The tile's inside: icon circle top left, name and state at the bottom.
+    /// The tile's inside: icon circle, then the name and state beside it.
     private func tileFace(_ symbol: String, title: String, detail: String, on: Bool, busy: Bool,
                           height: CGFloat) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
-            tileIcon(symbol, on: on, size: 44, busy: busy)
-            Spacer(minLength: 6)
-            Text(title)
-                .font(.headline)
-                .lineLimit(1)
-                .minimumScaleFactor(0.75)
-            Text(detail)
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-                .monospacedDigit()
-                .lineLimit(1)
+        HStack(spacing: 12) {
+            tileIcon(symbol, on: on, size: 40, busy: busy)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(title)
+                    .font(.headline)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.75)
+                Text(detail)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .monospacedDigit()
+                    .lineLimit(1)
+            }
+            Spacer(minLength: 0)
         }
-        .padding(16)
-        .frame(maxWidth: .infinity, minHeight: height, maxHeight: height, alignment: .topLeading)
+        .padding(.horizontal, 14)
+        .frame(maxWidth: .infinity, minHeight: height, maxHeight: height, alignment: .leading)
     }
 
     private func tileIcon(_ symbol: String, on: Bool, size: CGFloat, busy: Bool = false) -> some View {
@@ -695,47 +730,29 @@ struct RoomView: View {
         .foregroundStyle(on ? JarvisTheme.backgroundDeep : Color.secondary)
     }
 
-    /// Volume, then four equal buttons.
-    private var doorBar: some View {
-        HStack(spacing: Self.gap) {
-            RoomVolumeControl()
-                .padding(.horizontal, 16)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .roomTile(on: false)
+    /// TV remote, TV power, More: one per column, level with JARVIS volume.
+    private var bottomButtons: some View {
+        LazyVGrid(columns: Self.threeColumns, spacing: Self.gap) {
             barButton("TV remote", symbol: "appletvremote.gen4") { showingRemote = true }
-            TVPowerButton(caption: "TV", width: Self.barButtonWidth, height: Self.rowHeight)
-            if let peace = model.scenes.value?.scenes.first(where: { $0.entityID == "scene.peace" }) {
-                barButton("Peace", symbol: "hand.wave.fill", busy: model.runningScene == peace.entityID) {
-                    model.runScene(peace)
-                }
-                .disabled(model.runningScene != nil)
-                .accessibilityHint("Turns everything off for when you leave")
-            }
+            TVPowerButton(caption: "TV", height: Self.rowHeight)
             Menu { roomMenuItems } label: { barFace("More", symbol: "ellipsis.circle") }
                 .buttonStyle(CockpitButtonStyle())
                 .accessibilityLabel("More")
         }
-        .frame(height: Self.rowHeight)
     }
 
-    static let barButtonWidth: CGFloat = 104
-
-    private func barButton(_ title: String, symbol: String, busy: Bool = false,
-                           action: @escaping () -> Void) -> some View {
-        Button(action: action) { barFace(title, symbol: symbol, busy: busy) }
+    private func barButton(_ title: String, symbol: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) { barFace(title, symbol: symbol) }
             .buttonStyle(CockpitButtonStyle())
             .accessibilityLabel(title)
     }
 
-    private func barFace(_ title: String, symbol: String, busy: Bool = false) -> some View {
-        VStack(spacing: 4) {
-            if busy { ProgressView() } else {
-                Image(systemName: symbol).font(.title3.weight(.semibold)).foregroundStyle(JarvisTheme.cyan)
-                    .frame(height: 24)
-            }
-            Text(title).font(.caption.weight(.semibold)).lineLimit(1).foregroundStyle(.primary)
+    private func barFace(_ title: String, symbol: String) -> some View {
+        HStack(spacing: 10) {
+            Image(systemName: symbol).font(.title3.weight(.semibold)).foregroundStyle(JarvisTheme.cyan)
+            Text(title).font(.headline).lineLimit(1).foregroundStyle(.primary)
         }
-        .frame(width: Self.barButtonWidth, height: Self.rowHeight)
+        .frame(maxWidth: .infinity, minHeight: Self.rowHeight, maxHeight: Self.rowHeight)
         .roomTile(on: false)
     }
 
@@ -743,7 +760,6 @@ struct RoomView: View {
         Text(title)
             .font(.title3.weight(.semibold))
             .foregroundStyle(.primary)
-            .frame(height: 26)
             .accessibilityAddTraits(.isHeader)
     }
 
@@ -783,10 +799,6 @@ struct RoomView: View {
             } else {
                 core(size: 170)
             }
-            Text(voice.active ? "Listening" : "Say \u{201C}Hey JARVIS\u{201D}")
-                .font(.footnote)
-                .foregroundStyle(.tertiary)
-                .frame(maxWidth: .infinity)
             Divider().overlay(JarvisTheme.border)
             if let event = model.now.value?.nextEvent {
                 infoRow("calendar", title: "Next up", value: eventText(event))

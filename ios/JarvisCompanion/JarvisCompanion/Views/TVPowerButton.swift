@@ -37,19 +37,18 @@ struct TVPowerButton: View {
 
     private func barFace(_ caption: String) -> some View {
         let lit = on == true
-        return VStack(spacing: 4) {
+        return HStack(spacing: 10) {
             if busy { ProgressView() } else {
                 Image(systemName: "power").font(.title3.weight(.semibold))
                     .foregroundStyle(lit ? JarvisTheme.backgroundDeep : JarvisTheme.cyan)
-                    .frame(height: 24)
             }
-            Text(lit ? "\(caption) on" : caption).font(.caption.weight(.semibold)).lineLimit(1)
+            Text(lit ? "\(caption) on" : caption).font(.headline).lineLimit(1)
                 .foregroundStyle(lit ? JarvisTheme.backgroundDeep : Color.primary)
         }
-        .frame(width: width ?? size, height: height ?? size)
-        .background(lit ? JarvisTheme.cyan.opacity(0.9) : Color.clear, in: .rect(cornerRadius: 20))
-        .jarvisSurface(in: .rect(cornerRadius: 20))
-        .overlay(RoundedRectangle(cornerRadius: 20).strokeBorder(lit ? JarvisTheme.cyan.opacity(0.45) : JarvisTheme.border))
+        .frame(maxWidth: width ?? .infinity, minHeight: height ?? size, maxHeight: height ?? size)
+        .background(lit ? JarvisTheme.cyan.opacity(0.9) : Color.clear, in: .rect(cornerRadius: 18))
+        .jarvisSurface(in: .rect(cornerRadius: 18))
+        .overlay(RoundedRectangle(cornerRadius: 18).strokeBorder(lit ? JarvisTheme.cyan.opacity(0.45) : JarvisTheme.border))
     }
 
     private var square: some View {
