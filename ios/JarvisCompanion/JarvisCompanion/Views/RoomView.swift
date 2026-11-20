@@ -212,7 +212,8 @@ struct RoomView: View {
             holdSeen = false
         }
         .overlay {
-            if let id = dragger.panelID ?? dragger.activeID,
+            // Landscape slides stay on the tile; the big panel is for a hold.
+            if let id = dragger.panelID ?? (wideLayout ? nil : dragger.activeID),
                let entity = model.entities.value?.first(where: { $0.entityID == id }) {
                 LevelPanel(model: model, dragger: dragger, entity: entity, symbol: Self.symbol(for: entity),
                            interactive: dragger.panelID == id)
@@ -220,7 +221,7 @@ struct RoomView: View {
                     .transition(.opacity.combined(with: .scale(scale: 0.96)))
             }
         }
-        .animation(.easeOut(duration: 0.18), value: dragger.panelID ?? dragger.activeID)
+        .animation(.easeOut(duration: 0.18), value: dragger.panelID ?? (wideLayout ? nil : dragger.activeID))
         .fullScreenCover(isPresented: $asleep) {
             // Black; a tap is the only thing on it. The nightstand iPad keeps
             // a dim grey clock (the Hub's old job), the backlight at its lowest.
@@ -1007,13 +1008,20 @@ struct RoomView: View {
             tileFace(Self.symbol(for: entity), title: entity.friendlyName,
                      detail: live.map { $0 > 0 ? "On · \($0)%" : "Off" } ?? statusText(entity, on: on),
                      on: on, busy: pending != nil, height: height)
-                // While dragged, the tile fills from the bottom to the new level.
-                .background(alignment: .bottom) {
+                // While slid, the tile fills from the left to the new level
+                // (portrait: from the bottom, as it's dragged up and down).
+                .background(alignment: .leading) {
                     if let live {
                         GeometryReader { geo in
-                            Self.onColor.opacity(0.28)
-                                .frame(height: geo.size.height * CGFloat(live) / 100)
-                                .frame(maxHeight: .infinity, alignment: .bottom)
+                            if wideLayout {
+                                Self.onColor.opacity(0.32)
+                                    .frame(width: geo.size.width * CGFloat(live) / 100)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                            } else {
+                                Self.onColor.opacity(0.28)
+                                    .frame(height: geo.size.height * CGFloat(live) / 100)
+                                    .frame(maxHeight: .infinity, alignment: .bottom)
+                            }
                         }
                         .clipShape(.rect(cornerRadius: Self.radius))
                     }
@@ -1045,15 +1053,28 @@ struct RoomView: View {
             .onChanged { drag in
                 guard LevelDragger.adjustable(entity), !touchSideways else { return }
                 let id = entity.entityID
+                let dx = drag.translation.width, dy = drag.translation.height
+                // Landscape (2026-11-20): slide side to side on the tile, right
+                // is brighter, the tile filling from the left. Portrait keeps up
+                // and down after a hold (the page scrolls there).
+                if wideLayout {
+                    if dragger.activeID != id {
+                        guard abs(dx) > abs(dy) else { touchSideways = true; return }
+                        holds.hold(id)  // the release mustn't toggle it
+                        touchDragged = true
+                        dragger.begin(entity, on: on, baseline: -dx)
+                    }
+                    dragger.update(entity, translation: -dx, model: model)
+                    return
+                }
                 if dragger.activeID != id {
-                    let dx = drag.translation.width, dy = drag.translation.height
                     guard abs(dy) > abs(dx) else { touchSideways = true; return }
-                    guard wideLayout || holding == id else { return }
+                    guard holding == id else { return }
                     holds.hold(id)  // the release mustn't toggle it
                     touchDragged = true
                     dragger.begin(entity, on: on, baseline: dy)
                 }
-                dragger.update(entity, translation: drag.translation.height, model: model)
+                dragger.update(entity, translation: dy, model: model)
             }
             .onEnded { _ in
                 touchSideways = false
