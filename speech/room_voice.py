@@ -82,6 +82,14 @@ _DISMISS = re.compile(r"\b(stop|cancel|dismiss|enough|off|okay|ok|thanks|thank y
 _JARVIS = re.compile(r"\bjarvis\b", re.IGNORECASE)
 
 
+def desk_mic_on() -> bool:
+    """``DESK_MIC`` (default on): 0 stops the Surface's own mic from waking
+    JARVIS or voting in voice ID, so only the iPads listen (Nick, 2026-11-19:
+    the desk mic kept scoring him as a guest). The desk speaker still talks.
+    Read live, so ``update_setting`` takes effect on the next frame."""
+    return os.getenv("DESK_MIC", "1").strip().lower() not in ("0", "off", "false", "no")
+
+
 def _tv_playing() -> bool:
     """The Movie scene is on, or the room TV reports a film playing."""
     try:
@@ -397,7 +405,7 @@ class RoomVoice:
                 return True
             sats = satellites.connected()
             frame = stream.read(timeout=0.05 if sats or candidates else 0.5)
-            if frame is not None:
+            if frame is not None and desk_mic_on():  # DESK_MIC=0: the frame is just drained
                 self._learn_noise(frame)
                 if self._heard_wake(frame):
                     candidates.append((self._last_wake_score, None))
@@ -448,7 +456,7 @@ class RoomVoice:
         source = self._source
         clips: dict[str, np.ndarray] = {}
         try:
-            if source is not None and getattr(self, "stream", None) is not None:
+            if source is not None and getattr(self, "stream", None) is not None and desk_mic_on():
                 clips["desk"] = self.stream.get_recent_audio(seconds)
             for sat in satellites.connected():
                 if sat is not source:

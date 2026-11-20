@@ -70,6 +70,16 @@ SETTINGS_SCHEMA: dict[str, dict[str, Any]] = {
         "max": 0.95,
         "description": "Wake word sensitivity. Lower = easier to trigger.",
     },
+    "DESK_MIC": {
+        "type": "bool",
+        "description": "Room voice: the Surface's own mic hears 'Hey JARVIS' and votes in voice ID. Off = only the iPads listen.",
+    },
+    "VOICE_TV_FLOOR": {
+        "type": "float",
+        "min": 0.0,
+        "max": 0.6,
+        "description": "While the TV plays, ignore a turn under this voice-ID score that never says 'Jarvis'. 0 = off.",
+    },
     "MIC_RMS_THRESHOLD": {
         "type": "float",
         "min": 100.0,

@@ -36,5 +36,12 @@ class TvWakeFilterTests(unittest.TestCase):
             self.assertFalse(room_voice._sounds_like_the_tv("lights on", guest(0.1)))
 
 
+class DeskMicTests(unittest.TestCase):
+    def test_desk_mic_switch(self) -> None:
+        for value, on in (("0", False), ("off", False), ("1", True), ("", True)):
+            with patch.dict(os.environ, {"DESK_MIC": value}):
+                self.assertEqual(room_voice.desk_mic_on(), on, value)
+
+
 if __name__ == "__main__":
     unittest.main()

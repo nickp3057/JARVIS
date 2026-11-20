@@ -1354,7 +1354,7 @@ struct HubView: View {
             // Brightness or fan speed on the tile itself (Nick, 2026-11-19).
             if adjustable {
                 Spacer(minLength: 0)
-                LevelSlider(model: model, entity: entity, compact: true)
+                LevelBar(model: model, entity: entity)
             }
         }
         .padding(10)
