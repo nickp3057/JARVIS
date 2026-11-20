@@ -1347,6 +1347,7 @@ there, so edit files with a `sudo python3` one-shot or vi.
 
 ## Recently Shipped
 
+- **Calm iPad orbs (2026-11-19, companion 6.88 / 330).** The iPads' Room orb no longer fires a thought for every house signal: `RoomView` opens `TrafficFeed` only when Room settings › Orb › **React to house traffic** is on (`room.houseTraffic`, default off), so by default the orb is calm like the phone's Home orb and moves only while JARVIS listens or thinks. The Link map still reads the feed while it's open.
 - **"Play X on my TV" reaches JARVIS, not Spotify (2026-11-19, Core only).** The room voice's music fast path (`speech/quick_answers._music`) grabbed "Play Hunger Games ... on my TV" (the TV guard knew "on the TV", not "on my TV") and, with Spotify not configured on the Surface, failed without trying the TV. Now `_NOT_SPOTIFY` also matches "on my …", and with no Spotify credentials the music fast path steps aside entirely so play/pause go to the model (Plex, the TV). Tests: `tests/test_room_smart.py`.
 - **Temporary 4K countdown on Media (2026-11-19, companion 6.83 / 325).** The Media tab shows a **Temporary 4K** card only while there are temp-4K films: one line each with "1080p again in 1d 4h" (amber under 6 h; "Downloading 42%" / "Searching for 4K" before it lands) and a **+1 day** button; hold a row for +3 hours, +1 week or Remove 4K now. Core: `GET /api/media/temp4k` (`temp_4k.listing()`, soonest to go first), `POST /api/media/temp4k/extend {tmdb_id, hours}` (adds on top of the current countdown; before it lands, a longer keep) and `POST /api/media/temp4k/remove {tmdb_id}` (`remove_id`, the 1080p copy untouched; adopted films are only untracked). Refreshed with the Media section. Tests: `tests/test_temp_4k.py`.
 - **One button per tile (2026-11-19, companion 6.82 / 324).** The phone tile's level bar is now drawn inside the tile's own button (`LevelFill`, display only) instead of being a second tap target (`LevelBar` removed): tap toggles, hold opens the big level page.
@@ -1512,7 +1513,7 @@ there, so edit files with a `sudo python3` one-shot or vi.
   classified by `HOME_ASSISTANT_URL`/`PLEX_URL`/arr URLs, `TRAFFIC_NAS_HOSTS`,
   private/Tailscale addresses, `TV_HOST`). `GET /api/traffic/stream`
   (status:read, SSE `traffic` batches every 100 ms, no replay). The iPad's
-  Room holds the stream open (`TrafficFeed`) and each signal fires one
+  Room holds the stream open (`TrafficFeed`, only with Room settings › React to house traffic on since 6.88) and each signal fires one
   neural-core thought from that device's own neuron (outward from the core
   when Core sends, inward from the outer shell when Core receives); idle
   thoughts slow while it's wired. Memory tab toolbar: **Memory map**

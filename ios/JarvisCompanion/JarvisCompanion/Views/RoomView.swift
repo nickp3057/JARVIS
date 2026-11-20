@@ -58,6 +58,10 @@ struct RoomView: View {
     /// Room settings › Max brightness: full backlight whenever the iPad isn't
     /// dark for the night or dimmed for a movie (Nick, 2026-11-15).
     @AppStorage(RoomView.maxBrightnessKey) private var maxBrightness = true
+    /// Room settings › React to house traffic: off (the default) keeps the
+    /// orb calm like the phone's Home orb, moving only for listening and
+    /// thinking (Nick, 2026-11-19).
+    @AppStorage(RoomView.houseTrafficKey) private var houseTraffic = false
     /// The screen's brightness before movie mode dimmed it.
     @State private var movieBrightness: CGFloat?
     /// Bumped by each tap in movie mode: full brightness, then back to dim.
@@ -309,10 +313,11 @@ struct RoomView: View {
                 if !model.homeStreamLive { await model.refreshEntities() }
             }
         }
-        .task(id: scenePhase) {
+        .task(id: "\(scenePhase)-\(houseTraffic)") {
             // The house's live traffic: every real signal fires one of the
-            // neural core's thoughts (TrafficFeed). Open while the Room is up.
-            guard scenePhase == .active else { return }
+            // neural core's thoughts (TrafficFeed). Open while the Room is up,
+            // only when Room settings › React to house traffic is on.
+            guard scenePhase == .active, houseTraffic else { return }
             TrafficFeed.shared.hold(settings: settings)
             defer { TrafficFeed.shared.release() }
             while !Task.isCancelled { try? await Task.sleep(for: .seconds(3600)) }
@@ -397,6 +402,7 @@ struct RoomView: View {
     static let defaultFavorites = "scene.game_time,scene.movie,scene.study"
     /// Shared with `RootView`: slide back to Room after a while on another tab.
     static let autoReturnKey = "room.autoReturn"
+    static let houseTrafficKey = "room.houseTraffic"
 
     /// A tap on the night screen: screen back on, and the tap-to-wake light.
     private func wakeFromNight() {
@@ -1292,6 +1298,7 @@ private struct RoomSettingsView: View {
 
     private var nightstand: Bool { PadRole.resolve(padRoleRaw) == .nightstand }
     @AppStorage(RoomView.maxBrightnessKey) private var maxBrightness = true
+    @AppStorage(RoomView.houseTrafficKey) private var houseTraffic = false
     @AppStorage(SatelliteVoice.settingKey) private var satelliteSetting = ""
     @AppStorage(SatelliteVoice.trimKey) private var satelliteTrim = 1.0
     @ObservedObject private var satellite = SatelliteVoice.shared
@@ -1395,6 +1402,13 @@ private struct RoomSettingsView: View {
                     }
                 }
                 NightVolumePanel(inForm: true)
+                Section {
+                    Toggle("React to house traffic", isOn: $houseTraffic)
+                } header: {
+                    Text("Orb")
+                } footer: {
+                    Text("Off, the orb stays calm like the phone's and moves only while JARVIS listens or thinks. On, every signal around the house fires a thought.")
+                }
                 Section {
                     ThemePicker()
                 } header: {

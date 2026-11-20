@@ -103,7 +103,6 @@ Review checklist when home:
 
 ### Room, scenes and screens
 
-- [ ] **NEXT UP: calm iPad orbs like the phone** (asked 2026-11-19; delete this line once shipped). The iPads' Room orb fires a thought for every house signal (`RoomView` holds `TrafficFeed`, which drives `NeuralCore`), so it looks busy; the phone's Home orb doesn't subscribe and stays calm, reacting only to listening/thinking. Nick likes the phone's. Make the iPads (mini and Air) calm the same way, ideally a Room settings toggle ("React to house traffic", default off) so he can turn it back on.
 - [ ] **GPS presence for "away"** (asked 2026-11-17): the room goes quiet today when Peace ran and every light is off (`status_hub.room_away`). Use the iPhone's location (HA `person.nick` / companion app zone, or a geofence in JarvisCompanion) as the real away signal, so the room mutes when Nick leaves whatever the scene, and wakes up again when he's home.
 - [ ] **Plex movie picker in iPad movie mode** (asked 2026-10-29): grid of Plex posters with search; a tap starts it on the TV's Plex app (Plex client `playMedia` or HA `media_player.play_media`). Needs Core endpoints for the library and play.
 - [ ] Govee effects (Aurora, Candlelight, Starry Sky...) in the light sheet.
