@@ -25,6 +25,10 @@ final class AlertStream {
     private static final long FRESH_MS = 2 * 60 * 1000;
     /** "id@created_at" of fresh alerts already handled, across reconnects. */
     private static final java.util.Set<String> SEEN = new java.util.HashSet<>();
+    /** The open stream, so {@link #kick} can drop it. */
+    private static volatile HttpURLConnection current;
+    private static final Object NAP = new Object();
+    private static volatile boolean kicked;
 
     private AlertStream() {}
 
@@ -32,6 +36,26 @@ final class AlertStream {
         Thread t = new Thread(() -> loop(context.getApplicationContext()), "alerts");
         t.setDaemon(true);
         t.start();
+    }
+
+    /**
+     * Reconnect now. In standby the TV's Wi-Fi drops and comes back, leaving
+     * a dead socket that takes up to 45 s to notice: on 2026-11-19 Core
+     * powered the TV on at 7:00:16 but the wake_up went into a dead stream,
+     * and the replay only arrived at 7:01:25. Called when the screen turns
+     * on and when Wi-Fi comes back; the fresh connection replays the
+     * wake-up (and any I'm up) at once.
+     */
+    static void kick(String why) {
+        Log.i(TAG, "reconnecting: " + why);
+        kicked = true;
+        HttpURLConnection conn = current;
+        if (conn != null) {
+            new Thread(conn::disconnect, "alerts-kick").start();  // not on the main thread
+        }
+        synchronized (NAP) {
+            NAP.notifyAll();
+        }
     }
 
     private static void loop(Context c) {
@@ -50,10 +74,22 @@ final class AlertStream {
                     }
                 }
             }
+            if (kicked) {
+                kicked = false;
+                backoff = 5_000;
+                continue;
+            }
             try {
-                Thread.sleep(backoff);
+                synchronized (NAP) {
+                    NAP.wait(backoff);
+                }
             } catch (InterruptedException e) {
                 return;
+            }
+            if (kicked) {
+                kicked = false;
+                backoff = 5_000;
+                continue;
             }
             backoff = Math.min(backoff * 2, 60_000);
         }
@@ -64,6 +100,8 @@ final class AlertStream {
         HttpURLConnection conn = Jarvis.open(Jarvis.base(c), "/api/clients/events?since=0",
                 Jarvis.token(c), 45_000);
         conn.setRequestProperty("Accept", "text/event-stream");
+        current = conn;
+        kicked = false;
         try {
             int code = conn.getResponseCode();
             if (code != 200) throw new java.io.IOException("HTTP " + code);
@@ -89,6 +127,7 @@ final class AlertStream {
                 }
             }
         } finally {
+            current = null;
             conn.disconnect();
         }
     }

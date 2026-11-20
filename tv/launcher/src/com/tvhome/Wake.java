@@ -28,13 +28,16 @@ final class Wake {
     static volatile long snoozeUntil;
     /** When the last alarm went off (wall-clock ms), so I'm up only stops wake-up music. */
     private static volatile long rangAt;
+    /** When I'm up was last pressed (wall-clock ms): a wake still starting stops. */
+    private static volatile long dismissedAt;
 
     private Wake() {}
 
     /** Blocking; call off the main thread. {@code music}: spotify: URI, "search:words", or "" to resume. */
     static void run(Context c, String music, int volumePercent, String label) {
         Log.i(TAG, "waking: music=" + music + " volume=" + volumePercent);
-        rangAt = System.currentTimeMillis();
+        long started = System.currentTimeMillis();
+        rangAt = started;
         cancelSnooze(); // a snooze ending (ours or Core's) lands here
         AudioManager audio = c.getSystemService(AudioManager.class);
         int max = audio.getStreamMaxVolume(AudioManager.STREAM_MUSIC);
@@ -44,6 +47,12 @@ final class Wake {
             adb.shell("input keyevent 224"); // WAKEUP: screen on, no toggle
             adb.shell("input keyevent 3"); // home: clock, greeting and the music card
             Thread.sleep(2500);
+            // A reconnect replays the wake-up and I'm up together; don't start
+            // music that was already turned down.
+            if (dismissedAt >= started) {
+                Log.i(TAG, "already answered; not starting the music");
+                return;
+            }
             // Through Spotify's media session, so Spotify never takes the screen.
             if (!Music.playInBackground(c, music)) {
                 // Spotify hasn't run since boot: open it once, then play through it.
@@ -72,6 +81,10 @@ final class Wake {
                 }
             }
             Thread.sleep(1500);
+            if (dismissedAt >= started) {
+                Music.pause(c);
+                return;
+            }
             // I'm up / Snooze over the home screen (also covers Spotify if it had to open).
             adb.shell("am start -n " + c.getPackageName() + "/.WakeActivity --ei volume " + volumePercent
                     + " --es label '" + label.replace("'", "") + "'");
@@ -105,6 +118,7 @@ final class Wake {
 
     /** I'm up (here or on the phone): stop the music and close the wake screen. */
     static void dismiss(Context c) {
+        dismissedAt = System.currentTimeMillis();
         boolean alarm = snoozeUntil > 0 || System.currentTimeMillis() - rangAt < 60 * 60_000;
         cancelSnooze();
         if (alarm) {

@@ -104,6 +104,15 @@ every deploy, so edit the repo copy, not the TV's.
 - **Plex sign-in**: Nick stays signed in to his Plex profile, so the old PIN
   auto-entry is gone (2026-10-27); `PlexWatch` only presses Watch/Resume for
   "play ..." voice requests.
+- **Wake-up reaches a TV whose Wi-Fi dropped in standby (9.14)**: on
+  2026-11-19 Core powered the TV on at 7:00:16 but the wake_up went into an
+  alert stream that had died overnight; the TV only noticed (45 s read
+  timeout + backoff) and replayed it at 7:01:25, after Nick had already
+  pressed I'm up on the iPad. Now `AlertStream.kick` drops the stream and
+  reconnects at once when the screen turns on (`ACTION_SCREEN_ON`) or Wi-Fi
+  comes back (default-network callback), so the replay lands within a
+  second or two of power-on. `Wake.run` also stops if I'm up arrived while
+  it was starting (a replay can deliver both together).
 - **Phone snooze**: `wake_snooze` / `wake_dismiss` bus events (from the
   phone's notification buttons) pause and count down, or stop the music
   and close `WakeActivity` (9.0: I'm up used to leave it playing). Core

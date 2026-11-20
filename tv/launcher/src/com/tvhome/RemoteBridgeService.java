@@ -81,12 +81,32 @@ public class RemoteBridgeService extends Service {
             PlaybackReport.start(this);  // light sync: where Plex is in the film
             NightlyRefresh.scheduleNext(this);
             registerReceiver(new ScreenOffReceiver(), new IntentFilter(Intent.ACTION_SCREEN_OFF));
+            // Out of standby: drop a stream that may have died overnight.
+            registerReceiver(new ScreenOnReceiver(), new IntentFilter(Intent.ACTION_SCREEN_ON));
+            getSystemService(android.net.ConnectivityManager.class)
+                    .registerDefaultNetworkCallback(new NetworkUp());
         }
         if (reader == null || !reader.isAlive()) {
             reader = new Thread(this::readLog, "logcat");
             reader.start();
         }
         return START_STICKY;
+    }
+
+    /** Out of standby: drop an alert stream that may have died overnight. */
+    private static final class ScreenOnReceiver extends BroadcastReceiver {
+        @Override
+        public void onReceive(Context context, Intent intent) {
+            AlertStream.kick("screen on");
+        }
+    }
+
+    /** Wi-Fi back after a standby drop: reconnect instead of waiting out the dead socket. */
+    private static final class NetworkUp extends android.net.ConnectivityManager.NetworkCallback {
+        @Override
+        public void onAvailable(android.net.Network network) {
+            AlertStream.kick("network up");
+        }
     }
 
     /** A minute after the TV is switched off, refresh it if it has been up long (NightlyRefresh). */
