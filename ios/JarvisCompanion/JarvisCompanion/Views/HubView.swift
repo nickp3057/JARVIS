@@ -1348,8 +1348,12 @@ struct HubView: View {
                         .foregroundStyle(.primary)
                         .lineLimit(2, reservesSpace: true)
                         .multilineTextAlignment(.leading)
+                    if adjustable {  // just shows the level; hold the tile to change it
+                        Spacer(minLength: 0)
+                        LevelFill(level: LevelDragger.level(of: entity, on: on))
+                    }
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                 .contentShape(Rectangle())
             }
             .buttonStyle(CockpitButtonStyle())
@@ -1372,11 +1376,7 @@ struct HubView: View {
             .accessibilityLabel(entity.friendlyName)
             .accessibilityValue(entity.state.capitalized)
             .accessibilityAddTraits(on ? .isSelected : [])
-            // Brightness or fan speed on the tile itself (Nick, 2026-11-19).
-            if adjustable {
-                Spacer(minLength: 0)
-                LevelBar(model: model, entity: entity)
-            }
+            .accessibilityHint(adjustable ? "Hold for the level" : "")
         }
         .padding(10)
         // Every tile in a row the same height, slider or not.

@@ -51,38 +51,22 @@ struct LevelSlider: View {
     }
 }
 
-/// The phone's tile: a thin bar showing the level. Tap it (or slide on it)
-/// and `LevelSheet` opens with a big slider (Nick, 2026-11-19: the tile's
-/// own slider was too small to be accurate).
-struct LevelBar: View {
-    @ObservedObject var model: HubViewModel
-    let entity: HomeEntity
-    @State private var open = false
+/// The phone's tile: a thin bar showing the level, drawn inside the tile's
+/// own button (no separate tap target: Nick, 2026-11-19). Hold the tile for
+/// the big slider (`LevelSheet`).
+struct LevelFill: View {
+    let level: Int
 
     var body: some View {
-        let on = model.pendingEntityStates[entity.entityID] ?? entity.isOn
-        let level = LevelDragger.level(of: entity, on: on)
-        Button { open = true } label: {
-            GeometryReader { geo in
-                ZStack(alignment: .leading) {
-                    Capsule().fill(Color.secondary.opacity(0.18))
-                    Capsule().fill(JarvisTheme.amber.opacity(0.85))
-                        .frame(width: max(level > 0 ? 8 : 0, geo.size.width * CGFloat(level) / 100))
-                }
+        GeometryReader { geo in
+            ZStack(alignment: .leading) {
+                Capsule().fill(Color.secondary.opacity(0.18))
+                Capsule().fill(JarvisTheme.amber.opacity(0.85))
+                    .frame(width: max(level > 0 ? 6 : 0, geo.size.width * CGFloat(level) / 100))
             }
-            .frame(height: 8)
-            .padding(.vertical, 8)  // a taller target than it looks
-            .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
-        .sheet(isPresented: $open) {
-            LevelSheet(model: model, entity: entity)
-                .presentationDetents([.height(LevelSheet.height(entity))])
-                .presentationDragIndicator(.visible)
-        }
-        .accessibilityLabel(entity.domain == "fan" ? "\(entity.friendlyName) speed" : "\(entity.friendlyName) brightness")
-        .accessibilityValue("\(level) percent")
-        .accessibilityHint("Opens a bigger slider")
+        .frame(height: 6)
+        .accessibilityHidden(true)
     }
 }
 
