@@ -32,6 +32,8 @@ struct RootView: View {
     @ObservedObject private var cameraViewer = RoomCameraPresenter.shared
     /// Donna mode covers everything, tab bar included, until he leaves.
     @ObservedObject private var donna = DonnaPresenter.shared
+    /// A tapped alert push: its sheet opens over whatever tab is up.
+    @ObservedObject private var alertOpener = AlertOpener.shared
     /// iPad: slide back to Room after a few idle minutes on another tab.
     @AppStorage(RoomView.autoReturnKey) private var autoReturn = true
     /// Bumped by any touch, so the trip back to Room waits for a quiet spell.
@@ -187,6 +189,10 @@ struct RootView: View {
         .overlay(alignment: .top) { InAppNoticeBanner() }  // pushes Guided Access would hide
         .overlay { VoiceEnrollCard() }  // Teach JARVIS my voice: the line to read
         .fullScreenCover(isPresented: $wakeRinging.showing) { WakeRingingView().environmentObject(settings) }
+        .sheet(item: $alertOpener.target) { target in
+            AlertDetailSheet(model: hub, alertID: target.id, onAsk: sendNow)
+                .environmentObject(settings)
+        }
         // While the iPad's lens is on, its reactors draw the green orb.
         .environment(\.cameraWatching, camera.watching)
         .fullScreenCover(isPresented: $cameraViewer.showing) { RoomCameraView().environmentObject(settings) }

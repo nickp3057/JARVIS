@@ -50,6 +50,7 @@ from brain import study_brief
 from brain.standing_orders import add_order, list_orders, remove_order
 from brain import tool_health
 from brain import self_repair
+from brain import skill_requests
 from brain.habits import describe_habits
 from brain.knowledge_vault import capture_note, describe_search
 from brain.timers import cancel_timer, dismiss_timer, list_timers, pause_timer, resume_timer, set_timer
@@ -2178,6 +2179,31 @@ _CUSTOM_TOOLS: list[dict[str, Any]] = [
         },
     },
     {
+        "name": "request_skill",
+        "description": (
+            "Call this when Nick asks for something none of your tools can do (no integration, no "
+            "API, no tool that fits), instead of improvising, guessing, or pretending it worked. It "
+            "files the wish on his Skill requests list in the app (asking again bumps its count) so it "
+            "can become a real tool later. Then tell him plainly you can't do that yet and that it's "
+            "logged. Not for things a tool can do but failed at (that's a fault: system_health / "
+            "diagnose_tool), and not for questions you can answer from knowledge or web search."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "summary": {"type": "string", "description": "The missing capability in a few words, e.g. 'Control the bedroom blinds'."},
+                "ask": {"type": "string", "description": "What Nick actually said or asked for."},
+                "why": {"type": "string", "description": "Why it can't be done today: what's missing (an integration, an API, a device)."},
+            },
+            "required": ["summary"],
+        },
+    },
+    {
+        "name": "list_skill_requests",
+        "description": "List the skills Nick has asked for that JARVIS doesn't have yet (open by default; status done/declined/all).",
+        "input_schema": {"type": "object", "properties": {"status": {"type": "string"}}},
+    },
+    {
         "name": "list_repair_proposals",
         "description": "List staged self-repair proposals (pending by default; status=all for history).",
         "input_schema": {"type": "object", "properties": {"status": {"type": "string"}}},
@@ -3254,6 +3280,8 @@ _DISPATCH: dict[str, Callable[[dict[str, Any]], str]] = {
     "apply_repair": _tool_apply_repair,
     "propose_stack_fix": _tool_propose_stack_fix,
     "list_repair_proposals": _tool_list_repair_proposals,
+    "request_skill": lambda args: skill_requests.tool_request(args),
+    "list_skill_requests": lambda args: skill_requests.tool_list(args),
     "reject_repair": _tool_reject_repair,
     "list_standing_orders": _tool_list_standing_orders,
     "remove_standing_order": _tool_remove_standing_order,
@@ -3425,7 +3453,7 @@ def execute_tool(name: str, args: dict[str, Any], session_id: str | None = None)
 def _score_tool(name: str, *, ok: bool, error: str, started: float) -> None:
     """Feed the self-diagnosis ledger; never let bookkeeping break a tool call."""
     if name in ("system_health", "clear_tool_health", "clear_alerts", "refresh_alerts", "diagnose_tool", "apply_repair", "list_repair_proposals", "reject_repair",
-                "propose_stack_fix"):
+                "propose_stack_fix", "request_skill", "list_skill_requests"):
         return
     try:
         tool_health.record(name, ok=ok, error=error, elapsed_ms=(time.monotonic() - started) * 1000)

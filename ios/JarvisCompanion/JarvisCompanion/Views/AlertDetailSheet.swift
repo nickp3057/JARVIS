@@ -13,6 +13,8 @@ struct AlertDetailSheet: View {
     @State private var outcome: String?
     @State private var asking = false
     @State private var copied = false
+    /// Opened from a push before the list had it: fetching it first.
+    @State private var fetching = true
 
     /// The live copy, so autopilot's progress updates while the sheet is open.
     private var alert: JarvisAlert? { model.alerts.value?.first { $0.id == alertID } }
@@ -40,6 +42,8 @@ struct AlertDetailSheet: View {
                         actions(alert)
                     }
                     .padding(20)
+                } else if fetching {
+                    ProgressView().frame(maxWidth: .infinity).padding(.top, 80)
                 } else {
                     VStack(spacing: 10) {
                         Image(systemName: "checkmark.circle").font(.largeTitle).foregroundStyle(JarvisTheme.success)
@@ -49,6 +53,10 @@ struct AlertDetailSheet: View {
                     .frame(maxWidth: .infinity)
                     .padding(.top, 80)
                 }
+            }
+            .task {
+                if alert == nil { await model.refreshAlerts() }
+                fetching = false
             }
             .navigationTitle("Alert")
             .navigationBarTitleDisplayMode(.inline)

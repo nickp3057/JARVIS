@@ -152,6 +152,7 @@ _COMPANION_CAPABILITIES: dict[str, object] = {
         "repairs": True,
         "alert_fix": True,
         "autopilot": True,
+        "skill_requests": True,
     },
 }
 
@@ -689,6 +690,26 @@ def autopilot_set(request: AutopilotRequest, _: None = Depends(authorize)) -> di
     from brain import settings as settings_mod
     settings_mod.update_setting("AUTO_REPAIR_ENABLED", "true" if request.enabled else "false")
     return autopilot()
+
+
+@app.get("/api/skills/requests")
+def skill_request_list(status: str = "open", _: None = Depends(authorize)) -> dict[str, object]:
+    """What Nick asked for that JARVIS can't do yet, most asked first."""
+    from brain import skill_requests
+    return {"requests": skill_requests.listing(status if status in (*skill_requests.STATUSES, "all") else "open")}
+
+
+class SkillRequestUpdate(BaseModel):
+    status: str = Field(pattern="^(open|done|declined)$")
+
+
+@app.post("/api/skills/requests/{request_id}")
+def skill_request_update(request_id: str, request: SkillRequestUpdate, _: None = Depends(authorize)) -> dict[str, object]:
+    from brain import skill_requests
+    record = skill_requests.set_status(request_id, request.status)
+    if record is None:
+        raise HTTPException(status_code=404, detail="No such skill request")
+    return {"request": record}
 
 
 @app.post("/api/alerts/clear")

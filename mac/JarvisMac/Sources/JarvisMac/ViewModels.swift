@@ -215,6 +215,49 @@ final class AlertsModel: ObservableObject {
             self.error = error.localizedDescription
         }
     }
+
+    // MARK: Fixes and autopilot
+
+    @Published private(set) var fixing: Set<Int> = []
+    @Published private(set) var autopilot: AutopilotStatus?
+    /// A Fix it that couldn't start, keyed by alert ("nothing to retry").
+    @Published var fixNotes: [Int: String] = [:]
+
+    func loadAutopilot() async {
+        autopilot = try? await JarvisAPI.make(settings).autopilot()
+    }
+
+    func setAutopilot(_ enabled: Bool) async {
+        do { autopilot = try await JarvisAPI.make(settings).setAutopilot(enabled) } catch {
+            self.error = error.localizedDescription
+        }
+    }
+
+    /// The click is the approval; the alert's repair shows progress.
+    func fix(_ alert: JarvisAlert) async {
+        guard !fixing.contains(alert.id) else { return }
+        fixing.insert(alert.id)
+        defer { fixing.remove(alert.id) }
+        do {
+            let result = try await JarvisAPI.make(settings).fixAlert(alert)
+            fixNotes[alert.id] = result.started ? nil : result.message
+            await load()
+        } catch {
+            self.error = error.localizedDescription
+        }
+    }
+
+    func dismiss(_ alert: JarvisAlert) async {
+        alerts.removeAll { $0.id == alert.id }
+        do {
+            try await JarvisAPI.make(settings).dismissAlert(alert)
+        } catch {
+            self.error = error.localizedDescription
+        }
+        await load()
+    }
+
+    var anyRepairRunning: Bool { alerts.contains { $0.repair?.isWorking == true } }
 }
 
 // MARK: - Donna

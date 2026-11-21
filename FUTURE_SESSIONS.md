@@ -160,7 +160,9 @@ See JARVIS.md Recently Shipped. Unit-tested only; nothing ran against the real N
 - [ ] Alert sheet: Fix it on a stale arr alert with a healthy stack clears it; Ask JARVIS sends the report straight to Chat as one paragraph; Copy and Dismiss work; long-press menu works.
 - [ ] Donna: send, switch apps, come back: no Face ID. Leave and reopen: Face ID. End session closes at once and the next visit starts fresh.
 - [ ] Decide: should HA get an automatic trigger (e.g. many watched devices unavailable at once)? Today `restart_home_assistant` is on the autopilot list but nothing triggers it automatically (an unreachable HA can't take a restart call anyway).
-- [ ] The Mac app's Alerts section doesn't have the new sheet/Fix it/autopilot toggle yet (own sources in `mac/JarvisMac`).
+- [ ] Mac app Alerts (built, not installed by me): Fix it / Copy / Dismiss and the Autopilot toggle work against the real Core (`mac/JarvisMac/build.sh --open`).
+- [ ] Tap a JARVIS alert push (6.98): the alert's sheet opens; an info push (e.g. "Fixed it myself") just opens the app.
+- [ ] Ask JARVIS for something he can't do ("close my blinds"): he says so plainly, it lands on Control → Skill requests, asking again bumps the count. Watch he doesn't file things a tool can do.
 
 ### Reliability pass (2026-11-14, Core only): check after deploy
 
@@ -277,6 +279,9 @@ covers, JARVIS says so plainly and files a **skill request** (what Nick
 asked, when, why it failed) to a `memory/skill_requests.json` store visible
 in the companion (not the to-do list); then this self-patch flow drafts the
 tool for the most-asked requests and asks Nick to approve it.
+*First half shipped 2026-11-20 (companion 6.98):* `request_skill` /
+`brain/skill_requests.py` and the Control tab's Skill requests card. Next:
+the self-patch flow that drafts a tool for the top request.
 
 ### 3. Skill acquisition from repetition
 `brain/habits.py` already notices patterns. Next step: when the same

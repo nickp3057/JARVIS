@@ -7,11 +7,12 @@ tool would otherwise write Nick's live file. Tests that need the file patch
 import tempfile
 from pathlib import Path
 
-from brain import auto_heal, event_bus, lessons, memory_extractor, movie_exit, tool_health, usage, watches
+from brain import auto_heal, event_bus, lessons, skill_requests, memory_extractor, movie_exit, tool_health, usage, watches
 
 _TMP = tempfile.mkdtemp(prefix="jarvis-tests-")
 tool_health._FILE = Path(_TMP) / "tool_health.json"
 event_bus._REPEATS_FILE = Path(_TMP) / "alert_repeats.json"  # and off memory/alert_repeats.json
+skill_requests._FILE = Path(_TMP) / "skill_requests.json"  # and off memory/skill_requests.json
 auto_heal._FILE = Path(_TMP) / "auto_repairs.json"  # and off memory/auto_repairs.json
 lessons._FILE = Path(_TMP) / "lessons.json"  # and off memory/lessons.json
 watches._FILE = Path(_TMP) / "watches.json"  # and off memory/watches.json

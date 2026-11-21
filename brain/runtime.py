@@ -449,7 +449,9 @@ class JarvisRuntime:
         from brain import notifications
         if not notifications.configured():
             return
-        delivery = notifications.send(alert.title, alert.message, **alert.grouping)
+        # Warnings and criticals sit on Needs attention, so a tap can open them there.
+        opener = {"alert_id": alert.id, "alert_at": alert.created_at} if alert.severity != "info" else {}
+        delivery = notifications.send(alert.title, alert.message, **opener, **alert.grouping)
         if not delivery.delivered:
             self.record_event(kind="alert", source=alert.source, title="Phone alert delivery failed",
                               detail=f"Alert remains in the runtime inbox. {delivery.detail}"[:500])

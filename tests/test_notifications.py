@@ -247,6 +247,15 @@ class ApnsSenderTests(unittest.TestCase):
         self.assertTrue(ok)
         self.assertEqual(notifications.device_count(), 2)
 
+    def test_alert_id_rides_in_the_payload_for_tap_to_open(self):
+        import json as _json
+        notifications.register_device(TOKEN, "sandbox")
+        self.assertTrue(notifications.send("T", "m", alert_id=42, alert_at=1700000000.5).delivered)
+        body = _json.loads(self.requests[-1].content)
+        self.assertEqual((body["alert_id"], body["alert_at"]), (42, 1700000000.5))
+        self.assertTrue(notifications.send("T", "m").delivered)
+        self.assertNotIn("alert_id", _json.loads(self.requests[-1].content))
+
     def test_bad_key_file_reports_not_ready(self):
         self.key_path.write_text("not a key")
         ready, reason = notifications.app_push_status()

@@ -66,6 +66,8 @@ final class HubViewModel: ObservableObject {
     @Published private(set) var onHomeNetwork: Bool?
     /// Pending and recent self-repair proposals (server-staged fixes).
     @Published var repairs = Section<[RepairProposal]>()
+    /// Skills Nick asked for that JARVIS doesn't have yet; empty on an older Core.
+    @Published var skillRequests = Section<[SkillRequest]>()
     /// Repair ids with an Approve/Dismiss call in flight.
     @Published private(set) var busyRepairs: Set<String> = []
     /// The alert whose incident report is being gathered (Needs attention tap).
@@ -158,7 +160,8 @@ final class HubViewModel: ObservableObject {
         async let m: Void = refreshGlance()
         async let n: Void = refreshShopping()
         async let o: Void = refreshAutopilot()
-        _ = await (a, b, c, d, e, f, g, h, i, j, k, l, m, n, o)
+        async let p: Void = refreshSkillRequests()
+        _ = await (a, b, c, d, e, f, g, h, i, j, k, l, m, n, o, p)
     }
 
     func refreshGlance() async {
@@ -380,6 +383,20 @@ final class HubViewModel: ObservableObject {
                 dismissedAlertIDs.remove(alert.id)
                 actionError = error.localizedDescription
             }
+        }
+    }
+
+    func refreshSkillRequests() async {
+        await load(\.skillRequests) { try await $0.skillRequests() }
+    }
+
+    func closeSkillRequest(_ request: SkillRequest, status: String) {
+        skillRequests.value?.removeAll { $0.id == request.id }
+        Task {
+            do { try await client().closeSkillRequest(id: request.id, status: status) } catch {
+                actionError = error.localizedDescription
+            }
+            await refreshSkillRequests()
         }
     }
 

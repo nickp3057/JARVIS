@@ -187,7 +187,8 @@ URGENT_CATEGORIES = frozenset({"WAKE_UP"})
 
 
 def _send_apns(title: str, message: str, *, thread_id: str = "", collapse_id: str = "",
-               passive: bool = False, category: str = "") -> tuple[bool, str]:
+               passive: bool = False, category: str = "", alert_id: int | None = None,
+               alert_at: float | None = None) -> tuple[bool, str]:
     """Push to every registered device; success if at least one accepted it.
 
     ``thread_id`` groups notifications on the phone; ``collapse_id`` makes a
@@ -208,7 +209,12 @@ def _send_apns(title: str, message: str, *, thread_id: str = "", collapse_id: st
         aps["thread-id"] = thread_id[:64]
     if category:
         aps["category"] = category[:64]  # the app registers these (PushAppDelegate)
-    body = {"aps": aps, "source": "jarvis"}
+    body: dict[str, object] = {"aps": aps, "source": "jarvis"}
+    if alert_id is not None:
+        # Tapping the push opens this alert's sheet in the app (Fix it, etc.).
+        body["alert_id"] = alert_id
+        if alert_at is not None:
+            body["alert_at"] = alert_at
     payload = json.dumps(body, ensure_ascii=False).encode("utf-8")
     with _apns_lock:
         with _lock:
@@ -273,7 +279,7 @@ def ha_service() -> str:
 
 
 def _send_home_assistant(title: str, message: str, *, thread_id: str = "", collapse_id: str = "",
-                         passive: bool = False, category: str = "") -> tuple[bool, str]:
+                         passive: bool = False, category: str = "", **_: object) -> tuple[bool, str]:
     service = ha_service()
     if not service:
         return False, "No HA mobile_app notify service configured"
@@ -312,11 +318,14 @@ def configured() -> bool:
 
 
 def send(title: str, message: str, *, thread_id: str = "", collapse_id: str = "",
-         passive: bool = False, category: str = "") -> Delivery:
+         passive: bool = False, category: str = "", alert_id: int | None = None,
+         alert_at: float | None = None) -> Delivery:
     """Deliver to the phone through the first working channel. ``category``
-    picks the companion's action buttons (e.g. WAKE_UP: I'm up / Snooze)."""
+    picks the companion's action buttons (e.g. WAKE_UP: I'm up / Snooze).
+    ``alert_id`` / ``alert_at`` (a bus alert) let a tap open that alert."""
     grouping = {k: v for k, v in (("thread_id", thread_id), ("collapse_id", collapse_id), ("passive", passive),
-                                  ("category", category)) if v}
+                                  ("category", category), ("alert_id", alert_id), ("alert_at", alert_at))
+                if v is not None and v != "" and v is not False}
     message = (message or "").strip()
     if not message:
         return Delivery(False, None, "empty message")

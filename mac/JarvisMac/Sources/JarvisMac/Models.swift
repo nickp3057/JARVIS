@@ -128,11 +128,36 @@ struct JarvisAlert: Decodable, Identifiable, Hashable {
     let message: String
     let createdAt: Double
     let repeats: Int?
+    /// Core has a one-tap fix for it (Core 2026-11-20+).
+    var fixable: Bool? = nil
+    /// The repair working on it: autopilot's or a Fix it click.
+    var repair: AlertRepair? = nil
 
     enum CodingKeys: String, CodingKey {
-        case id, severity, title, message, repeats
+        case id, severity, title, message, repeats, fixable, repair
         case createdAt = "created_at"
     }
+}
+
+struct AlertRepair: Decodable, Hashable {
+    let id: String
+    let label: String
+    let status: String
+    let result: String
+    let auto: Bool
+
+    var isWorking: Bool { status == "running" }
+    var succeeded: Bool { status == "applied" }
+    var failed: Bool { status == "failed" || status == "rolled_back" }
+}
+
+struct AlertFixResult: Decodable {
+    let started: Bool
+    let message: String
+}
+
+struct AutopilotStatus: Decodable, Hashable {
+    let enabled: Bool
 }
 
 // MARK: Donna

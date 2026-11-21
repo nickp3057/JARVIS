@@ -147,6 +147,21 @@ struct AlertFixResult: Decodable {
     var resolved: Bool? = nil
 }
 
+/// Something Nick asked for that JARVIS has no tool for yet (`GET /api/skills/requests`).
+struct SkillRequest: Decodable, Identifiable, Hashable {
+    let id: String
+    let summary: String
+    let asks: [String]
+    let why: String
+    let count: Int
+    let lastAt: Double
+
+    enum CodingKeys: String, CodingKey {
+        case id, summary, asks, why, count
+        case lastAt = "last_at"
+    }
+}
+
 /// `GET/POST /api/autopilot`: JARVIS fixing the basic stuff himself.
 struct AutopilotStatus: Decodable, Hashable {
     let enabled: Bool
@@ -761,6 +776,18 @@ struct JarvisAPIClient {
         struct Result: Decodable { let dismissed: Int }
         _ = try await postJSON(Result.self, path: "api/alerts/\(alert.id)/dismiss",
                                body: IncidentReportBody(createdAt: alert.createdAt))
+    }
+
+    func skillRequests() async throws -> [SkillRequest] {
+        struct Envelope: Decodable { let requests: [SkillRequest] }
+        return try await getJSON(Envelope.self, path: "api/skills/requests").requests
+    }
+
+    /// "done" (JARVIS can do it now) or "declined" (not needed).
+    func closeSkillRequest(id: String, status: String) async throws {
+        struct Body: Encodable { let status: String }
+        struct Result: Decodable {}
+        _ = try await postJSON(Result.self, path: "api/skills/requests/\(id)", body: Body(status: status))
     }
 
     func autopilot() async throws -> AutopilotStatus {

@@ -126,6 +126,21 @@ struct JarvisAPI {
     func refreshAlerts() async throws { _ = try await send("POST", "api/alerts/refresh", timeout: 60) }
     func clearAlerts() async throws { _ = try await send("POST", "api/alerts/clear") }
 
+    func fixAlert(_ alert: JarvisAlert) async throws -> AlertFixResult {
+        try await post("api/alerts/\(alert.id)/fix", body: ["created_at": AnyEncodable(alert.createdAt)], timeout: 60)
+    }
+
+    func dismissAlert(_ alert: JarvisAlert) async throws {
+        try await send("POST", "api/alerts/\(alert.id)/dismiss",
+                       body: try JSONEncoder().encode(["created_at": alert.createdAt]))
+    }
+
+    func autopilot() async throws -> AutopilotStatus { try await get("api/autopilot") }
+
+    func setAutopilot(_ enabled: Bool) async throws -> AutopilotStatus {
+        try await post("api/autopilot", body: ["enabled": AnyEncodable(enabled)])
+    }
+
     // MARK: Donna
 
     func donnaState() async throws -> DonnaState { try await get("api/donna") }

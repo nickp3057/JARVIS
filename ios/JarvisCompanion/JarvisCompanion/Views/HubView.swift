@@ -90,6 +90,7 @@ struct HubView: View {
                                 // What needs you first, then the controls, then the day.
                                 if !attentionAlerts.isEmpty { needsAttentionCard }
                                 if !visibleRepairs.isEmpty { repairsCard }
+                                if !openSkillRequests.isEmpty { skillRequestsCard }
                                 controlShortcuts
                                 quickActionsCard
                                 nowCard
@@ -414,6 +415,7 @@ struct HubView: View {
     @ViewBuilder private var deskHouse: some View {
         if !attentionAlerts.isEmpty { needsAttentionCard }
         if !visibleRepairs.isEmpty { repairsCard }
+        if !openSkillRequests.isEmpty { skillRequestsCard }
         if let scenes = model.scenes.value, !scenes.scenes.isEmpty { scenesCard(scenes) }
         quickActionsCard
         controlShortcuts
@@ -1124,6 +1126,57 @@ struct HubView: View {
             Button("Dismiss", systemImage: "xmark", role: .destructive) { model.dismissAlert(alert) }
         }
         .accessibilityHint("Shows the whole alert and what JARVIS can do about it")
+    }
+
+    private var openSkillRequests: [SkillRequest] { Array((model.skillRequests.value ?? []).prefix(6)) }
+
+    /// What Nick asked for that JARVIS can't do yet, most asked first. A
+    /// row's menu marks it done (he can now) or not needed.
+    private var skillRequestsCard: some View {
+        CockpitPanel("Skill requests", symbol: "sparkles", trailing: {
+            StatusPill(text: "\(model.skillRequests.value?.count ?? 0)", color: JarvisTheme.cyan)
+        }) {
+            VStack(spacing: 0) {
+                ForEach(Array(openSkillRequests.enumerated()), id: \.element.id) { index, request in
+                    skillRequestRow(request)
+                    if index < openSkillRequests.count - 1 { divider }
+                }
+            }
+        }
+    }
+
+    private func skillRequestRow(_ request: SkillRequest) -> some View {
+        let when = Date(timeIntervalSince1970: request.lastAt).formatted(.relative(presentation: .named))
+        return HStack(alignment: .top, spacing: 10) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text(request.summary).font(.subheadline.weight(.medium))
+                if let ask = request.asks.last {
+                    Text("“\(ask)”").font(.caption).foregroundStyle(.secondary).lineLimit(2)
+                }
+                Text(request.count > 1 ? "Asked \(request.count)×, last \(when)" : "Asked \(when)")
+                    .font(.caption2).foregroundStyle(.tertiary)
+            }
+            Spacer(minLength: 6)
+            Menu {
+                Button("JARVIS can do this now", systemImage: "checkmark.circle") {
+                    model.closeSkillRequest(request, status: "done")
+                }
+                Button("Not needed", systemImage: "xmark") {
+                    model.closeSkillRequest(request, status: "declined")
+                }
+                Button("Copy", systemImage: "doc.on.doc") {
+                    UIPasteboard.general.string = ([request.summary] + request.asks + [request.why])
+                        .filter { !$0.isEmpty }.joined(separator: " — ")
+                }
+            } label: {
+                Image(systemName: "ellipsis.circle")
+                    .foregroundStyle(JarvisTheme.cyan)
+                    .frame(width: 32, height: 32)
+                    .contentShape(Rectangle())
+            }
+            .accessibilityLabel("Options for \(request.summary)")
+        }
+        .padding(.vertical, 8)
     }
 
     /// Pending fixes first, then the last few outcomes.

@@ -119,7 +119,12 @@ class PhoneSubscriberTests(unittest.TestCase):
         with patch("brain.notifications.configured", return_value=True), \
              patch("brain.notifications.send", return_value=Delivery(True, "app_push", "ok")) as send:
             self.runtime.push_to_phone("Arr", "qBit down", source="arr-stack", thread_id="inc-1", collapse_id="inc-1")
-        send.assert_called_once_with("Arr", "qBit down", thread_id="inc-1", collapse_id="inc-1")
+        send.assert_called_once()
+        self.assertEqual(send.call_args.args, ("Arr", "qBit down"))
+        kwargs = send.call_args.kwargs
+        self.assertEqual((kwargs["thread_id"], kwargs["collapse_id"]), ("inc-1", "inc-1"))
+        # A critical alert carries its id so tapping the push opens it in the app.
+        self.assertEqual(kwargs["alert_id"], event_bus.since(0)[-1].id)
 
     def test_info_alerts_do_not_buzz_the_phone(self) -> None:
         with patch("brain.notifications.configured", return_value=True), patch("brain.notifications.send") as send:

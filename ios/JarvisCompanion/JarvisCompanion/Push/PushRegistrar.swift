@@ -117,6 +117,16 @@ final class PushAppDelegate: NSObject, UIApplicationDelegate, UNUserNotification
             }
             return
         }
+        if action == UNNotificationDefaultActionIdentifier,
+           let id = (content.userInfo["alert_id"] as? NSNumber)?.intValue {
+            // An alert push: open its sheet (Fix it, Ask JARVIS, ...).
+            let at = (content.userInfo["alert_at"] as? NSNumber)?.doubleValue
+            Task { @MainActor in
+                AlertOpener.shared.open(id: id, createdAt: at)
+                completionHandler()
+            }
+            return
+        }
         guard action == Self.wakeAwake || action == Self.wakeSnooze || action == Self.wakeKeepLights else {
             completionHandler()
             return
@@ -156,6 +166,23 @@ final class PushAppDelegate: NSObject, UIApplicationDelegate, UNUserNotification
             WakeRinging.shared.open()
             completionHandler([.list, .sound])
         }
+    }
+}
+
+/// A tapped alert push waiting for RootView to open its sheet.
+@MainActor
+final class AlertOpener: ObservableObject {
+    static let shared = AlertOpener()
+
+    struct Target: Identifiable, Equatable {
+        let id: Int
+        let createdAt: Double?
+    }
+
+    @Published var target: Target?
+
+    func open(id: Int, createdAt: Double?) {
+        target = Target(id: id, createdAt: createdAt)
     }
 }
 
