@@ -65,16 +65,16 @@ class EndpointTests(unittest.TestCase):
         self.headers = {"Authorization": "Bearer test-token"}
 
     def test_play_resumes_or_starts_over_on_the_tv(self):
-        with patch.object(plex, "playable", return_value=(True, "Dune")), \
-             patch.object(plex, "server_id", return_value="srv"), \
+        item = {"label": "Dune", "kind": "movie", "title": "Dune"}
+        with patch.object(plex, "playable", return_value=(True, item)), \
              patch.object(plex, "play_from_start", return_value=(True, "")) as reset, \
-             patch("integrations.tv_remote.play_plex", return_value=(True, "")) as play:
+             patch("integrations.tv_remote.play_item", return_value=(True, "")) as play:
             body = self.client.post("/api/plex/play", json={"rating_key": "10"}, headers=self.headers).json()
             reset.assert_not_called()
             self.client.post("/api/plex/play", json={"rating_key": "10", "from_start": True}, headers=self.headers)
             reset.assert_called_once_with("10")
         self.assertEqual(body["message"], "Starting Dune on the TV.")
-        play.assert_called_with("10", "srv")
+        play.assert_called_with("10", "movie", "Dune")
         bad = self.client.post("/api/plex/play", json={"rating_key": "10; rm"}, headers=self.headers)
         self.assertEqual(bad.status_code, 422)
 
@@ -120,9 +120,69 @@ class ShowTests(unittest.TestCase):
         }
         with patch.object(plex, "_get", side_effect=lambda path, params=None: (True, pages[path])):
             self.assertEqual(plex.show_episodes("51")[1]["next_up"], "907")
-            ok, label = plex.playable("907")
-            self.assertEqual(label, 'Andor season 1, episode 7, "Announcement"')
-            self.assertFalse(plex.playable("50")[0])
+            ok, item = plex.playable("907")
+            self.assertEqual(item["label"], 'Andor season 1, episode 7, "Announcement"')
+            self.assertEqual(item["kind"], "episode")
+            ok, show = plex.playable("50")
+            self.assertEqual((show["kind"], show["title"]), ("show", "Severance"))
+
+
+class LibraryFilterTests(unittest.TestCase):
+    def test_hidden_libraries_leave_the_picker(self):
+        pages = {
+            "/library/sections": {"MediaContainer": {"Directory": [
+                {"key": "1", "type": "movie", "title": "Movies"},
+                {"key": "4", "type": "movie", "title": "Home Videos"},
+                {"key": "2", "type": "show", "title": "TV Shows"}]}},
+            "/library/sections/1/all": {"MediaContainer": {"Metadata": [_item("10", "Dune", 2021, 100)]}},
+            "/library/sections/4/all": {"MediaContainer": {"Metadata": [_item("40", "Birthday 2009", 2009, 900)]}},
+        }
+        with patch.object(plex, "_get", side_effect=lambda path, params=None: (True, pages[path])):
+            with patch.dict(os.environ, {"PLEX_HIDDEN_LIBRARIES": "4"}):
+                self.assertEqual([f["title"] for f in plex.library_movies()[1]], ["Dune"])
+                listing = plex.libraries()[1]
+            with patch.dict(os.environ, {"PLEX_HIDDEN_LIBRARIES": "home videos"}):
+                self.assertEqual([f["title"] for f in plex.library_movies()[1]], ["Dune"])
+            with patch.dict(os.environ, {"PLEX_HIDDEN_LIBRARIES": ""}):
+                self.assertEqual(len(plex.library_movies()[1]), 2)
+        self.assertEqual([(l["title"], l["hidden"]) for l in listing],
+                         [("Movies", False), ("Home Videos", True), ("TV Shows", False)])
+
+
+class PlayItemTests(unittest.TestCase):
+    """The TV turned on but played the wrong thing (2026-11-20): HA's plex://
+    link is ignored while Plex is open, so JARVIS TV starts it (tv_play)."""
+
+    def _run(self, sessions):
+        from integrations import tv_remote
+        with patch.object(tv_remote, "power", return_value=(True, "")) as power, \
+             patch("brain.event_bus.publish_card") as card, \
+             patch.object(plex, "sessions", return_value=(True, sessions)), \
+             patch.object(plex, "server_id", return_value="srv"), \
+             patch.object(tv_remote, "play_plex", return_value=(True, "")) as fallback, \
+             patch("threading.Thread", side_effect=lambda target, **_: MagicMock(start=target)):
+            ok, message = tv_remote.play_item("10", "movie", "Dune", sleep=lambda s: None)
+        return power, card, fallback, ok, message
+
+    def test_asks_jarvis_tv_and_skips_the_fallback_when_it_plays(self):
+        power, card, fallback, ok, _ = self._run([{"rating_key": "10"}])
+        power.assert_called_once_with(True)
+        self.assertEqual(card.call_args.args[0], "tv_play")
+        self.assertEqual(card.call_args.args[2], {"rating_key": "10", "type": "movie", "title": "Dune"})
+        fallback.assert_not_called()
+
+    def test_falls_back_to_the_deep_link_when_nothing_started(self):
+        _, _, fallback, ok, _ = self._run([{"rating_key": "99"}])
+        fallback.assert_called_once_with("10", "srv")
+
+    def test_a_show_counts_as_playing_through_its_episode(self):
+        from integrations import tv_remote
+        with patch.object(tv_remote, "power", return_value=(True, "")), patch("brain.event_bus.publish_card"), \
+             patch.object(plex, "sessions", return_value=(True, [{"rating_key": "907", "grandparent_rating_key": "51"}])), \
+             patch.object(tv_remote, "play_plex") as fallback, \
+             patch("threading.Thread", side_effect=lambda target, **_: MagicMock(start=target)):
+            tv_remote.play_item("51", "show", "Andor", sleep=lambda s: None)
+        fallback.assert_not_called()
 
 
 if __name__ == "__main__":

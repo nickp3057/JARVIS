@@ -1222,6 +1222,8 @@ MONITOR_WATCHDOG_ENABLED=true  # brain/watchdog.py: restart dead monitor threads
 MONITOR_WATCHDOG_INTERVAL_S=60
 MONITOR_RESTART_MAX=3       # restarts per monitor per hour before it gives up and alerts
 MONITOR_HANG_S=900          # a monitor that hasn't moved this long (not waiting/sleeping) is reported stuck
+PLEX_HIDDEN_LIBRARIES=      # libraries the picker hides, keys or titles (e.g. Home Videos); the picker's menu writes keys
+TV_PLAY_VERIFY_S=35         # after asking JARVIS TV to play, check Plex this long later; nothing playing = try the HA deep link
 ALERT_RECHECK_INTERVAL_S=600  # Needs attention re-checks itself this often (ALERT_RECHECK_ENABLED=false stops it)
 AUTO_REPAIR_ENABLED=true    # autopilot: JARVIS runs the basic stack fixes himself (never Plex); false = everything waits for approval
 AUTO_REPAIR_FIXES=          # comma list; blank = arr_recovery,retest_indexers,switch_indexer_mirror,retry_download,restart_home_assistant (refresh_plex can't be added)
@@ -1443,6 +1445,8 @@ there, so edit files with a `sudo python3` one-shot or vi.
 ---
 
 ## Recently Shipped
+
+- **The TV plays what you picked; library filter (2026-11-20, companion 6.105 / 347, Core).** The picker (and "play X on my TV") turned the TV on but played the wrong thing: Core sent HA's `plex://play/?metadataKey=` deep link, which Plex ignores while it's open (found for light sync calibration on 2026-11-15, never applied here). New `tv_remote.play_item(key, kind, title)`: wakes the TV (HA), publishes a `tv_play` card that JARVIS TV's `PlexWatch.playFresh` handles (force-stop Plex, open the `watch.plex.tv/libraries/<server>/<kind>/<slug>/<key>` page, press Watch), then after `TV_PLAY_VERIFY_S` (35) checks Plex's sessions and only then falls back to the old deep link. Shows play through the show's own page (its Watch plays the next-up episode, like the TV's Continue Watching row): the picker's Continue and `play_on_tv` both do this; a specific episode is sent as kind `episode` (unverified on the TV; the deep-link fallback covers it). `plex.sessions()` gained `grandparent_rating_key`. **Libraries:** the picker's Sort menu lists every movie/show library with a toggle; hidden ones (`PLEX_HIDDEN_LIBRARIES`, keys or titles, editable by voice too) leave the picker. `GET/POST /api/plex/libraries`.
 
 - **Away follows your phone (2026-11-20, companion 6.103 / 345, Core).** Asked 2026-11-17. `app.status_hub.room_away` (what keeps the room voice from saying alerts, reminders and announcements) now asks `brain/presence.py` first: Home Assistant's `person.nick` (the iPhone's GPS via the HA companion app) away means quiet whatever the scene, home means it talks again; the old guess (Peace scene with every light off) is only the fallback when GPS can't be read. A presence monitor (`_presence_monitor_loop`, debounced `PRESENCE_CONFIRM_S`) logs "Nick left" / "Nick is home" to the inbox, and on leaving with room lights still on pushes "You left lights on" (info, category `LEFT_ON`) whose **Turn them off** button calls `POST /api/presence/lights-off` (dashboard lights only, so `switch.wii_u` and the rest are never touched). `GET /api/presence` (status:read) reports location and whether the room is quiet. The iPads' dark screen still follows Peace/Goodnight as before.
 

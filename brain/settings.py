@@ -186,6 +186,13 @@ SETTINGS_SCHEMA: dict[str, dict[str, Any]] = {
         "description": "Whether Claude can use the web search tool.",
     },
 
+    # --- Movie picker ---
+    "PLEX_HIDDEN_LIBRARIES": {
+        "type": "string",
+        "description": "Plex libraries the app's movie/show picker hides, comma-separated keys or titles "
+                       "(e.g. 'Home Videos'). Empty shows them all.",
+    },
+
     # --- Autopilot (brain/auto_heal.py) ---
     "AUTO_REPAIR_ENABLED": {
         "type": "bool",

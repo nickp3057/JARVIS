@@ -13,6 +13,9 @@ from __future__ import annotations
 import os
 
 from integrations import home_assistant
+from jarvis_logger import get_logger
+
+log = get_logger(__name__)
 
 # Companion button -> Android TV Remote key name (remote.send_command).
 KEYS = {
@@ -99,3 +102,43 @@ def play_plex(rating_key: str | int, server: str | None) -> tuple[bool, str]:
     if server:
         link += f"&server={server}"
     return home_assistant.call_service("remote", "turn_on", entity(), {"activity": link})
+
+
+def play_item(rating_key: str, kind: str, title: str, *, verify_s: float | None = None,
+              sleep=None) -> tuple[bool, str]:
+    """Start a Plex item on the room TV the way that works (2026-11-20).
+
+    The HA ``plex://`` deep link (``play_plex``) is ignored while Plex is
+    already open, so the TV turned on and showed the wrong thing (the picker,
+    "play X on my TV"). JARVIS TV's ``PlexWatch.playFresh`` closes Plex, opens
+    the item's library page and presses Watch; Core asks it with a
+    ``tv_play`` card, as the light sync calibration already does. ``kind``:
+    movie, episode, or show (the show page's Watch plays its next-up episode).
+    The TV is woken first (a sleeping TV's event stream reconnects on screen-on
+    and replays the card), and if Plex isn't playing it within ``verify_s``
+    (``TV_PLAY_VERIFY_S``, 35) the old deep link is tried once."""
+    import os
+    import threading
+    import time as _time
+    from brain import event_bus
+    power(True)
+    event_bus.publish_card("tv_play", title, {"rating_key": str(rating_key), "type": kind, "title": title},
+                           source="tv", ttl_s=45)
+    wait = verify_s if verify_s is not None else float(os.getenv("TV_PLAY_VERIFY_S", "35") or 35)
+    nap = sleep or _time.sleep
+
+    def verify() -> None:
+        from integrations import plex
+        nap(wait)
+        ok, sessions = plex.sessions()
+        if ok and isinstance(sessions, list) and any(
+                str(s.get("rating_key") or s.get("ratingKey") or "") == str(rating_key)
+                or str(s.get("grandparent_rating_key") or s.get("grandparentRatingKey") or "") == str(rating_key)
+                for s in sessions):
+            return
+        log.info("JARVIS TV didn't start %s within %.0f s; trying the Plex deep link", title, wait)
+        play_plex(rating_key, plex.server_id())
+
+    if wait > 0:
+        threading.Thread(target=verify, daemon=True, name="tv-play-verify").start()
+    return True, f"Starting {title} on the TV."

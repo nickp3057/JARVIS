@@ -69,11 +69,11 @@ class PlayOnTvTests(unittest.TestCase):
                  "parentIndex": 6, "index": 15, "title": "Quid Pro Quo", "ratingKey": "8330"}]}},
         }
         from integrations import plex
+        from integrations import tv_remote
         with patch.object(plex, "_get", side_effect=lambda path, params=None: (True, responses[path])), \
-                patch.object(home_assistant, "_request", return_value=(True, [])) as request:
+                patch.object(tv_remote, "play_item", return_value=(True, "")) as play:
             reply = tools.execute_tool("play_on_tv", {"title": "suits"})
         self.assertIn('season 6, episode 15, "Quid Pro Quo"', reply)
-        sent = request.call_args.kwargs["json"]
-        self.assertEqual(sent["entity_id"], "remote.nick_s_room_tv")
-        self.assertEqual(sent["activity"],
-                         "plex://play/?metadataKey=%2Flibrary%2Fmetadata%2F8330&server=srv")
+        # JARVIS TV opens the show's page (its Watch plays that next-up
+        # episode); HA's plex:// link was ignored while Plex was open.
+        play.assert_called_once_with("66", "show", "Suits")

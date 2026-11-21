@@ -151,18 +151,20 @@ def next_up(title: str) -> tuple[bool, dict[str, Any] | str]:
         return False, f"I can't find {title} on Plex, sir."
     match = next((m for m in found if _norm(m.get("title")) == wanted), found[0])
     if match.get("type") == "movie":
-        return True, {"key": match["ratingKey"], "label": match.get("title"), "server": server}
+        return True, {"key": match["ratingKey"], "label": match.get("title"), "server": server,
+                      "kind": "movie", "title": str(match.get("title") or "")}
     show_key = str(match.get("ratingKey"))
+    show = {"show_key": show_key, "show_title": str(match.get("title") or "")}
     ok, deck = _get("/library/onDeck")
     for item in (((deck or {}).get("MediaContainer") or {}).get("Metadata") or []) if ok else []:
         if str(item.get("grandparentRatingKey")) == show_key:
-            return True, {"key": item["ratingKey"], "label": _episode_label(item), "server": server}
+            return True, {"key": item["ratingKey"], "label": _episode_label(item), "server": server, "kind": "episode", **show}
     ok, leaves = _get(f"/library/metadata/{show_key}/allLeaves")
     episodes = (((leaves or {}).get("MediaContainer") or {}).get("Metadata") or []) if ok else []
     if not episodes:
         return False, f"Plex has no episodes of {match.get('title')}, sir."
     pick = next((e for e in episodes if not e.get("viewCount")), episodes[0])
-    return True, {"key": pick["ratingKey"], "label": _episode_label(pick), "server": server}
+    return True, {"key": pick["ratingKey"], "label": _episode_label(pick), "server": server, "kind": "episode", **show}
 
 
 # --- Light sync (brain/light_tracks.py, brain/light_sync.py) -----------------
@@ -294,6 +296,7 @@ def sessions() -> tuple[bool, list[dict[str, Any]] | str]:
             "media_id": str(media.get("id") or ""), "part_id": str(part.get("id") or ""),
             "part_key": str(part.get("key") or ""), "format_key": fmt,
             "rating_key": str(item.get("ratingKey") or ""), "title": str(item.get("title") or ""),
+            "grandparent_rating_key": str(item.get("grandparentRatingKey") or ""),
             "year": item.get("year"), "type": str(item.get("type") or ""),
             "view_offset_ms": int(item.get("viewOffset") or 0), "duration_ms": int(item.get("duration") or 0),
             "state": str(player.get("state") or ""),
@@ -308,12 +311,37 @@ def sessions() -> tuple[bool, list[dict[str, Any]] | str]:
 _PICKER_SORTS = {"recent": "addedAt:desc", "title": "titleSort", "unwatched": "addedAt:desc", "year": "year:desc"}
 
 
-def _movie_sections() -> tuple[bool, list[str] | str]:
+def hidden_libraries() -> set[str]:
+    """Library keys the picker leaves out (``PLEX_HIDDEN_LIBRARIES``, e.g.
+    Home Videos). Titles work too, lower-cased."""
+    return {p.strip().lower() for p in os.getenv("PLEX_HIDDEN_LIBRARIES", "").split(",") if p.strip()}
+
+
+def libraries() -> tuple[bool, list[dict[str, Any]] | str]:
+    """Every movie and show library: {key, title, type, hidden}."""
     ok, payload = _get("/library/sections")
     if not ok:
         return False, str(payload)
-    sections = ((payload or {}).get("MediaContainer") or {}).get("Directory") or []
-    return True, [str(s["key"]) for s in sections if s.get("type") == "movie" and s.get("key")]
+    hidden = hidden_libraries()
+    out = []
+    for section in ((payload or {}).get("MediaContainer") or {}).get("Directory") or []:
+        if section.get("type") not in {"movie", "show"} or not section.get("key"):
+            continue
+        key, title = str(section["key"]), str(section.get("title") or "")
+        out.append({"key": key, "title": title, "type": str(section["type"]),
+                    "hidden": key in hidden or title.lower() in hidden})
+    return True, out
+
+
+def _sections_of(kind: str) -> tuple[bool, list[str] | str]:
+    ok, listing = libraries()
+    if not ok:
+        return False, str(listing)
+    return True, [lib["key"] for lib in listing if lib["type"] == kind and not lib["hidden"]]
+
+
+def _movie_sections() -> tuple[bool, list[str] | str]:
+    return _sections_of("movie")
 
 
 def _picker_card(item: dict[str, Any]) -> dict[str, Any]:
@@ -390,11 +418,7 @@ def poster(path: str, width: int = 300) -> tuple[bool, bytes | str, str]:
 # --- TV shows in the picker ----------------------------------------------------
 
 def _show_sections() -> tuple[bool, list[str] | str]:
-    ok, payload = _get("/library/sections")
-    if not ok:
-        return False, str(payload)
-    sections = ((payload or {}).get("MediaContainer") or {}).get("Directory") or []
-    return True, [str(s["key"]) for s in sections if s.get("type") == "show" and s.get("key")]
+    return _sections_of("show")
 
 
 def library_shows(query: str = "", sort: str = "recent", limit: int = 300) -> tuple[bool, list[dict[str, Any]] | str]:
@@ -476,13 +500,18 @@ def show_episodes(show_key: str) -> tuple[bool, dict[str, Any] | str]:
                               for number, items in sorted(seasons.items())]}
 
 
-def playable(rating_key: str) -> tuple[bool, str]:
-    """A movie or episode Plex can play: (True, label) or (False, reason)."""
+def playable(rating_key: str) -> tuple[bool, dict[str, str] | str]:
+    """A movie, episode or show the TV can start: (True, {label, kind,
+    title}) or (False, reason). ``title`` is what JARVIS TV slugs into the
+    library link; a show starts its next-up episode."""
     ok, payload = _get(f"/library/metadata/{rating_key}")
     if not ok:
         return False, str(payload)
     items = ((payload or {}).get("MediaContainer") or {}).get("Metadata") or []
-    if not items or items[0].get("type") not in {"movie", "episode"}:
-        return False, "That isn't a movie or an episode on Plex."
+    if not items or items[0].get("type") not in {"movie", "episode", "show"}:
+        return False, "That isn't a movie, show or episode on Plex."
     item = items[0]
-    return True, _episode_label(item) if item.get("type") == "episode" else str(item.get("title") or "it")
+    kind = str(item["type"])
+    title = str(item.get("title") or "it")
+    label = _episode_label(item) if kind == "episode" else (f"the next episode of {title}" if kind == "show" else title)
+    return True, {"label": label, "kind": kind, "title": title}

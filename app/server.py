@@ -786,6 +786,29 @@ def plex_movies(query: str = "", sort: str = "recent", _: None = Depends(authori
     return {"movies": films}
 
 
+@app.get("/api/plex/libraries")
+def plex_libraries(_: None = Depends(authorize)) -> dict[str, object]:
+    """Movie and show libraries, and which ones the picker hides."""
+    from integrations import plex
+    ok, listing = plex.libraries()
+    if not ok:
+        raise HTTPException(status_code=502, detail=str(listing))
+    return {"libraries": listing}
+
+
+class PlexLibrariesRequest(BaseModel):
+    hidden: list[str] = Field(default_factory=list, max_length=50)
+
+
+@app.post("/api/plex/libraries")
+def plex_libraries_set(request: PlexLibrariesRequest, _: None = Depends(authorize)) -> dict[str, object]:
+    """Choose which libraries the picker hides (saved in PLEX_HIDDEN_LIBRARIES)."""
+    from brain import settings as settings_mod
+    keys = [k for k in request.hidden if k.isdigit()]
+    settings_mod.update_setting("PLEX_HIDDEN_LIBRARIES", ",".join(keys))
+    return plex_libraries()
+
+
 @app.get("/api/plex/shows")
 def plex_shows(query: str = "", sort: str = "recent", _: None = Depends(authorize)) -> dict[str, object]:
     """Plex shows for the picker: title, year, poster, episodes watched of total."""
@@ -826,19 +849,21 @@ class PlexPlayRequest(BaseModel):
 
 @app.post("/api/plex/play")
 def plex_play(request: PlexPlayRequest, _: None = Depends(authorize)) -> dict[str, object]:
-    """Start a film or episode on the room TV's Plex app (resumes unless ``from_start``)."""
+    """Start a film, episode or show on the room TV. JARVIS TV opens it (closes
+    Plex first, presses Watch); a show plays its next-up episode; resumes
+    unless ``from_start``."""
     from integrations import plex, tv_remote
-    found, label = plex.playable(request.rating_key)
-    if not found:
-        raise HTTPException(status_code=404, detail=label)
-    if request.from_start:
+    found, item = plex.playable(request.rating_key)
+    if not found or not isinstance(item, dict):
+        raise HTTPException(status_code=404, detail=str(item))
+    if request.from_start and item["kind"] != "show":
         cleared, detail = plex.play_from_start(request.rating_key)
         if not cleared:
             raise HTTPException(status_code=502, detail=f"Couldn't reset the resume point: {detail}")
-    sent, detail = tv_remote.play_plex(request.rating_key, plex.server_id())
+    sent, detail = tv_remote.play_item(request.rating_key, item["kind"], item["title"])
     if not sent:
         raise HTTPException(status_code=502, detail=f"The TV didn't take it: {detail}")
-    return {"ok": True, "message": f"Starting {label} on the TV."}
+    return {"ok": True, "message": f"Starting {item['label']} on the TV."}
 
 
 @app.get("/api/skills/requests")

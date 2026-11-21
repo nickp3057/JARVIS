@@ -208,6 +208,15 @@ struct PlexMovie: Decodable, Identifiable, Hashable {
     }
 }
 
+/// A Plex library and whether the picker hides it (`GET /api/plex/libraries`).
+struct PlexLibrary: Decodable, Identifiable, Hashable {
+    let key: String
+    let title: String
+    let type: String
+    let hidden: Bool
+    var id: String { key }
+}
+
 /// One show for the picker (`GET /api/plex/shows`).
 struct PlexShow: Decodable, Identifiable, Hashable {
     let ratingKey: String
@@ -1322,6 +1331,18 @@ struct JarvisAPIClient {
         if (response as? HTTPURLResponse)?.statusCode == 404 { return nil }
         _ = try validate(response, data: data)
         return data
+    }
+
+    func plexLibraries() async throws -> [PlexLibrary] {
+        struct Envelope: Decodable { let libraries: [PlexLibrary] }
+        return try await getJSON(Envelope.self, path: "api/plex/libraries").libraries
+    }
+
+    /// Which libraries the picker hides (keys).
+    func setHiddenLibraries(_ keys: [String]) async throws -> [PlexLibrary] {
+        struct Body: Encodable { let hidden: [String] }
+        struct Envelope: Decodable { let libraries: [PlexLibrary] }
+        return try await postJSON(Envelope.self, path: "api/plex/libraries", body: Body(hidden: keys)).libraries
     }
 
     func plexShows(query: String = "", sort: String = "recent") async throws -> [PlexShow] {

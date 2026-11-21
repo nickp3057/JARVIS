@@ -20,6 +20,7 @@ struct MoviePickerView: View {
     @State private var starting: String?
     @State private var started = 0
     @State private var path: [PlexShow] = []
+    @State private var libraries: [PlexLibrary] = []
 
     private var sorts: [(String, String)] {
         [("recent", kind == "shows" ? "Recently watched" : "Recently added"), ("unwatched", "Unwatched"), ("title", "A–Z")]
@@ -80,13 +81,23 @@ struct MoviePickerView: View {
                         Picker("Sort", selection: $sort) {
                             ForEach(sorts, id: \.0) { Text($0.1).tag($0.0) }
                         }
-                    } label: { Label("Sort", systemImage: "arrow.up.arrow.down") }
+                        if !libraries.isEmpty {
+                            Section("Show these libraries") {
+                                ForEach(libraries) { library in
+                                    Toggle(library.title, isOn: Binding(
+                                        get: { !library.hidden },
+                                        set: { shown in setLibrary(library, shown: shown) }))
+                                }
+                            }
+                        }
+                    } label: { Label("Sort and libraries", systemImage: "line.3.horizontal.decrease.circle") }
                 }
             }
             .navigationDestination(for: PlexShow.self) { show in
                 ShowEpisodesView(show: show) { dismiss() }
             }
-            .task(id: "\(kind)|\(query)|\(sort)") {
+            .task { libraries = (try? await JarvisAPIClient.make(from: settings).plexLibraries()) ?? [] }
+            .task(id: "\(kind)|\(query)|\(sort)|\(libraries.filter(\.hidden).map(\.key).joined(separator: ","))") {
                 // Wait for typing to settle before asking Plex.
                 if !query.isEmpty { try? await Task.sleep(for: .milliseconds(350)) }
                 guard !Task.isCancelled else { return }
@@ -109,6 +120,17 @@ struct MoviePickerView: View {
             .sensoryFeedback(.success, trigger: started)
         }
         .preferredColorScheme(.dark)
+    }
+
+    /// Hide or show one library (saved on Core), then reload the wall.
+    private func setLibrary(_ library: PlexLibrary, shown: Bool) {
+        var hidden = Set(libraries.filter(\.hidden).map(\.key))
+        if shown { hidden.remove(library.key) } else { hidden.insert(library.key) }
+        Task {
+            if let updated = try? await JarvisAPIClient.make(from: settings).setHiddenLibraries(Array(hidden)) {
+                libraries = updated
+            }
+        }
     }
 
     private func load() async {
@@ -166,7 +188,9 @@ private struct ShowEpisodesView: View {
         List {
             if let next = nextUp {
                 Section {
-                    Button { start(next, fromStart: false) } label: {
+                    // The show itself: its page's Watch plays this same next-up
+                    // episode on the TV (the path the TV's Continue row uses).
+                    Button { startShow(next) } label: {
                         HStack {
                             Image(systemName: "play.fill").foregroundStyle(JarvisTheme.amber)
                             VStack(alignment: .leading, spacing: 2) {
@@ -220,6 +244,19 @@ private struct ShowEpisodesView: View {
                 ProgressView()
             } else if episode.watched {
                 Image(systemName: "checkmark.circle.fill").foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private func startShow(_ next: PlexEpisode) {
+        starting = next.id
+        Task {
+            defer { starting = nil }
+            do {
+                _ = try await JarvisAPIClient.make(from: settings).playOnTV(ratingKey: show.ratingKey, fromStart: false)
+                done()
+            } catch {
+                self.error = error.localizedDescription
             }
         }
     }

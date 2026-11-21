@@ -942,7 +942,12 @@ def _tool_play_on_tv(args: dict[str, Any]) -> str:
     ok, pick = plex.next_up(title)
     if not ok:
         return str(pick)
-    sent, detail = tv_remote.play_plex(pick["key"], pick.get("server"))
+    # JARVIS TV opens it (Plex ignores HA's deep link while it's open). A show
+    # opens on its own page, whose Watch plays the same next-up episode.
+    if pick.get("kind") == "episode" and pick.get("show_key"):
+        sent, detail = tv_remote.play_item(pick["show_key"], "show", pick.get("show_title") or title)
+    else:
+        sent, detail = tv_remote.play_item(str(pick["key"]), "movie", pick.get("title") or title)
     if not sent:
         return f"The TV didn't answer: {detail}"
     return f"Playing {pick['label']} on your TV in Plex, sir."
