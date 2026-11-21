@@ -208,6 +208,69 @@ struct PlexMovie: Decodable, Identifiable, Hashable {
     }
 }
 
+/// One show for the picker (`GET /api/plex/shows`).
+struct PlexShow: Decodable, Identifiable, Hashable {
+    let ratingKey: String
+    let title: String
+    let year: Int?
+    let thumb: String
+    let episodes: Int
+    let watchedEpisodes: Int
+    let seasons: Int
+
+    var id: String { ratingKey }
+    var progress: Double { episodes > 0 ? Double(watchedEpisodes) / Double(episodes) : 0 }
+    var allWatched: Bool { episodes > 0 && watchedEpisodes >= episodes }
+    var countLine: String {
+        let left = episodes - watchedEpisodes
+        if episodes == 0 { return seasons == 1 ? "1 season" : "\(seasons) seasons" }
+        return left <= 0 ? "Watched" : (watchedEpisodes == 0 ? "\(episodes) episodes" : "\(left) left")
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case title, year, thumb, episodes, seasons
+        case ratingKey = "rating_key"
+        case watchedEpisodes = "watched_episodes"
+    }
+}
+
+struct PlexEpisode: Decodable, Identifiable, Hashable {
+    let ratingKey: String
+    let title: String
+    let season: Int
+    let episode: Int
+    let durationMs: Int
+    let viewOffsetMs: Int
+    let watched: Bool
+
+    var id: String { ratingKey }
+    var progress: Double { durationMs > 0 ? Double(viewOffsetMs) / Double(durationMs) : 0 }
+    var resumable: Bool { viewOffsetMs > 60_000 }
+    var code: String { "S\(season) E\(episode)" }
+
+    enum CodingKeys: String, CodingKey {
+        case title, season, episode, watched
+        case ratingKey = "rating_key"
+        case durationMs = "duration_ms"
+        case viewOffsetMs = "view_offset_ms"
+    }
+}
+
+/// `GET /api/plex/shows/{key}/episodes`.
+struct ShowEpisodes: Decodable, Hashable {
+    struct Season: Decodable, Hashable {
+        let season: Int
+        let episodes: [PlexEpisode]
+    }
+    let nextUp: String?
+    let seasons: [Season]
+
+    enum CodingKeys: String, CodingKey {
+        case seasons
+        case nextUp = "next_up"
+    }
+}
+
 /// `GET/POST /api/autopilot`: JARVIS fixing the basic stuff himself.
 struct AutopilotStatus: Decodable, Hashable {
     let enabled: Bool
@@ -1261,7 +1324,19 @@ struct JarvisAPIClient {
         return data
     }
 
-    func playOnTV(_ movie: PlexMovie, fromStart: Bool) async throws -> String {
+    func plexShows(query: String = "", sort: String = "recent") async throws -> [PlexShow] {
+        struct Envelope: Decodable { let shows: [PlexShow] }
+        var items = [URLQueryItem(name: "sort", value: sort)]
+        if !query.isEmpty { items.append(URLQueryItem(name: "query", value: query)) }
+        return try await getJSON(Envelope.self, path: "api/plex/shows", query: items).shows
+    }
+
+    func showEpisodes(showKey: String) async throws -> ShowEpisodes {
+        try await getJSON(ShowEpisodes.self, path: "api/plex/shows/\(showKey)/episodes")
+    }
+
+    /// A film or episode on the room TV (resumes unless `fromStart`).
+    func playOnTV(ratingKey: String, fromStart: Bool) async throws -> String {
         struct Body: Encodable {
             let ratingKey: String
             let fromStart: Bool
@@ -1272,7 +1347,7 @@ struct JarvisAPIClient {
         }
         struct Result: Decodable { let message: String }
         return try await postJSON(Result.self, path: "api/plex/play",
-                                  body: Body(ratingKey: movie.ratingKey, fromStart: fromStart)).message
+                                  body: Body(ratingKey: ratingKey, fromStart: fromStart)).message
     }
 
     /// A product photo; nil when it has none (404). `version` busts caches.

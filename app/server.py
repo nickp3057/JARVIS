@@ -786,6 +786,29 @@ def plex_movies(query: str = "", sort: str = "recent", _: None = Depends(authori
     return {"movies": films}
 
 
+@app.get("/api/plex/shows")
+def plex_shows(query: str = "", sort: str = "recent", _: None = Depends(authorize)) -> dict[str, object]:
+    """Plex shows for the picker: title, year, poster, episodes watched of total."""
+    from integrations import plex
+    if not plex.is_configured():
+        raise HTTPException(status_code=503, detail="Plex is not configured on Core")
+    ok, shows = plex.library_shows(query[:100], sort if sort in ("recent", "title", "year", "unwatched") else "recent")
+    if not ok:
+        raise HTTPException(status_code=502, detail=str(shows))
+    return {"shows": shows}
+
+
+@app.get("/api/plex/shows/{show_key}/episodes")
+def plex_show_episodes(show_key: str, _: None = Depends(authorize)) -> dict[str, object]:
+    """A show's seasons and episodes, and which one Continue plays."""
+    from integrations import plex
+    ok, result = plex.show_episodes(show_key)
+    if not ok:
+        raise HTTPException(status_code=404 if "Not a" in str(result) or "no episodes" in str(result) else 502,
+                            detail=str(result))
+    return result
+
+
 @app.get("/api/plex/poster")
 def plex_poster(path: str, width: int = 300, _: None = Depends(authorize)) -> Response:
     """A poster through Core (the Plex token stays here). Cached a day on the device."""
@@ -803,11 +826,11 @@ class PlexPlayRequest(BaseModel):
 
 @app.post("/api/plex/play")
 def plex_play(request: PlexPlayRequest, _: None = Depends(authorize)) -> dict[str, object]:
-    """Start a film on the room TV's Plex app (resumes unless ``from_start``)."""
+    """Start a film or episode on the room TV's Plex app (resumes unless ``from_start``)."""
     from integrations import plex, tv_remote
-    found, record = plex.movie(request.rating_key)
+    found, label = plex.playable(request.rating_key)
     if not found:
-        raise HTTPException(status_code=404, detail=str(record))
+        raise HTTPException(status_code=404, detail=label)
     if request.from_start:
         cleared, detail = plex.play_from_start(request.rating_key)
         if not cleared:
@@ -815,8 +838,7 @@ def plex_play(request: PlexPlayRequest, _: None = Depends(authorize)) -> dict[st
     sent, detail = tv_remote.play_plex(request.rating_key, plex.server_id())
     if not sent:
         raise HTTPException(status_code=502, detail=f"The TV didn't take it: {detail}")
-    title = record["title"] if isinstance(record, dict) else "it"
-    return {"ok": True, "message": f"Starting {title} on the TV."}
+    return {"ok": True, "message": f"Starting {label} on the TV."}
 
 
 @app.get("/api/skills/requests")

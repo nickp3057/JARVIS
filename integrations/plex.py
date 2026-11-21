@@ -385,3 +385,104 @@ def poster(path: str, width: int = 300) -> tuple[bool, bytes | str, str]:
     if response.status_code != 200:
         return False, f"Plex error {response.status_code}.", ""
     return True, response.content, response.headers.get("Content-Type", "image/jpeg")
+
+
+# --- TV shows in the picker ----------------------------------------------------
+
+def _show_sections() -> tuple[bool, list[str] | str]:
+    ok, payload = _get("/library/sections")
+    if not ok:
+        return False, str(payload)
+    sections = ((payload or {}).get("MediaContainer") or {}).get("Directory") or []
+    return True, [str(s["key"]) for s in sections if s.get("type") == "show" and s.get("key")]
+
+
+def library_shows(query: str = "", sort: str = "recent", limit: int = 300) -> tuple[bool, list[dict[str, Any]] | str]:
+    """Every show for the picker: poster, year, episode counts. ``sort`` as
+    for movies; "unwatched" keeps shows with episodes left to watch."""
+    ok, sections = _show_sections()
+    if not ok:
+        return False, str(sections)
+    order = {"recent": "lastViewedAt:desc", "title": "titleSort", "year": "year:desc", "unwatched": "addedAt:desc"}
+    params: dict[str, Any] = {"type": 2, "sort": order.get(sort, "addedAt:desc"),
+                              "X-Plex-Container-Start": 0, "X-Plex-Container-Size": max(1, min(limit, 1000))}
+    if query.strip():
+        params["title"] = query.strip()
+    shows: list[dict[str, Any]] = []
+    for section in sections:
+        ok, payload = _get(f"/library/sections/{section}/all", params)
+        if not ok:
+            continue
+        for item in ((payload or {}).get("MediaContainer") or {}).get("Metadata") or []:
+            if not isinstance(item, dict) or item.get("type") != "show" or not item.get("ratingKey"):
+                continue
+            total, seen = int(item.get("leafCount") or 0), int(item.get("viewedLeafCount") or 0)
+            if sort == "unwatched" and total and seen >= total:
+                continue
+            shows.append({"rating_key": str(item["ratingKey"]), "title": str(item.get("title") or ""),
+                          "year": item.get("year"), "thumb": str(item.get("thumb") or ""),
+                          "episodes": total, "watched_episodes": seen,
+                          "seasons": int(item.get("childCount") or 0),
+                          "summary": " ".join(str(item.get("summary") or "").split())[:400],
+                          "content_rating": str(item.get("contentRating") or ""),
+                          "last_viewed_at": int(item.get("lastViewedAt") or 0)})
+    if len(sections) > 1:
+        if sort == "title":
+            shows.sort(key=lambda s: _title_key(s["title"]))
+        elif sort == "recent":
+            shows.sort(key=lambda s: -s["last_viewed_at"])
+    return True, shows[:limit]
+
+
+def _episode_card(item: dict[str, Any]) -> dict[str, Any]:
+    duration = int(item.get("duration") or 0)
+    offset = int(item.get("viewOffset") or 0)
+    return {"rating_key": str(item.get("ratingKey") or ""), "title": str(item.get("title") or ""),
+            "season": int(item.get("parentIndex") or 0), "episode": int(item.get("index") or 0),
+            "thumb": str(item.get("thumb") or ""), "duration_ms": duration,
+            "view_offset_ms": offset if 0 < offset < duration else 0,
+            "watched": int(item.get("viewCount") or 0) > 0,
+            "summary": " ".join(str(item.get("summary") or "").split())[:300]}
+
+
+def show_episodes(show_key: str) -> tuple[bool, dict[str, Any] | str]:
+    """A show's episodes by season, plus the one "Continue" would play
+    (On Deck, else the first unwatched, else the first)."""
+    if not str(show_key).isdigit():
+        return False, "Not a Plex show."
+    ok, leaves = _get(f"/library/metadata/{show_key}/allLeaves")
+    if not ok:
+        return False, str(leaves)
+    episodes = [_episode_card(e) for e in ((leaves or {}).get("MediaContainer") or {}).get("Metadata") or []
+                if isinstance(e, dict) and e.get("type") == "episode"]
+    if not episodes:
+        return False, "Plex has no episodes of that show."
+    seasons: dict[int, list[dict[str, Any]]] = {}
+    for episode in episodes:
+        seasons.setdefault(episode["season"], []).append(episode)
+    next_key = None
+    ok, deck = _get("/library/onDeck")
+    for item in (((deck or {}).get("MediaContainer") or {}).get("Metadata") or []) if ok else []:
+        if str(item.get("grandparentRatingKey")) == str(show_key):
+            next_key = str(item.get("ratingKey"))
+            break
+    if next_key is None:
+        # In story order, and not a Special (season 0) unless that's all there is.
+        ordered = sorted(episodes, key=lambda e: (e["season"], e["episode"]))
+        regular = [e for e in ordered if e["season"] > 0] or ordered
+        next_key = next((e["rating_key"] for e in regular if not e["watched"]), regular[0]["rating_key"])
+    return True, {"next_up": next_key,
+                  "seasons": [{"season": number, "episodes": sorted(items, key=lambda e: e["episode"])}
+                              for number, items in sorted(seasons.items())]}
+
+
+def playable(rating_key: str) -> tuple[bool, str]:
+    """A movie or episode Plex can play: (True, label) or (False, reason)."""
+    ok, payload = _get(f"/library/metadata/{rating_key}")
+    if not ok:
+        return False, str(payload)
+    items = ((payload or {}).get("MediaContainer") or {}).get("Metadata") or []
+    if not items or items[0].get("type") not in {"movie", "episode"}:
+        return False, "That isn't a movie or an episode on Plex."
+    item = items[0]
+    return True, _episode_label(item) if item.get("type") == "episode" else str(item.get("title") or "it")

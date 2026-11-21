@@ -65,8 +65,7 @@ class EndpointTests(unittest.TestCase):
         self.headers = {"Authorization": "Bearer test-token"}
 
     def test_play_resumes_or_starts_over_on_the_tv(self):
-        record = {"title": "Dune", "rating_key": "10"}
-        with patch.object(plex, "movie", return_value=(True, record)), \
+        with patch.object(plex, "playable", return_value=(True, "Dune")), \
              patch.object(plex, "server_id", return_value="srv"), \
              patch.object(plex, "play_from_start", return_value=(True, "")) as reset, \
              patch("integrations.tv_remote.play_plex", return_value=(True, "")) as play:
@@ -86,6 +85,44 @@ class EndpointTests(unittest.TestCase):
             response = self.client.get("/api/plex/poster", params={"path": "/library/metadata/1/thumb/2"}, headers=self.headers)
         self.assertEqual((response.status_code, response.content), (200, b"img"))
         self.assertEqual(self.client.get("/api/plex/movies").status_code, 401)
+
+
+class ShowTests(unittest.TestCase):
+    def test_shows_and_episodes_with_continue(self):
+        pages = {
+            "/library/sections": {"MediaContainer": {"Directory": [{"key": "2", "type": "show"}]}},
+            "/library/sections/2/all": {"MediaContainer": {"Metadata": [
+                {"type": "show", "ratingKey": "50", "title": "Severance", "leafCount": 19, "viewedLeafCount": 19},
+                {"type": "show", "ratingKey": "51", "title": "Andor", "leafCount": 24, "viewedLeafCount": 5}]}},
+            "/library/metadata/51/allLeaves": {"MediaContainer": {"Metadata": [
+                {"type": "episode", "ratingKey": "903", "parentIndex": 2, "index": 1, "title": "One Year Later"},
+                {"type": "episode", "ratingKey": "901", "parentIndex": 1, "index": 1, "title": "Kassa", "viewCount": 1},
+                {"type": "episode", "ratingKey": "902", "parentIndex": 1, "index": 2, "title": "That Would Be Me"}]}},
+            "/library/onDeck": {"MediaContainer": {"Metadata": []}},
+        }
+        with patch.object(plex, "_get", side_effect=lambda path, params=None: (True, pages[path])):
+            ok, shows = plex.library_shows(sort="unwatched")
+            self.assertEqual([s["title"] for s in shows], ["Andor"])  # Severance is all watched
+            ok, result = plex.show_episodes("51")
+        self.assertEqual([s["season"] for s in result["seasons"]], [1, 2])
+        self.assertEqual([e["rating_key"] for e in result["seasons"][0]["episodes"]], ["901", "902"])
+        self.assertEqual(result["next_up"], "902")  # first unwatched
+        self.assertFalse(plex.show_episodes("51; x")[0])
+
+    def test_on_deck_wins_and_playable_accepts_episodes(self):
+        pages = {
+            "/library/metadata/51/allLeaves": {"MediaContainer": {"Metadata": [
+                {"type": "episode", "ratingKey": "901", "parentIndex": 1, "index": 1, "title": "Kassa"}]}},
+            "/library/onDeck": {"MediaContainer": {"Metadata": [{"grandparentRatingKey": "51", "ratingKey": "907"}]}},
+            "/library/metadata/907": {"MediaContainer": {"Metadata": [
+                {"type": "episode", "grandparentTitle": "Andor", "parentIndex": 1, "index": 7, "title": "Announcement"}]}},
+            "/library/metadata/50": {"MediaContainer": {"Metadata": [{"type": "show", "title": "Severance"}]}},
+        }
+        with patch.object(plex, "_get", side_effect=lambda path, params=None: (True, pages[path])):
+            self.assertEqual(plex.show_episodes("51")[1]["next_up"], "907")
+            ok, label = plex.playable("907")
+            self.assertEqual(label, 'Andor season 1, episode 7, "Announcement"')
+            self.assertFalse(plex.playable("50")[0])
 
 
 if __name__ == "__main__":
