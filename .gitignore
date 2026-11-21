@@ -20,6 +20,7 @@ memory/tool_health.json
 memory/repair_proposals.json
 memory/auto_repairs.json
 memory/skill_requests.json
+memory/skills.json
 memory/push_devices.json
 memory/wake_alarm.json
 memory/arr_stack_alerts.json

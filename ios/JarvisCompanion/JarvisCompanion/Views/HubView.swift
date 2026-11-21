@@ -91,6 +91,7 @@ struct HubView: View {
                                 if !attentionAlerts.isEmpty { needsAttentionCard }
                                 if !visibleRepairs.isEmpty { repairsCard }
                                 if !openSkillRequests.isEmpty { skillRequestsCard }
+                                if !learnedSkills.isEmpty { learnedSkillsCard }
                                 controlShortcuts
                                 quickActionsCard
                                 nowCard
@@ -416,6 +417,7 @@ struct HubView: View {
         if !attentionAlerts.isEmpty { needsAttentionCard }
         if !visibleRepairs.isEmpty { repairsCard }
         if !openSkillRequests.isEmpty { skillRequestsCard }
+        if !learnedSkills.isEmpty { learnedSkillsCard }
         if let scenes = model.scenes.value, !scenes.scenes.isEmpty { scenesCard(scenes) }
         quickActionsCard
         controlShortcuts
@@ -1128,6 +1130,66 @@ struct HubView: View {
         .accessibilityHint("Shows the whole alert and what JARVIS can do about it")
     }
 
+    private var learnedSkills: [LearnedSkill] { model.learnedSkills.value ?? [] }
+
+    /// Skills JARVIS built from his own tools. Drafts wait for Approve; the
+    /// tap is the approval. Active ones can be switched off or deleted.
+    private var learnedSkillsCard: some View {
+        let drafts = learnedSkills.filter(\.isDraft).count
+        return CockpitPanel("Skills", symbol: "wand.and.stars", trailing: {
+            if drafts > 0 { StatusPill(text: "\(drafts) to approve", color: JarvisTheme.amber) }
+        }) {
+            VStack(spacing: 0) {
+                ForEach(Array(learnedSkills.enumerated()), id: \.element.id) { index, skill in
+                    learnedSkillRow(skill)
+                    if index < learnedSkills.count - 1 { divider }
+                }
+            }
+        }
+    }
+
+    private func learnedSkillRow(_ skill: LearnedSkill) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(alignment: .firstTextBaseline) {
+                Text(skill.title).font(.subheadline.weight(.medium))
+                if skill.status == "disabled" {
+                    Text("OFF").font(.caption2.weight(.semibold)).foregroundStyle(.secondary)
+                }
+                Spacer()
+                if !skill.isDraft {
+                    Menu {
+                        if skill.status == "active" {
+                            Button("Switch off", systemImage: "pause.circle") { model.setSkill(skill, status: "disabled") }
+                        } else {
+                            Button("Switch on", systemImage: "play.circle") { model.setSkill(skill, status: "active") }
+                        }
+                        Button("Delete", systemImage: "trash", role: .destructive) { model.setSkill(skill, status: "deleted") }
+                    } label: {
+                        Image(systemName: "ellipsis.circle").foregroundStyle(JarvisTheme.cyan)
+                            .frame(width: 32, height: 28).contentShape(Rectangle())
+                    }
+                    .accessibilityLabel("Options for \(skill.title)")
+                }
+            }
+            Text(skill.description).font(.caption).foregroundStyle(.secondary)
+            Text(skill.steps.map { $0.tool.replacingOccurrences(of: "_", with: " ") }.joined(separator: " → ")
+                 + (skill.params.isEmpty ? "" : "  ·  asks for " + skill.params.map(\.name).joined(separator: ", ")))
+                .font(.caption2.monospaced()).foregroundStyle(.tertiary)
+            if skill.isDraft {
+                HStack {
+                    Button("Dismiss", role: .cancel) { model.setSkill(skill, status: "deleted") }
+                        .buttonStyle(.bordered)
+                    Spacer()
+                    Button("Approve") { model.setSkill(skill, status: "active") }
+                        .buttonStyle(.borderedProminent)
+                        .accessibilityHint("JARVIS can use this skill from now on")
+                }
+                .controlSize(.small)
+            }
+        }
+        .padding(.vertical, 8)
+    }
+
     private var openSkillRequests: [SkillRequest] { Array((model.skillRequests.value ?? []).prefix(6)) }
 
     /// What Nick asked for that JARVIS can't do yet, most asked first. A
@@ -1153,11 +1215,23 @@ struct HubView: View {
                 if let ask = request.asks.last {
                     Text("“\(ask)”").font(.caption).foregroundStyle(.secondary).lineLimit(2)
                 }
+                if request.drafting == true {
+                    HStack(spacing: 5) {
+                        ProgressView().controlSize(.mini)
+                        Text("JARVIS is drafting a skill…").font(.caption2.weight(.semibold)).foregroundStyle(JarvisTheme.cyan)
+                    }
+                } else if request.draftSkillID != nil {
+                    Text("A draft skill is ready below").font(.caption2.weight(.semibold)).foregroundStyle(JarvisTheme.cyan)
+                } else if let note = request.note, !note.isEmpty {
+                    Text(note).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                }
                 Text(request.count > 1 ? "Asked \(request.count)×, last \(when)" : "Asked \(when)")
                     .font(.caption2).foregroundStyle(.tertiary)
             }
             Spacer(minLength: 6)
             Menu {
+                Button("Draft a skill", systemImage: "wand.and.stars") { model.draftSkill(for: request) }
+                    .disabled(request.drafting == true)
                 Button("JARVIS can do this now", systemImage: "checkmark.circle") {
                     model.closeSkillRequest(request, status: "done")
                 }

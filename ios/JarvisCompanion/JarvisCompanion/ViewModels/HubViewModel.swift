@@ -68,6 +68,8 @@ final class HubViewModel: ObservableObject {
     @Published var repairs = Section<[RepairProposal]>()
     /// Skills Nick asked for that JARVIS doesn't have yet; empty on an older Core.
     @Published var skillRequests = Section<[SkillRequest]>()
+    /// Skills JARVIS composed from his own tools: drafts to approve, active, off.
+    @Published var learnedSkills = Section<[LearnedSkill]>()
     /// Repair ids with an Approve/Dismiss call in flight.
     @Published private(set) var busyRepairs: Set<String> = []
     /// The alert whose incident report is being gathered (Needs attention tap).
@@ -161,7 +163,8 @@ final class HubViewModel: ObservableObject {
         async let n: Void = refreshShopping()
         async let o: Void = refreshAutopilot()
         async let p: Void = refreshSkillRequests()
-        _ = await (a, b, c, d, e, f, g, h, i, j, k, l, m, n, o, p)
+        async let q: Void = refreshLearnedSkills()
+        _ = await (a, b, c, d, e, f, g, h, i, j, k, l, m, n, o, p, q)
     }
 
     func refreshGlance() async {
@@ -388,6 +391,36 @@ final class HubViewModel: ObservableObject {
 
     func refreshSkillRequests() async {
         await load(\.skillRequests) { try await $0.skillRequests() }
+    }
+
+    func refreshLearnedSkills() async {
+        await load(\.learnedSkills) { try await $0.learnedSkills() }
+    }
+
+    /// Hand one request to the skill drafter; watch until it answers.
+    func draftSkill(for request: SkillRequest) {
+        Task {
+            do { _ = try await client().draftSkill(requestID: request.id) } catch {
+                actionError = error.localizedDescription
+            }
+            for _ in 0..<40 {
+                await refreshSkillRequests()
+                await refreshLearnedSkills()
+                let busy = (skillRequests.value ?? []).contains { $0.id == request.id && $0.drafting == true }
+                if !busy { break }
+                try? await Task.sleep(for: .seconds(3))
+            }
+        }
+    }
+
+    func setSkill(_ skill: LearnedSkill, status: String) {
+        Task {
+            do { try await client().setSkill(id: skill.id, status: status) } catch {
+                actionError = error.localizedDescription
+            }
+            await refreshLearnedSkills()
+            await refreshSkillRequests()
+        }
     }
 
     func closeSkillRequest(_ request: SkillRequest, status: String) {

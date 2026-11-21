@@ -155,11 +155,32 @@ struct SkillRequest: Decodable, Identifiable, Hashable {
     let why: String
     let count: Int
     let lastAt: Double
+    /// The skill drafter's outcome: a draft to approve, or what it'd take.
+    var note: String? = nil
+    var draftSkillID: String? = nil
+    var drafting: Bool? = nil
 
     enum CodingKeys: String, CodingKey {
-        case id, summary, asks, why, count
+        case id, summary, asks, why, count, note, drafting
         case lastAt = "last_at"
+        case draftSkillID = "draft_skill_id"
     }
+}
+
+/// A skill JARVIS taught himself from his own tools (`GET /api/skills`).
+struct LearnedSkill: Decodable, Identifiable, Hashable {
+    struct Step: Decodable, Hashable { let tool: String }
+    struct Param: Decodable, Hashable { let name: String; let description: String }
+    let id: String
+    let name: String
+    let description: String
+    let status: String  // draft | active | disabled
+    let steps: [Step]
+    let params: [Param]
+    var uses: Int? = nil
+
+    var isDraft: Bool { status == "draft" }
+    var title: String { name.replacingOccurrences(of: "_", with: " ").capitalized }
 }
 
 /// One film for the movie picker (`GET /api/plex/movies`).
@@ -813,6 +834,24 @@ struct JarvisAPIClient {
         struct Body: Encodable { let status: String }
         struct Result: Decodable {}
         _ = try await postJSON(Result.self, path: "api/skills/requests/\(id)", body: Body(status: status))
+    }
+
+    func draftSkill(requestID: String) async throws -> String {
+        struct Result: Decodable { let message: String }
+        struct Empty: Encodable {}
+        return try await postJSON(Result.self, path: "api/skills/requests/\(requestID)/draft", body: Empty()).message
+    }
+
+    func learnedSkills() async throws -> [LearnedSkill] {
+        struct Envelope: Decodable { let skills: [LearnedSkill] }
+        return try await getJSON(Envelope.self, path: "api/skills").skills
+    }
+
+    /// "active" (approve), "disabled" or "deleted". The tap is the approval.
+    func setSkill(id: String, status: String) async throws {
+        struct Body: Encodable { let status: String }
+        struct Result: Decodable {}
+        _ = try await postJSON(Result.self, path: "api/skills/\(id)", body: Body(status: status))
     }
 
     func autopilot() async throws -> AutopilotStatus {

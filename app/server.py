@@ -173,6 +173,7 @@ _COMPANION_CAPABILITIES: dict[str, object] = {
         "autopilot": True,
         "skill_requests": True,
         "movie_picker": True,
+        "skills": True,
     },
 }
 
@@ -710,6 +711,44 @@ def autopilot_set(request: AutopilotRequest, _: None = Depends(authorize)) -> di
     from brain import settings as settings_mod
     settings_mod.update_setting("AUTO_REPAIR_ENABLED", "true" if request.enabled else "false")
     return autopilot()
+
+
+@app.post("/api/skills/requests/{request_id}/draft")
+def skill_request_draft(request_id: str, _: None = Depends(authorize)) -> dict[str, object]:
+    """Draft a skill tap: the skill drafter subagent works on it in the
+    background; poll /api/skills/requests (``draft_skill_id`` or ``note``)."""
+    from brain import skill_drafter, skill_requests
+    if not any(r["id"] == request_id for r in skill_requests.listing("all")):
+        raise HTTPException(status_code=404, detail="No such skill request")
+    runtime()  # jobs show in the runtime's task lane
+    started = skill_drafter.start(request_id)
+    if started:
+        skill_requests.annotate(request_id, drafting=True, note="")
+    return {"started": started, "message": "Drafting a skill…" if started else "A skill is already being drafted."}
+
+
+@app.get("/api/skills")
+def skill_list(_: None = Depends(authorize)) -> dict[str, object]:
+    """Learned skills: drafts waiting for approval, active and disabled ones."""
+    from brain import skills
+    return {"skills": [{**s, "summary": skills.describe(s)} for s in skills.listing()]}
+
+
+class SkillUpdate(BaseModel):
+    status: str = Field(pattern="^(active|disabled|deleted)$")
+
+
+@app.post("/api/skills/{skill_id}")
+def skill_update(skill_id: str, request: SkillUpdate, _: None = Depends(authorize)) -> dict[str, object]:
+    """Approve (active), switch off (disabled) or throw away (deleted). The tap is Nick's approval."""
+    from brain import skills
+    try:
+        record = skills.set_status(skill_id, request.status)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    if record is None:
+        raise HTTPException(status_code=404, detail="No such skill")
+    return {"skill": record}
 
 
 # --- Movie picker (iPad movie mode) ------------------------------------------

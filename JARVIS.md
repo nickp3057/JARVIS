@@ -49,6 +49,8 @@ Pearson-Stark-Jarvis/
 │   ├── clipboard_tool.py    Read/write clipboard via PowerShell Get/Set-Clipboard
 │   ├── alert_checks.py      Needs attention Refresh: re-checks each alert live, hides the fixed ones
 │   ├── watchdog.py          Restarts monitor threads that die, reports ones that freeze; systemd watchdog pings while /health answers
+│   ├── skills.py            Learned skills: recipes of allowlisted tools JARVIS composes himself, active once Nick approves (propose_skill / run_skill)
+│   ├── skill_drafter.py     Subagent: turns a skill request into a draft skill, or a "what it'd take" note
 │   ├── skill_requests.py    Wishes JARVIS had no tool for (request_skill): counted, most-asked first, shown in the app
 │   ├── auto_heal.py         Autopilot: monitors run the basic stack fixes themselves (arr recovery, indexers, stuck downloads); never Plex; cooldowns + daily cap
 │   ├── debug_reports.py     Durable user-submitted companion failure reports
@@ -899,6 +901,23 @@ entry in `brain/agent_roster.py` (name, kind, icon, description, schedule);
   shows open ones (Skill requests card, most asked first; menu: JARVIS can do
   this now / Not needed / Copy) via `GET /api/skills/requests` and
   `POST /api/skills/requests/{id}` `{status: done|declined|open}`.
+- `propose_skill(name, description, params?, steps, request_id?)` /
+  `run_skill(name, args)` — learned skills (`brain/skills.py`,
+  `memory/skills.json`): a named recipe of 1-8 calls to tools JARVIS already
+  has, `{param}` placeholders in string inputs. Steps may only use
+  `skills.ALLOWED_TOOLS` (house, scenes, music, TV, timers, reminders, notes,
+  read-only lookups; no trading, settings, repairs, memory edits, deletions,
+  browser or other skills), re-checked at approval and at every run; each step
+  goes through `execute_tool`, so its own gates still apply, and a failing step
+  stops the run. A proposal is a draft until Nick approves (chat confirm gate,
+  or Approve on the Control tab's **Skills** card, `POST /api/skills/{id}`
+  `{status: active|disabled|deleted}`); approving one answers its skill
+  request. Active skills ride in `<turn_context>` ("Skills you've learned").
+  **Skill drafter** (`brain/skill_drafter.py`, subagent `skill_drafter`,
+  `SKILL_DRAFTER_MODEL`, default auto:sonnet): Draft a skill on a request
+  (`POST /api/skills/requests/{id}/draft`) gives it the allowed tools' real
+  schemas; it either saves a draft (`draft_skill_id` on the request) or a
+  "what it'd take" `note`.
 - Stored in `memory/repair_proposals.json` via `brain/self_repair.py`. This is
   the "propose → approve → apply → verify → rollback" loop from the governed
   self-modification roadmap item, scoped to configuration and services, not
@@ -1401,6 +1420,8 @@ there, so edit files with a `sudo python3` one-shot or vi.
 ---
 
 ## Recently Shipped
+
+- **JARVIS teaches himself skills (2026-11-20, companion 6.101 / 343, Core).** Second half of Nick's "create new skills" goal: learned skills are recipes of JARVIS's own everyday tools (`propose_skill` / `run_skill`, `brain/skills.py`), drafted in chat or by the new **Skill drafter** subagent from a skill request (menu → Draft a skill), and active only after Nick's Approve on the Control tab's **Skills** card (or his yes in chat). Wishes no recipe can meet get a "what it'd take" note on the request. Not code generation: source-level self-modification stays future work (FUTURE_SESSIONS.md Tier 1 #1).
 
 - **Movie picker (2026-11-20, companion 6.100 / 342, Core).** iPad movie mode has **Pick a movie** and the phone's TV remote has **Movies**: `MoviePickerView`, a dark poster wall of every Plex film with search (Plex's own title filter, debounced) and Recently added / Unwatched / A–Z. Watched films get a check, part-watched ones a resume bar. A tap offers Resume from 1h 02m / Start over (or Play) and starts it on the room TV. Core: `GET /api/plex/movies?query=&sort=` (`plex.library_movies`: every movie library merged, a film in two libraries, e.g. a 4K copy, listed once from the first), `GET /api/plex/poster?path=&width=` (`plex.poster`, through Plex's photo transcoder so the token stays on Core; only `/library/metadata/` paths, width 80-800, device-cached a day), `POST /api/plex/play {rating_key, from_start}` (`plex.play_from_start` to clear the resume point, then `tv_remote.play_plex`, the same HA `plex://` deep link the light sync calibration uses). Capability `movie_picker`.
 

@@ -114,6 +114,19 @@ def set_status(request_id: str, status: str) -> dict[str, Any] | None:
     return None
 
 
+def annotate(request_id: str, **fields: Any) -> dict[str, Any] | None:
+    """Attach the drafter's outcome: ``draft_skill_id`` and/or ``note``."""
+    allowed = {k: v for k, v in fields.items() if k in {"draft_skill_id", "note", "drafting"}}
+    with _LOCK:
+        items = _load()
+        for record in items:
+            if record.get("id") == request_id:
+                record.update(allowed)
+                _save(items)
+                return dict(record)
+    return None
+
+
 # --- tool handlers --------------------------------------------------------------
 
 def tool_request(args: dict[str, Any]) -> str:

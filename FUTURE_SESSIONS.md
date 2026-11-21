@@ -163,6 +163,7 @@ See JARVIS.md Recently Shipped. Unit-tested only; nothing ran against the real N
 - [ ] Mac app Alerts (built, not installed by me): Fix it / Copy / Dismiss and the Autopilot toggle work against the real Core (`mac/JarvisMac/build.sh --open`).
 - [ ] Watchdog: run `sudo sh ~/jarvis/deploy/surface-setup.sh` on the Surface once, then `deploy/surface.sh`; `systemctl show jarvis-api -p WatchdogUSec` says 3min and the log has "systemd watchdog on". Watch the inbox for false "Monitor looks stuck" notes (the HA websocket monitor blocks on recv by design; `_IDLE_MARKERS` should cover it).
 - [ ] Movie picker (6.100): never run against the real Plex (the Mac has no PLEX_URL). On the iPad in movie mode: posters load, search and the three sorts work, a 4K duplicate shows once, Resume picks up where Plex left off, Start over starts at 0:00, and the TV switches to Plex if it was on another app.
+- [ ] Skills (6.101): ask for a routine ("set up date night: movie scene, jazz, volume 30") and see a draft + "approve" code in chat; Approve on the Control tab; "date night" runs it. Draft a skill on a request that needs hardware (blinds) leaves a sensible note. Watch the drafter's cost on the Agents page (auto:sonnet).
 - [ ] Tap a JARVIS alert push (6.98): the alert's sheet opens; an info push (e.g. "Fixed it myself") just opens the app.
 - [ ] Ask JARVIS for something he can't do ("close my blinds"): he says so plainly, it lands on Control → Skill requests, asking again bumps the count. Watch he doesn't file things a tool can do.
 
@@ -282,8 +283,12 @@ asked, when, why it failed) to a `memory/skill_requests.json` store visible
 in the companion (not the to-do list); then this self-patch flow drafts the
 tool for the most-asked requests and asks Nick to approve it.
 *First half shipped 2026-11-20 (companion 6.98):* `request_skill` /
-`brain/skill_requests.py` and the Control tab's Skill requests card. Next:
-the self-patch flow that drafts a tool for the top request.
+`brain/skill_requests.py` and the Control tab's Skill requests card.
+*Second half, bounded (6.101):* learned skills composed from allowlisted
+tools (`brain/skills.py`) and the skill drafter subagent, approve-to-activate.
+Still open: wishes that need real new code (a new integration) only get a
+"what it'd take" note; drafting actual Python tools (patch, test, approve,
+activate, rollback) is the next step and needs a sandbox and Nick's review.
 
 ### 3. Skill acquisition from repetition
 `brain/habits.py` already notices patterns. Next step: when the same

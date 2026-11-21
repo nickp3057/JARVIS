@@ -51,6 +51,7 @@ from brain.standing_orders import add_order, list_orders, remove_order
 from brain import tool_health
 from brain import self_repair
 from brain import skill_requests
+from brain import skills
 from brain.habits import describe_habits
 from brain.knowledge_vault import capture_note, describe_search
 from brain.timers import cancel_timer, dismiss_timer, list_timers, pause_timer, resume_timer, set_timer
@@ -2199,6 +2200,39 @@ _CUSTOM_TOOLS: list[dict[str, Any]] = [
         },
     },
     {
+        "name": "propose_skill",
+        "description": (
+            "Teach yourself a new skill: a named recipe (1-8 steps) of tools you already have, with "
+            "{param} placeholders in string inputs, e.g. date_night(playlist) = a scene, play_music, "
+            "set_volume. Use it when Nick asks for a routine or combination you'll want again, or when a "
+            "skill request can be met by chaining tools. Only everyday tools are allowed (house, scenes, "
+            "music, TV, timers, reminders, notes, lookups); no trading, settings, repairs, memory edits or "
+            "deletions. It's a draft until Nick approves (his yes, or Approve in the app)."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "name": {"type": "string", "description": "snake_case, e.g. date_night"},
+                "description": {"type": "string", "description": "One line: what it does."},
+                "params": {"type": "array", "items": {"type": "object", "properties": {
+                    "name": {"type": "string"}, "description": {"type": "string"}}, "required": ["name"]}},
+                "steps": {"type": "array", "items": {"type": "object", "properties": {
+                    "tool": {"type": "string"}, "input": {"type": "object"}}, "required": ["tool"]}},
+                "request_id": {"type": "string", "description": "The skill request this answers, if any."},
+            },
+            "required": ["name", "description", "steps"],
+        },
+    },
+    {
+        "name": "run_skill",
+        "description": "Run one of your learned skills (listed under 'Skills you've learned') with its args.",
+        "input_schema": {
+            "type": "object",
+            "properties": {"name": {"type": "string"}, "args": {"type": "object"}},
+            "required": ["name"],
+        },
+    },
+    {
         "name": "list_skill_requests",
         "description": "List the skills Nick has asked for that JARVIS doesn't have yet (open by default; status done/declined/all).",
         "input_schema": {"type": "object", "properties": {"status": {"type": "string"}}},
@@ -3282,6 +3316,8 @@ _DISPATCH: dict[str, Callable[[dict[str, Any]], str]] = {
     "list_repair_proposals": _tool_list_repair_proposals,
     "request_skill": lambda args: skill_requests.tool_request(args),
     "list_skill_requests": lambda args: skill_requests.tool_list(args),
+    "propose_skill": lambda args: skills.tool_propose(args),
+    "run_skill": lambda args: skills.tool_run(args),
     "reject_repair": _tool_reject_repair,
     "list_standing_orders": _tool_list_standing_orders,
     "remove_standing_order": _tool_remove_standing_order,
@@ -3453,7 +3489,7 @@ def execute_tool(name: str, args: dict[str, Any], session_id: str | None = None)
 def _score_tool(name: str, *, ok: bool, error: str, started: float) -> None:
     """Feed the self-diagnosis ledger; never let bookkeeping break a tool call."""
     if name in ("system_health", "clear_tool_health", "clear_alerts", "refresh_alerts", "diagnose_tool", "apply_repair", "list_repair_proposals", "reject_repair",
-                "propose_stack_fix", "request_skill", "list_skill_requests"):
+                "propose_stack_fix", "request_skill", "list_skill_requests", "propose_skill", "run_skill"):
         return
     try:
         tool_health.record(name, ok=ok, error=error, elapsed_ms=(time.monotonic() - started) * 1000)

@@ -752,6 +752,8 @@ class JarvisAgent:
         dynamic += build_habits_section(render_habits_block())
         dynamic += build_lessons_section(lessons.render_block(latest_user_text))
         dynamic += build_systems_health_section(tool_health.render_block())
+        from brain import skills
+        dynamic += skills.render_block()
         context = self._recent_tool_context.get(self._session_id)
         if context:
             dynamic += (
