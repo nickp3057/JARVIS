@@ -51,7 +51,7 @@ struct ShoppingItem: Codable, Identifiable, Hashable {
     }
 }
 
-struct ShoppingOverview: Decodable {
+struct ShoppingOverview: Decodable, Equatable {
     var list: [ShoppingItem]
     var catalog: [ShoppingItem]
 }

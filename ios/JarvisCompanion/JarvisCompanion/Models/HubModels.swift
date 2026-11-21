@@ -6,7 +6,7 @@ import Foundation
 /// HTTP 200 with a non-empty `error` and empty collections, so these models
 /// treat `error` as a first-class field rather than a failure.
 
-struct NowStatus: Codable {
+struct NowStatus: Codable, Equatable {
     let generatedAt: Double
     let timers: [NowTimer]
     let reminders: [NowReminder]
@@ -41,7 +41,7 @@ struct NowStatus: Codable {
     }
 }
 
-struct NowTimer: Codable, Identifiable {
+struct NowTimer: Codable, Identifiable, Equatable {
     let id: String
     let label: String
     let state: String
@@ -55,7 +55,7 @@ struct NowTimer: Codable, Identifiable {
     }
 }
 
-struct NowReminder: Codable, Identifiable {
+struct NowReminder: Codable, Identifiable, Equatable {
     let id: String
     let text: String
     let dueAt: Double?
@@ -68,7 +68,7 @@ struct NowReminder: Codable, Identifiable {
     }
 }
 
-struct NowEvent: Codable, Identifiable {
+struct NowEvent: Codable, Identifiable, Equatable {
     let id: String
     let title: String
     let startAt: Double?
@@ -82,7 +82,7 @@ struct NowEvent: Codable, Identifiable {
     }
 }
 
-struct AcademicEvent: Codable, Identifiable {
+struct AcademicEvent: Codable, Identifiable, Equatable {
     let id: String
     let title: String
     let startAt: Double?
@@ -102,7 +102,7 @@ struct AcademicEvent: Codable, Identifiable {
 /// and writes it. The phone registers `briefs` as local notifications; the
 /// rules (hour, window, keywords, tone) are settings Nick changes by talking
 /// to JARVIS, so the app only displays them.
-struct StudyBrief: Decodable {
+struct StudyBrief: Decodable, Equatable {
     let error: String
     let enabled: Bool
     let hour: Int
@@ -175,7 +175,7 @@ struct StudyBriefItem: Decodable, Equatable {
     }
 }
 
-struct StorageStatus: Decodable {
+struct StorageStatus: Decodable, Equatable {
     let error: String
     let label: String
     let totalBytes: Int64
@@ -192,7 +192,7 @@ struct StorageStatus: Decodable {
     }
 }
 
-struct TorrentsStatus: Decodable {
+struct TorrentsStatus: Decodable, Equatable {
     let error: String
     let dlSpeed: Int
     let upSpeed: Int
@@ -206,7 +206,7 @@ struct TorrentsStatus: Decodable {
     }
 }
 
-struct TorrentTransfer: Decodable, Identifiable {
+struct TorrentTransfer: Decodable, Identifiable, Equatable {
     let name: String
     let progress: Double
     let state: String
@@ -231,19 +231,19 @@ struct TorrentTransfer: Decodable, Identifiable {
     }
 }
 
-struct MediaStatus: Decodable {
+struct MediaStatus: Decodable, Equatable {
     let radarr: ServarrSection
     let sonarr: ServarrSection
 }
 
 /// `GET /api/media/temp4k`: temporary 4K films and their countdowns
 /// (Core's `integrations/temp_4k.py`).
-struct Temp4kStatus: Decodable {
+struct Temp4kStatus: Decodable, Equatable {
     let configured: Bool
     let films: [Temp4kFilm]
 }
 
-struct Temp4kFilm: Decodable, Identifiable {
+struct Temp4kFilm: Decodable, Identifiable, Equatable {
     let tmdbID: Int
     let title: String
     let year: Int?
@@ -261,13 +261,13 @@ struct Temp4kFilm: Decodable, Identifiable {
     }
 }
 
-struct ServarrSection: Decodable {
+struct ServarrSection: Decodable, Equatable {
     let error: String
     let queue: [MediaQueueItem]
     let recent: [MediaRecentItem]
 }
 
-struct MediaQueueItem: Decodable, Identifiable {
+struct MediaQueueItem: Decodable, Identifiable, Equatable {
     let title: String
     let progress: Double
     let size: Int
@@ -288,7 +288,7 @@ struct MediaQueueItem: Decodable, Identifiable {
     }
 }
 
-struct MediaRecentItem: Decodable, Identifiable {
+struct MediaRecentItem: Decodable, Identifiable, Equatable {
     let title: String
     let year: Int
     let added: String
@@ -300,7 +300,7 @@ struct ServicesStatus: Decodable {
     let services: [ServiceStatus]
 }
 
-struct ServiceStatus: Decodable, Identifiable {
+struct ServiceStatus: Decodable, Identifiable, Equatable {
     let name: String
     let up: Bool
     let latencyMS: Int?
@@ -318,7 +318,7 @@ struct ServiceLinks: Decodable {
     let links: [ServiceLink]
 }
 
-struct ServiceLink: Decodable, Identifiable {
+struct ServiceLink: Decodable, Identifiable, Equatable {
     let name: String
     let url: String
     /// Tailscale address for the same service ("" when the server has no
@@ -364,7 +364,7 @@ struct HomeEntities: Decodable {
     let sun: String?
 }
 
-struct HomeEntity: Decodable, Identifiable {
+struct HomeEntity: Decodable, Identifiable, Equatable {
     let entityID: String
     let friendlyName: String
     let domain: String
@@ -467,7 +467,7 @@ struct LightDetails: Decodable, Equatable {
 }
 
 /// Saved Home Assistant scenes (`GET /api/home/scenes`); `last` is the one run most recently.
-struct HomeScenes: Decodable {
+struct HomeScenes: Decodable, Equatable {
     let error: String
     let scenes: [HomeScene]
     let last: String?
@@ -493,7 +493,7 @@ struct HomeScenes: Decodable {
     enum CodingKeys: String, CodingKey { case error, scenes, last, current }
 }
 
-struct HomeScene: Decodable, Identifiable {
+struct HomeScene: Decodable, Identifiable, Equatable {
     let entityID: String
     let name: String
     let icon: String
@@ -856,7 +856,7 @@ struct VoiceState: Decodable, Equatable {
 
 /// `GET /api/glance`, the parts the Mac's Desk shows: weather and the
 /// calendar agenda (the TV reads the same snapshot).
-struct Glance: Decodable {
+struct Glance: Decodable, Equatable {
     let weather: GlanceWeather?
     let events: [GlanceEvent]
 
@@ -869,7 +869,7 @@ struct Glance: Decodable {
     }
 }
 
-struct GlanceWeather: Decodable {
+struct GlanceWeather: Decodable, Equatable {
     let online: Bool?
     let location: String?
     let temperatureF: Double?
@@ -902,7 +902,7 @@ struct GlanceWeather: Decodable {
     }
 }
 
-struct GlanceEvent: Decodable, Identifiable {
+struct GlanceEvent: Decodable, Identifiable, Equatable {
     let title: String
     let startAt: Double?
     let allDay: Bool

@@ -174,20 +174,29 @@ final class HubViewModel: ObservableObject {
 
     func refreshNow() async {
         resetConnectionIfNeeded()
-        guard !now.isLoading else { return }
+        // Every 5 s: publish (and cache) only when something changed.
+        guard !loadingSections.contains(\HubViewModel.now) else { return }
         let identity = connectionIdentity
-        now.isLoading = true
-        defer { if identity == connectionIdentity { now.isLoading = false } }
+        loadingSections.insert(\HubViewModel.now)
+        if now.value == nil, !now.isLoading { now.isLoading = true }
+        defer {
+            loadingSections.remove(\HubViewModel.now)
+            if identity == connectionIdentity, now.isLoading { now.isLoading = false }
+        }
         do {
             let value = try await client().nowStatus()
             guard !Task.isCancelled, identity == settings.connectionIdentity else { return }
-            now.value = value
-            now.loadError = nil
-            now.serverError = ""
-            nowSnapshotIsStale = false
-            if let data = try? JSONEncoder().encode(value) {
-                snapshotDefaults.set(data, forKey: nowSnapshotKey)
+            var next = now
+            next.value = value
+            next.loadError = nil
+            next.serverError = ""
+            if !Self.same(now, next) {
+                now = next
+                if let data = try? JSONEncoder().encode(value) {
+                    snapshotDefaults.set(data, forKey: nowSnapshotKey)
+                }
             }
+            if nowSnapshotIsStale { nowSnapshotIsStale = false }
             if value.calendarError.isEmpty, value.supportsAcademicEvents {
                 let countdown = Self.briefSignature(value.academicEvents)
                 if briefDue(for: countdown) {
@@ -200,8 +209,9 @@ final class HubViewModel: ObservableObject {
             }
         } catch {
             guard !Task.isCancelled, identity == settings.connectionIdentity else { return }
-            now.loadError = error.localizedDescription
-            nowSnapshotIsStale = now.value != nil
+            let message = error.localizedDescription
+            if now.loadError != message { now.loadError = message }
+            if nowSnapshotIsStale != (now.value != nil) { nowSnapshotIsStale = now.value != nil }
         }
     }
 
@@ -279,6 +289,7 @@ final class HubViewModel: ObservableObject {
         storage = Section(); entities = Section(); links = Section(); studyBrief = Section()
         alerts = Section(); repairs = Section(); maintenance = Section(); portfolio = Section()
         briefSyncedAt = nil
+        loadingSections = []
         nowSnapshotIsStale = false
         if let data = snapshotDefaults.data(forKey: nowSnapshotKey),
            let cached = try? JSONDecoder().decode(NowStatus.self, from: data) {
@@ -881,29 +892,24 @@ final class HubViewModel: ObservableObject {
     }
 
     /// Fetch one section, keeping stale data on screen when a refresh fails.
+    /// Sections with a fetch in flight. Kept off the published Sections, so a
+    /// background refresh doesn't redraw every card twice just to say so.
+    private var loadingSections: Set<AnyKeyPath> = []
+
     private func load<Value>(
         _ keyPath: ReferenceWritableKeyPath<HubViewModel, Section<Value>>,
         serverError: (Value) -> String = { _ in "" },
         fetch: (JarvisAPIClient) async throws -> Value
     ) async {
-        resetConnectionIfNeeded()
-        guard !self[keyPath: keyPath].isLoading else { return }
-        let identity = connectionIdentity
-        self[keyPath: keyPath].isLoading = true
-        defer { if identity == connectionIdentity { self[keyPath: keyPath].isLoading = false } }
-        do {
-            let value = try await fetch(client())
-            guard !Task.isCancelled, identity == settings.connectionIdentity else { return }
-            self[keyPath: keyPath].value = value
-            self[keyPath: keyPath].serverError = serverError(value)
-            self[keyPath: keyPath].loadError = nil
-        } catch {
-            guard !Task.isCancelled, identity == settings.connectionIdentity else { return }
-            self[keyPath: keyPath].loadError = error.localizedDescription
-        }
+        await load(keyPath, serverError: serverError, transform: { $0 }, fetch: fetch)
     }
 
-    /// Variant for endpoints whose envelope and rendered value differ.
+    /// Fetches one section and publishes it once, and only if it changed. The
+    /// poll refreshes up to seven sections every 5 s; each used to publish five
+    /// times (loading on, value, error, error cleared, loading off), redrawing
+    /// the visible tab ~35 times a tick even when nothing had changed.
+    /// `isLoading` is only published for a section's first load (the
+    /// placeholder row); later refreshes are silent until they have news.
     private func load<Raw, Value>(
         _ keyPath: ReferenceWritableKeyPath<HubViewModel, Section<Value>>,
         serverError: (Raw) -> String,
@@ -911,19 +917,45 @@ final class HubViewModel: ObservableObject {
         fetch: (JarvisAPIClient) async throws -> Raw
     ) async {
         resetConnectionIfNeeded()
-        guard !self[keyPath: keyPath].isLoading else { return }
+        guard !loadingSections.contains(keyPath) else { return }
         let identity = connectionIdentity
-        self[keyPath: keyPath].isLoading = true
-        defer { if identity == connectionIdentity { self[keyPath: keyPath].isLoading = false } }
+        loadingSections.insert(keyPath)
+        if self[keyPath: keyPath].value == nil, !self[keyPath: keyPath].isLoading {
+            self[keyPath: keyPath].isLoading = true
+        }
+        defer {
+            loadingSections.remove(keyPath)
+            if identity == connectionIdentity, self[keyPath: keyPath].isLoading {
+                self[keyPath: keyPath].isLoading = false
+            }
+        }
+        var next: Section<Value>
         do {
             let raw = try await fetch(client())
             guard !Task.isCancelled, identity == settings.connectionIdentity else { return }
-            self[keyPath: keyPath].value = transform(raw)
-            self[keyPath: keyPath].serverError = serverError(raw)
-            self[keyPath: keyPath].loadError = nil
+            next = self[keyPath: keyPath]
+            next.value = transform(raw)
+            next.serverError = serverError(raw)
+            next.loadError = nil
         } catch {
             guard !Task.isCancelled, identity == settings.connectionIdentity else { return }
-            self[keyPath: keyPath].loadError = error.localizedDescription
+            next = self[keyPath: keyPath]
+            next.loadError = error.localizedDescription
+        }
+        if !Self.same(self[keyPath: keyPath], next) { self[keyPath: keyPath] = next }
+    }
+
+    /// Whether publishing `next` would change nothing on screen. Values that
+    /// aren't Equatable always count as changed.
+    nonisolated static func same<Value>(_ old: Section<Value>, _ next: Section<Value>) -> Bool {
+        guard old.isLoading == next.isLoading, old.serverError == next.serverError,
+              old.loadError == next.loadError else { return false }
+        switch (old.value, next.value) {
+        case (nil, nil): return true
+        case let (a?, b?):
+            guard let a = a as? any Equatable else { return false }
+            return a.isEqual(to: b)
+        default: return false
         }
     }
 
@@ -1147,4 +1179,9 @@ final class HubViewModel: ObservableObject {
             await refreshTorrents()
         }
     }
+}
+
+private extension Equatable {
+    /// `==` against a value of unknown type (HubViewModel.same).
+    func isEqual(to other: Any) -> Bool { (other as? Self) == self }
 }
