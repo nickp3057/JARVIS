@@ -53,7 +53,9 @@ struct ChatView: View {
                     }
             }
         }
-        .listStyle(.inset)
+        .listStyle(.sidebar)
+        .scrollContentBackground(.hidden)
+        .background(Color.black.opacity(0.18))
         .overlay {
             if model.sessions.isEmpty {
                 Text("No conversations yet").foregroundStyle(.secondary)
@@ -91,18 +93,47 @@ struct ChatView: View {
         }
     }
 
+    private static let suggestions = [
+        ("sun.horizon", "Brief me on my day"),
+        ("lightbulb.2", "Set the room for movie night"),
+        ("arrow.down.circle", "What's downloading?"),
+        ("chart.line.uptrend.xyaxis", "How's my portfolio?"),
+        ("wrench.and.screwdriver", "How are your systems?"),
+        ("checklist", "What's on my to-do list?"),
+    ]
+
     private var welcome: some View {
-        VStack(spacing: 8) {
-            Image(systemName: "circle.hexagongrid")
-                .font(.system(size: 40, weight: .thin))
-                .foregroundStyle(JarvisTheme.accent)
+        VStack(spacing: 14) {
+            ReactorEmblem(size: 96)
             Text("Good to see you, sir.")
-                .font(.title2.weight(.semibold))
+                .font(.system(size: 26, weight: .semibold))
             Text("Ask for anything: the room, the media library, reminders, the markets.")
                 .foregroundStyle(.secondary)
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 220), spacing: 10)], spacing: 10) {
+                ForEach(Self.suggestions, id: \.1) { symbol, text in
+                    Button {
+                        model.draft = text
+                        model.send()
+                    } label: {
+                        GlowTile(active: false) {
+                            Label(text, systemImage: symbol).foregroundStyle(.white.opacity(0.85))
+                        }
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .frame(maxWidth: 720)
+            .padding(.top, 8)
         }
         .frame(maxWidth: .infinity)
-        .padding(.top, 100)
+        .padding(.top, 70)
+    }
+
+    private func copyButton(_ text: String) -> some View {
+        Button("Copy") {
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(text, forType: .string)
+        }
     }
 
     @ViewBuilder
@@ -116,21 +147,27 @@ struct ChatView: View {
                     .foregroundStyle(.white)
                     .padding(.horizontal, 14)
                     .padding(.vertical, 9)
-                    .background(JarvisTheme.userBubble, in: .rect(cornerRadius: 16))
+                    .background(LinearGradient(colors: [JarvisTheme.userBubble, JarvisTheme.accentDeep.opacity(0.8)],
+                                               startPoint: .topLeading, endPoint: .bottomTrailing),
+                                in: .rect(cornerRadius: 16))
                     .textSelection(.enabled)
+                    .contextMenu { copyButton(line.text) }
             }
             .font(.system(size: 14))
         } else {
-            HStack(alignment: .top, spacing: 10) {
-                Image(systemName: "circle.hexagongrid.fill")
-                    .foregroundStyle(JarvisTheme.accent)
-                    .font(.system(size: 15))
-                    .padding(.top, 2)
+            HStack(alignment: .top, spacing: 12) {
+                ReactorEmblem(size: 26)
+                    .padding(.top, 1)
                 Text(markdown(line.text))
                     .font(.system(size: 14))
-                    .lineSpacing(2)
+                    .lineSpacing(3)
                     .textSelection(.enabled)
-                    .frame(maxWidth: 680, alignment: .leading)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 10)
+                    .background(JarvisTheme.panel, in: .rect(cornerRadius: 16))
+                    .overlay(RoundedRectangle(cornerRadius: 16).strokeBorder(JarvisTheme.border))
+                    .frame(maxWidth: 720, alignment: .leading)
+                    .contextMenu { copyButton(line.text) }
                 Spacer(minLength: 40)
             }
         }

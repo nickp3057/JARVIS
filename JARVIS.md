@@ -40,7 +40,7 @@ Pearson-Stark-Jarvis/
 │   ├── client_tokens.py     Scoped per-client tokens (events:read, status:read, chat, settings:write, wake:write, playback:write) + CLI (create/grant/list/revoke); hashes in memory/client_tokens.json
 │   └── server.py            Authenticated HTTP bridge for the iOS companion (+ /api/clients/events SSE)
 │
-├── mac/JarvisMac/           JARVIS for Mac: native SwiftUI client (Chat, Home, Alerts, Donna); SwiftPM, build.sh installs ~/Applications/JARVIS.app
+├── mac/JarvisMac/           JARVIS for Mac 2.0: native SwiftUI client (Overview, Chat, Home, Media, Alerts, Skills & Fixes, Donna, menu bar panel); SwiftPM, build.sh installs ~/Applications/JARVIS.app
 │
 ├── brain/
 │   ├── agent.py             JarvisAgent: session management, tool loop, history
@@ -1445,6 +1445,8 @@ there, so edit files with a `sudo python3` one-shot or vi.
 ---
 
 ## Recently Shipped
+
+- **JARVIS for Mac 2.0 (2026-11-20, companion 6.107 / 349 version bump only).** Rebuilt top to bottom in the cockpit look (navy backdrop, Arc cyan, the icon's brushed gold; the window always runs dark, Donna keeps her rose). Sidebar: **Overview** (new default: the reactor, greeting and clock, Core online / home or away / autopilot pills; Needs attention, Next up (event, live timers, reminders), Room scenes, Downloads, Systems (every service and the media drive) and Waiting for you (draft skills, pending repairs), refreshed every 20 s, ⌘K asks JARVIS), **Chat** (reactor avatar, glass bubbles, six one-click suggestions, Copy on any message), **Home** (glowing scene and device tiles), **Media** (new: downloads with pause/resume every 5 s, and the Plex poster wall with Movies / TV Shows, search, sort, library toggles; a click plays on the TV through `tv_remote.play_item`, Resume / Start over for part-watched films), **Alerts** (glass cards, Fix it / Copy / Dismiss, Autopilot), **Skills & Fixes** (new: approve or dismiss draft skills, switch skills off, draft from skill requests, approve pending repairs, autopilot runs tagged), **Donna** (unchanged). A **menu bar** JARVIS (reactor glyph, filled when something needs you) shows alerts and one-click scenes. ⌘1-⌘7 switch pages. The app icon is the new reactor (`AppIcon-Mac.png` from `ios/icon/render_icon.swift`, packed into `JARVIS.icns` by `build.sh`). `JARVIS --snapshot <dir>` renders each page to a PNG off-screen (layout checks without a display). New files: `Dashboard.swift` (wire types + API), `DashboardModels.swift`, `OverviewView.swift`, `MediaView.swift`, `SkillsView.swift`, `Snapshot.swift`.
 
 - **New app icon (2026-11-20, companion 6.106 / 348).** An original reactor core: a white-hot core with seven swept cyan blades in a beveled glass lens, a cyan orbit, and a six-segment brushed-gold bezel (Mark 85 gold, no red), on deep navy. Default, dark (transparent backdrop) and tinted (greyscale) variants for iOS 18's icon styles. Drawn in code: `swift ios/icon/render_icon.swift <out-dir>` re-renders all three into the asset catalog's `AppIcon.appiconset`.
 

@@ -60,7 +60,7 @@ struct HomeView: View {
 
     private func section<Content: View>(_ title: String, @ViewBuilder _ content: () -> Content) -> some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text(title).font(.headline).foregroundStyle(.secondary)
+            Text(title.uppercased()).font(.system(size: 11, weight: .semibold)).tracking(1.2).foregroundStyle(.white.opacity(0.55))
             content()
         }
     }
@@ -68,20 +68,17 @@ struct HomeView: View {
     private func sceneTile(_ scene: HomeScene) -> some View {
         let current = model.currentScene == scene.entityID
         return Button { Task { await model.activate(scene) } } label: {
-            HStack(spacing: 10) {
-                Image(systemName: scene.symbol)
-                    .font(.system(size: 16))
-                    .frame(width: 22)
-                    .foregroundStyle(current ? JarvisTheme.accent : .secondary)
-                Text(scene.name).lineLimit(1)
-                Spacer(minLength: 0)
-                if model.busy.contains(scene.entityID) { ProgressView().controlSize(.small) }
+            GlowTile(active: current) {
+                HStack(spacing: 10) {
+                    Image(systemName: scene.symbol)
+                        .font(.system(size: 18))
+                        .frame(width: 24)
+                        .foregroundStyle(current ? JarvisTheme.accent : .secondary)
+                    Text(scene.name).font(.system(size: 14, weight: .medium)).lineLimit(1)
+                    Spacer(minLength: 0)
+                    if model.busy.contains(scene.entityID) { ProgressView().controlSize(.small) }
+                }
             }
-            .padding(.horizontal, 12)
-            .frame(height: 44)
-            .background(JarvisTheme.card, in: .rect(cornerRadius: 10))
-            .overlay(RoundedRectangle(cornerRadius: 10)
-                .strokeBorder(current ? JarvisTheme.accent : JarvisTheme.border, lineWidth: current ? 1.5 : 1))
             .contentShape(.rect)
         }
         .buttonStyle(.plain)
@@ -127,10 +124,12 @@ private struct EntityTile: View {
                 .disabled(!entity.isToggleable)
             }
         }
-        .padding(12)
-        .frame(minHeight: 64, alignment: .top)
-        .background(JarvisTheme.card, in: .rect(cornerRadius: 10))
-        .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(JarvisTheme.border))
+        .padding(14)
+        .frame(minHeight: 68, alignment: .top)
+        .background(entity.isOn ? JarvisTheme.accent.opacity(0.12) : JarvisTheme.panel, in: .rect(cornerRadius: 12))
+        .overlay(RoundedRectangle(cornerRadius: 12)
+            .strokeBorder(entity.isOn ? JarvisTheme.accent.opacity(0.55) : JarvisTheme.border, lineWidth: entity.isOn ? 1.4 : 1))
+        .shadow(color: entity.isOn ? JarvisTheme.accent.opacity(0.25) : .clear, radius: 12)
         .onAppear(perform: sync)
         .onChange(of: entity) { if !dragging { sync() } }
     }

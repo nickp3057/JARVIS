@@ -9,16 +9,29 @@ struct AlertsView: View {
         Group {
             if model.alerts.isEmpty {
                 ContentUnavailableView {
-                    Label("All clear", systemImage: "checkmark.seal")
+                    Label {
+                        Text("All clear")
+                    } icon: {
+                        ReactorEmblem(size: 72)
+                    }
                 } description: {
                     Text(model.error ?? "Nothing needs your attention.")
                 }
             } else {
                 List {
                     if let error = model.error { ErrorLine(text: error) }
-                    ForEach(model.alerts) { alert in row(alert) }
+                    ForEach(model.alerts) { alert in
+                        row(alert)
+                            .padding(10)
+                            .background(JarvisTheme.panel, in: .rect(cornerRadius: 12))
+                            .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(JarvisTheme.border))
+                            .listRowSeparator(.hidden)
+                            .listRowBackground(Color.clear)
+                    }
                 }
-                .listStyle(.inset)
+                .listStyle(.plain)
+                .scrollContentBackground(.hidden)
+                .padding(.horizontal, 12)
             }
         }
         .toolbar {

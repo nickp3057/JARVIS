@@ -162,18 +162,18 @@ struct JarvisAPI {
         return request
     }
 
-    private func get<T: Decodable>(_ path: String, query: [URLQueryItem] = []) async throws -> T {
+    func get<T: Decodable>(_ path: String, query: [URLQueryItem] = []) async throws -> T {
         try JSONDecoder().decode(T.self, from: try await send("GET", path, query: query))
     }
 
-    private func post<T: Decodable>(_ path: String, body: [String: AnyEncodable],
+    func post<T: Decodable>(_ path: String, body: [String: AnyEncodable],
                                     timeout: TimeInterval = 30) async throws -> T {
         let data = try await send("POST", path, body: try JSONEncoder().encode(body), timeout: timeout)
         return try JSONDecoder().decode(T.self, from: data)
     }
 
     @discardableResult
-    private func send(_ method: String, _ path: String, query: [URLQueryItem] = [], body: Data? = nil,
+    func send(_ method: String, _ path: String, query: [URLQueryItem] = [], body: Data? = nil,
                       timeout: TimeInterval = 30) async throws -> Data {
         var request = makeRequest(method, path, query: query, timeout: timeout)
         if let body {

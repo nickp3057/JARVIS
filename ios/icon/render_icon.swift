@@ -197,6 +197,28 @@ for variant in Variant.allCases {
         flat.draw(image, in: CGRect(x: 0, y: 0, width: size, height: size))
         image = flat.makeImage()!
     }
+    if variant == .standard {
+        // JARVIS for Mac: macOS doesn't mask icons, so the tile is drawn here
+        // at Apple's proportions (824 pt body, 185 pt corners, soft shadow).
+        let mac = CGContext(data: nil, width: Int(size), height: Int(size), bitsPerComponent: 8, bytesPerRow: 0,
+                            space: CGColorSpace(name: CGColorSpace.sRGB)!,
+                            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+        let body = CGRect(x: 100, y: 112, width: 824, height: 824)
+        let tile = CGPath(roundedRect: body, cornerWidth: 185, cornerHeight: 185, transform: nil)
+        mac.saveGState()
+        mac.setShadow(offset: CGSize(width: 0, height: -12), blur: 28, color: CGColor(gray: 0, alpha: 0.45))
+        mac.addPath(tile)
+        mac.setFillColor(rgb(0x020409))
+        mac.fillPath()
+        mac.restoreGState()
+        mac.addPath(tile)
+        mac.clip()
+        mac.draw(image, in: body)
+        let macRep = NSBitmapImageRep(cgImage: mac.makeImage()!)
+        let macPath = (out as NSString).appendingPathComponent("AppIcon-Mac.png")
+        try! macRep.representation(using: .png, properties: [:])!.write(to: URL(fileURLWithPath: macPath))
+        print("wrote \(macPath)")
+    }
     let rep = NSBitmapImageRep(cgImage: image)
     let data = rep.representation(using: .png, properties: [:])!
     let path = (out as NSString).appendingPathComponent("\(variant.rawValue).png")

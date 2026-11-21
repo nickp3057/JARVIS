@@ -5,7 +5,7 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 
-VERSION="1.0"
+VERSION="2.0"
 APP="$HOME/Applications/JARVIS.app"
 
 swift build -c release --product JarvisMac
@@ -18,6 +18,19 @@ rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BIN" "$APP/Contents/MacOS/JARVIS"
 
+# The reactor icon, drawn by the same renderer as the phone's (ios/icon).
+ICONWORK="$(mktemp -d)"
+if swift ../../ios/icon/render_icon.swift "$ICONWORK" >/dev/null 2>&1; then
+  SET="$ICONWORK/JARVIS.iconset"
+  mkdir -p "$SET"
+  for px in 16 32 128 256 512; do
+    sips -z $px $px "$ICONWORK/AppIcon-Mac.png" --out "$SET/icon_${px}x${px}.png" >/dev/null
+    sips -z $((px * 2)) $((px * 2)) "$ICONWORK/AppIcon-Mac.png" --out "$SET/icon_${px}x${px}@2x.png" >/dev/null
+  done
+  iconutil -c icns "$SET" -o "$APP/Contents/Resources/JARVIS.icns"
+fi
+rm -rf "$ICONWORK"
+
 cat > "$APP/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -27,6 +40,7 @@ cat > "$APP/Contents/Info.plist" <<PLIST
   <key>CFBundleDisplayName</key><string>JARVIS</string>
   <key>CFBundleIdentifier</key><string>com.jarvis.mac</string>
   <key>CFBundleExecutable</key><string>JARVIS</string>
+  <key>CFBundleIconFile</key><string>JARVIS</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleShortVersionString</key><string>${VERSION}</string>
   <key>CFBundleVersion</key><string>${VERSION}</string>

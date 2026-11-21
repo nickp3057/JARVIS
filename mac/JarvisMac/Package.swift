@@ -2,7 +2,8 @@
 import PackageDescription
 
 // JARVIS for Mac: a native macOS client of JARVIS Core (app/server.py):
-// chat, home, alerts and Donna. Build and install with ./build.sh.
+// overview, chat, home, media, alerts, skills & fixes, Donna, and a menu bar
+// panel. Build and install with ./build.sh.
 let package = Package(
     name: "JarvisMac",
     platforms: [.macOS(.v15)],
