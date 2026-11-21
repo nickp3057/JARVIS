@@ -122,7 +122,7 @@ class MonitorSwitchTests(unittest.TestCase):
             self.rt.start_monitors()
             self.rt.start_monitors()  # a second call starts nothing twice
         self.assertEqual(sorted(self.started), ["_alert_recheck_loop", "_home_monitor_entry", "_light_sync_loop", "_wake_monitor_loop",
-                                                "_watch_monitor_loop"])
+                                                "_watch_monitor_loop", "_watchdog_loop"])
 
     def test_configured_integrations_get_their_monitors(self) -> None:
         patch("integrations.google_calendar.is_configured", return_value=True).start()
@@ -137,7 +137,7 @@ class MonitorSwitchTests(unittest.TestCase):
         self.assertEqual(sorted(self.started), ["_alert_recheck_loop", "_calendar_monitor_loop", "_deadman_loop",
                                                 "_download_monitor_loop", "_email_triage_loop",
                                                 "_nas_host_monitor_loop", "_temp_4k_monitor_loop",
-                                                "_wake_monitor_loop"])
+                                                "_wake_monitor_loop", "_watchdog_loop"])
 
     def test_monitor_switch_words(self) -> None:
         for value, on in (("true", True), ("ON", True), ("1", True), ("false", False), ("off", False), ("", False)):

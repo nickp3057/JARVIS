@@ -47,12 +47,31 @@ async def lifespan(_: FastAPI):
         await asyncio.to_thread(runtime)
     if room_voice.enabled():  # "Hey JARVIS" on the Optiplex's mic, same runtime as the apps
         room_voice.start(await asyncio.to_thread(runtime))
+    # Under systemd with WatchdogSec (deploy/surface-setup.sh): ping only while
+    # our own /health answers, so a wedged Core gets restarted. Inert elsewhere.
+    from brain.watchdog import SystemdWatchdog
+    systemd_watchdog = SystemdWatchdog(_self_health)
+    systemd_watchdog.start()
     try:
         yield
     finally:
+        systemd_watchdog.stop()
         room_voice.stop()
         if _runtime is not None:
             await asyncio.to_thread(_runtime.stop_monitors)
+
+
+def _self_health() -> bool:
+    """Core asking itself over loopback: does /health answer within 10 s?"""
+    import requests
+    port = int(os.getenv("JARVIS_SERVER_PORT", "8000"))
+    token = os.getenv("JARVIS_API_TOKEN", "")
+    try:
+        response = requests.get(f"http://127.0.0.1:{port}/health", timeout=10,
+                                headers={"Authorization": f"Bearer {token}"})
+    except requests.RequestException:
+        return False
+    return response.status_code == 200
 
 
 app = FastAPI(title="JARVIS Core", version="1.0", lifespan=lifespan)

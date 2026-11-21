@@ -362,6 +362,7 @@ runtime knows, the more JARVIS feels like one mind instead of several scripts.
 
 ## Runtime Monitor Settings
 
+- Watchdog (`brain/watchdog.py`): monitors start via `JarvisRuntime._spawn` so `_watchdog_loop` can restart dead ones and report frozen ones; new monitors must use `_spawn`, not a bare `threading.Thread`. `MONITOR_WATCHDOG_*` / `MONITOR_RESTART_MAX` / `MONITOR_HANG_S`. The systemd watchdog pings from the server lifespan while `/health` answers.
 - Autopilot (`brain/auto_heal.py`): rides the arr monitor's poll
   (`_arr_autopilot`) and the download monitor's stall staging; `AUTO_REPAIR_*`
   settings in JARVIS.md. Alert re-check (`_alert_recheck_loop`): every

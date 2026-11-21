@@ -1,5 +1,6 @@
 #!/bin/sh
 # One time, on the Surface:  sudo sh ~/jarvis/deploy/surface-setup.sh
+# Also turns on systemd's watchdog for jarvis-api (a hung Core is restarted).
 # Lets user nick restart/stop/start the jarvis-api service (and read its
 # status) without a password, so deploy/surface.sh (from the Mac) and
 # Claude Code sessions can deploy Core. Nothing else gets passwordless sudo.
@@ -24,3 +25,15 @@ echo 0 > /sys/module/snd_hda_intel/parameters/power_save 2>/dev/null || true
 echo N > /sys/module/snd_hda_intel/parameters/power_save_controller 2>/dev/null || true
 echo "✓ sound chip power saving off (now and after reboots)"
 echo "✓ $RULE installed: sudo -n systemctl restart jarvis-api now works for nick"
+# Watchdog (brain/watchdog.py): Core pings systemd while its /health answers;
+# no ping for 3 minutes means it's wedged, and systemd restarts it.
+DROPIN=/etc/systemd/system/jarvis-api.service.d
+mkdir -p "$DROPIN"
+cat > "$DROPIN/watchdog.conf" <<'UNIT'
+[Service]
+WatchdogSec=180
+NotifyAccess=main
+Restart=on-failure
+UNIT
+$SYSTEMCTL daemon-reload
+echo "✓ systemd watchdog on for jarvis-api (takes effect at the next restart)"

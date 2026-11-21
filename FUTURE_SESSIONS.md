@@ -161,6 +161,7 @@ See JARVIS.md Recently Shipped. Unit-tested only; nothing ran against the real N
 - [ ] Donna: send, switch apps, come back: no Face ID. Leave and reopen: Face ID. End session closes at once and the next visit starts fresh.
 - [ ] Decide: should HA get an automatic trigger (e.g. many watched devices unavailable at once)? Today `restart_home_assistant` is on the autopilot list but nothing triggers it automatically (an unreachable HA can't take a restart call anyway).
 - [ ] Mac app Alerts (built, not installed by me): Fix it / Copy / Dismiss and the Autopilot toggle work against the real Core (`mac/JarvisMac/build.sh --open`).
+- [ ] Watchdog: run `sudo sh ~/jarvis/deploy/surface-setup.sh` on the Surface once, then `deploy/surface.sh`; `systemctl show jarvis-api -p WatchdogUSec` says 3min and the log has "systemd watchdog on". Watch the inbox for false "Monitor looks stuck" notes (the HA websocket monitor blocks on recv by design; `_IDLE_MARKERS` should cover it).
 - [ ] Tap a JARVIS alert push (6.98): the alert's sheet opens; an info push (e.g. "Fixed it myself") just opens the app.
 - [ ] Ask JARVIS for something he can't do ("close my blinds"): he says so plainly, it lands on Control → Skill requests, asking again bumps the count. Watch he doesn't file things a tool can do.
 
@@ -320,7 +321,7 @@ conversation. Speak for urgent things, queue the rest for the next natural
 pause or the morning briefing. Log every decision so the policy can be
 tuned. This is the Presence layer's missing piece.
 
-### 8. Watchdog and self-restart
+### 8. Watchdog and self-restart *(shipped 2026-11-20: brain/watchdog.py)*
 The NAS integration now includes runtime-owned arr health polling, restricted
 confirmed recovery, and optional Healthchecks heartbeats that stop if its arr
 monitor stalls. See `PROGRESS.md` for activation status. Process supervision

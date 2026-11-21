@@ -261,11 +261,11 @@ class JarvisRuntime:
         """Start background monitors that feed observations into the inbox."""
         if _monitor_on("HOME_MONITOR_ENABLED") and not self._home_monitor_started:
             self._home_monitor_started = True
-            threading.Thread(target=self._home_monitor_entry, daemon=True).start()
+            self._spawn(self._home_monitor_entry)
 
         if _monitor_on("WEATHER_MONITOR_ENABLED") and not self._weather_monitor_started:
             self._weather_monitor_started = True
-            threading.Thread(target=self._weather_monitor_loop, daemon=True).start()
+            self._spawn(self._weather_monitor_loop)
 
         if _monitor_on("CALENDAR_MONITOR_ENABLED") and not self._calendar_monitor_started:
             try:
@@ -275,7 +275,7 @@ class JarvisRuntime:
                 configured = False
             if configured:
                 self._calendar_monitor_started = True
-                threading.Thread(target=self._calendar_monitor_loop, daemon=True).start()
+                self._spawn(self._calendar_monitor_loop)
 
         if _monitor_on("QBITTORRENT_MONITOR_ENABLED") and not self._download_monitor_started:
             try:
@@ -285,57 +285,108 @@ class JarvisRuntime:
                 configured = False
             if configured:
                 self._download_monitor_started = True
-                threading.Thread(target=self._download_monitor_loop, daemon=True).start()
+                self._spawn(self._download_monitor_loop)
 
         if _watched_devices() and not self._device_watch_started:
             self._device_watch_started = True
-            threading.Thread(target=self._device_watch_loop, daemon=True).start()
+            self._spawn(self._device_watch_loop)
 
         if not self._wake_monitor_started:
             self._wake_monitor_started = True
-            threading.Thread(target=self._wake_monitor_loop, daemon=True).start()
+            self._spawn(self._wake_monitor_loop)
 
         from integrations import schwab
         if schwab.configured() and not self._schwab_monitor_started:
             self._schwab_monitor_started = True
-            threading.Thread(target=self._schwab_monitor_loop, daemon=True).start()
+            self._spawn(self._schwab_monitor_loop)
             threading.Thread(target=schwab.stream_forever, args=(self._stop_monitors,), daemon=True).start()
-            threading.Thread(target=self._investing_loop, daemon=True, name="investing").start()
+            self._spawn(self._investing_loop)
 
         if _monitor_on("PRICE_WATCH_MONITOR_ENABLED") and not self._price_monitor_started:
             self._price_monitor_started = True
-            threading.Thread(target=self._price_monitor_loop, daemon=True).start()
+            self._spawn(self._price_monitor_loop)
 
         if _monitor_on("WATCH_MONITOR_ENABLED") and not getattr(self, "_watch_monitor_started", False):
             self._watch_monitor_started = True
-            threading.Thread(target=self._watch_monitor_loop, daemon=True).start()
+            self._spawn(self._watch_monitor_loop)
 
         from integrations import gmail
         if _monitor_on("EMAIL_TRIAGE_ENABLED") and gmail.is_configured() and not self._email_monitor_started:
             self._email_monitor_started = True
-            threading.Thread(target=self._email_triage_loop, daemon=True).start()
+            self._spawn(self._email_triage_loop)
 
         from integrations import nas_stack
         if nas_stack.enabled("ARR_STACK_MONITOR_ENABLED") and self._arr_monitor_thread is None:
-            self._arr_monitor_thread = threading.Thread(target=self._arr_stack_monitor_loop, daemon=True)
-            self._arr_monitor_thread.start()
+            self._spawn(self._arr_stack_monitor_loop, attr="_arr_monitor_thread")
         from integrations import nas_host
         if nas_host.monitor_enabled() and not self._nas_host_started:
             self._nas_host_started = True
-            threading.Thread(target=self._nas_host_monitor_loop, daemon=True).start()
+            self._spawn(self._nas_host_monitor_loop)
         from integrations import temp_4k
         if _monitor_on("TEMP_4K_MONITOR_ENABLED") and temp_4k.configured() and not getattr(self, "_temp_4k_started", False):
             self._temp_4k_started = True
-            threading.Thread(target=self._temp_4k_monitor_loop, daemon=True).start()
+            self._spawn(self._temp_4k_monitor_loop)
         if _monitor_on("LIGHT_SYNC") and not getattr(self, "_light_sync_started", False):
             self._light_sync_started = True
-            threading.Thread(target=self._light_sync_loop, daemon=True).start()
+            self._spawn(self._light_sync_loop)
         if _monitor_on("ALERT_RECHECK_ENABLED") and not getattr(self, "_alert_recheck_started", False):
             self._alert_recheck_started = True
-            threading.Thread(target=self._alert_recheck_loop, daemon=True).start()
+            self._spawn(self._alert_recheck_loop)
         if os.getenv("JARVIS_HEALTHCHECKS_URL", "").strip() and not self._deadman_started:
             self._deadman_started = True
-            threading.Thread(target=self._deadman_loop, daemon=True).start()
+            self._spawn(self._deadman_loop)
+        if _monitor_on("MONITOR_WATCHDOG_ENABLED") and not getattr(self, "_watchdog_started", False):
+            self._watchdog_started = True
+            threading.Thread(target=self._watchdog_loop, daemon=True).start()
+
+    def _spawn(self, target, *, attr: str | None = None, name: str | None = None):
+        """Start a monitor thread the watchdog looks after (brain/watchdog.py)."""
+        from brain.watchdog import Supervised
+        thread = threading.Thread(target=target, daemon=True)
+        thread.start()
+        if not hasattr(self, "_supervised"):
+            self._supervised = {}
+        self._supervised[name or getattr(target, "__name__", str(target)).strip("_")] = Supervised(target, thread, attr)
+        if attr:
+            setattr(self, attr, thread)
+        return thread
+
+    def _watchdog_loop(self) -> None:
+        """Once a minute: restart monitors that died, report ones that froze.
+        ``MONITOR_WATCHDOG_ENABLED=false`` keeps it from starting."""
+        import sys
+        from brain import watchdog
+        watch = watchdog.MonitorWatch()
+        while not self._stop_monitors.wait(_env_float("MONITOR_WATCHDOG_INTERVAL_S", 60.0, 10.0)):
+            try:
+                supervised = dict(getattr(self, "_supervised", {}))
+                for action in watch.check(supervised, sys._current_frames()):
+                    self._watchdog_act(action, supervised.get(action.name))
+            except Exception:  # noqa: BLE001 - the watchdog must outlive what it watches
+                log.exception("Watchdog pass failed")
+
+    def _watchdog_act(self, action, entry) -> None:
+        label = action.name.replace("_", " ").removesuffix(" loop").removesuffix(" entry")
+        health = f"monitor:{action.name}"
+        if action.kind == "restart" and entry is not None:
+            log.warning("Watchdog: %s died; restarting it", action.name)
+            self._spawn(entry.target, attr=entry.attr, name=action.name)
+            tool_health.record(health, ok=False, error="thread died; restarted", elapsed_ms=0)
+            self.record_event(kind="system", source="watchdog", title="Monitor restarted",
+                              detail=f"The {label} had stopped; I started it again.")
+        elif action.kind == "gave_up":
+            tool_health.record(health, ok=False, error=f"thread keeps dying ({action.detail}); not restarted", elapsed_ms=0)
+            self.raise_alert("monitor_down", f"{label.capitalize()} keeps stopping",
+                             f"The {label} {action.detail}, so I've stopped restarting it. "
+                             "A restart of Core (or a look at the logs) is the next step.",
+                             source="watchdog", severity="warning", dedupe_key=health, cooldown_s=3600)
+        elif action.kind == "stuck":
+            log.warning("Watchdog: %s looks stuck at %s", action.name, action.detail)
+            tool_health.record(health, ok=False, error=f"stuck at {action.detail}", elapsed_ms=0)
+            self.record_event(kind="system", source="watchdog", title="Monitor looks stuck",
+                              detail=f"The {label} hasn't moved: {action.detail}.")
+        elif action.kind == "unstuck":
+            tool_health.clear(health)
 
     def _in_startup_grace(self) -> bool:
         """True during the first ``STARTUP_NETWORK_GRACE_S`` (120) seconds.

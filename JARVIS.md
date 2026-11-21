@@ -48,6 +48,7 @@ Pearson-Stark-Jarvis/
 │   ├── automation_workshop.py Staged HA automation drafts, diffs, apply + rollback
 │   ├── clipboard_tool.py    Read/write clipboard via PowerShell Get/Set-Clipboard
 │   ├── alert_checks.py      Needs attention Refresh: re-checks each alert live, hides the fixed ones
+│   ├── watchdog.py          Restarts monitor threads that die, reports ones that freeze; systemd watchdog pings while /health answers
 │   ├── skill_requests.py    Wishes JARVIS had no tool for (request_skill): counted, most-asked first, shown in the app
 │   ├── auto_heal.py         Autopilot: monitors run the basic stack fixes themselves (arr recovery, indexers, stuck downloads); never Plex; cooldowns + daily cap
 │   ├── debug_reports.py     Durable user-submitted companion failure reports
@@ -1176,6 +1177,10 @@ ROOM_VOLUME_MAPPED=1        # levels use amixer -M (loudness-matched: 8 = about 
 TV_HDMI_INPUTS=              # HDMI 1..N input ids for the remote's Input menu (blank = the TCL's HW15,HW16,HW17)
 LIGHT_RAINBOWS=             # light=select:option (or light=scene.x) pairs for the Rainbow button (defaults to Nick's strip + desk DIY scenes, the lamp's built-in Rainbow scene, and the fan ring's scene.fan_light_rainbow Tap-to-Run)
 ALERT_REPEAT_WINDOW_S=1800  # suppress repeat pushes, retain visible alerts even across restarts (memory/alert_repeats.json); 0 = off
+MONITOR_WATCHDOG_ENABLED=true  # brain/watchdog.py: restart dead monitor threads, report frozen ones
+MONITOR_WATCHDOG_INTERVAL_S=60
+MONITOR_RESTART_MAX=3       # restarts per monitor per hour before it gives up and alerts
+MONITOR_HANG_S=900          # a monitor that hasn't moved this long (not waiting/sleeping) is reported stuck
 ALERT_RECHECK_INTERVAL_S=600  # Needs attention re-checks itself this often (ALERT_RECHECK_ENABLED=false stops it)
 AUTO_REPAIR_ENABLED=true    # autopilot: JARVIS runs the basic stack fixes himself (never Plex); false = everything waits for approval
 AUTO_REPAIR_FIXES=          # comma list; blank = arr_recovery,retest_indexers,switch_indexer_mirror,retry_download,restart_home_assistant (refresh_plex can't be added)
@@ -1396,6 +1401,8 @@ there, so edit files with a `sudo python3` one-shot or vi.
 ---
 
 ## Recently Shipped
+
+- **Watchdog (2026-11-20, Core; companion 6.99 / 341 version bump only).** Every monitor thread starts through `JarvisRuntime._spawn`, which registers it; `_watchdog_loop` (once a minute, `MONITOR_WATCHDOG_ENABLED`) asks `brain/watchdog.py`'s `MonitorWatch` what to do. A monitor that died is restarted (inbox "Monitor restarted", `tool_health` `monitor:<name>`), at most `MONITOR_RESTART_MAX` (3) an hour, then a `monitor_down` warning. One whose innermost frame hasn't moved for `MONITOR_HANG_S` (15 min) while not waiting/sleeping/reading a socket is reported stuck once (inbox + tool health, so it shows in Systems health); stuck threads aren't restarted, since a second copy could double-act. Process level: under systemd with `WatchdogSec` (`deploy/surface-setup.sh` adds the drop-in `jarvis-api.service.d/watchdog.conf`, WatchdogSec=180, NotifyAccess=main), `SystemdWatchdog` in the server lifespan pings `WATCHDOG=1` only while Core's own `/health` answers over loopback, so a wedged Core is restarted by systemd. Crashes were already restarted (`Restart=on-failure`).
 
 - **Tap a push to open the alert, Mac alerts catch up, skill requests (2026-11-20, companion 6.98 / 340, Core, Mac).** Warning/critical pushes carry `alert_id` / `alert_at` in the APNs payload (`notifications.send(..., alert_id=)`, set by `_deliver_alert_to_phone`); tapping one opens `AlertDetailSheet` over any tab (`AlertOpener` in `PushRegistrar.swift`, presented by `RootView`), fetching the alert first if the list hadn't loaded it. The Mac app's Alerts got the repair line, Fix it / Copy / Dismiss and the Autopilot toggle. **Skill requests** (`brain/skill_requests.py`, tools `request_skill` / `list_skill_requests`): when Nick asks for something no tool covers, JARVIS files it instead of improvising and says so; repeats count up; the Control tab's **Skill requests** card lists them, most asked first. First slice of Nick's "create new skills" goal (FUTURE_SESSIONS.md Tier 1 #1).
 
