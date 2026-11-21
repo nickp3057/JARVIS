@@ -301,3 +301,87 @@ def sessions() -> tuple[bool, list[dict[str, Any]] | str]:
                        "machine_id": str(player.get("machineIdentifier") or "")},
         })
     return True, out
+
+
+# --- Movie picker (the iPad's movie mode, GET /api/plex/movies) -------------
+
+_PICKER_SORTS = {"recent": "addedAt:desc", "title": "titleSort", "unwatched": "addedAt:desc", "year": "year:desc"}
+
+
+def _movie_sections() -> tuple[bool, list[str] | str]:
+    ok, payload = _get("/library/sections")
+    if not ok:
+        return False, str(payload)
+    sections = ((payload or {}).get("MediaContainer") or {}).get("Directory") or []
+    return True, [str(s["key"]) for s in sections if s.get("type") == "movie" and s.get("key")]
+
+
+def _picker_card(item: dict[str, Any]) -> dict[str, Any]:
+    duration = int(item.get("duration") or 0)
+    offset = int(item.get("viewOffset") or 0)
+    return {"rating_key": str(item.get("ratingKey") or ""), "title": str(item.get("title") or ""),
+            "year": item.get("year"), "thumb": str(item.get("thumb") or ""),
+            "duration_ms": duration, "view_offset_ms": offset if 0 < offset < duration else 0,
+            "watched": int(item.get("viewCount") or 0) > 0, "added_at": int(item.get("addedAt") or 0),
+            "summary": " ".join(str(item.get("summary") or "").split())[:400],
+            "rating": item.get("audienceRating") or item.get("rating"),
+            "content_rating": str(item.get("contentRating") or "")}
+
+
+def library_movies(query: str = "", sort: str = "recent", limit: int = 300) -> tuple[bool, list[dict[str, Any]] | str]:
+    """Every movie for the picker: poster path, year, resume point. ``query``
+    filters by title (Plex's own substring match); ``sort`` is recent, title,
+    year or unwatched (recent, minus anything watched). Films in more than one
+    library (a 4K copy) appear once, from the first library."""
+    ok, sections = _movie_sections()
+    if not ok:
+        return False, str(sections)
+    params: dict[str, Any] = {"type": 1, "sort": _PICKER_SORTS.get(sort, "addedAt:desc"),
+                              "X-Plex-Container-Start": 0, "X-Plex-Container-Size": max(1, min(limit, 1000))}
+    if query.strip():
+        params["title"] = query.strip()
+    if sort == "unwatched":
+        params["unwatched"] = 1
+    seen: set[tuple[str, Any]] = set()
+    films: list[dict[str, Any]] = []
+    for section in sections:
+        ok, payload = _get(f"/library/sections/{section}/all", params)
+        if not ok:
+            continue
+        for item in ((payload or {}).get("MediaContainer") or {}).get("Metadata") or []:
+            if not isinstance(item, dict) or item.get("type") != "movie":
+                continue
+            card = _picker_card(item)
+            key = (_title_key(card["title"]), card["year"])
+            if not card["rating_key"] or key in seen:
+                continue
+            seen.add(key)
+            films.append(card)
+    if len(sections) > 1:  # merged libraries: restore the requested order
+        if sort == "title":
+            films.sort(key=lambda f: _title_key(f["title"]))
+        elif sort == "year":
+            films.sort(key=lambda f: -(f["year"] or 0))
+        else:
+            films.sort(key=lambda f: -f["added_at"])
+    return True, films[:limit]
+
+
+def poster(path: str, width: int = 300) -> tuple[bool, bytes | str, str]:
+    """A poster image through Plex's transcoder (so the token never leaves
+    Core). Only library artwork paths are allowed."""
+    url, token = _config()
+    if not (url and token):
+        return False, "Plex is not configured.", ""
+    if not path.startswith("/library/metadata/") or ".." in path or "?" in path:
+        return False, "Not a Plex artwork path.", ""
+    width = max(80, min(int(width), 800))
+    try:
+        response = requests.get(f"{url}/photo/:/transcode",
+                                params={"url": path, "width": width, "height": int(width * 1.5), "minSize": 1},
+                                headers={"X-Plex-Token": token}, timeout=_TIMEOUT_SECONDS)
+    except requests.RequestException as exc:
+        return False, f"Plex unreachable: {exc.__class__.__name__}", ""
+    if response.status_code != 200:
+        return False, f"Plex error {response.status_code}.", ""
+    return True, response.content, response.headers.get("Content-Type", "image/jpeg")

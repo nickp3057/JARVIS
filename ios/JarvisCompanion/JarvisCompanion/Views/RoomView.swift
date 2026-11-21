@@ -924,6 +924,8 @@ private struct MovieModeView: View {
     @State private var tick = 0
     /// Calibration's nudge size (ms): 25 to get close, 5 and 1 to finish.
     @State private var calibrationStep = 25
+    /// The Plex poster wall (MoviePickerView).
+    @State private var pickingMovie = false
 
     private var bedroom: HomeEntity? {
         model.entities.value?.first { $0.entityID == "light.bedroom_lights" }
@@ -936,6 +938,15 @@ private struct MovieModeView: View {
                     .font(.headline)
                     .foregroundStyle(JarvisTheme.amber.opacity(0.8))
                 Spacer()
+                Button { pickingMovie = true } label: {
+                    Label("Pick a movie", systemImage: "film.stack")
+                        .font(.subheadline.weight(.semibold))
+                        .padding(.horizontal, 16).padding(.vertical, 10)
+                        .background(Color.white.opacity(0.06), in: .capsule)
+                }
+                .buttonStyle(CockpitButtonStyle())
+                .foregroundStyle(.secondary)
+                .accessibilityHint("Browse Plex and start a film on the TV")
                 // Out of the Movie scene in one tap: the room goes back to
                 // how it was before (Core's snapshot, brain/movie_exit.py).
                 Button { model.exitMovie() } label: {
@@ -1005,6 +1016,7 @@ private struct MovieModeView: View {
         .sensoryFeedback(.impact(weight: .light), trigger: tick)
         .onAppear { model.wantsLightSync = true }
         .onDisappear { model.wantsLightSync = false }
+        .sheet(isPresented: $pickingMovie) { MoviePickerView().environmentObject(settings) }
         // The home stream says when light sync changes; this is the fallback.
         .task {
             while !Task.isCancelled {

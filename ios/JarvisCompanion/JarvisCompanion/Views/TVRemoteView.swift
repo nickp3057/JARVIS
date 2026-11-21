@@ -34,6 +34,7 @@ struct TVRemoteView: View {
     @Environment(\.horizontalSizeClass) private var sizeClass
     @State private var error: String?
     @State private var tick = 0
+    @State private var pickingMovie = false
 
     private var isPad: Bool { sizeClass == .regular }
 
@@ -49,8 +50,15 @@ struct TVRemoteView: View {
             .scrollBounceBehavior(.basedOnSize)
             .background { JarvisBackdrop() }
             .navigationTitle("TV remote").navigationBarTitleDisplayMode(.inline)
-            .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } }
+                ToolbarItem(placement: .topBarLeading) {
+                    Button("Movies", systemImage: "film.stack") { pickingMovie = true }
+                        .accessibilityHint("Browse Plex and start a film on the TV")
+                }
+            }
             .sensoryFeedback(.impact(weight: .light), trigger: tick)
+            .sheet(isPresented: $pickingMovie) { MoviePickerView().environmentObject(settings) }
         }
         .modifier(PageSizedOnPad())
     }

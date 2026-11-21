@@ -172,6 +172,7 @@ _COMPANION_CAPABILITIES: dict[str, object] = {
         "alert_fix": True,
         "autopilot": True,
         "skill_requests": True,
+        "movie_picker": True,
     },
 }
 
@@ -709,6 +710,54 @@ def autopilot_set(request: AutopilotRequest, _: None = Depends(authorize)) -> di
     from brain import settings as settings_mod
     settings_mod.update_setting("AUTO_REPAIR_ENABLED", "true" if request.enabled else "false")
     return autopilot()
+
+
+# --- Movie picker (iPad movie mode) ------------------------------------------
+
+
+@app.get("/api/plex/movies")
+def plex_movies(query: str = "", sort: str = "recent", _: None = Depends(authorize)) -> dict[str, object]:
+    """Plex films for the picker: title, year, poster path, resume point."""
+    from integrations import plex
+    if not plex.is_configured():
+        raise HTTPException(status_code=503, detail="Plex is not configured on Core")
+    ok, films = plex.library_movies(query[:100], sort if sort in ("recent", "title", "year", "unwatched") else "recent")
+    if not ok:
+        raise HTTPException(status_code=502, detail=str(films))
+    return {"movies": films}
+
+
+@app.get("/api/plex/poster")
+def plex_poster(path: str, width: int = 300, _: None = Depends(authorize)) -> Response:
+    """A poster through Core (the Plex token stays here). Cached a day on the device."""
+    from integrations import plex
+    ok, body, content_type = plex.poster(path, width)
+    if not ok:
+        raise HTTPException(status_code=404 if "path" in str(body) else 502, detail=str(body))
+    return Response(content=body, media_type=content_type, headers={"Cache-Control": "private, max-age=86400"})
+
+
+class PlexPlayRequest(BaseModel):
+    rating_key: str = Field(pattern=r"^\d{1,12}$")
+    from_start: bool = False
+
+
+@app.post("/api/plex/play")
+def plex_play(request: PlexPlayRequest, _: None = Depends(authorize)) -> dict[str, object]:
+    """Start a film on the room TV's Plex app (resumes unless ``from_start``)."""
+    from integrations import plex, tv_remote
+    found, record = plex.movie(request.rating_key)
+    if not found:
+        raise HTTPException(status_code=404, detail=str(record))
+    if request.from_start:
+        cleared, detail = plex.play_from_start(request.rating_key)
+        if not cleared:
+            raise HTTPException(status_code=502, detail=f"Couldn't reset the resume point: {detail}")
+    sent, detail = tv_remote.play_plex(request.rating_key, plex.server_id())
+    if not sent:
+        raise HTTPException(status_code=502, detail=f"The TV didn't take it: {detail}")
+    title = record["title"] if isinstance(record, dict) else "it"
+    return {"ok": True, "message": f"Starting {title} on the TV."}
 
 
 @app.get("/api/skills/requests")

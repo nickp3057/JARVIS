@@ -111,7 +111,7 @@ Review checklist when home:
 ### Room, scenes and screens
 
 - [ ] **GPS presence for "away"** (asked 2026-11-17): the room goes quiet today when Peace ran and every light is off (`status_hub.room_away`). Use the iPhone's location (HA `person.nick` / companion app zone, or a geofence in JarvisCompanion) as the real away signal, so the room mutes when Nick leaves whatever the scene, and wakes up again when he's home.
-- [ ] **Plex movie picker in iPad movie mode** (asked 2026-10-29): grid of Plex posters with search; a tap starts it on the TV's Plex app (Plex client `playMedia` or HA `media_player.play_media`). Needs Core endpoints for the library and play.
+- [x] **Plex movie picker in iPad movie mode** (asked 2026-10-29; shipped 2026-11-20, companion 6.100): movie mode's **Pick a movie** and the TV remote's **Movies** open `MoviePickerView` (posters through Core, search, Recently added / Unwatched / A–Z, Resume / Start over → the TV's Plex app via the existing `plex://` deep link). Later: TV shows (seasons/episodes), and starting the Movie scene when a film is picked outside movie mode.
 - [ ] Govee effects (Aurora, Candlelight, Starry Sky...) in the light sheet.
 - [ ] Scenes on the iPhone Home Screen / Control Center (widget target).
 - [ ] iPad Room tab: a now-playing / music card.
@@ -162,6 +162,7 @@ See JARVIS.md Recently Shipped. Unit-tested only; nothing ran against the real N
 - [ ] Decide: should HA get an automatic trigger (e.g. many watched devices unavailable at once)? Today `restart_home_assistant` is on the autopilot list but nothing triggers it automatically (an unreachable HA can't take a restart call anyway).
 - [ ] Mac app Alerts (built, not installed by me): Fix it / Copy / Dismiss and the Autopilot toggle work against the real Core (`mac/JarvisMac/build.sh --open`).
 - [ ] Watchdog: run `sudo sh ~/jarvis/deploy/surface-setup.sh` on the Surface once, then `deploy/surface.sh`; `systemctl show jarvis-api -p WatchdogUSec` says 3min and the log has "systemd watchdog on". Watch the inbox for false "Monitor looks stuck" notes (the HA websocket monitor blocks on recv by design; `_IDLE_MARKERS` should cover it).
+- [ ] Movie picker (6.100): never run against the real Plex (the Mac has no PLEX_URL). On the iPad in movie mode: posters load, search and the three sorts work, a 4K duplicate shows once, Resume picks up where Plex left off, Start over starts at 0:00, and the TV switches to Plex if it was on another app.
 - [ ] Tap a JARVIS alert push (6.98): the alert's sheet opens; an info push (e.g. "Fixed it myself") just opens the app.
 - [ ] Ask JARVIS for something he can't do ("close my blinds"): he says so plainly, it lands on Control → Skill requests, asking again bumps the count. Watch he doesn't file things a tool can do.
 

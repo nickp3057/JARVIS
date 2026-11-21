@@ -162,6 +162,31 @@ struct SkillRequest: Decodable, Identifiable, Hashable {
     }
 }
 
+/// One film for the movie picker (`GET /api/plex/movies`).
+struct PlexMovie: Decodable, Identifiable, Hashable {
+    let ratingKey: String
+    let title: String
+    let year: Int?
+    let thumb: String
+    let durationMs: Int
+    let viewOffsetMs: Int
+    let watched: Bool
+    let summary: String
+    var contentRating: String? = nil
+
+    var id: String { ratingKey }
+    var progress: Double { durationMs > 0 ? Double(viewOffsetMs) / Double(durationMs) : 0 }
+    var resumable: Bool { viewOffsetMs > 60_000 }
+
+    enum CodingKeys: String, CodingKey {
+        case title, year, thumb, watched, summary
+        case ratingKey = "rating_key"
+        case durationMs = "duration_ms"
+        case viewOffsetMs = "view_offset_ms"
+        case contentRating = "content_rating"
+    }
+}
+
 /// `GET/POST /api/autopilot`: JARVIS fixing the basic stuff himself.
 struct AutopilotStatus: Decodable, Hashable {
     let enabled: Bool
@@ -1164,6 +1189,44 @@ struct JarvisAPIClient {
 
     func clearShoppingPhoto(id: Int) async throws -> ShoppingItem {
         try await sendNoBody(ShoppingEnvelope.self, path: "api/shopping/items/\(id)/photo", method: "DELETE").item
+    }
+
+    // MARK: - Movie picker (Plex through Core)
+
+    func plexMovies(query: String = "", sort: String = "recent") async throws -> [PlexMovie] {
+        struct Envelope: Decodable { let movies: [PlexMovie] }
+        var items = [URLQueryItem(name: "sort", value: sort)]
+        if !query.isEmpty { items.append(URLQueryItem(name: "query", value: query)) }
+        return try await getJSON(Envelope.self, path: "api/plex/movies", query: items).movies
+    }
+
+    /// A poster through Core (the Plex token never reaches the device).
+    func plexPoster(path: String, width: Int) async throws -> Data? {
+        var r = request(path: "api/plex/poster")
+        if let url = r.url, var components = URLComponents(url: url, resolvingAgainstBaseURL: false) {
+            components.queryItems = [URLQueryItem(name: "path", value: path), URLQueryItem(name: "width", value: String(width))]
+            r.url = components.url
+        }
+        r.setValue("image/jpeg, image/png", forHTTPHeaderField: "Accept")
+        r.cachePolicy = .returnCacheDataElseLoad
+        let (data, response) = try await session.data(for: r)
+        if (response as? HTTPURLResponse)?.statusCode == 404 { return nil }
+        _ = try validate(response, data: data)
+        return data
+    }
+
+    func playOnTV(_ movie: PlexMovie, fromStart: Bool) async throws -> String {
+        struct Body: Encodable {
+            let ratingKey: String
+            let fromStart: Bool
+            enum CodingKeys: String, CodingKey {
+                case ratingKey = "rating_key"
+                case fromStart = "from_start"
+            }
+        }
+        struct Result: Decodable { let message: String }
+        return try await postJSON(Result.self, path: "api/plex/play",
+                                  body: Body(ratingKey: movie.ratingKey, fromStart: fromStart)).message
     }
 
     /// A product photo; nil when it has none (404). `version` busts caches.
