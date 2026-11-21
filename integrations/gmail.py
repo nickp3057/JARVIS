@@ -226,9 +226,29 @@ def _modify(message_id: str, add: list[str], remove: list[str]) -> bool:
     return True
 
 
-def file_to_label(message_id: str, label_id: str) -> bool:
-    """Move into a folder: add the label, take it out of the inbox, mark it read."""
-    return _modify(message_id, [label_id], ["INBOX", "UNREAD"])
+def file_to_label(message_id: str, label_id: str, mark_read: bool = True) -> bool:
+    """Move into a folder: add the label, take it out of the inbox, mark it read (unless told not to)."""
+    return _modify(message_id, [label_id], ["INBOX", "UNREAD"] if mark_read else ["INBOX"])
+
+
+def create_label(name: str) -> str | None:
+    """Create a user label (``Parent/Child`` nests it). Returns its id."""
+    svc = _get_service()
+    if svc is None:
+        return None
+    resp = _call(svc.users().labels().create(userId="me", body={
+        "name": name, "labelListVisibility": "labelShow", "messageListVisibility": "show"}))
+    return str(resp.get("id", "")) or None
+
+
+def set_label_color(label_id: str, background: str, text: str) -> bool:
+    """Colour a label. Gmail only accepts its fixed palette (see brain.email_rules.COLORS)."""
+    svc = _get_service()
+    if svc is None:
+        return False
+    _call(svc.users().labels().patch(userId="me", id=label_id, body={
+        "color": {"backgroundColor": background, "textColor": text}}))
+    return True
 
 
 def trash(message_id: str) -> bool:

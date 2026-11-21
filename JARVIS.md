@@ -75,6 +75,7 @@ Pearson-Stark-Jarvis/
 │   ├── price_watch.py       Guarded public-page price checks + durable targets
 │   ├── subagents.py         Background subagents: focused tool loop + one-at-a-time jobs in the task lane
 │   ├── email_triage.py      Email subagent: trash noise, file missionary mail, keep the rest, unsubscribe list
+│   ├── email_rules.py       Email filing rules (sender/subject -> folder, label colour); applied by the sorter before the model
 │   ├── watches.py           "Let me know when X happens": durable web watches checked by the watcher subagent
 │   ├── investing.py         Investing subagents: target weights, daily advisor, crash watch, paper playground
 │   ├── trading.py           Real Schwab orders: sizes them, enforces caps/cash-only/stocks+ETFs, waits for Nick's Approve
@@ -537,6 +538,21 @@ senders are never trashed; a sender filed to the same folder twice is filed
 without asking the model again. Senders trashed `EMAIL_UNSUB_THRESHOLD` times
 in `EMAIL_UNSUB_WINDOW_DAYS` go on the unsubscribe list (vault note
 `Jarvis Memory/Email Unsubscribe List.md`). All tools are locked to Nick's voice.
+
+**Filing rules** (`brain/email_rules.py`, `memory/email_rules.json`): "Amazon
+shipping/delivered/return mail goes to Kinda Important/Amazon, red". Each pass
+applies the rules first, without the model, to inbox mail in the lookback,
+including mail an earlier pass kept; a missing folder is created, the label is
+coloured (Gmail colours labels, not single messages), and filed mail is left
+unread unless the rule says otherwise. Subject words match at a word start
+("return" catches "Returned"); sender terms are domains (`amazon.com` covers
+subdomains, not lookalikes), mailboxes (`shipment-tracking@`) or name
+fragments. Rule folders, and Nick's standing orders that mention email, are
+also given to the model, so it can file variants the words missed (that never
+teaches the "same sender twice" shortcut). Setup without a conversation:
+`python -m brain.email_rules add "Kinda Important/Amazon" --from amazon.com --subject shipped delivered return --color red`.
+- `add_email_rule(folder, senders?, subjects?, color?, mark_read?, days?)` — add or replace a rule, then sweep the last 30 days with it
+- `list_email_rules` / `remove_email_rule(rule)` — the rules; remove by id or folder
 - `sort_inbox(days?)` — start a sorting pass now in the background (announces when done)
 - `email_triage_report(hours?)` — what was kept, filed and trashed
 - `email_unsubscribe_list` / `email_unsubscribed(sender)` — the list, and striking a sender off it
@@ -1296,6 +1312,7 @@ EMAIL_TRIAGE_LOOKBACK_DAYS=3 # how far back an automatic pass looks
 EMAIL_TRIAGE_MAX_PER_PASS=60 # messages per automatic pass (sort_inbox(days>7) allows 500)
 EMAIL_TRIAGE_BATCH=25       # messages per subagent run
 EMAIL_TRIAGE_MAX_ROUNDS=8   # tool-loop rounds per batch
+EMAIL_RULE_MAX_PER_PASS=100 # inbox messages each filing rule checks per pass
 EMAIL_MISSIONARY_PARENT=Mission Emails # sub-labels of this label are missionary folders
 EMAIL_MISSIONARY_LABELS=    # extra comma-separated label names that are missionary folders
 EMAIL_NEVER_TRASH=          # comma-separated addresses or domains never to trash

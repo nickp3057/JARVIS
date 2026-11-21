@@ -346,7 +346,9 @@ the monitor. Pair with the health dashboard so restarts are visible.
   sorted 24 mails cleanly), and ideally runs a day with
   `EMAIL_TRIAGE_DRY_RUN=true`. Then: kept-mail summary in the morning
   briefing; "what did <person> say" / draft a reply by voice (send behind the
-  confirm gate); a weekly "inbox cleanup" routine.
+  confirm gate); a weekly "inbox cleanup" routine. Filing rules shipped
+  2026-11-20 (`add_email_rule`, 6.102): next, a Rules card on the companion's
+  Control tab, and rules that trash or star instead of only filing.
 - **More subagents on `brain/subagents.py`**: research (web search to a vault
   note), shopping (price_watch + comparison), scheduled routines Nick sets by
   voice ("every Sunday, clean my inbox and tell me what's due"). Each gets

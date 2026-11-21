@@ -64,6 +64,7 @@ LOCKED_TOOLS = frozenset({
     "voice_id",
     # Nick's email: reading what was sorted, trashing, restoring
     "sort_inbox", "email_triage_report", "email_unsubscribe_list", "email_unsubscribed", "restore_email",
+    "add_email_rule", "list_email_rules", "remove_email_rule",
     # Nick's money: holdings, targets, approving trades
     "portfolio_summary", "investing_status", "investing_run", "set_portfolio_targets", "decide_investment", "record_holding",
     "place_trade",

@@ -1095,6 +1095,30 @@ def _tool_email_unsubscribed(args: dict[str, Any]) -> str:
     return email_triage.mark_unsubscribed(str(args.get("sender", "")))
 
 
+def _tool_add_email_rule(args: dict[str, Any]) -> str:
+    from brain import email_rules, email_triage
+    rule, message = email_rules.add_rule(args.get("folder"), args.get("senders"), args.get("subjects"),
+                                         args.get("color") or "", bool(args.get("mark_read", False)))
+    if rule is None:
+        return message
+    if args.get("sweep", True) is False:
+        return message + " It applies from the next sorting pass."
+    days = max(1, min(365, int(args.get("days") or 30)))
+    if email_triage.start_triage(days, announce=True):
+        return message + f" Sweeping the last {days} days of inbox mail with it now."
+    return message + " A sort is already running; the rule applies from the next pass."
+
+
+def _tool_list_email_rules(_: dict[str, Any]) -> str:
+    from brain import email_rules
+    return email_rules.list_rules()
+
+
+def _tool_remove_email_rule(args: dict[str, Any]) -> str:
+    from brain import email_rules
+    return email_rules.remove_rule(args.get("rule", ""))
+
+
 def _tool_restore_email(args: dict[str, Any]) -> str:
     from brain import email_triage
     return email_triage.restore(str(args.get("query", "")), float(args.get("days") or 30))
@@ -2054,7 +2078,8 @@ _CUSTOM_TOOLS: list[dict[str, Any]] = [
             "from now on ('stop opening with certainly', 'always give temperatures "
             "in Celsius'). It is injected into every future prompt until removed. "
             "Write it as one short imperative sentence. Use this whenever Nick "
-            "corrects your behaviour, so the change sticks."
+            "corrects your behaviour, so the change sticks. Not for where email "
+            "gets filed: that's add_email_rule, which the sorter actually applies."
         ),
         "input_schema": {
             "type": "object",
@@ -2796,9 +2821,9 @@ _CUSTOM_TOOLS: list[dict[str, Any]] = [
     {
         "name": "sort_inbox",
         "description": (
-            "Start the email-sorting subagent in the background: trashes annoying mail, files "
-            "missionary letters into each missionary's Gmail folder, leaves anything important in "
-            "the inbox. It already runs on its own every 15 minutes; use this when Nick asks to "
+            "Start the email-sorting subagent in the background: applies Nick's email filing rules, "
+            "trashes annoying mail, files missionary letters into each missionary's Gmail folder, "
+            "leaves anything important in the inbox. It already runs on its own every 15 minutes; use this when Nick asks to "
             "sort or clean his email now. 'days' widens the sweep (e.g. 30 for the last month)."
         ),
         "input_schema": {
@@ -2827,6 +2852,46 @@ _CUSTOM_TOOLS: list[dict[str, Any]] = [
             "type": "object",
             "properties": {"sender": {"type": "string", "description": "Email address or sender name."}},
             "required": ["sender"],
+        },
+    },
+    {
+        "name": "add_email_rule",
+        "description": (
+            "Teach the email sorter where a kind of mail goes: 'Amazon shipping and delivery emails go "
+            "in my Amazon folder and make them red'. Use THIS, not a standing order, whenever Nick wants "
+            "mail filed into a folder or coloured; the sorter applies rules on every pass (mail it "
+            "already kept included), creates the folder if missing, and sweeps the last 30 days now. "
+            "Gmail colours labels, not single emails, so a colour applies to the folder's label. "
+            "Pick sender fragments (domains like amazon.com, or mailboxes like shipment-tracking@) and "
+            "subject words generous enough to catch variants (shipped, delivered, delivery, arriving, "
+            "return, refund); subject words match at a word start, so 'return' covers 'Returned'. "
+            "Same folder and senders again replaces the old rule."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "folder": {"type": "string", "description": "Gmail folder/label; nested with '/', e.g. 'Kinda Important/Amazon'. Just 'Amazon' finds an existing nested one."},
+                "senders": {"type": "array", "items": {"type": "string"}, "description": "Sender domains, addresses or name fragments."},
+                "subjects": {"type": "array", "items": {"type": "string"}, "description": "Subject words; any one must appear. Omit to file everything from the senders."},
+                "color": {"type": "string", "enum": ["red", "orange", "yellow", "green", "blue", "purple", "pink", "gray"]},
+                "mark_read": {"type": "boolean", "description": "Mark filed mail read. Default false (left unread)."},
+                "days": {"type": "integer", "minimum": 1, "maximum": 365, "description": "How far back the immediate sweep goes (default 30)."},
+            },
+            "required": ["folder"],
+        },
+    },
+    {
+        "name": "list_email_rules",
+        "description": "The email sorter's filing rules (which mail goes to which folder, and label colours).",
+        "input_schema": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "remove_email_rule",
+        "description": "Delete an email filing rule by id or folder name. Mail already filed stays put.",
+        "input_schema": {
+            "type": "object",
+            "properties": {"rule": {"type": "string"}},
+            "required": ["rule"],
         },
     },
     {
@@ -3361,6 +3426,9 @@ _DISPATCH: dict[str, Callable[[dict[str, Any]], str]] = {
     "email_unsubscribe_list": _tool_email_unsubscribe_list,
     "email_unsubscribed": _tool_email_unsubscribed,
     "restore_email": _tool_restore_email,
+    "add_email_rule": _tool_add_email_rule,
+    "list_email_rules": _tool_list_email_rules,
+    "remove_email_rule": _tool_remove_email_rule,
     "background_agents": _tool_background_agents,
     "add_to_shopping_list": _tool_add_to_shopping_list,
     "shopping_list": _tool_shopping_list,
