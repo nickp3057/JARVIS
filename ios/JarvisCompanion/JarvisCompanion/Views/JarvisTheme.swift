@@ -210,15 +210,25 @@ enum JarvisTheme {
 /// A quiet gradient field shared by every screen. It keeps the app related to
 /// the desktop cockpit without competing with the text.
 struct JarvisBackdrop: View {
+    /// Lifts the blacks a little (0 = as designed; the door iPad's Room uses
+    /// 0.1, Nick 2026-11-20: "bring the black down by like 10%").
+    var lift: Double = 0
     // Observed so flipping the theme or the experiment switch redraws at once.
     @AppStorage(JarvisPalette.storageKey) private var palette = JarvisPalette.arc.rawValue
     @AppStorage(Experiment.plasma.storageKey) private var plasmaOn = Experiment.plasma.defaultOn
 
     var body: some View {
-        if palette == JarvisPalette.experimenting.rawValue && plasmaOn {
-            PlasmaBackdrop()
-        } else {
-            classic
+        Group {
+            if palette == JarvisPalette.experimenting.rawValue && plasmaOn {
+                PlasmaBackdrop(lift: lift)
+            } else {
+                classic
+            }
+        }
+        .overlay {
+            if lift > 0 {
+                Color.white.opacity(lift * 0.5).blendMode(.screen).ignoresSafeArea().allowsHitTesting(false)
+            }
         }
     }
 

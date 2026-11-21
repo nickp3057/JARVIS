@@ -96,6 +96,8 @@ enum PlasmaAnchor {
 /// passing colour thins and a soft dark pool holds instead, so full red and
 /// full blue can't stack there and wash him out.
 struct PlasmaBackdrop: View {
+    /// Fraction to thin the dark pool under JARVIS by (`JarvisBackdrop.lift`).
+    var lift: Double = 0
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.colorScheme) private var scheme
     /// With Liquid glass on the frost moves to the cards: the backdrop goes clear and vivid.
@@ -182,8 +184,8 @@ struct PlasmaBackdrop: View {
                         let squash = 1.18 + 0.08 * sin(2 * .pi * t / 61)
                         pool.scaleBy(x: squash, y: 1 / squash)
                         pool.fill(Path(ellipseIn: CGRect(x: -r, y: -r, width: r * 2, height: r * 2)), with: .radialGradient(
-                            .init(colors: [JarvisTheme.backgroundDeep.opacity(dark ? 0.86 : 0.45),
-                                           JarvisTheme.backgroundDeep.opacity(dark ? 0.58 : 0.28), .clear]),
+                            .init(colors: [JarvisTheme.backgroundDeep.opacity((dark ? 0.86 : 0.45) * (1 - lift)),
+                                           JarvisTheme.backgroundDeep.opacity((dark ? 0.58 : 0.28) * (1 - lift)), .clear]),
                             center: .zero, startRadius: 0, endRadius: r))
                     }
                     canvas.drawLayer { layer in
