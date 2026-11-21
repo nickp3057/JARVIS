@@ -307,10 +307,23 @@ def compose_bodies_with_model(client: Any, briefs: list[dict[str, Any]], cfg: di
     for block in getattr(response, "content", []) or []:
         if getattr(block, "type", None) == "tool_use":
             raw = getattr(block, "input", None) or {}
-            bodies = [str(b).strip() for b in (raw.get("bodies") or [])]
+            found = raw.get("bodies") or []
+            if isinstance(found, str):
+                # Models sometimes hand the array back JSON-encoded as one
+                # string; iterating it gave one "body" per character.
+                try:
+                    found = json.loads(found)
+                except ValueError:
+                    found = [found]
+            if not isinstance(found, list):
+                found = [found]
+            bodies = [str(b).strip() for b in found]
             break
     if len(bodies) != len(briefs) or any(not b or len(b) > 400 for b in bodies):
-        raise ValueError("model returned an unusable brief set")
+        raise ValueError(
+            f"model returned an unusable brief set ({len(bodies)} bodies for {len(briefs)} briefs, "
+            f"longest {max((len(b) for b in bodies), default=0)} chars, "
+            f"stop {getattr(response, 'stop_reason', '?')})")
     return bodies
 
 

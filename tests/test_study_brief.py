@@ -1,5 +1,6 @@
 """Daily study brief: settings, planning, composition, and the companion endpoint."""
 
+import json
 import os
 import unittest
 from datetime import datetime, timedelta
@@ -212,6 +213,13 @@ class CompositionTests(unittest.TestCase):
         payload = study_brief.compose(EVENTS, now=NOW, client=_FakeClient(fail=True))
         self.assertEqual(payload["composed_by"], "template")
         self.assertEqual(payload["briefs"][0]["body"], "CS 3550 Quiz 2 is in 2 days.")
+
+    def test_bodies_sent_as_a_json_string_still_count(self):
+        n = len(study_brief.plan_briefs(EVENTS, now=NOW, cfg=study_brief.settings())[:study_brief._MODEL_BRIEFS])
+        bodies = json.dumps([f"Brief {i}, sir." for i in range(n)])
+        payload = study_brief.compose(EVENTS, now=NOW, client=_FakeClient(bodies=bodies))
+        self.assertEqual(payload["composed_by"], "model")
+        self.assertEqual(payload["briefs"][0]["body"], "Brief 0, sir.")
 
     def test_wrong_count_from_model_falls_back(self) -> None:
         payload = study_brief.compose(EVENTS, now=NOW, client=_FakeClient(bodies=["only one"]))
