@@ -96,12 +96,16 @@ final class PushAppDelegate: NSObject, UIApplicationDelegate, UNUserNotification
         let awake = UNNotificationAction(identifier: Self.wakeAwake, title: "I'm up", options: [])
         let snooze = UNNotificationAction(identifier: Self.wakeSnooze, title: "Snooze 9 min", options: [])
         let keep = UNNotificationAction(identifier: Self.wakeKeepLights, title: "I'm awake, leave the lights", options: [])
+        // "You left lights on" (category LEFT_ON): turn them off from the lock screen.
+        let lightsOff = UNNotificationAction(identifier: Self.leftOnOff, title: "Turn them off", options: [])
         UNUserNotificationCenter.current().setNotificationCategories([
-            UNNotificationCategory(identifier: "WAKE_UP", actions: [awake, snooze, keep], intentIdentifiers: [])])
+            UNNotificationCategory(identifier: "WAKE_UP", actions: [awake, snooze, keep], intentIdentifiers: []),
+            UNNotificationCategory(identifier: "LEFT_ON", actions: [lightsOff], intentIdentifiers: [])])
         return true
     }
 
     static let wakeAwake = "WAKE_AWAKE", wakeSnooze = "WAKE_SNOOZE", wakeKeepLights = "WAKE_KEEP_LIGHTS"
+    static let leftOnOff = "LEFT_ON_OFF"
 
     /// A button on the wake-up push: tell JARVIS Core, which tells the TV.
     func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse,
@@ -113,6 +117,13 @@ final class PushAppDelegate: NSObject, UIApplicationDelegate, UNUserNotification
             Task { @MainActor in
                 WakeRinging.shared.detail = content.body
                 WakeRinging.shared.open()
+                completionHandler()
+            }
+            return
+        }
+        if action == Self.leftOnOff {
+            Task { @MainActor in
+                if let client = try? JarvisAPIClient.make(from: AppSettings()) { _ = try? await client.lightsOffLeftOn() }
                 completionHandler()
             }
             return

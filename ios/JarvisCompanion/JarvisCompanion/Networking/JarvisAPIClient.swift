@@ -836,6 +836,13 @@ struct JarvisAPIClient {
         _ = try await postJSON(Result.self, path: "api/skills/requests/\(id)", body: Body(status: status))
     }
 
+    /// The "You left lights on" push's button.
+    func lightsOffLeftOn() async throws -> String {
+        struct Result: Decodable { let message: String }
+        struct Empty: Encodable {}
+        return try await postJSON(Result.self, path: "api/presence/lights-off", body: Empty()).message
+    }
+
     func draftSkill(requestID: String) async throws -> String {
         struct Result: Decodable { let message: String }
         struct Empty: Encodable {}

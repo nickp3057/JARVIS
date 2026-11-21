@@ -920,12 +920,19 @@ def _resting_scenes() -> set[str]:
 
 
 def room_away() -> bool:
-    """Nick is out and the room is resting: the last scene run is an away
-    scene (``AWAY_SCENES``, default ``scene.peace``) and every room light is
-    still off, which is also when the iPads go dark. The room voice stays
-    silent on its own then (alerts, reminders, announcements still reach the
-    phone), so nobody home alone gets a voice out of the dark. A light
-    coming on ends it. Fails open: when HA can't be read, it's False."""
+    """Nick is out, so the room keeps quiet (alerts, reminders and
+    announcements still reach the phone), and nobody home alone gets a voice
+    out of the dark.
+
+    Since 2026-11-20 his iPhone's GPS decides (``brain/presence.py``,
+    ``person.nick``): away is quiet whatever the scene, home talks again.
+    Only when GPS can't be read does the old guess apply: the last scene run
+    is an away scene (``AWAY_SCENES``, default ``scene.peace``) and every room
+    light is still off. Fails open: when HA can't be read, it's False."""
+    from brain import presence
+    where = presence.location()
+    if where is not None:
+        return where == "away"
     raw = os.getenv("AWAY_SCENES", "scene.peace")
     away = {e.strip().lower() for e in raw.split(",") if e.strip()}
     try:

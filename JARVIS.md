@@ -48,6 +48,7 @@ Pearson-Stark-Jarvis/
 │   ├── automation_workshop.py Staged HA automation drafts, diffs, apply + rollback
 │   ├── clipboard_tool.py    Read/write clipboard via PowerShell Get/Set-Clipboard
 │   ├── alert_checks.py      Needs attention Refresh: re-checks each alert live, hides the fixed ones
+│   ├── presence.py          Home or away from Nick's iPhone GPS (HA person.nick); debounced leave/arrive; lights-left-on
 │   ├── watchdog.py          Restarts monitor threads that die, reports ones that freeze; systemd watchdog pings while /health answers
 │   ├── skills.py            Learned skills: recipes of allowlisted tools JARVIS composes himself, active once Nick approves (propose_skill / run_skill)
 │   ├── skill_drafter.py     Subagent: turns a skill request into a draft skill, or a "what it'd take" note
@@ -1212,6 +1213,11 @@ ROOM_VOLUME_MAPPED=1        # levels use amixer -M (loudness-matched: 8 = about 
 TV_HDMI_INPUTS=              # HDMI 1..N input ids for the remote's Input menu (blank = the TCL's HW15,HW16,HW17)
 LIGHT_RAINBOWS=             # light=select:option (or light=scene.x) pairs for the Rainbow button (defaults to Nick's strip + desk DIY scenes, the lamp's built-in Rainbow scene, and the fan ring's scene.fan_light_rainbow Tap-to-Run)
 ALERT_REPEAT_WINDOW_S=1800  # suppress repeat pushes, retain visible alerts even across restarts (memory/alert_repeats.json); 0 = off
+PRESENCE_ENABLED=true       # brain/presence.py: the room's away/quiet follows Nick's iPhone GPS (HA person entity)
+AWAY_PERSON=person.nick     # the HA person (or device_tracker) that says home / not_home
+PRESENCE_CONFIRM_S=180      # a leave/arrive must hold this long (GPS jitter at the zone edge)
+PRESENCE_INTERVAL_S=60      # presence monitor cadence
+PRESENCE_LEFT_ON_ALERT=1    # on leaving, push "You left lights on" with a Turn them off button; 0 = off
 MONITOR_WATCHDOG_ENABLED=true  # brain/watchdog.py: restart dead monitor threads, report frozen ones
 MONITOR_WATCHDOG_INTERVAL_S=60
 MONITOR_RESTART_MAX=3       # restarts per monitor per hour before it gives up and alerts
@@ -1437,6 +1443,8 @@ there, so edit files with a `sudo python3` one-shot or vi.
 ---
 
 ## Recently Shipped
+
+- **Away follows your phone (2026-11-20, companion 6.103 / 345, Core).** Asked 2026-11-17. `app.status_hub.room_away` (what keeps the room voice from saying alerts, reminders and announcements) now asks `brain/presence.py` first: Home Assistant's `person.nick` (the iPhone's GPS via the HA companion app) away means quiet whatever the scene, home means it talks again; the old guess (Peace scene with every light off) is only the fallback when GPS can't be read. A presence monitor (`_presence_monitor_loop`, debounced `PRESENCE_CONFIRM_S`) logs "Nick left" / "Nick is home" to the inbox, and on leaving with room lights still on pushes "You left lights on" (info, category `LEFT_ON`) whose **Turn them off** button calls `POST /api/presence/lights-off` (dashboard lights only, so `switch.wii_u` and the rest are never touched). `GET /api/presence` (status:read) reports location and whether the room is quiet. The iPads' dark screen still follows Peace/Goodnight as before.
 
 - **JARVIS teaches himself skills (2026-11-20, companion 6.101 / 343, Core).** Second half of Nick's "create new skills" goal: learned skills are recipes of JARVIS's own everyday tools (`propose_skill` / `run_skill`, `brain/skills.py`), drafted in chat or by the new **Skill drafter** subagent from a skill request (menu → Draft a skill), and active only after Nick's Approve on the Control tab's **Skills** card (or his yes in chat). Wishes no recipe can meet get a "what it'd take" note on the request. Not code generation: source-level self-modification stays future work (FUTURE_SESSIONS.md Tier 1 #1).
 

@@ -110,7 +110,7 @@ Review checklist when home:
 
 ### Room, scenes and screens
 
-- [ ] **GPS presence for "away"** (asked 2026-11-17): the room goes quiet today when Peace ran and every light is off (`status_hub.room_away`). Use the iPhone's location (HA `person.nick` / companion app zone, or a geofence in JarvisCompanion) as the real away signal, so the room mutes when Nick leaves whatever the scene, and wakes up again when he's home.
+- [x] *(shipped 2026-11-20, companion 6.103: brain/presence.py)* **GPS presence for "away"** (asked 2026-11-17): the room goes quiet today when Peace ran and every light is off (`status_hub.room_away`). Use the iPhone's location (HA `person.nick` / companion app zone, or a geofence in JarvisCompanion) as the real away signal, so the room mutes when Nick leaves whatever the scene, and wakes up again when he's home.
 - [x] **Plex movie picker in iPad movie mode** (asked 2026-10-29; shipped 2026-11-20, companion 6.100): movie mode's **Pick a movie** and the TV remote's **Movies** open `MoviePickerView` (posters through Core, search, Recently added / Unwatched / A–Z, Resume / Start over → the TV's Plex app via the existing `plex://` deep link). Later: TV shows (seasons/episodes), and starting the Movie scene when a film is picked outside movie mode.
 - [ ] Govee effects (Aurora, Candlelight, Starry Sky...) in the light sheet.
 - [ ] Scenes on the iPhone Home Screen / Control Center (widget target).
@@ -164,6 +164,7 @@ See JARVIS.md Recently Shipped. Unit-tested only; nothing ran against the real N
 - [ ] Watchdog: run `sudo sh ~/jarvis/deploy/surface-setup.sh` on the Surface once, then `deploy/surface.sh`; `systemctl show jarvis-api -p WatchdogUSec` says 3min and the log has "systemd watchdog on". Watch the inbox for false "Monitor looks stuck" notes (the HA websocket monitor blocks on recv by design; `_IDLE_MARKERS` should cover it).
 - [ ] Movie picker (6.100): never run against the real Plex (the Mac has no PLEX_URL). On the iPad in movie mode: posters load, search and the three sorts work, a 4K duplicate shows once, Resume picks up where Plex left off, Start over starts at 0:00, and the TV switches to Plex if it was on another app.
 - [ ] Skills (6.101): ask for a routine ("set up date night: movie scene, jazz, volume 30") and see a draft + "approve" code in chat; Approve on the Control tab; "date night" runs it. Draft a skill on a request that needs hardware (blinds) leaves a sensible note. Watch the drafter's cost on the Agents page (auto:sonnet).
+- [ ] Presence (6.103): leave home with a room light on: within ~4 min one "You left lights on" push; Turn them off works from the lock screen. While away the room says nothing for alerts/reminders; back home it talks again. `curl /api/presence` shows "home"/"away". Later: let the iPads go dark on away too, and a welcome-home line if Nick wants one.
 - [ ] Tap a JARVIS alert push (6.98): the alert's sheet opens; an info push (e.g. "Fixed it myself") just opens the app.
 - [ ] Ask JARVIS for something he can't do ("close my blinds"): he says so plainly, it lands on Control → Skill requests, asking again bumps the count. Watch he doesn't file things a tool can do.
 

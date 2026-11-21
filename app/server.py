@@ -174,6 +174,7 @@ _COMPANION_CAPABILITIES: dict[str, object] = {
         "skill_requests": True,
         "movie_picker": True,
         "skills": True,
+        "presence": True,
     },
 }
 
@@ -749,6 +750,25 @@ def skill_update(skill_id: str, request: SkillUpdate, _: None = Depends(authoriz
     if record is None:
         raise HTTPException(status_code=404, detail="No such skill")
     return {"skill": record}
+
+
+@app.get("/api/presence")
+def presence_status(_: None = _status_read) -> dict[str, object]:
+    """Home or away, from Nick's iPhone GPS through Home Assistant (null when unknown)."""
+    from brain import presence
+    from app import status_hub
+    return {"location": presence.location(), "person": presence.person_entity(), "room_quiet": status_hub.room_away()}
+
+
+@app.post("/api/presence/lights-off")
+def presence_lights_off(_: None = Depends(authorize)) -> dict[str, object]:
+    """The "You left lights on" push's Turn them off button."""
+    from brain import presence
+    done, failed = presence.turn_off_left_on()
+    message = (f"Turned off {done} light{'s' if done != 1 else ''}." if done else "Nothing was still on.")
+    if failed:
+        message += f" Couldn't turn off {', '.join(failed)}."
+    return {"turned_off": done, "failed": failed, "message": message}
 
 
 # --- Movie picker (iPad movie mode) ------------------------------------------

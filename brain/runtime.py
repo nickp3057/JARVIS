@@ -335,6 +335,10 @@ class JarvisRuntime:
         if os.getenv("JARVIS_HEALTHCHECKS_URL", "").strip() and not self._deadman_started:
             self._deadman_started = True
             self._spawn(self._deadman_loop)
+        if _monitor_on("PRESENCE_ENABLED") and _monitor_on("HOME_MONITOR_ENABLED") \
+                and not getattr(self, "_presence_started", False):
+            self._presence_started = True
+            self._spawn(self._presence_monitor_loop)
         if _monitor_on("MONITOR_WATCHDOG_ENABLED") and not getattr(self, "_watchdog_started", False):
             self._watchdog_started = True
             threading.Thread(target=self._watchdog_loop, daemon=True).start()
@@ -350,6 +354,41 @@ class JarvisRuntime:
         if attr:
             setattr(self, attr, thread)
         return thread
+
+    def _presence_monitor_loop(self) -> None:
+        """Nick leaving and coming home (brain/presence.py), every
+        PRESENCE_INTERVAL_S (60). Leaving with room lights on pushes a
+        "Turn them off" button (category LEFT_ON)."""
+        from brain import presence
+        watch = presence.PresenceWatch()
+        while not self._stop_monitors.is_set():
+            try:
+                change = watch.step(presence.location(fresh=True))
+                if change is not None:
+                    self._presence_changed(change)
+            except Exception:  # noqa: BLE001 - a bad pass must not end the loop
+                log.exception("Presence pass failed")
+            if self._stop_monitors.wait(_env_float("PRESENCE_INTERVAL_S", 60.0, 15.0)):
+                break
+
+    def _presence_changed(self, change) -> None:
+        from brain import presence
+        if change.kind == "arrived":
+            self.record_event(kind="presence", source="presence", title="Nick is home",
+                              detail="Your phone is home again; the room talks again.")
+            return
+        self.record_event(kind="presence", source="presence", title="Nick left",
+                          detail="Your phone left home; the room keeps quiet until you're back.")
+        if os.getenv("PRESENCE_LEFT_ON_ALERT", "1").strip().lower() in ("0", "off", "false", "no"):
+            return
+        left_on = presence.lights_left_on()
+        if left_on:
+            names = [light["name"] for light in left_on]
+            listed = names[0] if len(names) == 1 else ", ".join(names[:-1]) + " and " + names[-1]
+            self.raise_alert("left_on", "You left lights on",
+                             f"{listed} {'is' if len(names) == 1 else 'are'} still on in your room.",
+                             source="presence", severity="info", category="LEFT_ON",
+                             dedupe_key="left_on", cooldown_s=600)
 
     def _watchdog_loop(self) -> None:
         """Once a minute: restart monitors that died, report ones that froze.
