@@ -317,6 +317,11 @@ def _lines(value: Any) -> list[str]:
     return list(value or [])
 
 
+def _sentence(line: str) -> str:
+    line = ' '.join(line.split())
+    return line if line.endswith(('.', '?', '!')) else line + '.'
+
+
 def build(alert: event_bus.Alert, *, session_id: str | None = None) -> dict[str, Any]:
     """Gather, analyse and store one incident report; return what the app shows."""
     now = time.time()
@@ -375,11 +380,20 @@ def build(alert: event_bus.Alert, *, session_id: str | None = None) -> dict[str,
     if indexer_errors:
         prompt_lines.append("Indexer errors from Prowlarr's log (quote these, don't guess a different cause): "
                             + '; '.join(indexer_errors.values()))
+    from brain import auto_heal
+    from brain import self_repair as repairs
+    link = auto_heal.link_for(alert.kind, alert.context)
+    repair = repairs.latest_for_link(link, alert.created_at - 1800) if link else None
+    if repair:
+        who = 'Autopilot' if repair['auto'] else 'A repair'
+        prompt_lines.append(f"{who} already ran {repair['label']} ({repair['status']}"
+                            + (f": {_flat(repair['result'], 200)}" if repair['result'] else '') + ')')
     prompt_lines.append('Read the full report (logs, recent changes), tell me what you think is wrong, and propose a fix.')
     return {
         'report_id': stored['id'],
         'title': alert.title,
         'suspected_causes': causes,
         'sections': sections,
-        'prompt': '\n'.join(prompt_lines),
+        # One paragraph: in Chat's composer a double tap selects it all.
+        'prompt': ' '.join(_sentence(line) for line in prompt_lines),
     }

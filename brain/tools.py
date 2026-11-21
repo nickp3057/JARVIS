@@ -2159,7 +2159,11 @@ _CUSTOM_TOOLS: list[dict[str, Any]] = [
             "switch_indexer_mirror (an indexer whose site is Cloudflare-banned (error 1006) or down: test each of "
             "Prowlarr's mirrors, save the first that passes; pass indexer). Never runs anything: it stages a "
             "repair and asks Nick, who approves by replying yes / the code, or with the Approve button "
-            "in the app. The verified result arrives later as an alert. Say why in reason."
+            "in the app. The verified result arrives later as an alert. Say why in reason. Autopilot "
+            "(brain/auto_heal.py, AUTO_REPAIR_ENABLED) already runs arr_recovery, retest_indexers, "
+            "switch_indexer_mirror and retry_download by itself once a failure outlasts the NAS watchdog "
+            "(with cooldowns); refresh_plex is never automatic. Check list_repair_proposals before "
+            "proposing one it already ran."
         ),
         "input_schema": {
             "type": "object",

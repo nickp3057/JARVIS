@@ -10,10 +10,17 @@ needs review), and `ARCHITECTURE.md` (the layered design and runtime rule).
 
 - Do **not** widen the NAS SSH permission model (restricted forced-command
   keys only, no Docker socket, no root) without Nick saying so.
-- JARVIS **never** restarts a container or runs the arr recovery without
-  asking. Every restart or stack fix is a one-tap proposal through
-  `brain/self_repair.py` / `brain/stack_fixes.py`; don't add a fourth approval
-  gate. The NAS's own root-cron DHT/indexer watchdogs keep auto-acting.
+- ~~JARVIS never restarts a container or runs the arr recovery without
+  asking.~~ **Changed 2026-11-20:** "I'd also like jarvis to try to fix these
+  errors with some of just the basic stuff. Like restarting the arr stack ...
+  I don't want to have to manually do anything. The only thing I'd like to not
+  be automatic is the plex so if I'm actively watching something I'm not
+  interrupted." Autopilot (`brain/auto_heal.py`) runs the allowlisted
+  `brain/stack_fixes.py` fixes on its own with cooldowns and a daily cap;
+  Plex fixes are never automatic, and anything that could disturb a film
+  waits while Plex plays. Everything still goes through
+  `brain/self_repair.py` (one record, one outcome alert); don't add a parallel
+  path. The NAS's own root-cron DHT/indexer watchdogs keep auto-acting first.
 - Knaben and Torrent9 stay disabled ("they can be off"); don't re-enable or
   suggest them.
 
@@ -142,6 +149,18 @@ v1 shipped 2026-10-27 and is the TV's home screen (JARVIS.md "JARVIS TV"). Open:
 - [ ] Room voice: start speaking the first sentence of long answers sooner (skipped: spoken replies are one sentence).
 - [ ] Reminders only fire while something pops them (room voice in server mode); a Core without the room voice never sends them.
 - [ ] Playwright on the Surface (`pip install playwright` + `python -m playwright install --with-deps chromium`) if JARVIS should click and fill forms; without it he reads pages over plain HTTP.
+
+### Autopilot, Needs attention sheet, Donna unlock (2026-11-20, companion 6.97): check after deploy
+
+See JARVIS.md Recently Shipped. Unit-tested only; nothing ran against the real NAS or phone.
+- [ ] Next real arr outage: the stack is recreated once ~10 min in (not during a watchdog hold), the phone gets one quiet "Fixed it myself" / the arr follow-up, and the Needs attention row shows AUTOPILOT · FIXING then clears. `memory/auto_repairs.json` on the Surface logs it.
+- [ ] A stalled download: the alert says "I'm retrying it with another release" and disappears once a new release is grabbed.
+- [ ] Indexer backoff: re-test after 30 min, mirror switch after 2 h, no more than once per 12 h per indexer. Watch for a mirror switch that makes things worse.
+- [ ] The autopilot toggle on Needs attention flips `AUTO_REPAIR_ENABLED` in the Surface's `.env`.
+- [ ] Alert sheet: Fix it on a stale arr alert with a healthy stack clears it; Ask JARVIS sends the report straight to Chat as one paragraph; Copy and Dismiss work; long-press menu works.
+- [ ] Donna: send, switch apps, come back: no Face ID. Leave and reopen: Face ID. End session closes at once and the next visit starts fresh.
+- [ ] Decide: should HA get an automatic trigger (e.g. many watched devices unavailable at once)? Today `restart_home_assistant` is on the autopilot list but nothing triggers it automatically (an unreachable HA can't take a restart call anyway).
+- [ ] The Mac app's Alerts section doesn't have the new sheet/Fix it/autopilot toggle yet (own sources in `mac/JarvisMac`).
 
 ### Reliability pass (2026-11-14, Core only): check after deploy
 

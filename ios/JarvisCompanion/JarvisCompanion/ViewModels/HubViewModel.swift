@@ -78,6 +78,12 @@ final class HubViewModel: ObservableObject {
     /// Transient, user-visible outcome of the last quick action that failed.
     @Published var actionError: String?
     @Published private(set) var recheckingAlerts = false
+    /// Alerts with a Fix it call in flight.
+    @Published private(set) var fixingAlertIDs: Set<Int> = []
+    /// Alerts swiped away here, hidden at once while Core catches up.
+    @Published private(set) var dismissedAlertIDs: Set<Int> = []
+    /// Whether JARVIS fixes the basic stuff himself; nil on an older Core.
+    @Published private(set) var autopilot: AutopilotStatus?
     @Published private(set) var nowSnapshotIsStale = false
 
     private let settings: AppSettings
@@ -151,7 +157,8 @@ final class HubViewModel: ObservableObject {
         async let l: Void = refreshScenes()
         async let m: Void = refreshGlance()
         async let n: Void = refreshShopping()
-        _ = await (a, b, c, d, e, f, g, h, i, j, k, l, m, n)
+        async let o: Void = refreshAutopilot()
+        _ = await (a, b, c, d, e, f, g, h, i, j, k, l, m, n, o)
     }
 
     func refreshGlance() async {
@@ -330,6 +337,8 @@ final class HubViewModel: ObservableObject {
 
     func refreshAlerts() async {
         await load(\.alerts) { try await $0.recentAlerts() }
+        // Autopilot may be mid-fix: keep watching until it reports.
+        if (alerts.value ?? []).contains(where: { $0.repair?.isWorking == true }) { followRepairs() }
     }
 
     /// The Needs attention card's Refresh button: what's fixed disappears.
@@ -340,6 +349,67 @@ final class HubViewModel: ObservableObject {
             defer { recheckingAlerts = false }
             do { try await client().recheckAlerts() } catch { actionError = error.localizedDescription }
             await refreshAlerts()
+        }
+    }
+
+    /// Fix it on one alert. The fix runs on Core; the alert's `repair`
+    /// shows its progress, polled here until it settles.
+    func fixAlert(_ alert: JarvisAlert) async -> AlertFixResult? {
+        guard !fixingAlertIDs.contains(alert.id) else { return nil }
+        fixingAlertIDs.insert(alert.id)
+        defer { fixingAlertIDs.remove(alert.id) }
+        do {
+            let result = try await client().fixAlert(alert)
+            await refreshAlerts()
+            await refreshRepairs()
+            if result.started { followRepairs() }
+            return result
+        } catch {
+            actionError = error.localizedDescription
+            return nil
+        }
+    }
+
+    func dismissAlert(_ alert: JarvisAlert) {
+        dismissedAlertIDs.insert(alert.id)
+        Task {
+            do {
+                try await client().dismissAlert(alert)
+                await refreshAlerts()
+            } catch {
+                dismissedAlertIDs.remove(alert.id)
+                actionError = error.localizedDescription
+            }
+        }
+    }
+
+    func refreshAutopilot() async {
+        autopilot = try? await client().autopilot()
+    }
+
+    func setAutopilot(_ enabled: Bool) {
+        Task {
+            do { autopilot = try await client().setAutopilot(enabled) } catch { actionError = error.localizedDescription }
+        }
+    }
+
+    private var following: Task<Void, Never>?
+
+    /// While a repair is running, re-read alerts and repairs every few
+    /// seconds (for up to ten minutes) so its outcome lands without a pull.
+    func followRepairs() {
+        guard following == nil else { return }
+        following = Task { [weak self] in
+            for _ in 0..<120 {
+                try? await Task.sleep(for: .seconds(5))
+                guard let self, !Task.isCancelled else { return }
+                await self.refreshAlerts()
+                await self.refreshRepairs()
+                let working = (self.alerts.value ?? []).contains { $0.repair?.isWorking == true }
+                    || (self.repairs.value ?? []).contains { $0.status == "running" }
+                if !working { break }
+            }
+            self?.following = nil
         }
     }
 

@@ -5,16 +5,19 @@ import SwiftUI
 /// hides her; this is the lock. Donna's view, and so her first request to
 /// Core, is only built once the owner has unlocked.
 ///
-/// Relocks whenever the app goes to the background, and covers her while the
-/// app is inactive so the app switcher's snapshot never shows the chat.
+/// One Face ID per visit: the unlock (on `DonnaPresenter`) survives switching
+/// to another app and back, and ends when he leaves Donna, ends the session,
+/// or stays away longer than `DonnaPresenter.relockAfter`. She's covered
+/// whenever the app isn't active, so the app switcher's snapshot never shows
+/// the chat.
 struct DonnaLock<Content: View>: View {
     @ViewBuilder var content: () -> Content
     @ObservedObject private var presenter = DonnaPresenter.shared
     @Environment(\.scenePhase) private var scenePhase
-    @State private var unlocked = false
     @State private var checking = false
-    @State private var backgrounded = false
     @State private var failure: String?
+
+    private var unlocked: Bool { presenter.unlocked }
 
     var body: some View {
         ZStack {
@@ -29,13 +32,16 @@ struct DonnaLock<Content: View>: View {
         .onChange(of: scenePhase) { _, phase in
             switch phase {
             case .background:
-                unlocked = false
-                backgrounded = true
-            case .active where backgrounded:
-                // Only re-prompt after a real trip to the background; the Face ID
+                if presenter.backgroundedAt == nil { presenter.backgroundedAt = Date() }
+            case .active:
+                // Only judged after a real trip to the background; the Face ID
                 // sheet itself flips the app inactive and back, which would loop.
-                backgrounded = false
-                Task { await unlock() }
+                guard let away = presenter.backgroundedAt else { break }
+                presenter.backgroundedAt = nil
+                if Date().timeIntervalSince(away) > DonnaPresenter.relockAfter {
+                    presenter.unlocked = false
+                    Task { await unlock() }
+                }
             default:
                 break
             }
@@ -94,8 +100,8 @@ struct DonnaLock<Content: View>: View {
             return
         }
         do {
-            unlocked = try await context.evaluatePolicy(.deviceOwnerAuthentication,
-                                                        localizedReason: "Unlock Donna")
+            presenter.unlocked = try await context.evaluatePolicy(.deviceOwnerAuthentication,
+                                                                  localizedReason: "Unlock Donna")
             failure = nil
         } catch let error as LAError where [.userCancel, .appCancel, .systemCancel].contains(error.code) {
             failure = nil

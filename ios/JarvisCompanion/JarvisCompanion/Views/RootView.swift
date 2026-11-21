@@ -95,18 +95,18 @@ struct RootView: View {
                     .tag(RootTab.room)
             }
 
-            HubView(model: hub, onAsk: ask, focus: .media)
+            HubView(model: hub, onAsk: ask, focus: .media, onSendNow: sendNow)
                 .swipePage(swipeOffset)
                 .tabItem { Label("Media", systemImage: "play.rectangle.on.rectangle") }
                 .tag(RootTab.media)
 
-            HubView(model: hub, onAsk: ask, onNavigate: navigate, focus: .hub)
+            HubView(model: hub, onAsk: ask, onNavigate: navigate, focus: .hub, onSendNow: sendNow)
                 .swipePage(swipeOffset)
                 .tabItem { Label("Control", systemImage: "switch.2") }
                 .tag(RootTab.hub)
 
             if !Self.isMac {
-                HubView(model: hub, onAsk: ask, onNavigate: navigate, focus: .home)
+                HubView(model: hub, onAsk: ask, onNavigate: navigate, focus: .home, onSendNow: sendNow)
                     .swipePage(swipeOffset)
                     .tabItem { Label("Home", systemImage: "house") }
                     .tag(RootTab.home)
@@ -242,9 +242,9 @@ struct RootView: View {
 
     private var phonePages: [AnyView] {
         // Same order as `PhoneTabs.tabs`.
-        [AnyView(HubView(model: hub, onAsk: ask, focus: .media).environmentObject(settings)),
-         AnyView(HubView(model: hub, onAsk: ask, onNavigate: navigate, focus: .hub).environmentObject(settings)),
-         AnyView(HubView(model: hub, onAsk: ask, onNavigate: navigate, focus: .home, phoneVoice: phoneVoice).environmentObject(settings)),
+        [AnyView(HubView(model: hub, onAsk: ask, focus: .media, onSendNow: sendNow).environmentObject(settings)),
+         AnyView(HubView(model: hub, onAsk: ask, onNavigate: navigate, focus: .hub, onSendNow: sendNow).environmentObject(settings)),
+         AnyView(HubView(model: hub, onAsk: ask, onNavigate: navigate, focus: .home, phoneVoice: phoneVoice, onSendNow: sendNow).environmentObject(settings)),
          AnyView(ChatView(model: chat).environmentObject(settings)),
          AnyView(SettingsView(embedded: true, studyBrief: hub.studyBrief.value).environmentObject(settings))]
     }

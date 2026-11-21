@@ -3,10 +3,20 @@ import SwiftUI
 import UserNotifications
 
 /// Opens and closes Donna mode from anywhere (the Chat tab's logo: tap twice, then hold).
+///
+/// Also holds the Face ID unlock, so it outlives a trip to another app: Nick
+/// sends a message and switches away while she answers. Leaving Donna (or
+/// ending the session) locks her again; so does half an hour away, the same
+/// idle time after which Core closes her session anyway.
 @MainActor
 final class DonnaPresenter: ObservableObject {
     static let shared = DonnaPresenter()
-    @Published var showing = false
+    static let relockAfter: TimeInterval = 30 * 60
+    @Published var showing = false {
+        didSet { if !showing { unlocked = false; backgroundedAt = nil } }
+    }
+    @Published var unlocked = false
+    var backgroundedAt: Date?
 }
 
 /// Donna mode's state: this session's messages, sending, ending, and the

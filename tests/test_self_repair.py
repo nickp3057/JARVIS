@@ -156,7 +156,7 @@ class SelfRepairTests(unittest.TestCase):
         self_repair._save([proposal])
         self.assertIn("needs Nick's own approval", self_repair.apply(proposal["id"], confirmed=True))
         notes = []
-        self_repair.set_notifier(lambda title, detail, severity: notes.append((title, severity)))
+        self_repair.set_notifier(lambda title, detail, severity, **_: notes.append((title, severity)))
         self.addCleanup(self_repair.set_notifier, None)
 
         class Inline:

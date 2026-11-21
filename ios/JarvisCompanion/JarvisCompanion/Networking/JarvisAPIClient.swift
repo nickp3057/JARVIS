@@ -112,13 +112,45 @@ struct JarvisAlert: Decodable, Identifiable, Hashable {
     let createdAt: Double
     /// How many times the same problem was raised (Core condenses them; 5.69+).
     var repeats: Int? = nil
+    /// Core has a one-tap fix for it (the sheet's Fix it button; 6.97+).
+    var fixable: Bool? = nil
+    /// What JARVIS is doing about it: the newest repair tied to this alert,
+    /// from autopilot or a Fix it tap (6.97+).
+    var repair: AlertRepair? = nil
 
     var date: Date { Date(timeIntervalSince1970: createdAt) }
 
     enum CodingKeys: String, CodingKey {
-        case id, kind, severity, title, message, source, repeats
+        case id, kind, severity, title, message, source, repeats, fixable, repair
         case createdAt = "created_at"
     }
+}
+
+/// The repair working on one alert (`repair` in `GET /api/alerts/recent`).
+struct AlertRepair: Decodable, Hashable {
+    let id: String
+    let label: String
+    let status: String  // pending | running | applied | failed | rolled_back
+    let result: String
+    /// JARVIS ran it on his own (autopilot) rather than on a tap.
+    let auto: Bool
+
+    var isWorking: Bool { status == "running" }
+    var succeeded: Bool { status == "applied" }
+    var failed: Bool { status == "failed" || status == "rolled_back" }
+}
+
+/// `POST /api/alerts/{id}/fix`.
+struct AlertFixResult: Decodable {
+    let started: Bool
+    let message: String
+    var resolved: Bool? = nil
+}
+
+/// `GET/POST /api/autopilot`: JARVIS fixing the basic stuff himself.
+struct AutopilotStatus: Decodable, Hashable {
+    let enabled: Bool
+    let fixes: [String]
 }
 
 /// One self-repair proposal (`GET /api/repairs`). Pending ones get an
@@ -130,8 +162,16 @@ struct RepairProposal: Decodable, Identifiable, Hashable {
     let rationale: String
     let status: String  // pending | running | applied | failed | rolled_back | rejected
     let result: String
+    /// "auto" when JARVIS ran it himself, "app"/"chat" when Nick approved (6.97+).
+    var approvedBy: String? = nil
 
     var isPending: Bool { status == "pending" }
+    var isAuto: Bool { approvedBy == "auto" }
+
+    enum CodingKeys: String, CodingKey {
+        case id, kind, label, rationale, status, result
+        case approvedBy = "approved_by"
+    }
 }
 
 /// Something JARVIS staged in this chat that waits for Nick: a Schwab order,
@@ -708,6 +748,28 @@ struct JarvisAPIClient {
     func incidentReport(for alert: JarvisAlert) async throws -> IncidentReport {
         try await postJSON(IncidentReport.self, path: "api/alerts/\(alert.id)/report",
                            body: IncidentReportBody(createdAt: alert.createdAt))
+    }
+
+    /// The alert sheet's Fix it button: the tap is the approval.
+    func fixAlert(_ alert: JarvisAlert) async throws -> AlertFixResult {
+        try await postJSON(AlertFixResult.self, path: "api/alerts/\(alert.id)/fix",
+                           body: IncidentReportBody(createdAt: alert.createdAt))
+    }
+
+    /// Hides one alert (and its repeats) from Needs attention.
+    func dismissAlert(_ alert: JarvisAlert) async throws {
+        struct Result: Decodable { let dismissed: Int }
+        _ = try await postJSON(Result.self, path: "api/alerts/\(alert.id)/dismiss",
+                               body: IncidentReportBody(createdAt: alert.createdAt))
+    }
+
+    func autopilot() async throws -> AutopilotStatus {
+        try await getJSON(AutopilotStatus.self, path: "api/autopilot")
+    }
+
+    func setAutopilot(_ enabled: Bool) async throws -> AutopilotStatus {
+        struct Body: Encodable { let enabled: Bool }
+        return try await postJSON(AutopilotStatus.self, path: "api/autopilot", body: Body(enabled: enabled))
     }
 
     func approvals(sessionID: String) async throws -> [PendingApproval] {

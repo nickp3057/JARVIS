@@ -150,6 +150,8 @@ _COMPANION_CAPABILITIES: dict[str, object] = {
         "home_on_off": True,
         "torrent_pause_resume": True,
         "repairs": True,
+        "alert_fix": True,
+        "autopilot": True,
     },
 }
 
@@ -606,19 +608,31 @@ def recent_alerts(limit: int = 10, hours: float = 24, _: None = _status_read) ->
     """Newest-first bus alerts for polling clients (the Hub's Needs attention
     card). Info-level alerts (e.g. "back online") are included so a client
     can tell a problem cleared."""
+    from brain import auto_heal
     cutoff = time.time() - max(0.0, hours) * 3600
     alerts: list[dict[str, object]] = []
     seen: dict[str, dict[str, object]] = {}
+    first_seen: dict[str, float] = {}
     for a in reversed(event_bus.since(0, limit=200)):  # newest first
         if a.created_at < cutoff or event_bus.is_cleared(a):
             continue
         key = event_bus.condense_key(a.kind, a.title, a.message, a.context)
+        first_seen[key] = a.created_at  # oldest copy wins: the walk is newest first
         if key in seen:  # the same problem again: one row, counted
             seen[key]["repeats"] = int(seen[key]["repeats"]) + 1
             continue
-        seen[key] = {**a.to_dict(), "repeats": 1}
+        seen[key] = {**a.to_dict(), "repeats": 1,
+                     "fixable": auto_heal.fix_for(a.kind, a.context) is not None,
+                     "_link": auto_heal.link_for(a.kind, a.context), "_key": key}
         alerts.append(seen[key])
-    return {"alerts": alerts[: max(1, min(50, limit))]}
+    alerts = alerts[: max(1, min(50, limit))]
+    for row in alerts:
+        # What JARVIS is doing about it: the newest repair tied to this alert
+        # since it first appeared (autopilot or a Fix it tap).
+        link, key = row.pop("_link"), row.pop("_key")
+        if link:
+            row["repair"] = self_repair.latest_for_link(str(link), first_seen[str(key)] - 1800)
+    return {"alerts": alerts}
 
 
 @app.post("/api/alerts/refresh")
@@ -627,6 +641,54 @@ def refresh_alerts(_: None = Depends(authorize)) -> dict[str, object]:
     live system; fixed ones disappear, the rest stay."""
     from brain import alert_checks
     return alert_checks.refresh()
+
+
+class AlertActionRequest(BaseModel):
+    created_at: float | None = None
+
+
+@app.post("/api/alerts/{alert_id}/fix")
+def alert_fix(alert_id: int, request: AlertActionRequest, _: None = Depends(authorize)) -> dict[str, object]:
+    """The alert sheet's Fix it button. The tap is Nick's approval; the fix
+    runs in the background and its progress shows on the alert (``repair``)."""
+    from brain import auto_heal
+    runtime()  # the runtime wires the repair notifier
+    alert = incident_reports.find_alert(alert_id, request.created_at)
+    if alert is None:
+        raise HTTPException(status_code=404, detail="Alert not found (the server may have restarted)")
+    return auto_heal.fix_alert(alert)
+
+
+@app.post("/api/alerts/{alert_id}/dismiss")
+def alert_dismiss(alert_id: int, request: AlertActionRequest, _: None = Depends(authorize)) -> dict[str, object]:
+    """Swipe away one alert (every repeat of the same problem goes with it)."""
+    alert = incident_reports.find_alert(alert_id, request.created_at)
+    if alert is None:
+        raise HTTPException(status_code=404, detail="Alert not found (the server may have restarted)")
+    key = event_bus.condense_key(alert.kind, alert.title, alert.message, alert.context)
+    ids = [a.id for a in event_bus.since(0, limit=200)
+           if event_bus.condense_key(a.kind, a.title, a.message, a.context) == key]
+    event_bus.resolve(ids)
+    return {"dismissed": len(ids)}
+
+
+@app.get("/api/autopilot")
+def autopilot(_: None = Depends(authorize)) -> dict[str, object]:
+    """Whether JARVIS fixes the basic stuff himself, which fixes, and what he ran today."""
+    from brain import auto_heal
+    return {"enabled": auto_heal.enabled(), "fixes": sorted(auto_heal.allowed_fixes()),
+            "never": sorted(auto_heal.NEVER_AUTO), "runs": auto_heal.recent_runs()}
+
+
+class AutopilotRequest(BaseModel):
+    enabled: bool
+
+
+@app.post("/api/autopilot")
+def autopilot_set(request: AutopilotRequest, _: None = Depends(authorize)) -> dict[str, object]:
+    from brain import settings as settings_mod
+    settings_mod.update_setting("AUTO_REPAIR_ENABLED", "true" if request.enabled else "false")
+    return autopilot()
 
 
 @app.post("/api/alerts/clear")

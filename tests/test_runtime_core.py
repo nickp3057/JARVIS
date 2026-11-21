@@ -121,7 +121,7 @@ class MonitorSwitchTests(unittest.TestCase):
                                      "LIGHT_SYNC": "1"}):
             self.rt.start_monitors()
             self.rt.start_monitors()  # a second call starts nothing twice
-        self.assertEqual(sorted(self.started), ["_home_monitor_entry", "_light_sync_loop", "_wake_monitor_loop",
+        self.assertEqual(sorted(self.started), ["_alert_recheck_loop", "_home_monitor_entry", "_light_sync_loop", "_wake_monitor_loop",
                                                 "_watch_monitor_loop"])
 
     def test_configured_integrations_get_their_monitors(self) -> None:
@@ -134,7 +134,7 @@ class MonitorSwitchTests(unittest.TestCase):
                                      "PRICE_WATCH_MONITOR_ENABLED": "no", "WATCH_MONITOR_ENABLED": "no",
                                      "JARVIS_HEALTHCHECKS_URL": "https://hc", "LIGHT_SYNC": "0"}):
             self.rt.start_monitors()
-        self.assertEqual(sorted(self.started), ["_calendar_monitor_loop", "_deadman_loop",
+        self.assertEqual(sorted(self.started), ["_alert_recheck_loop", "_calendar_monitor_loop", "_deadman_loop",
                                                 "_download_monitor_loop", "_email_triage_loop",
                                                 "_nas_host_monitor_loop", "_temp_4k_monitor_loop",
                                                 "_wake_monitor_loop"])

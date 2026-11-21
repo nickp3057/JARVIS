@@ -79,7 +79,6 @@ struct DonnaView: View {
                 Spacer()
                 Menu {
                     Button("End session", systemImage: "checkmark.circle") { end() }
-                        .disabled(model.messages.isEmpty)
                     Button("What Donna knows", systemImage: "book.closed") { showingMemory = true }
                     Button("Bring old chats over", systemImage: "square.and.arrow.down") { showingImport = true }
                 } label: {
@@ -233,14 +232,17 @@ struct DonnaView: View {
         }
     }
 
+    /// "I'm done talking": Donna closes at once and locks; her note is
+    /// written on Core in the background. If that call fails, Core still
+    /// closes the session itself after half an hour idle, so nothing is lost.
     private func end() {
         guard !ending else { return }
         ending = true
-        Task {
-            let ended = await model.endSession()
-            ending = false
-            if ended { leave() }  // ending the session closes Donna
+        let model = model
+        if !model.messages.isEmpty {
+            Task { await model.endSession() }
         }
+        leave()
     }
 }
 

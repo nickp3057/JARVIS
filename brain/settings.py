@@ -186,6 +186,13 @@ SETTINGS_SCHEMA: dict[str, dict[str, Any]] = {
         "description": "Whether Claude can use the web search tool.",
     },
 
+    # --- Autopilot (brain/auto_heal.py) ---
+    "AUTO_REPAIR_ENABLED": {
+        "type": "bool",
+        "description": "Autopilot: JARVIS fixes the basic stuff himself (restart the arr stack, re-test indexers, "
+                       "retry stuck downloads). Plex is never touched automatically. Default on.",
+    },
+
     # --- Price watching ---
     "PRICE_WATCH_MONITOR_ENABLED": {
         "type": "bool",

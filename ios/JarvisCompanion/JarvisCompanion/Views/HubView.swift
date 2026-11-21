@@ -13,6 +13,8 @@ struct HubView: View {
     /// Desk's ask bar: send straight to Chat (RootView switches tabs).
     var onSend: ((String) -> Void)? = nil
     var phoneVoice: PushToTalkController? = nil
+    /// Sends straight to Chat (the alert sheet's Ask JARVIS); RootView switches tabs.
+    var onSendNow: ((String) -> Void)? = nil
     @State private var deskWidth: CGFloat = 0
     @State private var deskQuestion = ""
     @StateObject private var holds = HoldSuppressor()
@@ -39,6 +41,8 @@ struct HubView: View {
     @State private var heldTile: String?
     @State private var holdBuzz = 0
     @State private var showingRemote = false
+    /// The alert open in AlertDetailSheet.
+    @State private var openAlert: AlertSheetID?
     private let focus: HubFocus
 
     /// Home is JARVIS himself: the reactor, a quick look, the next
@@ -51,8 +55,10 @@ struct HubView: View {
 
     init(model: HubViewModel, onAsk: ((String) -> Void)? = nil,
          onNavigate: ((HubFocus) -> Void)? = nil, onSend: ((String) -> Void)? = nil,
-         focus: HubFocus = .home, phoneVoice: PushToTalkController? = nil) {
+         focus: HubFocus = .home, phoneVoice: PushToTalkController? = nil,
+         onSendNow: ((String) -> Void)? = nil) {
         self.model = model
+        self.onSendNow = onSendNow
         self.onAsk = onAsk
         self.onNavigate = onNavigate
         self.onSend = onSend
@@ -141,6 +147,9 @@ struct HubView: View {
             .sheet(item: $diagnosisTarget) { target in
                 MediaDiagnosisView(title: target.title, kind: target.kind,
                                    makeClient: { try JarvisAPIClient.make(from: settings) })
+            }
+            .sheet(item: $openAlert) { item in
+                AlertDetailSheet(model: model, alertID: item.id, onAsk: onSendNow ?? onSend ?? onAsk)
             }
             .sheet(isPresented: $showingMediaRequest) {
                 MediaRequestView(makeClient: { try JarvisAPIClient.make(from: settings) })
@@ -1002,9 +1011,16 @@ struct HubView: View {
     /// Warnings and criticals from the last day. An older server without
     /// /api/alerts/recent simply never shows this card.
     private var attentionAlerts: [JarvisAlert] {
-        Array((model.alerts.value ?? []).filter { $0.severity != "info" }.prefix(5))
+        Array((model.alerts.value ?? [])
+            .filter { $0.severity != "info" && !model.dismissedAlertIDs.contains($0.id) }
+            .prefix(6))
     }
 
+    struct AlertSheetID: Identifiable { let id: Int }
+
+    /// Each row: title and the start of the message, what JARVIS is doing
+    /// about it, and a tap into the full alert (AlertDetailSheet). Long
+    /// press for Copy / Fix it / Dismiss without opening it.
     private var needsAttentionCard: some View {
         CockpitPanel("Needs attention", symbol: "exclamationmark.triangle", trailing: {
             StatusPill(text: "\(attentionAlerts.count)", color: JarvisTheme.amber)
@@ -1015,54 +1031,99 @@ struct HubView: View {
                     Image(systemName: "arrow.clockwise")
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(JarvisTheme.cyan)
+                        .frame(width: 32, height: 32)
+                        .contentShape(Rectangle())
                 }
                 .accessibilityLabel("Refresh")
                 .accessibilityHint("Checks each alert again. Fixed ones disappear.")
             }
         }) {
             VStack(spacing: 0) {
+                if let autopilot = model.autopilot { autopilotRow(autopilot) }
                 ForEach(Array(attentionAlerts.enumerated()), id: \.element.id) { index, alert in
-                    Button { openIncident(alert) } label: {
-                        VStack(alignment: .leading, spacing: 3) {
-                            HStack {
-                                Circle()
-                                    .fill(alert.severity == "critical" ? JarvisTheme.critical : JarvisTheme.amber)
-                                    .frame(width: 8, height: 8)
-                                Text(alert.title).font(.subheadline.weight(.medium))
-                                Spacer()
-                                if model.reportingAlertID == alert.id {
-                                    ProgressView().controlSize(.small)
-                                } else {
-                                    if let repeats = alert.repeats, repeats > 1 {
-                                        Text("\(repeats)×")
-                                            .font(.caption2.monospacedDigit().weight(.semibold))
-                                            .foregroundStyle(JarvisTheme.amber)
-                                            .accessibilityLabel("\(repeats) times")
-                                    }
-                                    Text(alert.date, style: .relative)
-                                        .font(.caption2.monospacedDigit())
-                                        .foregroundStyle(.secondary)
-                                }
-                                if onAsk != nil {
-                                    Image(systemName: "chevron.right")
-                                        .font(.caption2.weight(.semibold))
-                                        .foregroundStyle(.tertiary)
-                                }
-                            }
-                            if !alert.message.isEmpty {
-                                Text(alert.message).font(.caption).foregroundStyle(.secondary).lineLimit(3)
-                            }
-                        }
-                        .padding(.vertical, 8)
-                        .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    .disabled(onAsk == nil || model.reportingAlertID != nil)
-                    .accessibilityHint(onAsk == nil ? "" : "Opens Chat with a diagnostic report")
+                    attentionRow(alert)
                     if index < attentionAlerts.count - 1 { divider }
                 }
             }
         }
+    }
+
+    private func autopilotRow(_ autopilot: AutopilotStatus) -> some View {
+        HStack(spacing: 10) {
+            Image(systemName: autopilot.enabled ? "wand.and.sparkles" : "hand.raised")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(autopilot.enabled ? JarvisTheme.cyan : .secondary)
+            Text(autopilot.enabled ? "Autopilot fixes the arr stack, indexers and stuck downloads. Never Plex."
+                                   : "Autopilot is off: fixes wait for you.")
+                .font(.caption).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 4)
+            Toggle("Autopilot", isOn: Binding(get: { autopilot.enabled }, set: { model.setAutopilot($0) }))
+                .labelsHidden()
+                .controlSize(.mini)
+        }
+        .padding(.vertical, 6)
+        .padding(.bottom, attentionAlerts.isEmpty ? 0 : 4)
+    }
+
+    private func attentionRow(_ alert: JarvisAlert) -> some View {
+        Button { openAlert = AlertSheetID(id: alert.id) } label: {
+            HStack(alignment: .top, spacing: 10) {
+                Capsule()
+                    .fill(AlertDetailSheet.tint(alert))
+                    .frame(width: 3)
+                    .padding(.vertical, 2)
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack(alignment: .firstTextBaseline) {
+                        Text(alert.title)
+                            .font(.subheadline.weight(.medium))
+                            .lineLimit(2)
+                            .multilineTextAlignment(.leading)
+                        Spacer(minLength: 6)
+                        if let repeats = alert.repeats, repeats > 1 {
+                            Text("\(repeats)×")
+                                .font(.caption2.monospacedDigit().weight(.semibold))
+                                .foregroundStyle(JarvisTheme.amber)
+                                .accessibilityLabel("\(repeats) times")
+                        }
+                        Text(alert.date, style: .relative)
+                            .font(.caption2.monospacedDigit())
+                            .foregroundStyle(.secondary)
+                    }
+                    if !alert.message.isEmpty {
+                        Text(alert.message)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(2)
+                            .multilineTextAlignment(.leading)
+                    }
+                    if let badge = AlertDetailSheet.repairBadge(alert.repair) {
+                        HStack(spacing: 5) {
+                            if alert.repair?.isWorking == true { ProgressView().controlSize(.mini) }
+                            Text((alert.repair?.auto == true ? "AUTOPILOT · " : "") + badge.text)
+                                .font(.caption2.weight(.semibold))
+                                .foregroundStyle(badge.color)
+                        }
+                        .padding(.top, 1)
+                    }
+                }
+                Image(systemName: "chevron.right")
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(.tertiary)
+                    .padding(.top, 3)
+            }
+            .padding(.vertical, 9)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .contextMenu {
+            Button("Copy", systemImage: "doc.on.doc") { UIPasteboard.general.string = AlertDetailSheet.copyText(alert) }
+            if alert.fixable == true {
+                Button("Fix it", systemImage: "wrench.and.screwdriver") { Task { _ = await model.fixAlert(alert) } }
+            }
+            Button("Dismiss", systemImage: "xmark", role: .destructive) { model.dismissAlert(alert) }
+        }
+        .accessibilityHint("Shows the whole alert and what JARVIS can do about it")
     }
 
     /// Pending fixes first, then the last few outcomes.
@@ -1073,7 +1134,7 @@ struct HubView: View {
 
     private var repairsCard: some View {
         let pending = visibleRepairs.filter(\.isPending).count
-        return CockpitPanel("Repairs", symbol: "wrench.and.screwdriver", trailing: {
+        return CockpitPanel("Fixes", symbol: "wrench.and.screwdriver", trailing: {
             if pending > 0 { StatusPill(text: "\(pending) to approve", color: JarvisTheme.amber) }
         }) {
             VStack(spacing: 0) {
@@ -1087,7 +1148,16 @@ struct HubView: View {
 
     private func repairRow(_ repair: RepairProposal) -> some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text(repair.label).font(.subheadline.weight(.medium))
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                Text(repair.label).font(.subheadline.weight(.medium))
+                if repair.isAuto {
+                    Text("AUTOPILOT")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(JarvisTheme.cyan)
+                        .padding(.horizontal, 5).padding(.vertical, 1)
+                        .overlay(Capsule().strokeBorder(JarvisTheme.cyan.opacity(0.4)))
+                }
+            }
             if repair.isPending {
                 if !repair.rationale.isEmpty {
                     Text(repair.rationale).font(.caption).foregroundStyle(.secondary).lineLimit(3)
@@ -1114,14 +1184,6 @@ struct HubView: View {
         .padding(.vertical, 8)
     }
 
-    /// Tap-to-chat: JARVIS gathers logs and recent changes for the alert,
-    /// and the report's prompt lands in Chat's composer for review.
-    private func openIncident(_ alert: JarvisAlert) {
-        guard let onAsk else { return }
-        Task {
-            if let prompt = await model.incidentPrompt(for: alert) { onAsk(prompt) }
-        }
-    }
 
     private var servicesCard: some View {
         CockpitPanel("Services", symbol: "dot.radiowaves.left.and.right", trailing: {

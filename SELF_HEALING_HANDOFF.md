@@ -82,3 +82,5 @@ cd ~/jarvis && git pull
    test, approve, activate, rollback.
 
 Current correction (2026-10-29): `SELF_REPAIR_COMMANDS` is no longer model-editable. Command execution requires chat/app approval bound to the diagnosed command; the editable-setting entry above records the original implementation.
+
+Current correction (2026-11-20): Nick asked for autonomy on the basic fixes. `brain/auto_heal.py` lets monitors run allowlisted stack fixes themselves (`approved_by: auto`) with cooldowns, a daily cap and Plex never automatic; `SELF_REPAIR_COMMANDS` and the model's `apply_repair` stay human-gated. Review checklist for it is in FUTURE_SESSIONS.md.

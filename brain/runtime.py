@@ -220,8 +220,9 @@ class JarvisRuntime:
         from brain import subagents
         subagents.attach(self)  # background subagent jobs show in the task lane
         from brain import self_repair
-        self_repair.set_notifier(lambda title, detail, severity: self.raise_alert(
-            "repair", title, detail, source="self-repair", severity=severity))
+        self_repair.set_notifier(lambda title, detail, severity, passive=False: self.raise_alert(
+            "repair", title, detail, source="self-repair", severity=severity,
+            **({"passive": True} if passive else {})))
         from brain import light_tracks
         light_tracks.set_notifier(lambda title, detail, severity: self.raise_alert(
             "light_sync", title, detail, source="light-sync", severity=severity,
@@ -329,6 +330,9 @@ class JarvisRuntime:
         if _monitor_on("LIGHT_SYNC") and not getattr(self, "_light_sync_started", False):
             self._light_sync_started = True
             threading.Thread(target=self._light_sync_loop, daemon=True).start()
+        if _monitor_on("ALERT_RECHECK_ENABLED") and not getattr(self, "_alert_recheck_started", False):
+            self._alert_recheck_started = True
+            threading.Thread(target=self._alert_recheck_loop, daemon=True).start()
         if os.getenv("JARVIS_HEALTHCHECKS_URL", "").strip() and not self._deadman_started:
             self._deadman_started = True
             threading.Thread(target=self._deadman_loop, daemon=True).start()
@@ -367,6 +371,7 @@ class JarvisRuntime:
                 # during watchdog recoveries, minimum downtime, one grouped
                 # notification per incident, daily digest for long backoff.
                 pushes, advisory = run_cycle(tracker, policy, snapshot, status)
+                self._arr_autopilot(tracker, policy, snapshot)
                 for push in pushes:
                     log.info("Arr stack push (%s, %s): %s", push.kind, push.thread_id, push.message)
                     message = push.message
@@ -389,10 +394,30 @@ class JarvisRuntime:
             if self._stop_monitors.wait(nas_stack.seconds("ARR_STACK_MONITOR_INTERVAL_S", 60)):
                 break
 
+    def _arr_autopilot(self, tracker, policy, snapshot: dict) -> None:
+        """Autopilot (brain/auto_heal.py): restart the arr stack or re-test
+        indexers once a failure has outlasted the NAS watchdog's turn."""
+        from brain import auto_heal
+        from brain.arr_stack import _ADVISORY_KEYS
+        try:
+            incident = policy.state.get("incident") or {}
+            hold = incident.get("hold") or {}
+            failing = {k: v for k, v in tracker.failing().items() if k not in _ADVISORY_KEYS}
+            started = auto_heal.consider_arr(failing, maintenance=bool(snapshot.get("maintenance")),
+                                             hold_until=float(hold.get("until") or 0))
+            if started:
+                log.info("Autopilot started: %s", ", ".join(started))
+        except Exception:  # noqa: BLE001 - autopilot must never stop the monitor
+            log.exception("Arr autopilot pass failed")
+
     def _report_arr_recovery(self, title: str, message: str) -> None:
         """Deliver the asynchronous outcome of a confirmed arr restart."""
+        from brain import self_repair
+        self_repair.finish_arr_recovery(message)  # the Fixes card / alert badge
         self.announce(message, source="arr-stack", title="Arr recovery result")
-        self.push_to_phone(title, message, source="arr-stack")
+        # Back up is good news: a quiet info push, not a new Needs attention row.
+        recovered = any(marker in message for marker in self_repair._ARR_RECOVERED)
+        self.push_to_phone(title, message, source="arr-stack", **({"passive": True} if recovered else {}))
 
     def push_to_phone(self, title: str, message: str, *, source: str, **grouping) -> bool:
         """Publish an arr-stack alert on the bus (phone + client streams).
@@ -540,6 +565,18 @@ class JarvisRuntime:
                                  context={"condition_keys": list(alert.condition_keys)} if alert.condition_keys else None)
             if self._stop_monitors.wait(nas_stack.seconds("NAS_HOST_MONITOR_INTERVAL_S", 300, 60)):
                 break
+
+    def _alert_recheck_loop(self) -> None:
+        """Needs attention tidies itself: every ALERT_RECHECK_INTERVAL_S
+        (10 min) each alert is checked against the live system and the fixed
+        ones leave, the same check as the app's Refresh button."""
+        from brain import alert_checks
+        while not self._stop_monitors.wait(_env_float("ALERT_RECHECK_INTERVAL_S", 600.0, 120.0)):
+            try:
+                if alert_checks.needs_attention():
+                    alert_checks.refresh()
+            except Exception:  # noqa: BLE001 - a bad pass must not end the loop
+                log.exception("Alert re-check failed")
 
     def _deadman_loop(self) -> None:
         """Ping Healthchecks while the arr monitor is alive.
@@ -1642,28 +1679,31 @@ class JarvisRuntime:
                 staged = self._stage_download_retry(torrent_hash, why)
                 self.raise_alert("download_stalled", "Download stalled",
                                  f"{item.get('name', 'Download')}: {why} "
-                                 + ("A retry is ready in Repairs." if staged else "Ask me to diagnose it."),
+                                 + {"auto": "I'm retrying it with another release.",
+                                    "staged": "A retry is ready in Fixes."}.get(staged, "Ask me to diagnose it."),
                                  source="downloads",
                                  context={"torrent_hash": torrent_hash, "name": str(item.get("name", ""))[:200]})
         stalled &= set(current)
         return current
 
-    def _stage_download_retry(self, torrent_hash: str, why: str) -> bool:
-        """Stage (never run) a one-tap retry for the arr item behind a stalled
-        torrent. False when no Radarr/Sonarr queue item owns it."""
+    def _stage_download_retry(self, torrent_hash: str, why: str) -> str:
+        """Retry the arr item behind a stalled torrent: on its own when the
+        autopilot allows ("auto"), else staged for a one-tap approval
+        ("staged"). "" when no Radarr/Sonarr queue item owns it."""
         try:
             from integrations import media_doctor
             from brain import self_repair
             found = media_doctor.find_queue_record(torrent_hash)
             if found is None:
-                return False
+                return ""
             params = media_doctor.retry_params(*found)
-            self_repair.propose_stack_fix("retry_download", f"{found[2]}: {why}", params=params,
-                                          key=torrent_hash.lower()[:16])
-            return True
+            reply = self_repair.propose_stack_fix("retry_download", f"{found[2]}: {why}", params=params,
+                                                  key=torrent_hash.lower()[:16],
+                                                  link="torrent:" + torrent_hash.lower()[:16], auto=True)
+            return "auto" if " is running" in reply else "staged"
         except Exception:  # noqa: BLE001 - a lookup failure must not stop the alert
             log.exception("Could not stage a download retry")
-            return False
+            return ""
 
 
 def _watched_devices() -> list[str]:

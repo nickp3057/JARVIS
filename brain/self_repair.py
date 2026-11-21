@@ -18,6 +18,9 @@ when the exact proposal id is applied with ``confirmed=True``:
                       Approve tap. The model's ``confirmed=True`` is not
                       enough, and they run in the background, reporting the
                       verified outcome through the notifier (an alert).
+                      Since 2026-11-20 a monitor may also run the basic ones
+                      itself (``approved_by="auto"``) when ``brain.auto_heal``
+                      allows it: never Plex, with cooldowns and a daily cap.
 
 After a repair the subsystem is re-probed.  If it is still failing, a
 ``set_setting`` repair is rolled back automatically to the previous value.
@@ -50,8 +53,9 @@ _LOCK = RLock()
 _MAX_PROPOSALS = 50
 _PROBE_TIMEOUT_S = 3.0
 _COMMAND_TIMEOUT_S = 90
-# (title, detail, severity) -> None; the runtime points this at raise_alert.
-_notifier: Callable[[str, str, str], None] | None = None
+# The runtime points this at raise_alert.
+# (title, detail, severity, passive=False) -> None
+_notifier: Callable[..., None] | None = None
 
 # Subsystem playbooks.  ``tools`` are prefixes/names from brain/tools.py;
 # ``env`` are the settings the subsystem needs; ``url_env`` is probed by TCP;
@@ -322,17 +326,21 @@ def diagnose(tool: str, session_id: str | None = None) -> str:
     return "\n".join(lines)
 
 
-def set_notifier(callback: Callable[[str, str, str], None] | None) -> None:
+def set_notifier(callback: Callable[..., None] | None) -> None:
     global _notifier
     _notifier = callback
 
 
 def propose_stack_fix(name: str, rationale: str, session_id: str | None = None, *,
-                      params: dict[str, Any] | None = None, key: str | None = None) -> str:
+                      params: dict[str, Any] | None = None, key: str | None = None,
+                      link: str | None = None, auto: bool = False) -> str:
     """Stage an allowlisted stack fix; in chat, open the confirm gate for it.
 
-    Nothing runs here. The fix runs only when Nick replies "yes"/the code
-    (confirm gate) or taps Approve in the app (``POST /api/repairs/{id}/apply``)."""
+    Nothing runs here unless ``auto`` (a monitor's call, never the model's)
+    and ``brain.auto_heal`` allows the fix right now; otherwise it runs only
+    when Nick replies "yes"/the code (confirm gate) or taps Approve in the app
+    (``POST /api/repairs/{id}/apply``). ``link`` ties the repair to the alert
+    it answers (``auto_heal.link_for``) so the app can show its progress."""
     from brain import confirm_gate, stack_fixes
     name = (name or "").strip().lower()
     fix = stack_fixes.FIXES.get(name)
@@ -343,10 +351,19 @@ def propose_stack_fix(name: str, rationale: str, session_id: str | None = None, 
     action = {"kind": "stack_fix", "name": name, **({"params": params} if params else {})}
     label = stack_fixes.describe(name, params)
     proposal = _new_proposal("nas_stack", tool, action, (rationale or "").strip()[:500] or label)
+    if link:
+        proposal["link"] = link
     with _LOCK:
         items = [p for p in _load() if not (p.get("status") == "pending" and p.get("tool") == tool)]
         items.append(proposal)
         _save(items)
+    if auto and not session_id:
+        from brain import auto_heal
+        reason = auto_heal.blocked_reason(name, key or "")
+        if reason is None:
+            auto_heal.record(name, key or "", proposal["id"])
+            return apply(proposal["id"], confirmed=True, approved_by="auto")
+        log.info("Repair %s staged for approval; autopilot held it: %s", proposal["id"], reason)
     staged = f"Staged repair {proposal['id']}: {label}. It also shows in the app with an Approve button."
     if not session_id:
         return staged + " Nothing has been changed yet."
@@ -367,8 +384,20 @@ def public_proposals(hours: float = 24) -> list[dict[str, Any]]:
             continue
         out.append({"id": p["id"], "kind": p["action"].get("kind"), "target": p.get("tool"), "label": _describe_action(p["action"]),
                     "rationale": p.get("rationale", ""), "status": p.get("status"), "result": p.get("result", ""),
-                    "created_at": p.get("created_at"), "finished_at": p.get("finished_at")})
+                    "created_at": p.get("created_at"), "finished_at": p.get("finished_at"),
+                    "approved_by": p.get("approved_by"), "link": p.get("link")})
     return out[:20]
+
+
+def latest_for_link(link: str, since: float = 0.0) -> dict[str, Any] | None:
+    """The newest repair tied to an alert's link, staged at or after ``since``."""
+    with _LOCK:
+        items = _load()
+    for p in reversed(items):
+        if p.get("link") == link and float(p.get("created_at") or 0) >= since and p.get("status") != "rejected":
+            return {"id": p["id"], "label": _describe_action(p["action"]), "status": p.get("status"),
+                    "result": p.get("result", ""), "auto": p.get("approved_by") == "auto"}
+    return None
 
 
 def _describe_action(action: dict[str, Any]) -> str:
@@ -410,14 +439,64 @@ def _run_stack_fix(proposal: dict[str, Any], approved_by: str) -> None:
     from brain import stack_fixes
     name = proposal["action"]["name"]
     ok, outcome = stack_fixes.run(name, proposal["action"].get("params"))
+    if ok and name == "arr_recovery":
+        # Only started: the chain takes minutes. It stays "running" until
+        # arr_stack's follow-up reports (finish_arr_recovery), so the app
+        # never shows FIXED for a stack that isn't back yet.
+        global _arr_following
+        _arr_following = proposal["id"]
+        with _LOCK:
+            items = _load()
+            for p in items:
+                if p.get("id") == proposal["id"]:
+                    p["result"] = outcome[:500]
+            _save(items)
+        log.info("Stack fix %s (arr_recovery, approved via %s) started: %s", proposal["id"], approved_by, outcome)
+        if approved_by == "auto" and _notifier is not None:
+            try:
+                _notifier("Restarting the arr stack myself", outcome, "info", passive=True)
+            except Exception:  # noqa: BLE001
+                log.exception("Repair notifier failed")
+        return
     _finish(proposal["id"], "applied" if ok else "failed", outcome)
     log.info("Stack fix %s (%s, approved via %s): %s", proposal["id"], name, approved_by, outcome)
+    if ok and proposal.get("link"):
+        _resolve_linked_alerts(str(proposal["link"]))  # verified fixed: off Needs attention
     if _notifier is not None:
-        title = f"Repair {'done' if ok else 'failed'}: {stack_fixes.describe(name, proposal['action'].get('params')).split(':')[0].split(',')[0]}"
+        what = stack_fixes.describe(name, proposal['action'].get('params')).split(':')[0].split(',')[0]
+        if approved_by == "auto":
+            title = f"{'Fixed it myself' if ok else 'Tried to fix it myself'}: {what}"
+        else:
+            title = f"Repair {'done' if ok else 'failed'}: {what}"
         try:
-            _notifier(title[:120], outcome, "info" if ok else "warning")
+            # A fix that worked on its own is news, not an alarm: a quiet push.
+            _notifier(title[:120], outcome, "info" if ok else "warning", passive=ok)
         except Exception:  # noqa: BLE001 - delivery problems must not hide the result
             log.exception("Repair notifier failed")
+
+
+# The arr_recovery proposal waiting on arr_stack's follow-up report.
+_arr_following: str | None = None
+_ARR_RECOVERED = ("Arr stack recovered", "Arr stack is back up", "but every service is up")
+
+
+def finish_arr_recovery(message: str) -> None:
+    """arr_stack's follow-up landed: close the repair that started it."""
+    global _arr_following
+    proposal_id, _arr_following = _arr_following, None
+    if not proposal_id:
+        return
+    ok = any(marker in message for marker in _ARR_RECOVERED)
+    _finish(proposal_id, "applied" if ok else "failed", message)
+    if ok:
+        _resolve_linked_alerts("arr_stack")
+
+
+def _resolve_linked_alerts(link: str) -> None:
+    from brain import auto_heal, event_bus
+    ids = [a.id for a in event_bus.since(0, limit=200) if auto_heal.link_for(a.kind, a.context) == link]
+    if ids:
+        event_bus.resolve(ids)
 
 
 def apply(proposal_id: str, *, confirmed: bool = False, value: Any = None, approved_by: str | None = None) -> str:
@@ -425,7 +504,9 @@ def apply(proposal_id: str, *, confirmed: bool = False, value: Any = None, appro
 
     ``approved_by`` ("chat" from the confirm gate, "app" from the Approve tap)
     is required for stack fixes and commands: they only ever follow a message or tap from
-    Nick himself, so the model's apply_repair call alone is refused."""
+    Nick himself, so the model's apply_repair call alone is refused. "auto"
+    (a monitor, via ``propose_stack_fix(auto=True)``) is accepted only for a
+    stack fix ``brain.auto_heal`` permits."""
     if not confirmed:
         return "I need Nick's explicit go-ahead before I apply a repair, sir."
     with _LOCK:
@@ -435,7 +516,11 @@ def apply(proposal_id: str, *, confirmed: bool = False, value: Any = None, appro
             return f"No repair proposal with id '{proposal_id}', sir."
         if proposal.get("status") != "pending":
             return f"Repair {proposal_id} was already {proposal.get('status')}."
-        if proposal["action"].get("kind") in {"stack_fix", "run_command"} and approved_by not in {"chat", "app"}:
+        if approved_by == "auto":
+            from brain import auto_heal
+            if proposal["action"].get("kind") != "stack_fix" or not auto_heal.permitted(str(proposal["action"].get("name"))):
+                return f"Repair {proposal_id} isn't one I may run on my own, sir; it waits for your approval."
+        elif proposal["action"].get("kind") in {"stack_fix", "run_command"} and approved_by not in {"chat", "app"}:
             return (f"Repair {proposal_id} runs a command or changes a service, so it needs Nick's own "
                     "approval: his \"yes\" or code in chat, or the Approve button in the app, sir.")
         action = proposal["action"]
@@ -443,6 +528,8 @@ def apply(proposal_id: str, *, confirmed: bool = False, value: Any = None, appro
             # Ask before marking it running, or it could never be applied with the value.
             return f"Repair {proposal_id} needs a value for {action['key']}, sir. Tell me what to set it to."
         proposal["status"] = "running"
+        if approved_by:
+            proposal["approved_by"] = approved_by
         _save(items)
 
     if proposal["action"]["kind"] == "stack_fix":

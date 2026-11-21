@@ -30,7 +30,7 @@ class StackFixApprovalTests(unittest.TestCase):
             p.start()
             self.addCleanup(p.stop)
         self.notes = []
-        self_repair.set_notifier(lambda title, detail, severity: self.notes.append((title, detail, severity)))
+        self_repair.set_notifier(lambda title, detail, severity, **_: self.notes.append((title, detail, severity)))
         self.addCleanup(self_repair.set_notifier, None)
         confirm_gate.clear_for_tests()
         self.addCleanup(confirm_gate.clear_for_tests)

@@ -259,6 +259,17 @@ approval, like torrent pause/resume) and `/reject` dismisses. Stack fixes
 thread and report through `self_repair.set_notifier`, which the runtime
 points at `raise_alert("repair", ...)`.
 
+Autopilot (`brain/auto_heal.py`, 2026-11-20) is the one exception to "a
+human approves": monitors (never the model) may call
+`propose_stack_fix(..., auto=True)`, which runs the fix with
+`approved_by="auto"` when `auto_heal.blocked_reason` is None (enabled, on the
+list, never Plex, Plex idle for HA restarts, within cooldowns and the daily
+cap); otherwise the proposal waits for approval as before. `apply()` re-checks
+`auto_heal.permitted` for every "auto" run. Repairs carry a `link`
+(`auto_heal.link_for`) back to their alert, which `/api/alerts/recent`
+returns as `repair`; `POST /api/alerts/{id}/fix` and `/dismiss` act on one
+alert.
+
 The dashboard endpoints (`/api/status/torrents`, `/api/status/media`,
 `/api/status/storage`, `/api/status/services`, `/api/links` (each link has
 `url` plus `remote_url` from `LINK_REMOTE_HOSTS`; the app picks by probing
@@ -350,6 +361,11 @@ making UI widgets or speech loops own business logic directly. The more the
 runtime knows, the more JARVIS feels like one mind instead of several scripts.
 
 ## Runtime Monitor Settings
+
+- Autopilot (`brain/auto_heal.py`): rides the arr monitor's poll
+  (`_arr_autopilot`) and the download monitor's stall staging; `AUTO_REPAIR_*`
+  settings in JARVIS.md. Alert re-check (`_alert_recheck_loop`): every
+  `ALERT_RECHECK_INTERVAL_S` (600) unless `ALERT_RECHECK_ENABLED=false`.
 
 - Temp 4K monitor (`integrations/temp_4k.py`): on when `RADARR4K_URL`/`RADARR4K_API_KEY` are set and `TEMP_4K_MONITOR_ENABLED` isn't off; every `TEMP_4K_INTERVAL_S` (300) it alerts when a temporary 4K film lands and deletes it from the 4K Radarr when `TEMP_4K_HOURS` is up.
 - Schwab monitor + streamer: on when `SCHWAB_APP_KEY`/`SECRET`/`CALLBACK_URL`

@@ -48,6 +48,7 @@ Pearson-Stark-Jarvis/
 │   ├── automation_workshop.py Staged HA automation drafts, diffs, apply + rollback
 │   ├── clipboard_tool.py    Read/write clipboard via PowerShell Get/Set-Clipboard
 │   ├── alert_checks.py      Needs attention Refresh: re-checks each alert live, hides the fixed ones
+│   ├── auto_heal.py         Autopilot: monitors run the basic stack fixes themselves (arr recovery, indexers, stuck downloads); never Plex; cooldowns + daily cap
 │   ├── debug_reports.py     Durable user-submitted companion failure reports
 │   ├── incident_reports.py  Tap-to-chat incident report: live health, NAS watchdog logs, app log warnings, quoted indexer HTTP/Cloudflare errors, recent changes, rule-based suspected cause
 │   ├── history.py           SQLite conversation history with session support
@@ -828,6 +829,9 @@ entry in `brain/agent_roster.py` (name, kind, icon, description, schedule);
   charging or above 20%). Arr incidents require healthy live stack checks; NAS
   alerts carry condition keys checked against fresh host telemetry. Unrelated
   recovery notes never clear warnings. Anything it cannot judge stays.
+- Needs attention also tidies itself: `_alert_recheck_loop` runs the same
+  re-check every `ALERT_RECHECK_INTERVAL_S` (600) while anything is listed
+  (`ALERT_RECHECK_ENABLED=false` stops it).
 - `clear_alerts` — empty the app's Needs attention list ("things need you")
   outright when Nick says it's all handled (`POST /api/alerts/clear`, admin
   token; voice only now). Cleared alerts drop out of `/api/alerts/recent`
@@ -866,7 +870,24 @@ entry in `brain/agent_roster.py` (name, kind, icon, description, schedule);
   opens the confirm gate ("yes" / code) and the app shows it on Home →
   Repairs with Approve / Dismiss. `apply_repair` from the model is refused
   for stack fixes. They run in the background and report the verified
-  outcome as a `repair` alert. Nothing restarts without Nick (his rule).
+  outcome as a `repair` alert. Since 2026-11-20 (Nick: "I don't want to have
+  to manually do anything ... the only thing I'd like to not be automatic is
+  the plex") **autopilot** (`brain/auto_heal.py`) runs the basic ones itself
+  from the monitors, with `approved_by: auto`: `arr_recovery` once a stack
+  condition (an API down, Prowlarr health, qBittorrent disconnected, DHT zero)
+  outlasts `AUTO_REPAIR_ARR_AFTER_S` (600 s; DHT/disconnected wait
+  `ARR_STACK_DHT_ALERT_AFTER_S` + 5 min so the NAS watchdog acts first), never
+  during a recovery or watchdog hold; `retest_indexers` after an indexer is
+  backed off 30 min (`AUTO_REPAIR_INDEXER_AFTER_S`); `switch_indexer_mirror`
+  after 2 h (`AUTO_REPAIR_MIRROR_AFTER_S`); `retry_download` as soon as a
+  download stalls. `refresh_plex` is hard-coded never-automatic and
+  `restart_home_assistant` waits while anything plays on Plex. Limits: one arr
+  recovery per `AUTO_REPAIR_ARR_COOLDOWN_S` (2 h), `AUTO_REPAIR_ARR_DAILY_MAX`
+  (3) a day, `AUTO_REPAIR_DAILY_MAX` (12) fixes a day, each fix/target once per
+  cooldown (`memory/auto_repairs.json`). `AUTO_REPAIR_ENABLED=false` (or the
+  toggle on the Needs attention card, `POST /api/autopilot`) puts everything
+  back to staged-for-approval. The model can't trigger autopilot; only
+  monitors call it.
 - `list_repair_proposals(status?)` / `reject_repair(proposal_id)`.
 - Stored in `memory/repair_proposals.json` via `brain/self_repair.py`. This is
   the "propose → approve → apply → verify → rollback" loop from the governed
@@ -1146,6 +1167,15 @@ ROOM_VOLUME_MAPPED=1        # levels use amixer -M (loudness-matched: 8 = about 
 TV_HDMI_INPUTS=              # HDMI 1..N input ids for the remote's Input menu (blank = the TCL's HW15,HW16,HW17)
 LIGHT_RAINBOWS=             # light=select:option (or light=scene.x) pairs for the Rainbow button (defaults to Nick's strip + desk DIY scenes, the lamp's built-in Rainbow scene, and the fan ring's scene.fan_light_rainbow Tap-to-Run)
 ALERT_REPEAT_WINDOW_S=1800  # suppress repeat pushes, retain visible alerts even across restarts (memory/alert_repeats.json); 0 = off
+ALERT_RECHECK_INTERVAL_S=600  # Needs attention re-checks itself this often (ALERT_RECHECK_ENABLED=false stops it)
+AUTO_REPAIR_ENABLED=true    # autopilot: JARVIS runs the basic stack fixes himself (never Plex); false = everything waits for approval
+AUTO_REPAIR_FIXES=          # comma list; blank = arr_recovery,retest_indexers,switch_indexer_mirror,retry_download,restart_home_assistant (refresh_plex can't be added)
+AUTO_REPAIR_ARR_AFTER_S=600 # how long an arr stack failure lasts before autopilot recreates the stack
+AUTO_REPAIR_ARR_COOLDOWN_S=7200  # at most one automatic arr recovery per this many seconds
+AUTO_REPAIR_ARR_DAILY_MAX=3 # and this many a day
+AUTO_REPAIR_DAILY_MAX=12    # automatic fixes a day, all kinds
+AUTO_REPAIR_INDEXER_AFTER_S=1800  # indexer backed off this long: re-test all
+AUTO_REPAIR_MIRROR_AFTER_S=7200   # still backed off this long: try its other mirrors
 RING_LIGHTS=light.nicks_fan # colour-only lights: the apps never send white (the fan's RGB ring)
 RESTING_SCENES=scene.normal,scene.peace,scene.goodnight  # running one means "no scene"
 NORMAL_LIGHT=light.bedroom_lights  # left on when a scene tile leaves its scene and HA has no Normal scene
@@ -1357,6 +1387,8 @@ there, so edit files with a `sudo python3` one-shot or vi.
 ---
 
 ## Recently Shipped
+
+- **Autopilot, a new Needs attention, Donna stays unlocked (2026-11-20, companion 6.97 / 339, Core).** *Autopilot* (`brain/auto_heal.py`): JARVIS now runs the basic stack fixes himself (arr recovery, indexer re-test and mirror switch, stuck-download retry) once a failure outlasts the NAS watchdog; never Plex; cooldowns and a daily cap; the toggle sits on the Needs attention card (details under `propose_stack_fix`). Each repair carries a `link` to the alert it answers, so `GET /api/alerts/recent` rows include `repair` (status, result, auto) and `fixable`; a verified fix clears its alert. New routes: `POST /api/alerts/{id}/fix` (the tap is the approval, no cooldown), `POST /api/alerts/{id}/dismiss` (one alert and its repeats), `GET/POST /api/autopilot`. Needs attention re-checks itself every 10 min. *App:* rows show two lines of the message, a FIXING / FIXED / FIX FAILED badge (AUTOPILOT when he did it) and open `AlertDetailSheet`: the whole message (selectable), what JARVIS is doing, **Fix it**, **Ask JARVIS about it** (gathers the incident report and sends it straight to Chat instead of filling the composer), **Copy**, **Dismiss**; long-press a row for the same. The incident prompt is one paragraph now. Repairs card renamed **Fixes** with an AUTOPILOT tag. *Donna:* End session closes her immediately (note written in the background) and Face ID is asked once per visit, not after every app switch (30 min away relocks). Tests: `tests/test_auto_heal.py`; `tests/__init__.py` turns autopilot off for every other test so none can run a real fix.
 
 - **Faster, truer light sync builds (2026-11-19, companion 6.90 / 332, Core).** Measured on the Surface with the temp-4K Songbirds file (3840x1608 HEVC Main 10, HDR PQ): software decode ran at 110 fps with 4 threads and 139 fps with 8 (a 2 h 37 min film: ~43 vs ~34 min). Builds now use every core by default (`LIGHT_SYNC_BUILD_THREADS` blank, up to 8). HDR files (`is_hdr`: smpte2084/arib-std-b67 in the probe) are tonemapped to SDR on the 64x28 frame (zscale + hable, nearly free): the plain 4K track came out washed out (saturation 0.35) against the 1080p SDR track's 0.47 for the same minute; tonemapped 0.43. Hardware decode: `build_hwaccel()` picks VAAPI when `/dev/dri/renderD128` is usable and an Intel VA driver is installed, and a failed GPU decode rebuilds in software at once; the success log says which decode ran. One-time on the Surface to turn the GPU on: `sudo apt install intel-media-va-driver && sudo usermod -aG render nick && sudo systemctl restart jarvis-api`. GPU (Iris Plus integrated graphics, Quick Sync via VAAPI; also needs `libva-drm2`, which imageio-ffmpeg loads at runtime): copying full 4K frames back made it slower than software (91 fps), so VAAPI builds shrink on the GPU first (`scale_vaapi` to 480x200, then `hwdownload`): 4K HDR 251-261 fps (~18 min for a 2.5 h film), 1080p SDR 631 fps, colours identical to software (Surface, 2026-11-19, companion 6.91 / 333).
 - **Light sync builds can't stall "Hey JARVIS"; no builds on their own (2026-11-19, companion 6.89 / 331).** Playing the temp-4K Songbirds copy (a different Plex Part from the 1080p one that had a track) quietly queued a two-hour 4K build; its per-frame colour maths ran as Python inside Core, held the interpreter lock, and the room voice fell ~30 s behind (wake word heard, no answer in time). Now: (1) `brain/light_track_worker.py` runs ffmpeg and the colour maths in its own process at nice 10 and streams 3 bytes per frame; `light_tracks.read_track` only counts them. (2) `light_sync` never starts a build itself; the reason reads "…'s light sync is for another copy; make one for this copy from the menu" and status has `other_copy_has_track`. (3) `POST /api/lightsync/build {playing: true}` (`LightSyncController.build_playing`) builds the copy playing on the TV now; the iPad movie screen's Light sync menu button says **Make a light sync for this copy** in that case and sends it. (4) `resume()` drops queued copy builds that queued themselves (quiet + `base_rating_key`), so tonight's Songbirds 4K build doesn't restart. `cancel` accepts Part keys (`6699--<hash>`). Tests: `tests/test_light_sync.py`.
@@ -2009,8 +2041,13 @@ there, so edit files with a `sudo python3` one-shot or vi.
   into one line, and the tab bar is covered (`DonnaPresenter`, overlay in
   `RootView`). Hold the line or tap the chevron to leave. Since 6.69 the
   door only hides her; `DonnaLock` is the lock: Face ID (passcode fallback)
-  before `DonnaView` is even built, relocking whenever the app backgrounds and
-  covering her while inactive so the app switcher snapshot stays blank. The
+  before `DonnaView` is even built, and covering her while inactive so the
+  app switcher snapshot stays blank. Since 6.97 one Face ID lasts the visit:
+  the unlock lives on `DonnaPresenter`, survives switching apps (send, go do
+  something else, come back to her answer), and ends on leaving Donna, End
+  session, or 30 min in the background (`DonnaPresenter.relockAfter`, Core's
+  own idle end). End session closes her at once; the note is written on Core
+  in the background. The
   Mac app's Donna section has the same gate with Touch ID (login-password
   fallback), relocking on leaving the section, screen lock/sleep, or 5 min in
   the background (`mac/JarvisMac/Sources/JarvisMac/DonnaLock.swift`). Memory works like a
