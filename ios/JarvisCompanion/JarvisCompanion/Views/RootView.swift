@@ -202,7 +202,7 @@ struct RootView: View {
         .overlay { VoiceEnrollCard() }  // Teach JARVIS my voice: the line to read
         .fullScreenCover(isPresented: $wakeRinging.showing) { WakeRingingView().environmentObject(settings) }
         .sheet(item: $alertOpener.target) { target in
-            AlertDetailSheet(model: hub, alertID: target.id, onAsk: sendNow)
+            AlertDetailSheet(model: hub, alertID: target.id, onAsk: sendNow, onOpen: openQuickLink)
                 .environmentObject(settings)
         }
         // While the iPad's lens is on, its reactors draw the green orb.
@@ -326,6 +326,17 @@ struct RootView: View {
         guard (Self.isPad || Self.isMac), !reduceMotion else { return }
         swipeOffset = to > from ? 140 : -140
         withAnimation(.spring(duration: 0.35, bounce: 0.12)) { swipeOffset = 0 }
+    }
+
+    /// A pushed alert's quick link: over to the tab with that card.
+    private func openQuickLink(_ link: AlertDetailSheet.QuickLink) {
+        switch link {
+        case .transfers, .services, .storage:
+            hub.mediaScrollTarget = link == .transfers ? "transfers" : link == .services ? "services" : "storage"
+            selection = .media
+        case .fixes: selection = Self.isMac ? .desk : .hub
+        case .schwabLogin: break  // the sheet opens the login itself
+        }
     }
 
     /// Desk's ask bar: straight into Chat and sent.

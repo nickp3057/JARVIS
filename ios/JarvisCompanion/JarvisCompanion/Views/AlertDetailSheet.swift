@@ -9,7 +9,11 @@ struct AlertDetailSheet: View {
     let alertID: Int
     /// Sends a message to JARVIS now and switches to Chat.
     var onAsk: ((String) -> Void)?
+    /// Takes Nick to what the alert is about (Transfers, Services, …); the
+    /// sheet closes first. Nil hides those links (Schwab's login still works).
+    var onOpen: ((QuickLink) -> Void)? = nil
     @Environment(\.dismiss) private var dismiss
+    @State private var schwabLoggingIn = false
     @State private var outcome: String?
     @State private var asking = false
     @State private var copied = false
@@ -64,6 +68,56 @@ struct AlertDetailSheet: View {
         }
         .presentationDetents([.medium, .large])
         .presentationDragIndicator(.visible)
+        .sheet(isPresented: $schwabLoggingIn) {
+            SchwabLoginView {
+                Task {
+                    await model.refreshPortfolio()
+                    model.recheckAlerts()  // logged in: the alert drops off
+                }
+            }
+        }
+    }
+
+    /// The one tap that answers an alert, by what raised it.
+    enum QuickLink: String {
+        case schwabLogin, transfers, services, storage, fixes
+        var title: String {
+            switch self {
+            case .schwabLogin: return "Log in to Schwab"
+            case .transfers: return "Open Transfers"
+            case .services: return "Open Services"
+            case .storage: return "Open Storage"
+            case .fixes: return "Review the fix"
+            }
+        }
+        var symbol: String {
+            switch self {
+            case .schwabLogin: return "person.badge.key"
+            case .transfers: return "arrow.down.circle"
+            case .services: return "dot.radiowaves.left.and.right"
+            case .storage: return "internaldrive"
+            case .fixes: return "checkmark.seal"
+            }
+        }
+    }
+
+    static func quickLink(for alert: JarvisAlert, pendingFix: Bool) -> QuickLink? {
+        switch alert.kind {
+        case "schwab_login": return .schwabLogin
+        case "download_error", "download_stalled": return .transfers
+        case "arr_stack": return .services
+        case "nas_host":
+            let text = (alert.title + " " + alert.message).lowercased()
+            return ["disk", "storage", "space", "full", "drive"].contains { text.contains($0) } ? .storage : .services
+        case "repair": return pendingFix ? .fixes : nil
+        default: return nil
+        }
+    }
+
+    private func quickLink(_ alert: JarvisAlert) -> QuickLink? {
+        let pending = model.repairs.value?.contains(where: \.isPending) ?? false
+        guard let link = Self.quickLink(for: alert, pendingFix: pending) else { return nil }
+        return link == .schwabLogin || onOpen != nil ? link : nil
     }
 
     private func header(_ alert: JarvisAlert) -> some View {
@@ -111,7 +165,16 @@ struct AlertDetailSheet: View {
 
     private func actions(_ alert: JarvisAlert) -> some View {
         let working = alert.repair?.isWorking == true || model.fixingAlertIDs.contains(alert.id)
+        let link = quickLink(alert)
         return VStack(spacing: 10) {
+            if let link {
+                // Fix it stays the main button when there is one.
+                if alert.fixable == true {
+                    quickLinkButton(link).buttonStyle(.bordered)
+                } else {
+                    quickLinkButton(link).buttonStyle(.borderedProminent)
+                }
+            }
             if alert.fixable == true {
                 Button {
                     Task {
@@ -162,6 +225,19 @@ struct AlertDetailSheet: View {
             .sensoryFeedback(.success, trigger: copied)
         }
         .controlSize(.large)
+    }
+
+    private func quickLinkButton(_ link: QuickLink) -> some View {
+        Button {
+            if link == .schwabLogin {
+                schwabLoggingIn = true
+            } else {
+                dismiss()
+                onOpen?(link)
+            }
+        } label: {
+            Label(link.title, systemImage: link.symbol).frame(maxWidth: .infinity)
+        }
     }
 
     static func tint(_ alert: JarvisAlert) -> Color {
