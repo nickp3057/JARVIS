@@ -98,34 +98,41 @@ struct Pill: View {
     }
 }
 
-/// The app icon's reactor, drawn live: gold bezel, cyan orbit, white core.
+/// The app icon's HUD rings, drawn live: arcs of different lengths round a
+/// white-hot core (ios/icon/render_icon.swift draws the same at 1024).
 struct ReactorEmblem: View {
     var size: CGFloat = 64
+
+    private func arc(_ diameter: CGFloat, from: Double, to: Double, width: CGFloat, opacity: Double, glow: Bool = false) -> some View {
+        Circle()
+            .trim(from: from / 360, to: to / 360)
+            .stroke(JarvisTheme.accent.opacity(opacity), style: StrokeStyle(lineWidth: width, lineCap: .round))
+            .frame(width: size * diameter, height: size * diameter)
+            .shadow(color: glow ? JarvisTheme.accent : .clear, radius: size * 0.04)
+    }
+
     var body: some View {
         ZStack {
-            Circle().fill(RadialGradient(colors: [JarvisTheme.accent.opacity(0.35), .clear], center: .center,
-                                         startRadius: 0, endRadius: size * 0.6))
-            ForEach(0..<6, id: \.self) { i in
-                Circle()
-                    .trim(from: CGFloat(i) / 6 + 0.012, to: CGFloat(i + 1) / 6 - 0.012)
-                    .stroke(LinearGradient(colors: [Color(hex: 0xFBE09A), JarvisTheme.gold, JarvisTheme.goldDeep],
-                                           startPoint: .top, endPoint: .bottom),
-                            style: StrokeStyle(lineWidth: size * 0.07))
-                    .frame(width: size * 0.82, height: size * 0.82)
+            Circle().fill(RadialGradient(colors: [JarvisTheme.accent.opacity(0.3), .clear], center: .center,
+                                         startRadius: 0, endRadius: size * 0.5))
+            // SwiftUI's angles run clockwise from 3 o'clock; mirrored to match the icon.
+            Group {
+                arc(0.78, from: 200, to: 360, width: max(1, size * 0.006), opacity: 0.45)
+                arc(0.78, from: 0, to: 160, width: max(1, size * 0.006), opacity: 0.45)
+                arc(0.66, from: 110, to: 360, width: max(1.5, size * 0.03), opacity: 1, glow: true)
+                arc(0.66, from: 0, to: 50, width: max(1.5, size * 0.03), opacity: 1, glow: true)
+                arc(0.53, from: 0, to: 150, width: max(1, size * 0.018), opacity: 0.85)
+                arc(0.53, from: 175, to: 290, width: max(1, size * 0.018), opacity: 0.5)
+                Circle().stroke(JarvisTheme.accent.opacity(0.4), lineWidth: max(0.5, size * 0.004))
+                    .frame(width: size * 0.4, height: size * 0.4)
             }
+            .scaleEffect(x: 1, y: -1)
             Circle()
-                .trim(from: 0.06, to: 0.94)
-                .stroke(JarvisTheme.accent, style: StrokeStyle(lineWidth: size * 0.025, lineCap: .round))
-                .rotationEffect(.degrees(-125))
-                .frame(width: size * 0.64, height: size * 0.64)
-                .shadow(color: JarvisTheme.accent, radius: size * 0.05)
-            Circle().fill(Color(hex: 0x0A2638)).frame(width: size * 0.5, height: size * 0.5)
-            Circle()
-                .fill(RadialGradient(colors: [.white, Color(hex: 0xBFF4FF), JarvisTheme.accent.opacity(0)],
-                                     center: .center, startRadius: 0, endRadius: size * 0.22))
-                .frame(width: size * 0.44, height: size * 0.44)
-            Circle().fill(.white).frame(width: size * 0.13, height: size * 0.13)
-                .shadow(color: Color(hex: 0xBFF4FF), radius: size * 0.06)
+                .fill(RadialGradient(colors: [.white, Color(hex: 0xC9F6FF), JarvisTheme.accent.opacity(0)],
+                                     center: .center, startRadius: 0, endRadius: size * 0.17))
+                .frame(width: size * 0.34, height: size * 0.34)
+            Circle().fill(.white).frame(width: size * 0.12, height: size * 0.12)
+                .shadow(color: Color(hex: 0xBFF4FF), radius: size * 0.05)
         }
         .frame(width: size, height: size)
         .accessibilityHidden(true)
