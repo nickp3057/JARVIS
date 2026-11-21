@@ -42,7 +42,7 @@ memory/sounds/
 memory/tts_cache/
 memory/*.p8
 memory/voiceprint.json
-models/
+/models/
 memory/alert_repeats.json
 
 # personal data: never commit (scrubbed from history 2026-11-16)
