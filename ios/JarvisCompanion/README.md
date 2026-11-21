@@ -241,7 +241,7 @@ indexers, recovery results) arrive as **remote push** via APNs:
   and shows alerts as banners while the app is open.
 - Settings shows the registration state ("Push alerts on").
 
-Server setup (APNs key, `APNS_*` in the Optiplex `.env`) is in
+Server setup (APNs key, `APNS_*` in Core's `.env` on the Surface) is in
 `OVERNIGHT_HANDOFF.md`. With automatic signing, the first build after pulling
 lets Xcode add Push Notifications to the App ID.
 

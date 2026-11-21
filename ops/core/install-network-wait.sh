@@ -1,5 +1,5 @@
 #!/bin/sh
-# Make network-online.target actually wait for the Wi-Fi link on the Optiplex.
+# Make network-online.target actually wait for the Wi-Fi link on the Surface.
 #
 # Problem (confirmed 2026-09-22 after a power cut): jarvis-api.service already
 # has After=/Wants=network-online.target, but on this ifupdown + dhcpcd box
@@ -16,7 +16,7 @@
 # Bounded: after WAIT_ONLINE_TIMEOUT the wait unit fails and jarvis-api starts
 # anyway (Wants=, not Requires=), and the app's own startup grace absorbs it.
 #
-# Usage (on the Optiplex):  sudo sh ops/optiplex/install-network-wait.sh [gateway]
+# Usage (on the Surface):  sudo sh ops/core/install-network-wait.sh [gateway]
 set -eu
 GATEWAY=${1:-10.0.0.1}
 TIMEOUT=90

@@ -130,7 +130,7 @@ final class LevelDragger: ObservableObject {
 }
 
 /// The room speaker's volume (JARVIS's voice, timers and chimes on the
-/// Optiplex), 0-10 like "Hey JARVIS, volume 4". Sent when the finger lifts;
+/// Surface), 0-10 like "Hey JARVIS, volume 4". Sent when the finger lifts;
 /// Core plays a soft chime at the new level. Inside Core's quiet hours it
 /// sets the night level. Hidden on an older Core without `/api/room/volume`.
 struct RoomVolumeControl: View {

@@ -1,4 +1,4 @@
-"""The room voice's sounds on the Optiplex's speakers (ALSA ``aplay``).
+"""The room voice's sounds on the Surface's speakers (ALSA ``aplay``).
 
 Generated once into ``memory/sounds/`` (no asset files in git):
 

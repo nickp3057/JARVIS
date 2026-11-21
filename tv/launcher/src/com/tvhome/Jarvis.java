@@ -27,7 +27,7 @@ import java.util.concurrent.atomic.AtomicReference;
  * JARVIS Core client. The TV holds its own scoped token (events:read,
  * status:read; set by tv/provision.sh through ProvisionReceiver), never the
  * admin token. The last good snapshot is kept so the home screen is never
- * blank when Core is down. The Optiplex's DHCP address drifts, so when Core
+ * blank when Core is down. Core's DHCP address can drift, so when Core
  * stops answering the TV scans its own /24 for it.
  */
 final class Jarvis {

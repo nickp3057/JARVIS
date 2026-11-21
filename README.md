@@ -26,7 +26,7 @@ JARVIS runs as one Python runtime ("JARVIS Core") with several front ends: a des
 | `ui/` | PyQt6 desktop window: orb, chat bubbles, status panels |
 | `ios/JarvisCompanion/` | SwiftUI companion app for iPhone, iPad and Mac Catalyst ([its own README](ios/JarvisCompanion/README.md)) |
 | `tv/` | Android launcher that turns the Google TV home screen into a JARVIS dashboard |
-| `ops/` | Host setup for the Optiplex server and the NAS recovery scripts ([Optiplex](ops/optiplex/README.md), [NAS](ops/nas/README.md)) |
+| `ops/` | Host setup for Core's server and the NAS recovery scripts ([Core host](ops/core/README.md), [NAS](ops/nas/README.md)) |
 | `tests/` | `unittest` suite |
 | `memory/` | Runtime data (history, profile, habits, vault). Created on first run |
 
@@ -52,7 +52,7 @@ python -m app.main --text     # keyboard REPL; works without Claude via keyword 
 python -m app.main --server   # authenticated HTTP API for the companion app and TV
 ```
 
-In production, server mode runs on a Debian Optiplex as `jarvis-api.service`.
+In production, server mode runs on a Surface Laptop 3 (Linux) as `jarvis-api.service`; deploy with `deploy/surface.sh`.
 
 ## Tests
 

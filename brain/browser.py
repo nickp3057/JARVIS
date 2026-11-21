@@ -19,7 +19,7 @@ Guardrails, whatever the engine:
   information, never instructions.
 
 One page at a time, closed after ``BROWSER_IDLE_S`` (300) seconds idle so
-Chromium isn't holding RAM on the Optiplex. Playwright's sync API must stay
+Chromium isn't holding RAM on the Surface. Playwright's sync API must stay
 on one thread, so every call runs on a single worker thread.
 """
 from __future__ import annotations
@@ -46,7 +46,7 @@ _MAX_BODY_BYTES = 3_000_000
 _MAX_REDIRECTS = 5
 _SENSITIVE = re.compile(r"pass|pwd|card|cc-|cvv|cvc|csc|security.?code|ssn|social|iban|routing|account.?num|pin\b",
                         re.IGNORECASE)
-_INSTALL_HINT = ("That needs the full browser, sir: on the Optiplex run `.venv/bin/pip install playwright` and "
+_INSTALL_HINT = ("That needs the full browser, sir: on the Surface run `.venv/bin/pip install playwright` and "
                  "`.venv/bin/python -m playwright install --with-deps chromium`, then try again.")
 
 # Tags every visible interactive element with data-jarvis-ref and describes it.

@@ -18,7 +18,7 @@ every slow Govee call.
 The fan light (``light.nicks_fan``) is its RGB ring, so it goes red with the
 strip (Nick, 2026-11-04; red is a colour, never its white LED). It follows
 the strip in its rainbow (HA automation ``automation.fan_light_follows_strip``,
-ops/optiplex/room_rainbows.py), so engage pauses that automation (or the
+ops/core/room_rainbows.py), so engage pauses that automation (or the
 strip going red would turn the ring rainbow) and stand-down re-enables it.
 The snapshot puts the ring back off or in its colour; if it was on with the
 strip (its rainbow, which HA can't read back), ``scene.fan_light_rainbow``

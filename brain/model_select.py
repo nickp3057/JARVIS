@@ -14,7 +14,7 @@ which eats the 1024-token reply budget and adds voice latency), so
 ``request_kwargs`` adds per-generation settings: on 5.x+ models an
 ``effort`` level (``ANTHROPIC_EFFORT``, default ``low``) and, for the Haiku
 family, thinking off (``ANTHROPIC_THINKING=off``, the default). Both go in
-``extra_body`` so older SDK versions on the Optiplex accept them. If the API
+``extra_body`` so older SDK versions on Core's host accept them. If the API
 rejects them for some future model, ``mark_plain`` remembers to send that
 model a plain request instead.
 """

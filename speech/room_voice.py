@@ -1,4 +1,4 @@
-"""The room voice: "Hey JARVIS" on the Optiplex's mic and speakers.
+"""The room voice: "Hey JARVIS" on the Surface's mic and speakers.
 
 Runs inside JARVIS Core (``python -m app.main --server``) when ``ROOM_VOICE=1``,
 on the same runtime the apps use, so the iPad can show it live

@@ -5,7 +5,7 @@
 # (I'm up) and playback:write (Plex's position for light sync).
 # Run from the Mac at home:  TV=10.0.0.46:5555 tv/provision.sh
 # Re-running rotates the token. The TV finds Core again by itself if the
-# Optiplex's DHCP address changes.
+# Core's DHCP address changes.
 set -e
 TV=${TV:-10.0.0.46:5555}
 CORE_HOST=${CORE_HOST:-$(ssh jarvis "hostname -I | cut -d' ' -f1")}

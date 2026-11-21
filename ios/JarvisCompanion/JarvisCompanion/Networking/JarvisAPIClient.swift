@@ -1595,7 +1595,7 @@ struct JarvisAPIClient {
                                   body: Body(entityID: entityID, percentage: percentage, presetMode: presetMode)).error
     }
 
-    /// The room speaker's volume (JARVIS's voice and sounds on the Optiplex).
+    /// The room speaker's volume (JARVIS's voice and sounds on the Surface).
     /// The battery of the laptop Core runs on (Settings › Laptop).
     func hostBattery() async throws -> HostBattery {
         try await getJSON(HostBattery.self, path: "api/host/battery")

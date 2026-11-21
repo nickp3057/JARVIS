@@ -1,7 +1,7 @@
 import SwiftUI
 import UIKit
 
-/// Follows the room voice on the Optiplex ("Hey JARVIS") and, on the iPad,
+/// Follows the room voice on the Surface ("Hey JARVIS") and, on the iPad,
 /// shows it above everything: JARVIS listening, what you're saying as you
 /// say it, then the answer (or a tick for a quick home command).
 ///

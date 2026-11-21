@@ -56,7 +56,7 @@ class AlertTracker:
     consecutive polls before it is announced, and be absent for
     ``ARR_STACK_RECOVERY_CONFIRM_CHECKS`` consecutive polls before it is
     declared recovered. One-poll blips (a container recreate, a Tailscale
-    hiccup on the Optiplex) never reach the phone. While a NAS or Jarvis
+    hiccup on Core's host) never reach the phone. While a NAS or Jarvis
     recovery is running (``snapshot['maintenance']``), new conditions keep
     counting but are held back; if they outlast the maintenance they alert
     on the first poll after it ends."""
@@ -438,7 +438,7 @@ def _probe_http(service: str) -> bool:
 def service_states(nas_recovery: dict | None = None) -> dict[str, tuple[bool, str]]:
     """Live reachability of each stack component: name -> (up, detail).
 
-    Plain HTTP from the Optiplex; no SSH beyond the optional read-only status
+    Plain HTTP from Core; no SSH beyond the optional read-only status
     the caller already fetched. qBittorrent shares gluetun's network
     namespace, so qBit answering with positive DHT is proof the tunnel is up
     even without the status key."""
@@ -498,8 +498,8 @@ def _follow_recovery(request_id: str, accepted: bool) -> str:
                 states = service_states(recovery)
                 nodes = recovery.get('dht_nodes')
                 if all(up for up, _ in states.values()):
-                    return f'Arr stack recovered, sir. NAS verified gluetun healthy with DHT {nodes}; from the Optiplex: {_summarize(states, still_settling=False)}'
-                return (f'The NAS verified the recovery (gluetun healthy, DHT {nodes}), sir, but from the Optiplex: '
+                    return f'Arr stack recovered, sir. NAS verified gluetun healthy with DHT {nodes}; from Core: {_summarize(states, still_settling=False)}'
+                return (f'The NAS verified the recovery (gluetun healthy, DHT {nodes}), sir, but from Core: '
                         f'{_summarize(states, still_settling=now < deadline)} Request {short}.')
         elif not status_known and now - started_at >= _MIN_CHAIN_S:
             # No status key (or no correlated record): judge from live probes

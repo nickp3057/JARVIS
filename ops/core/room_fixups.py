@@ -1,6 +1,6 @@
-"""One-shot Home Assistant fixes for Nick's room (run on the Optiplex).
+"""One-shot Home Assistant fixes for Nick's room (run on Core's host, the Surface).
 
-    cd ~/jarvis && .venv/bin/python ops/optiplex/room_fixups.py
+    cd ~/jarvis && .venv/bin/python ops/core/room_fixups.py
 
 1. Scenes that turn the fan on now also say its direction and preset.
    HA 2026.10's fan reproduce-state compares every fan attribute and, when

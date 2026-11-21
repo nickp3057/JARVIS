@@ -139,7 +139,7 @@ Near-term responsibilities:
 - Store task state for multi-step work.
 - Decide when to interrupt, notify quietly, or stay silent.
 - Grow the Obsidian baseline into indexed episodic and semantic memory, with the
-  Optiplex as the live store and the NAS as synchronized storage. Stable-ID
+  Surface as the live store and the NAS as synchronized storage. Stable-ID
   inspection, revision-backed correction, keyed contradiction upserts, basic
   provenance, and isolated extractive session digests are present.
 - Expand the initial tool-free local fallback into governed tool calling and
@@ -344,7 +344,7 @@ failure degrades to text, while disconnect/cancel after commit stops delivery
 and synthesis but lets the runtime finish its durable receipt/history. Capture
 has a 120 s limit, reply delivery 180 s, and at most two voice workers. A full
 queue detaches delivery rather than blocking a turn holding the runtime lock.
-Core is still the Optiplex; this does not change NAS access or permissions.
+Core runs on the Surface; this does not change NAS access or permissions.
 
 The phone owns microphone/playback, generation-bound callbacks, permission and
 background cancellation, native ended-vs-cancelled hold handling, and bounded

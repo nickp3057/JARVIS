@@ -14,7 +14,7 @@ Configuration (.env):
 
 First run needs consent once and caches a token; subsequent runs refresh
 silently. On a desktop with a browser that happens in-process. On a headless
-server (the Optiplex) run ``python -m integrations.google_calendar --auth``
+server (the Surface) run ``python -m integrations.google_calendar --auth``
 over an SSH tunnel instead (see ``_cli_auth``); the running process never
 tries to open a browser there, and picks up the new token without a restart.
 A token refresh that fails for network reasons (e.g. Wi-Fi still associating

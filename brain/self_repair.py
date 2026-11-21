@@ -133,7 +133,7 @@ _PLAYBOOKS: dict[str, dict[str, Any]] = {
         "env": ("LOCAL_MODEL_URL",),
         "url_env": "LOCAL_MODEL_URL",
         "commands": ("restart_local_model",),
-        "hint": "Ollama/LM Studio on the Optiplex.",
+        "hint": "Ollama/LM Studio on the Surface.",
     },
 }
 

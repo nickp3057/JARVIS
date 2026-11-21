@@ -430,7 +430,7 @@ class JarvisRuntime:
     def _in_startup_grace(self) -> bool:
         """True during the first ``STARTUP_NETWORK_GRACE_S`` (120) seconds.
 
-        After a power cut the Optiplex's Wi-Fi can still be associating when
+        After a power cut the Surface's Wi-Fi can still be associating when
         the process starts, so every integration fails its first attempt with
         "Network is unreachable" or a DNS error. Monitors keep retrying during
         this window but don't record those failures as outages."""

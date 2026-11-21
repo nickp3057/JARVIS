@@ -45,7 +45,7 @@ async def lifespan(_: FastAPI):
     from speech import room_voice
     if enabled("ARR_STACK_MONITOR_ENABLED") or os.getenv("JARVIS_HEALTHCHECKS_URL", "").strip():
         await asyncio.to_thread(runtime)
-    if room_voice.enabled():  # "Hey JARVIS" on the Optiplex's mic, same runtime as the apps
+    if room_voice.enabled():  # "Hey JARVIS" on the Surface's mic, same runtime as the apps
         room_voice.start(await asyncio.to_thread(runtime))
     # Under systemd with WatchdogSec (deploy/surface-setup.sh): ping only while
     # our own /health answers, so a wedged Core gets restarted. Inert elsewhere.

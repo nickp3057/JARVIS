@@ -214,7 +214,7 @@ struct LinkMapView: View {
             JarvisCoreMark(size: 128, active: lit > 0.3)
                 .shadow(color: JarvisTheme.cyan.opacity(0.5 * lit), radius: 18 * lit)
             Text("JARVIS").font(.headline.weight(.semibold)).tracking(3)
-            Text("Core · Optiplex").font(.caption2).foregroundStyle(.secondary)
+            Text("Core · Surface").font(.caption2).foregroundStyle(.secondary)
         }
         .fixedSize()
     }

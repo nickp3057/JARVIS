@@ -1,7 +1,9 @@
-# Optiplex host setup
+# Core host setup
 
-The Optiplex (`ssh jarvis`, Debian 13, ifupdown + wpa_supplicant + dhcpcd on
-`wlp2s0`, no NetworkManager) runs `jarvis-api.service`. These are host-level
+Core runs on the Surface Laptop 3 since 2026-11-10 (`ssh jarvis`, LAN 10.0.0.73,
+Tailscale 100.69.8.11); deploy with `deploy/surface.sh`. The Optiplex is retired;
+the notes below were written for it (Debian 13, ifupdown + wpa_supplicant +
+dhcpcd on `wlp2s0`), so check them against the Surface before reusing them. It ran `jarvis-api.service`. These are host-level
 fixes that need `sudo`, so Nick applies them by hand.
 
 ## Wait for the network at boot
@@ -13,7 +15,7 @@ cut every integration logged "Network is unreachable" / DNS failures in the
 first second.
 
 ```bash
-cd ~/jarvis && sudo sh ops/optiplex/install-network-wait.sh 10.0.0.1
+cd ~/jarvis && sudo sh ops/core/install-network-wait.sh 10.0.0.1
 ```
 
 This sets `WAIT_ONLINE_METHOD=ping`, `WAIT_ONLINE_ADDRESS=<gateway>` and
@@ -54,8 +56,8 @@ settings), then:
 
 ```bash
 cd ~/jarvis && git pull
-.venv/bin/python ops/optiplex/swap_lamp.py          # finds it, changes nothing
-.venv/bin/python ops/optiplex/swap_lamp.py --apply  # does the swap
+.venv/bin/python ops/core/swap_lamp.py          # finds it, changes nothing
+.venv/bin/python ops/core/swap_lamp.py --apply  # does the swap
 sudo systemctl restart jarvis-api
 ```
 
@@ -71,7 +73,7 @@ light, Scene mode, its rainbow; name it "Fan Light Rainbow". Then:
 
 ```bash
 cd ~/jarvis && git pull
-.venv/bin/python ops/optiplex/room_rainbows.py   # or: ... room_rainbows.py scene.<tuya_scene>
+.venv/bin/python ops/core/room_rainbows.py   # or: ... room_rainbows.py scene.<tuya_scene>
 sudo systemctl restart jarvis-api
 ```
 

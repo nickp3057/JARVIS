@@ -25,7 +25,7 @@ and tailscaled running. Work in this session, in order:
 | #3 Prowlarr key | verified working live | — |
 | #4 NAS Tailscale IP → LAN | decided: swap (Nick edits `.env`) | — |
 | #6 DHT watchdog double restart | fixed (Nick deploys via install-recovery.sh) | `837c14f` |
-| BIOS AC-recovery mitigation | documented in `ops/optiplex/README.md` | `b563250` |
+| BIOS AC-recovery mitigation | documented in `ops/core/README.md` | `b563250` |
 | Real APNs push pipeline (server sender + iOS registration) | done; needs APNs key | `bfc662d`, `7dc1a8c` |
 | #7 deploy | see "Deploy checklist" below | |
 
@@ -34,7 +34,7 @@ Findings:
   `After=/Wants=network-online.target`, but on this ifupdown + dhcpcd host
   `ifupdown-wait-online.service` was *disabled*, so `systemd-analyze
   critical-chain` showed the target reached at 2.344 s and jarvis-api started
-  1 ms later. Fix: `ops/optiplex/install-network-wait.sh` enables the wait unit
+  1 ms later. Fix: `ops/core/install-network-wait.sh` enables the wait unit
   with `WAIT_ONLINE_METHOD=ping` to the IPv4 gateway (10.0.0.1), timeout 90 s.
   `route` was rejected: it accepts an IPv6 RA default route before the IPv4
   lease HA/NAS need. App side: `STARTUP_NETWORK_GRACE_S` (120) suppresses
@@ -103,7 +103,7 @@ Findings:
    (touches `QBITTORRENT_URL`, `RADARR_URL`, `SONARR_URL`, `NAS_SSH_HOST`; the
    pinned host key already lists 10.0.0.147). Optionally delete the obsolete
    `ARR_STACK_ALERT_COOLDOWN_S` line.
-4. ✅ **Optiplex boot wait:** verified 2026-09-24 (`ifupdown-wait-online` enabled, ping 10.0.0.1, 90 s). `ssh -t jarvis 'cd ~/jarvis && sudo sh ops/optiplex/install-network-wait.sh 10.0.0.1'`
+4. ✅ **Optiplex boot wait:** verified 2026-09-24 (`ifupdown-wait-online` enabled, ping 10.0.0.1, 90 s). `ssh -t jarvis 'cd ~/jarvis && sudo sh ops/core/install-network-wait.sh 10.0.0.1'`
 5. ✅ **Restart:** jarvis-api restarted 2026-09-23 09:39. `ssh -t jarvis 'sudo systemctl restart jarvis-api'`, then
    `ssh jarvis 'journalctl -u jarvis-api -n 30 --no-pager'`.
 6. ✅ **NAS shell fix + guard (#2)** — applied 2026-09-24 21:58 (shell `/bin/bash`, guard + root cron line verified). Before that it had never run: `getent passwd Jarvis` still ends in `/usr/sbin/nologin`, `~/jarvis-ops/` doesn't exist, no guard in `/volume1/docker/watchdog/`, and the status key from the Optiplex still gets `This account is currently not available.` This is why "confirm restart arr stack" failed with `NAS restricted SSH failed (exit 1)`.
@@ -135,7 +135,7 @@ Findings:
     adds Push to the App ID), open the app, allow notifications. Settings
     should show "Push alerts on"; `GET /api/push/status` should report
     `"primary": "app_push"`. HA then fires only if APNs fails.
-11. **BIOS:** AC Recovery → Power On (`ops/optiplex/README.md`).
+11. **BIOS:** AC Recovery → Power On (`ops/core/README.md`).
 12. **Calendar:** nothing to do — the existing token is fine; the fix just
     keeps a boot-time refresh failure from disabling it.
 

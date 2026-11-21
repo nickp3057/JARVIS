@@ -24,12 +24,12 @@ every deploy, so edit the repo copy, not the TV's.
   `JarvisCoreMark`), clock; cards Next up / School / Systems / Music, each
   opens a detail list (Back closes). Bottom row: Plex, Spotify, Wake-up,
   Settings (corner). Back on the home screen hides the highlight.
-- **Data**: JARVIS Core on the Optiplex (`http://10.0.0.81:8000`, DHCP too;
+- **Data**: JARVIS Core on the Surface (`http://10.0.0.73:8000`, reserved on the router;
   the TV rescans its /24 if Core moves). `GET /api/glance` every minute and the
   live alert stream `GET /api/clients/events` (SSE). Token `nicks-room-tv`,
   scopes `events:read status:read chat settings:write wake:write
   playback:write` (never the admin token). Set by
-  `tv/provision.sh` (run by Nick: SSH writes to the Optiplex need him).
+  `tv/provision.sh` (run on the Surface).
 - **Theme** (`ThemeStream`): follows Core's `/api/home/stream`, whose events
   carry the shared theme, so Barn Door turns the screen red at once (the 5 s
   `/api/theme` poll is the fallback).

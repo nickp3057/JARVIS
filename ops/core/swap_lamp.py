@@ -1,7 +1,7 @@
-"""Swap the old lamp plug (switch.lamp) for the new Govee lamp (run on the Optiplex).
+"""Swap the old lamp plug (switch.lamp) for the new Govee lamp (run on Core's host, the Surface).
 
-    cd ~/jarvis && .venv/bin/python ops/optiplex/swap_lamp.py            # find it
-    cd ~/jarvis && .venv/bin/python ops/optiplex/swap_lamp.py --apply    # do it
+    cd ~/jarvis && .venv/bin/python ops/core/swap_lamp.py            # find it
+    cd ~/jarvis && .venv/bin/python ops/core/swap_lamp.py --apply    # do it
     ... swap_lamp.py --apply light.some_new_lamp                         # pick one
 
 Nick replaced the Tuya plug that switched his lamp with a Govee lamp

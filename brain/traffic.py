@@ -124,7 +124,7 @@ def _host_node(parts) -> tuple[str, str]:
             return "core", "local"
         if port in _NAS_PORTS:
             return "nas", _service(port, host)
-        return "nas", host  # the LAN beyond the Optiplex is, in practice, the NAS
+        return "nas", host  # the LAN beyond Core's host is, in practice, the NAS
     return "internet", host
 
 

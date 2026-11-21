@@ -156,7 +156,7 @@ Pearson-Stark-Jarvis/
 │   │   └── src/com/tvhome/  HomeActivity (glance + Plex/Settings), ReactorView (phone's mark), Jarvis (Core client), AlertStream, AnswerCard (answer screens)
 │   │                        + Banner (live alerts over any app), NightlyRefresh (no-sound fix),
 │   │                        RemoteBridgeService (voice -> Plex, boot cleanup), SelfAdb
-│   ├── provision.sh         Creates the TV's scoped token on the Optiplex and hands it to the TV
+│   ├── provision.sh         Creates the TV's scoped token on Core (the Surface) and hands it to the TV
 │   └── restore.sh           Undo: stock Google TV launcher and the removed TCL apps
 │
 ├── ios/
@@ -476,7 +476,7 @@ RMS envelope from ElevenLabs audio drives the orb in real time using a monotonic
   until noon), so Core also powers the TV on through HA (`tv_remote.power`).
   If `remote.nick_s_room_tv` still isn't `on` `WAKE_BACKUP_DELAY_S` (90) later
   and nobody pressed I'm up / Snooze, the **backup ring** starts: the room voice
-  beeps the Optiplex speaker (at the day volume) until I'm up, Snooze, "stop" /
+  beeps the room speaker (on the Surface) (at the day volume) until I'm up, Snooze, "stop" /
   "I'm up" / "Hey JARVIS" by voice, or `WAKE_BACKUP_RING_S` (600) runs out.
   Voice dismissal counts as I'm up (lights, TV wake screen closes:
   `wake_alarm.im_up`); "I'm awake, leave the lights" stops it without the
@@ -1175,11 +1175,11 @@ JARVIS_API_TOKEN=           # required bearer token
 JARVIS_SERVER_HOST=0.0.0.0
 JARVIS_SERVER_PORT=8000
 WAKE_UP_LIGHTS=1            # I'm up (phone or TV) turns on every light (strip segments skipped); 0 = off
-ROOM_VOICE=0                # 1 = "Hey JARVIS" on the Optiplex mic/speakers inside Core (speech/room_voice.py)
+ROOM_VOICE=0                # 1 = "Hey JARVIS" on the Surface mic/speakers inside Core (speech/room_voice.py)
 SATELLITE_ARBITRATION_MS=350  # when the desk mic and an iPad satellite both hear "Hey JARVIS", wait this long and let the higher score answer
 SATELLITE_SYNC_MS=60        # desk vs iPad speakers: positive = the desk waits that many ms, negative = the iPads wait (raise it if the iPads still trail)
 DESK_BUFFER_MS=100          # the desk aplay buffer when iPads play along (aplay's default ~500 ms made the desk lag)
-AUDIO_OUTPUT_DEVICE=        # ALSA device for aplay; Optiplex: plughw:1,0 (card 0 is the USB mic, no output)
+AUDIO_OUTPUT_DEVICE=        # ALSA device for aplay; Surface: plughw:CARD=PCH,DEV=0
 MIC_DEVICE=CMTECK           # sounddevice input name/index. Set it: left empty, Core's room voice opened the onboard jack (hw:1,0). Rates it refuses are converted (48 kHz -> 16 kHz)
 VOICE_LIVE_MODEL=tiny.en    # Whisper model for live captions on the iPad; "off" to skip
 VOICE_SILENCE_END_MS=1000   # silence that ends what you said (750 cut Nick off mid-sentence)
@@ -1396,7 +1396,7 @@ there, so edit files with a `sudo python3` one-shot or vi.
    opens once for consent, then the token is cached to
    `memory/google_token.json` and refreshes silently after that. Access is
    read-only.
-5. On the headless Optiplex, never rely on step 4 (there is no browser; the
+5. On the headless Surface, never rely on step 4 (there is no browser; the
    process just logs a one-line hint). Instead, from the Mac:
    `ssh -L 8765:localhost:8765 jarvis`, then in that session
    `cd ~/jarvis && .venv/bin/python -m integrations.google_calendar --auth`
@@ -1414,7 +1414,7 @@ there, so edit files with a `sudo python3` one-shot or vi.
    a test user if the app is in testing mode).
 2. Link it explicitly (the running process never prompts):
    - Mac: `.venv/bin/python -m integrations.gmail --auth` opens a browser.
-   - Optiplex: from the Mac `ssh -L 8765:localhost:8765 jarvis`, then
+   - Surface: from the Mac `ssh -L 8765:localhost:8765 jarvis`, then
      `cd ~/jarvis && .venv/bin/python -m integrations.gmail --auth` and open the
      printed URL on the Mac.
 3. The token lands in `memory/gmail_token.json`; the monitor starts sorting
@@ -2034,7 +2034,7 @@ there, so edit files with a `sudo python3` one-shot or vi.
   `POST /api/home/scenes/activate {"toggle": true}` (every app tile): the
   current scene, untouched since (`status_hub._scene_matches`: on/off and
   dropdown options vs HA's saved scene config), leaves to `scene.normal`
-  (bedroom light on, the rest off; added by `ops/optiplex/room_fixups.py`)
+  (bedroom light on, the rest off; added by `ops/core/room_fixups.py`)
   and answers `left: true`; changed since, it runs again. iPad Room shows a
   quiet "Current scene: X" beside Scenes when X isn't a tile, and Movie turns
   the panel into a dark movie remote (clock, playback, volume, bedroom
@@ -2060,7 +2060,7 @@ there, so edit files with a `sudo python3` one-shot or vi.
   square, scene icons scale to fit their circle, and the scenes row is just
   the three favourites (others are voice-only). The panel goes dark 3 s
   after every light goes out from anywhere (phone, voice, wall), not only
-  after Peace/Goodnight run on the iPad. `ops/optiplex/room_fixups.py` (run
+  after Peace/Goodnight run on the iPad. `ops/core/room_fixups.py` (run
   once on the Optiplex) adds `direction`/`preset_mode` to the HA scenes that
   run the fan (HA 2026.10 otherwise calls `fan.set_direction` with None:
   "string value is None at 'direction'") and renames the room's entities
@@ -2068,7 +2068,7 @@ there, so edit files with a `sudo python3` one-shot or vi.
   Avengers Tower, Scentsy, Wii U; entity ids unchanged). The lamp is a Govee
   light, `light.lamp` (2026-11-03; it replaced the `switch.lamp` Tuya plug),
   so the apps give it the same light sheet as the others.
-  `ops/optiplex/swap_lamp.py` made the swap: it reloads the Govee
+  `ops/core/swap_lamp.py` made the swap: it reloads the Govee
   integrations, renames the new lamp `light.lamp` (its LAN twin
   `light.lamp_lan`, added to `LIGHT_TWINS`), disables the old plug as
   `switch.old_lamp_plug`, and repoints every scene, automation and `.env`
@@ -2219,7 +2219,7 @@ there, so edit files with a `sudo python3` one-shot or vi.
   startup), so a mic plugged in after Core starts is picked up without a
   restart (2026-11-10).
 - **Room rainbows: lamp in the desk scenes, the fan ring follows the strip
-  (2026-11-04, iOS 5.78 / build 221)** — `ops/optiplex/room_rainbows.py`
+  (2026-11-04, iOS 5.78 / build 221)** — `ops/core/room_rainbows.py`
   (run on the Optiplex) gives every HA scene that turns the desk lights on
   the lamp at 100% in its rotating Rainbow (`select.lamp_scene`), drops
   Movie's "fan light off", renames a Smart Life Tap-to-Run that puts the fan
@@ -2407,7 +2407,7 @@ there, so edit files with a `sudo python3` one-shot or vi.
   phone's `JarvisTheme.swift`). The TV follows `/api/clients/events` and
   shows fresh warnings/criticals as a non-focusable banner over any app,
   Plex included. It keeps the last snapshot for offline ("CORE UNREACHABLE ·
-  LAST SEEN ...") and rescans its /24 when the Optiplex's DHCP address moves.
+  LAST SEEN ...") and rescans its /24 when Core's DHCP address moves.
   Also fixes **no sound after the TV sat unused**: "off" on this TV is TCL's
   suspend-to-RAM (`tcl_sys_pms_str_enabled=1`; TCL's quirk table lists
   NO_SOUND_AFTER_STR_RESUME), so `NightlyRefresh` reboots it with
@@ -2631,7 +2631,7 @@ there, so edit files with a `sudo python3` one-shot or vi.
 - **Media storage measured through Radarr** — with no local mount, the Hub's
   storage card reads Radarr's (then Sonarr's) `/api/v3/diskspace` report and
   shows the volume holding the root folder, so the NAS library is measured
-  without mounting it on the Optiplex.
+  without mounting it on Core's host.
 - **Companion experience overhaul (1.19 / build 21)** — Chat, Hub, and Settings
   are now peer tabs. The Hub has Today, Media, and Home focus views, a compact
   two-metric overview, an actionable setup screen, and a briefing shortcut
@@ -2673,7 +2673,7 @@ there, so edit files with a `sudo python3` one-shot or vi.
   `MEDIA_STORAGE_PATH` measures a filesystem mounted on the JARVIS host; when
   it is blank the Hub asks Radarr (then Sonarr) for its `/api/v3/diskspace`
   report and shows the mount holding the root folder, so a library on the
-  NAS is measured without mounting it on the Optiplex. Only when neither
+  NAS is measured without mounting it on Core's host. Only when neither
   source exists does the panel report an unconfigured state.
 - **Guarded price watching** (`brain/price_watch.py`) — `watch_price`,
   `list_price_watches`, `check_prices`, and `remove_price_watch` persist public
@@ -3010,7 +3010,7 @@ in value order:
 - **Evolving structured memory** — automatic extraction and habit learning
   are shipped; the remaining step is an indexed (embedding) store once
   keyword retrieval over the vault starts returning noise. Keep the live
-  database on the Optiplex and synchronize or back up the vault to the NAS.
+  database on the Surface and synchronize or back up the vault to the NAS.
   Also worth doing: point `OBSIDIAN_VAULT_PATH` / `OBSIDIAN_INDEX_FOLDERS` at
   Nick's real vault so retrieval covers his own notes, not just JARVIS's.
 - **Local model routing phase two** — extend the shipped tool-free
@@ -3275,7 +3275,7 @@ The TCL Google TV in Nick's room ("Nick's Room TV", G10, Android 12,
 Wi-Fi on port 5555, Mac key authorized; its DHCP address drifts (10.0.0.44
 until 2026-10, 10.0.0.46 since), so scripts take `TV=host:5555`. Find it
 with a port-5555 scan of 10.0.0.0/24 if it moves; a router DHCP reservation
-for the TV and the Optiplex would end the drift.
+for the TV would end the drift (the Surface already has one: 10.0.0.73).
 
 ```bash
 TV=10.0.0.46:5555 tv/launcher/deploy.sh   # build, install, re-apply TCL permissions, start
@@ -3354,7 +3354,7 @@ socket or root SSH is exposed to Jarvis. See `PROGRESS.md` for deployment state;
 a live restart always requires separate confirmation.
 
 NAS SSH setup uses dedicated `jarvis_nas_recovery` and `jarvis_nas_status` keys
-on the Optiplex plus a pinned known-hosts file. The status key reads a fixed
+on the Surface (made 2026-11-21; the Optiplex's were removed) plus a pinned known-hosts file. The status key reads a fixed
 JSON summary and bounded watchdog tails without sudo; it cannot restart. The
 recovery key validates request IDs, detaches from UGOS SSH timeouts, and uses
 one narrow sudo launcher. See `ops/nas/README.md` for the preview/install and

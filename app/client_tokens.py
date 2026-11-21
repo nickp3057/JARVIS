@@ -17,7 +17,7 @@ full access. Every other client gets its own token here, limited to scopes:
 
 Only a SHA-256 of each token is stored (``memory/client_tokens.json``,
 gitignored); the token itself is printed once at creation. Manage from the
-Optiplex shell::
+Surface shell::
 
     .venv/bin/python -m app.client_tokens create living-room-tv events:read status:read
     .venv/bin/python -m app.client_tokens grant nicks-room-tv wake:write

@@ -699,7 +699,7 @@ def _home_entities_uncached() -> dict[str, Any]:
 # "light.x=select.x_diy_scene:Name,..." or "light.x=scene.y" (a scene that
 # puts the light in its rainbow: the fan ring's multi-colour mode is only
 # reachable through a Smart Life Tap-to-Run, which HA's Tuya integration
-# shows as a scene; ops/optiplex/room_rainbows.py names it).
+# shows as a scene; ops/core/room_rainbows.py names it).
 _DEFAULT_RAINBOWS = ("light.nick_strip_lights=select.nick_strip_lights_diy_scene:Real Rainbow,"
                      "light.desk_lights_2=select.desk_lights_diy_scene:New Rainbow,"
                      # the Govee lamp's own rotating rainbow (a built-in scene, not DIY)

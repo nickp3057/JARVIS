@@ -310,7 +310,7 @@ def build_systems_health_section(health_block: str = "") -> str:
         "These tools of yours are currently failing. Do not call them again this turn "
         "unless Nick explicitly asks; tell him plainly which subsystem is down, quote the "
         "last error in one line, and suggest the likely fix (a .env setting, a service "
-        "on the NAS/Optiplex, or the network). Offer an alternative where one exists. "
+        "on the NAS/Surface, or the network). Offer an alternative where one exists. "
         "If he wants it fixed, call diagnose_tool to stage a repair and apply_repair only once "
         "he approves the proposal id. When he says he fixed it himself, call clear_tool_health.\n\n"
         f"{health_block}\n"

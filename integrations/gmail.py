@@ -13,7 +13,7 @@ Configuration (.env):
 Linking is always explicit, never from inside the running process:
 
     .venv/bin/python -m integrations.gmail --auth        # Mac: opens a browser
-    ssh -L 8765:localhost:8765 jarvis                     # Optiplex: tunnel,
+    ssh -L 8765:localhost:8765 jarvis                     # the Surface: tunnel,
     cd ~/jarvis && .venv/bin/python -m integrations.gmail --auth   # then open the URL
 
 Scope is ``gmail.modify``: read, label, archive and move to Trash. It cannot

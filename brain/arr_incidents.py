@@ -6,7 +6,7 @@ phone hears about it. Found 2026-09-29: a 2-5 minute upstream outage makes
 gluetun restart, qBittorrent's DHT goes stale, the NAS DHT watchdog acts
 ~15 min later, and the recreate it runs produced 6-10 pushes per incident.
 
-Rules, all timed from the Optiplex clock:
+Rules, all timed from Core's clock:
 
 - Watchdog hold: once the NAS watchdog (or any shared recovery) is seen
   acting, every arr push is held for ``ARR_STACK_WATCHDOG_HOLD_S``. At the end
@@ -64,7 +64,7 @@ class Push(NamedTuple):
 
 
 class WatchdogAction(NamedTuple):
-    at: float  # Optiplex clock
+    at: float  # Core's clock
     what: str
     source: str
 

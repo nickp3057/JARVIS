@@ -1,6 +1,6 @@
-"""Rainbows for the lamp and the fan ring (run on the Optiplex).
+"""Rainbows for the lamp and the fan ring (run on Core's host, the Surface).
 
-    cd ~/jarvis && .venv/bin/python ops/optiplex/room_rainbows.py
+    cd ~/jarvis && .venv/bin/python ops/core/room_rainbows.py
     ... room_rainbows.py scene.some_tuya_scene     # name the Tap-to-Run yourself
 
 Nick, 2026-11-04: the lamp comes on, in its rainbow, in every scene where the
@@ -138,7 +138,7 @@ AUTOMATION = {
     "id": AUTOMATION_ID,
     "alias": "Fan light follows the strip",
     "description": "The fan ring's rainbow is on whenever the strip lights are (Nick, 2026-11-04). "
-                   "JARVIS's Barn Door turns this off while engaged. Made by ops/optiplex/room_rainbows.py.",
+                   "JARVIS's Barn Door turns this off while engaged. Made by ops/core/room_rainbows.py.",
     "mode": "restart",
     "triggers": [
         {"trigger": "state", "entity_id": STRIP, "from": "off", "to": "on", "id": "on"},
