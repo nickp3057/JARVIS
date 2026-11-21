@@ -1,3 +1,4 @@
+import Combine
 import SwiftUI
 import UIKit
 
@@ -6,8 +7,13 @@ import UIKit
 /// the only place settings live.
 struct RootView: View {
     @EnvironmentObject private var settings: AppSettings
-    @ObservedObject var chat: ChatViewModel
-    @ObservedObject var hub: HubViewModel
+    /// Not observed: the pages observe their own models. Observing them here
+    /// re-rendered every tab (three HubViews and Settings) on each keystroke
+    /// in Chat, each streamed token and each Hub poll, the phone's main jank.
+    let chat: ChatViewModel
+    let hub: HubViewModel
+    /// The conversation the hold-to-talk orb last saw (`chat.$messages`).
+    @State private var seenConversation: UUID?
     @State private var selection = RootView.isMac ? RootTab.desk : RootView.isPad ? RootTab.room : RootTab.home
     /// Horizontal offset of the visible tab while swiping, and while the new
     /// tab slides in. The tab bar itself never moves.
@@ -126,7 +132,7 @@ struct RootView: View {
                     .tag(RootTab.knowledge)
             }
 
-            SettingsView(embedded: true, studyBrief: hub.studyBrief.value)
+            HubSettingsPage(hub: hub)
                 .swipePage(swipeOffset)
                 .tabItem { Label("Settings", systemImage: "gearshape") }
                 .tag(RootTab.settings)
@@ -185,7 +191,13 @@ struct RootView: View {
         .focusedSceneValue(\.rootTab, $selection)
         .onAppear(perform: sizeMacWindow)
         .onAppear { phoneVoice.configure(settings: settings, chat: chat) }
-        .onChange(of: chat.conversationID) { _, id in phoneVoice.conversationChanged(id) }
+        .onReceive(chat.$messages.receive(on: DispatchQueue.main)) { _ in
+            // A conversation switch always replaces the messages.
+            let id = chat.conversationID
+            guard id != seenConversation else { return }
+            seenConversation = id
+            phoneVoice.conversationChanged(id)
+        }
         .overlay(alignment: .top) { InAppNoticeBanner() }  // pushes Guided Access would hide
         .overlay { VoiceEnrollCard() }  // Teach JARVIS my voice: the line to read
         .fullScreenCover(isPresented: $wakeRinging.showing) { WakeRingingView().environmentObject(settings) }
@@ -197,7 +209,7 @@ struct RootView: View {
         .environment(\.cameraWatching, camera.watching)
         .fullScreenCover(isPresented: $cameraViewer.showing) { RoomCameraView().environmentObject(settings) }
         .task { camera.activate(settings: settings) }
-        .onChange(of: hub.cameraWanted, initial: true) { _, wanted in camera.follow(wanted) }
+        .onReceive(hub.$cameraWanted.removeDuplicates()) { wanted in camera.follow(wanted) }
         .onChange(of: scenePhase) { _, phase in
             if phase == .active { camera.activate(settings: settings) } else { camera.deactivate() }
             if phase != .active { phoneVoice.cancel() }
@@ -252,7 +264,7 @@ struct RootView: View {
          AnyView(HubView(model: hub, onAsk: ask, onNavigate: navigate, focus: .hub, onSendNow: sendNow).environmentObject(settings)),
          AnyView(HubView(model: hub, onAsk: ask, onNavigate: navigate, focus: .home, phoneVoice: phoneVoice, onSendNow: sendNow).environmentObject(settings)),
          AnyView(ChatView(model: chat).environmentObject(settings)),
-         AnyView(SettingsView(embedded: true, studyBrief: hub.studyBrief.value).environmentObject(settings))]
+         AnyView(HubSettingsPage(hub: hub).environmentObject(settings))]
     }
 
     /// Mac: keep the window big enough for the Room tab's two columns.
@@ -335,6 +347,12 @@ struct RootView: View {
         chat.draftChanged()
         selection = .chat
     }
+}
+
+/// Settings with the study brief: only this small wrapper follows the hub.
+private struct HubSettingsPage: View {
+    @ObservedObject var hub: HubViewModel
+    var body: some View { SettingsView(embedded: true, studyBrief: hub.studyBrief.value) }
 }
 
 private extension View {

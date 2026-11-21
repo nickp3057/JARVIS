@@ -201,12 +201,27 @@ def fix_for(kind: str, context: dict[str, Any] | None) -> str | None:
 
 # --- triggers (called from monitors) --------------------------------------------
 
+# (name, key, reason) -> when that hold was last logged. A monitor re-asks
+# every minute; one line an hour per reason is enough (was 600+ a day).
+_held_logged: dict[tuple[str, str, str], float] = {}
+_HOLD_LOG_EVERY_S = 3600.0
+
+
+def _log_hold(name: str, key: str, reason: str) -> None:
+    now = time.time()
+    marker = (name, key, reason)
+    if now - _held_logged.get(marker, 0.0) < _HOLD_LOG_EVERY_S:
+        return
+    _held_logged[marker] = now
+    log.info("Autopilot held %s%s: %s", name, f" ({key})" if key else "", reason)
+
+
 def _stage(name: str, rationale: str, *, key: str = "", params: dict[str, Any] | None = None,
            link: str | None = None) -> str | None:
     from brain import self_repair
     reason = blocked_reason(name, key)
     if reason:
-        log.info("Autopilot held %s%s: %s", name, f" ({key})" if key else "", reason)
+        _log_hold(name, key, reason)
         return None
     return self_repair.propose_stack_fix(name, rationale, None, params=params, key=key or None,
                                          link=link, auto=True)

@@ -43,6 +43,10 @@ struct HubView: View {
     @State private var showingRemote = false
     /// The alert open in AlertDetailSheet.
     @State private var openAlert: AlertSheetID?
+    /// A card on this page to scroll to (a Needs attention quick link).
+    @State private var hubScrollTarget: String?
+    /// The Needs attention row whose Ask JARVIS is gathering its report.
+    @State private var askingAlertID: Int?
     private let focus: HubFocus
 
     /// Home is JARVIS himself: the reactor, a quick look, the next
@@ -89,7 +93,9 @@ struct HubView: View {
                             case .hub:
                                 // What needs you first, then the controls, then the day.
                                 if !attentionAlerts.isEmpty { needsAttentionCard }
-                                if !visibleRepairs.isEmpty { repairsCard }
+                                if !visibleRepairs.isEmpty {
+                                    repairsCard.highlight(highlightedCard == "repairs").id("repairs")
+                                }
                                 if !openSkillRequests.isEmpty { skillRequestsCard }
                                 if !learnedSkills.isEmpty { learnedSkillsCard }
                                 controlShortcuts
@@ -99,7 +105,7 @@ struct HubView: View {
                                 requestMediaButton
                                 temp4kCard
                                 storageCard.highlight(highlightedCard == "storage").id("storage")
-                                torrentsCard
+                                torrentsCard.highlight(highlightedCard == "transfers").id("transfers")
                                 mediaCard
                                 linksCard
                                 servicesCard.highlight(highlightedCard == "services").id("services")
@@ -115,6 +121,11 @@ struct HubView: View {
                 }
                 .onAppear { jump(proxy) }
                 .onChange(of: model.mediaScrollTarget) { jump(proxy) }
+                .onChange(of: hubScrollTarget) {
+                    guard let target = hubScrollTarget else { return }
+                    hubScrollTarget = nil
+                    scroll(proxy, to: target)
+                }
             }
             .refreshable { await model.refreshAll() }
             .scrollBounceBehavior(.basedOnSize)  // Home fits the screen: it doesn't scroll at all
@@ -144,7 +155,13 @@ struct HubView: View {
                 }
             }
             .sheet(isPresented: $schwabLoggingIn) {
-                SchwabLoginView { Task { await model.refreshPortfolio() } }
+                SchwabLoginView {
+                    Task {
+                        await model.refreshPortfolio()
+                        // Logged in: Schwab's Needs attention row drops off.
+                        if attentionAlerts.contains(where: { $0.kind == "schwab_login" }) { model.recheckAlerts() }
+                    }
+                }
             }
             .sheet(item: $diagnosisTarget) { target in
                 MediaDiagnosisView(title: target.title, kind: target.kind,
@@ -228,6 +245,11 @@ struct HubView: View {
     private func jump(_ proxy: ScrollViewProxy) {
         guard focus == .media, let target = model.mediaScrollTarget else { return }
         model.mediaScrollTarget = nil
+        scroll(proxy, to: target)
+    }
+
+    /// Scrolls a card to the top and outlines it for a moment.
+    private func scroll(_ proxy: ScrollViewProxy, to target: String) {
         Task { @MainActor in
             try? await Task.sleep(for: .milliseconds(150))
             withAnimation(.easeInOut(duration: 0.45)) { proxy.scrollTo(target, anchor: .top) }
@@ -1071,6 +1093,122 @@ struct HubView: View {
     }
 
     private func attentionRow(_ alert: JarvisAlert) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            attentionRowSummary(alert)
+            let actions = attentionActions(alert)
+            if !actions.isEmpty {
+                HStack(spacing: 8) {
+                    ForEach(actions) { action in attentionButton(action, alert: alert) }
+                    Spacer(minLength: 0)
+                }
+                .padding(.leading, 13)
+                .padding(.bottom, 9)
+                .padding(.top, -2)
+            }
+        }
+    }
+
+    /// One-tap answers to a Needs attention row, by what raised it: Schwab's
+    /// login, the download or service it's about, the fix waiting in Fixes;
+    /// Fix it when Core has one; Ask JARVIS for the rest.
+    enum AttentionAction: String, Identifiable {
+        case fix, schwabLogin, transfers, services, storage, fixes, ask
+        var id: String { rawValue }
+        var title: String {
+            switch self {
+            case .fix: return "Fix it"
+            case .schwabLogin: return "Log in"
+            case .transfers: return "Transfers"
+            case .services: return "Services"
+            case .storage: return "Storage"
+            case .fixes: return "Review fix"
+            case .ask: return "Ask JARVIS"
+            }
+        }
+        var symbol: String {
+            switch self {
+            case .fix: return "wrench.and.screwdriver"
+            case .schwabLogin: return "person.badge.key"
+            case .transfers: return "arrow.down.circle"
+            case .services: return "dot.radiowaves.left.and.right"
+            case .storage: return "internaldrive"
+            case .fixes: return "checkmark.seal"
+            case .ask: return "bubble.left"
+            }
+        }
+    }
+
+    private func attentionActions(_ alert: JarvisAlert) -> [AttentionAction] {
+        var actions: [AttentionAction] = []
+        if alert.fixable == true, alert.repair?.isWorking != true, alert.repair?.succeeded != true {
+            actions.append(.fix)
+        }
+        let text = (alert.title + " " + alert.message).lowercased()
+        switch alert.kind {
+        case "schwab_login": actions.append(.schwabLogin)
+        case "download_error", "download_stalled": actions.append(.transfers)
+        case "arr_stack": actions.append(.services)
+        case "nas_host":
+            actions.append(["disk", "storage", "space", "full", "drive"].contains { text.contains($0) } ? .storage : .services)
+        case "repair":
+            if visibleRepairs.contains(where: \.isPending) { actions.append(.fixes) }
+        case "device_battery": break  // the answer is a charger
+        default: break
+        }
+        if actions.isEmpty, alert.kind != "device_battery", (onSendNow ?? onSend ?? onAsk) != nil {
+            actions.append(.ask)
+        }
+        return Array(actions.prefix(2))
+    }
+
+    private func attentionButton(_ action: AttentionAction, alert: JarvisAlert) -> some View {
+        let busy = (action == .fix && model.fixingAlertIDs.contains(alert.id))
+            || (action == .ask && askingAlertID == alert.id)
+        return Button {
+            runAttention(action, alert: alert)
+        } label: {
+            HStack(spacing: 5) {
+                if busy { ProgressView().controlSize(.mini) } else { Image(systemName: action.symbol) }
+                Text(busy ? (action == .fix ? "Fixing…" : "Gathering…") : action.title)
+            }
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(action == .fix || action == .schwabLogin ? Color.black : JarvisTheme.cyan)
+            .padding(.horizontal, 11)
+            .frame(minHeight: 30)
+            .background {
+                if action == .fix || action == .schwabLogin {
+                    Capsule().fill(JarvisTheme.cyan)
+                } else {
+                    Capsule().fill(JarvisTheme.cyan.opacity(0.12))
+                }
+            }
+            .contentShape(Capsule())
+        }
+        .buttonStyle(CockpitButtonStyle())
+        .disabled(busy)
+        .accessibilityLabel("\(action.title): \(alert.title)")
+    }
+
+    private func runAttention(_ action: AttentionAction, alert: JarvisAlert) {
+        switch action {
+        case .fix: Task { _ = await model.fixAlert(alert) }
+        case .schwabLogin: schwabLoggingIn = true
+        case .transfers: openMedia("transfers")
+        case .services: openMedia("services")
+        case .storage: openMedia("storage")
+        case .fixes: hubScrollTarget = "repairs"
+        case .ask:
+            guard askingAlertID == nil, let ask = onSendNow ?? onSend ?? onAsk else { return }
+            askingAlertID = alert.id
+            Task {
+                let prompt = await model.incidentPrompt(for: alert) ?? HubViewModel.fallbackPrompt(for: alert)
+                askingAlertID = nil
+                ask(prompt)
+            }
+        }
+    }
+
+    private func attentionRowSummary(_ alert: JarvisAlert) -> some View {
         Button { openAlert = AlertSheetID(id: alert.id) } label: {
             HStack(alignment: .top, spacing: 10) {
                 Capsule()

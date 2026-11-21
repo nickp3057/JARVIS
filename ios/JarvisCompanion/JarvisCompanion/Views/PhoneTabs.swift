@@ -44,9 +44,10 @@ struct PhoneTabs: UIViewControllerRepresentable {
 
     func updateUIViewController(_ controller: UITabBarController, context: Context) {
         context.coordinator.parent = self
-        for (index, page) in pages.enumerated() {
-            (controller.viewControllers?[index] as? UIHostingController<AnyView>)?.rootView = page
-        }
+        // The pages are built once (each observes its own model; a theme
+        // change rebuilds the whole shell via `.id`). Re-assigning rootView
+        // here re-rendered all five pages on every RootView update, such as
+        // each word of a hold-to-talk transcript.
         controller.view.tintColor = UIColor(JarvisTheme.reactor)
         (controller as? PhoneTabBarController)?.reduceMotion = reduceMotion
         // A binding update must not fight an interactive transition in flight.

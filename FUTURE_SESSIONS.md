@@ -149,6 +149,8 @@ v1 shipped 2026-10-27 and is the TV's home screen (JARVIS.md "JARVIS TV"). Open:
 
 ### Loose ends and small debt
 
+- [ ] **NAS restricted keys missing on the Surface (found 2026-11-21).** `~/.ssh/jarvis_nas_recovery`, `jarvis_nas_status` and `jarvis_nas_known_hosts` never came over from the Optiplex, so autopilot's arr restart can't run ("NAS restricted key or pinned known-hosts file is missing") and it hit its daily cap retrying. Copy the three files from the Optiplex to the Surface (`chmod 600`), then run the `probe` hand test in `ops/nas/README.md`. Separately, Prowlarr reported "All indexer proxies are unavailable" for 6 h+: a stack restart won't fix a dead proxy (FlareSolverr?), so look at the proxy itself.
+- [ ] Phone cleanup (6.110): typing in Chat and watching a reply stream should feel smooth now; Needs attention buttons (Log in, Fix it, Transfers, Services, Review fix, Ask JARVIS) each land where they say.
 - [ ] Time-sensitive wake push: Nick accepts the updated Program License Agreement at developer.apple.com, then add `com.apple.developer.usernotifications.time-sensitive` to `JarvisCompanion.entitlements`. Until then Focus/Sleep can hold the wake-up push.
 - [ ] Room voice: start speaking the first sentence of long answers sooner (skipped: spoken replies are one sentence).
 - [ ] Reminders only fire while something pops them (room voice in server mode); a Core without the room voice never sends them.
