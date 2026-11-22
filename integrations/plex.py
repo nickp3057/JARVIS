@@ -301,7 +301,8 @@ def sessions() -> tuple[bool, list[dict[str, Any]] | str]:
             "view_offset_ms": int(item.get("viewOffset") or 0), "duration_ms": int(item.get("duration") or 0),
             "state": str(player.get("state") or ""),
             "player": {"title": str(player.get("title") or ""), "product": str(player.get("product") or ""),
-                       "machine_id": str(player.get("machineIdentifier") or "")},
+                       "machine_id": str(player.get("machineIdentifier") or ""),
+                       "local": str(player.get("local")).lower() in ("1", "true")},
         })
     return True, out
 

@@ -412,11 +412,15 @@ class ClockTests(TrackStoreDir):
 
     def test_pick_session(self) -> None:
         tv = {"type": "movie", "rating_key": "1", "player": {"title": "Nick's Room TV", "product": "Plex for Android (TV)",
-                                                              "machine_id": "abc"}}
+                                                              "machine_id": "abc", "local": True}}
         other = {"type": "movie", "rating_key": "2", "player": {"title": "iPad", "product": "Plex", "machine_id": "x"}}
         song = {"type": "track", "rating_key": "3", "player": {}}
         self.assertIs(light_sync.pick_session([tv, song]), tv)
-        self.assertIsNone(light_sync.pick_session([tv, other]))
+        # A friend's stream elsewhere is never "on the TV", even when it's the only movie.
+        self.assertIsNone(light_sync.pick_session([other, song]))
+        remote_tv = {**tv, "player": {**tv["player"], "local": False}}
+        self.assertIsNone(light_sync.pick_session([remote_tv]))
+        self.assertIs(light_sync.pick_session([tv, other]), tv)  # the local room TV, not the iPad
         self.assertIs(light_sync.pick_session([other, tv], "abc"), tv)
         self.assertIs(light_sync.pick_session([other, tv], "room tv"), tv)
         self.assertIsNone(light_sync.pick_session([other], "abc"))

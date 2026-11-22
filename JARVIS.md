@@ -1278,7 +1278,7 @@ LIGHT_SYNC_BLEND_MS=80      # fade between colours at Medium (Subtle x2.5, Inten
 LIGHT_SYNC_LAMP_LEAD_MS=150 # the lamp reads ahead (it fades by itself)
 LIGHT_SYNC_STRIP_LEVEL=0.35 # strip/desk brightness at Medium (Subtle x0.6, Intense x1.6, max 1)
 LIGHT_SYNC_LAMP_LEVEL=0.6   # lamp brightness at Medium
-LIGHT_SYNC_PLEX_PLAYER=     # the room TV's Plex player (title, product or machineIdentifier); blank = the only movie playing
+LIGHT_SYNC_PLEX_PLAYER=     # the room TV's Plex player (title, product or machineIdentifier); blank = the only movie on a local Android TV player (never a remote friend's stream)
 LIGHT_SYNC_BUILD_THREADS=   # ffmpeg decode threads for a track build; blank = every core, up to 8 (runs at nice 10)
 LIGHT_SYNC_HWACCEL=          # blank/auto = VAAPI when the Intel GPU is usable (driver + render group), else software; off = software; or e.g. videotoolbox. Never ffmpeg's own "auto" (aborts on the Surface probing CUDA)
 TV_MEDIA_PLAYERS=media_player.nicks_room_tv,media_player.nicks_room_tv_2,media_player.nick_s_room_tv,media_player.nicks_room_group,media_player.nick_s_room_display   # on/off for these goes to the remote

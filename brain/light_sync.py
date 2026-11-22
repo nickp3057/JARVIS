@@ -666,7 +666,9 @@ def _same_title(a: str, b: str) -> bool:
 def pick_session(sessions: list[dict[str, Any]], player: str = "", tv: Playback | None = None) -> dict[str, Any] | None:
     """The room TV's movie session: the one whose player matches
     ``LIGHT_SYNC_PLEX_PLAYER`` (title, product or machineIdentifier), else
-    the only movie playing on any player."""
+    the room TV's film when the TV reported it, else the only movie playing
+    on a local Android TV player. Never someone else's stream: a friend
+    watching the server from elsewhere is not "on the TV" (2026-11-22)."""
     movies = [s for s in sessions if s.get("type") == "movie"]
     wanted = player.strip().lower()
     if wanted:
@@ -681,10 +683,15 @@ def pick_session(sessions: list[dict[str, Any]], player: str = "", tv: Playback 
                    or _same_title(str(s.get("title") or ""), tv.title)]
         if len(matches) == 1:
             return matches[0]
-        android_tv = [s for s in matches if "android" in str((s.get("player") or {}).get("product", "")).lower()
-                      and "tv" in str((s.get("player") or {}).get("product", "")).lower()]
+        android_tv = [s for s in matches if _android_tv(s)]
         return android_tv[0] if len(android_tv) == 1 else None
-    return movies[0] if len(movies) == 1 else None
+    room = [s for s in movies if _android_tv(s) and (s.get("player") or {}).get("local")]
+    return room[0] if len(room) == 1 else None
+
+
+def _android_tv(session: dict[str, Any]) -> bool:
+    product = str((session.get("player") or {}).get("product", "")).lower()
+    return "android" in product and "tv" in product
 
 
 # --- The player --------------------------------------------------------------
