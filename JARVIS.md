@@ -110,7 +110,7 @@ Pearson-Stark-Jarvis/
 │   ├── qbittorrent.py       Live torrent progress, speed, ETA + completion monitor
 │   ├── servarr_common.py    Shared Radarr/Sonarr HTTP client + quality/root-folder
 │   │                        resolver + NL quality-phrase fuzzy matching
-│   ├── radarr.py            find_movie (lookup) / add_movie (confirm-gated) / change_movie_quality
+│   ├── radarr.py            find_movie (lookup) / add_movie (confirm-gated) / add_movies (batch) / change_movie_quality
 │   ├── temp_4k.py           temporary 4K copies via a second Radarr (radarr4k), auto-removed
 │   ├── sonarr.py            find_series (lookup) / add_series (confirm-gated)
 │   ├── nas_host.py          NAS host-health snapshot (containers, RAID, SMART, volumes, temps): debounced alerts + incident-report lines
@@ -726,6 +726,13 @@ entry in `brain/agent_roster.py` (name, kind, icon, description, schedule);
   POST with `monitored: true`, `addOptions.searchForMovie: true`. Refuses
   unless `confirmed: true` and the ID came from the same session's latest,
   unexpired lookup; quality is a natural phrase fuzzy-matched to a profile.
+- `add_movies(titles[], quality?, confirmed)` — several films in one request
+  ("add Fight Club, La La Land and Oppenheimer"). Looks each title up on its
+  own and adds every plain match (one result, or a top result whose title no
+  other result shares, the same test as a single add); reports ones already
+  in the library and lists ambiguous/unfound titles for find_movie/add_movie.
+  Up to 15 titles. Before this, chaining find_movie per title overwrote the
+  session's lookup receipt, so adds failed ("my last lookup overwrote...").
 - `change_movie_quality(title, quality)` — "change Weapons to standard". Moves
   a library movie to another profile (`Standard` 1080p, `Favorite 4K`,
   `Locked`). Radarr never downgrades by itself (a 4K file outranks every 1080p
@@ -1445,6 +1452,8 @@ there, so edit files with a `sudo python3` one-shot or vi.
 ---
 
 ## Recently Shipped
+
+- **Amazon filing fixed, batch movie adds, clean download titles, self-managed arr updates (2026-11-23, companion 6.119 / 361).** *Amazon mail:* the 11-20 "file Amazon mail into the Amazon folder, red" request was saved as a standing order before filing rules existed, so no rule ever ran and triage kept shipping notices in the inbox ("no Amazon folder exists"). Rule `dbb719` now files amazon.com mail whose subject mentions shipped/shipping/delivered/delivery/arriving/out for delivery/ordered/order/return/refund to `Kinda Important/Amazon` (red label, left unread); promos (store-news) don't match. *Movies:* new `add_movies` tool (skill request 79540869, "add multi movies when I'm typing"). *Titles:* `download_status` shows the spoken title ("Good Will Hunting"), not the release filename, so the model stops repeating codec/group tags. *Arr updates:* the weekly NAS updater had aborted on 2026-11-15 and 11-22 when lscr.io returned `toomanyrequests` for qBittorrent, so nothing updated; pulls now retry and skip, and Core re-runs a failed update itself (see "Arr stack" below).
 
 - **Phone cleanup and Needs attention quick links (2026-11-21, companion 6.110 / 352 and 6.111 / 353, Core log tidy).** *Jank:* `RootView` no longer observes `ChatViewModel` / `HubViewModel` (it holds them as plain `let`s, follows `chat.$messages` / `hub.$cameraWanted` with `onReceive`, and Settings' study brief goes through a small `HubSettingsPage` wrapper), and `PhoneTabs.updateUIViewController` no longer re-assigns every page's `rootView`. Before, each keystroke in Chat, each streamed token, each hold-to-talk transcript word and each Hub poll re-rendered all five phone pages (three HubViews and Settings). *Needs attention, tidied (6.111 / 353):* the header holds everything: the count, the autopilot switch (a wand that lights up, no sentence) and Refresh; each row is just the alert's title (a spinner while a fix runs). The quick link lives in `AlertDetailSheet`, above Fix it and Ask JARVIS (`AlertDetailSheet.QuickLink`, by kind): `schwab_login` → **Log in to Schwab** (opens the login over the sheet; logging in re-checks the list so it drops off), `download_error` / `download_stalled` → **Open Transfers**, `arr_stack` → **Open Services**, `nas_host` → **Open Storage** or **Open Services**, `repair` with a pending fix → **Review the fix** (scrolls to Fixes). When Core also has a fix, Fix it stays the main button. The sheet opened from a push (RootView) switches tabs the same way. Media's Transfers card and the Fixes card have scroll ids (`transfers`, `repairs`). *Core:* `auto_heal` logs a held autopilot fix once an hour per reason instead of every minute (the Surface logged 637 "Autopilot held arr_recovery" lines on 2026-11-21). *Quieter polling (6.113 / 355):* `HubViewModel.load` publishes a section once per refresh and only when it changed (`HubViewModel.same`; the hub models are now `Equatable`), and `isLoading` is published only for a section's first load (in-flight fetches are tracked in a private `loadingSections`). `refreshNow` does the same and re-caches the Now snapshot only on a change. Before, the 5 s poll republished up to seven sections five times each, redrawing the visible tab ~35 times a tick with nothing new. The study brief accepts `bodies` sent as a JSON-encoded string (the model sometimes does that; it had fallen back to the template 15 times since 2026-11-20) and logs counts/length/stop reason when it still falls back.
 
@@ -3385,7 +3394,15 @@ hand-test commands. Installation hardens previously writable path/SSH ACLs.
   compose updater (`ops/nas/stack_updater.sh`, the weekly root-cron job) runs
   at once through the recovery key (`update <uuid>`), pulling images and
   recreating only changed containers, never through the UGOS GUI. Arr alerts
-  are held for `ARR_STACK_UPDATE_HOLD_S` (900) meanwhile. Servarr's "New
+  are held for `ARR_STACK_UPDATE_HOLD_S` (900) meanwhile. JARVIS also looks
+  after the weekly run (2026-11-23): the NAS host monitor reads the updater's
+  status, and when the last run says `FAILED:` or `PARTIAL:` it runs the
+  update again (`brain/arr_stack.auto_retry_update`), at most
+  `ARR_UPDATE_RETRY_MAX` (3) times a day and `ARR_UPDATE_RETRY_GAP_S` (7200)
+  apart; once those are spent it raises one `arr_update` alert, which clears
+  itself when a run succeeds. The updater retries each image pull 4 times
+  with backoff and skips an image that still won't pull (`PULL FAILED:` /
+  `PARTIAL:`) instead of aborting everything. Servarr's "New
   update is available" health message is no longer an alert at all.
 - Recovery returns promptly on SSH and continues detached on the NAS. The
   turn replies at once; a background follow-up polls the NAS result (if the

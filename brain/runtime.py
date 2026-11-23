@@ -637,6 +637,7 @@ class JarvisRuntime:
         Debounce and recovery live in ``integrations.nas_host.HostWatch``. An
         unreachable NAS is not judged here; the arr monitor reports that.
         """
+        from brain import arr_stack
         from integrations import nas_host, nas_stack
         watch = nas_host.HostWatch()
         while not self._stop_monitors.is_set():
@@ -647,10 +648,20 @@ class JarvisRuntime:
                     break
                 continue
             try:
-                alerts = watch.step(nas_stack.watchdog_status())
+                status = nas_stack.watchdog_status()
+                alerts = watch.step(status)
             except Exception:  # noqa: BLE001 - a bad snapshot must not kill the monitor
                 log.exception("NAS host monitor poll failed")
-                alerts = []
+                status, alerts = None, []
+            try:
+                # JARVIS handles the arr updates: a failed weekly run is retried.
+                parsed = nas_host.from_status(status) if status else None
+                stuck = arr_stack.auto_retry_update(parsed[0]) if parsed else None
+                if stuck:
+                    self.raise_alert("arr_update", "Arr update failing", stuck, source="nas-host",
+                                     severity="warning")
+            except Exception:  # noqa: BLE001
+                log.exception("Arr update retry check failed")
             for alert in alerts:
                 self.raise_alert("nas_host", alert.title, alert.message, source="nas-host",
                                  severity=alert.severity, push=alert.push,

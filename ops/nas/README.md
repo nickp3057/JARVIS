@@ -108,6 +108,14 @@ to 15 min behind a recovery), so the launcher does not hold it. JARVIS's
 `update_arr_stack` tool stages it for Nick's yes and holds arr alerts for
 `ARR_STACK_UPDATE_HOLD_S` (900) while containers restart.
 
+Pull retries (2026-11-23): each `docker compose pull` is tried 4 times with
+30/60/90 s backoff (registry rate limits: lscr.io's `toomanyrequests` aborted
+the whole run on 2026-11-15 and 11-22). An image that still won't pull is
+recorded as `PULL FAILED: <service>` and skipped; the rest update, and the
+run ends `PARTIAL: ...` (exit 3) instead of `SUCCESS:`. Only when every stack
+image fails does it end `FAILED: pull-all`. Core re-runs the updater on
+`FAILED:`/`PARTIAL:` (up to 3 times a day, 2 h apart) and alerts once after.
+
 Because root now runs `stack_updater.sh` on Jarvis's request as well as from
 cron, it must be root-owned 755 with no ACLs. On 2026-10-29 it (and the
 watchdog folder) showed `rwxrwxrwx+`, meaning any account that can write

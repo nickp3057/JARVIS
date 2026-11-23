@@ -15,6 +15,9 @@ import uuid
 import requests
 
 from integrations import nas_stack, qbittorrent, servarr_common
+from jarvis_logger import get_logger
+
+_log = get_logger(__name__)
 
 _ALERT_FILE = Path(__file__).resolve().parents[1] / 'memory' / 'arr_stack_alerts.json'
 _pending: dict[str, tuple[float, str, str]] = {}
@@ -256,6 +259,57 @@ def start_update() -> str:
     _update_hold_until = time.time() + nas_stack.seconds('ARR_STACK_UPDATE_HOLD_S', 900, 60)
     return ("Update started on the NAS, sir. It pulls new images and restarts only the containers "
             "that changed, about five minutes. Alerts are held until it settles.")
+
+
+_RETRY_FILE = Path(__file__).resolve().parents[1] / 'memory' / 'arr_update_retry.json'
+
+
+def auto_retry_update(health: dict, now: float | None = None) -> str | None:
+    """JARVIS looks after the arr updates: when the NAS updater's last run
+    failed (a registry rate limit on the weekly cron, say), run it again,
+    at most ``ARR_UPDATE_RETRY_MAX`` (3) times a day, ``ARR_UPDATE_RETRY_GAP_S``
+    (2 h) apart. Returns alert text once retries are used up for a failure,
+    else None. State lives in ``memory/arr_update_retry.json``."""
+    from integrations import nas_host
+
+    now = time.time() if now is None else now
+    failure = nas_host.updater_failure(health)
+    try:
+        state = json.loads(_RETRY_FILE.read_text())
+        if not isinstance(state, dict):
+            state = {}
+    except (OSError, ValueError):
+        state = {}
+    retries = [t for t in state.get('retries', []) if isinstance(t, (int, float)) and now - t < 86400]
+    if failure is None:
+        if state.get('alerted') or state.get('retries'):
+            state = {}
+            _save_retry(state)
+        return None
+    run, problem = failure
+    if state.get('alerted') == run:
+        return None
+    max_retries = nas_stack.count('ARR_UPDATE_RETRY_MAX', 3, 0, 10)
+    gap = nas_stack.seconds('ARR_UPDATE_RETRY_GAP_S', 7200, 600)
+    if (retries and now - max(retries) < gap) or recovery_in_progress():
+        return None  # the last retry may still be running; judge it next time
+    if len(retries) < max_retries:
+        state['retries'] = retries + [now]
+        _save_retry(state)
+        _log.info('Arr updater run %s failed (%s); retrying: %s', run, problem, start_update())
+        return None
+    state.update(retries=retries, alerted=run)
+    _save_retry(state)
+    return (f"The arr stack update keeps failing ({problem}); I retried it {len(retries)} times today. "
+            "Nothing was broken, the containers are on their old images.")
+
+
+def _save_retry(state: dict) -> None:
+    try:
+        _RETRY_FILE.parent.mkdir(parents=True, exist_ok=True)
+        _RETRY_FILE.write_text(json.dumps(state))
+    except OSError:
+        pass
 
 
 _PENDING_TTL_S = 600

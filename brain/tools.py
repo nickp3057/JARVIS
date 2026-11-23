@@ -627,6 +627,11 @@ def _tool_add_movie(args: dict[str, Any]) -> str:
     )
 
 
+def _tool_add_movies(args: dict[str, Any]) -> str:
+    return radarr.add_movies(args.get("titles") or [], quality=args.get("quality"),
+                             confirmed=bool(args.get("confirmed", False)))
+
+
 def _tool_change_movie_quality(args: dict[str, Any]) -> str:
     return radarr.change_movie_quality(
         args.get("title", ""), args.get("quality", ""), session_id=args.get("_jarvis_session_id"),
@@ -3114,6 +3119,28 @@ _CUSTOM_TOOLS: list[dict[str, Any]] = [
         },
     },
     {
+        "name": "add_movies",
+        "description": (
+            "Add several movies at once when Nick names two or more ('add Fight "
+            "Club, La La Land and Oppenheimer'). Give the titles as he said them "
+            "(with a year if he gave one); it looks each up and adds every plain "
+            "match in one go, reports ones already in the library, and lists any "
+            "ambiguous or unfound title, which you then settle with find_movie / "
+            "add_movie. Use this instead of chaining find_movie/add_movie per title. "
+            "'quality' works as in add_movie and applies to all of them."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "titles": {"type": "array", "items": {"type": "string"},
+                           "description": "Movie titles, optionally with years, e.g. ['Good Will Hunting 1997', 'Michael']."},
+                "quality": {"type": "string", "description": "Natural-language quality phrase. Optional."},
+                "confirmed": {"type": "boolean", "description": "Must be true: Nick asked to add these titles."},
+            },
+            "required": ["titles", "confirmed"],
+        },
+    },
+    {
         "name": "change_movie_quality",
         "description": (
             "Move a movie already in the library to another Radarr quality "
@@ -3447,6 +3474,7 @@ _DISPATCH: dict[str, Callable[[dict[str, Any]], str]] = {
     "temporary_4k": _tool_temporary_4k,
     "find_movie": _tool_find_movie,
     "add_movie": _tool_add_movie,
+    "add_movies": _tool_add_movies,
     "find_series": _tool_find_series,
     "add_series": _tool_add_series,
     "list_quality_profiles": _tool_list_quality_profiles,

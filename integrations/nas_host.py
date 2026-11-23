@@ -13,6 +13,7 @@ from __future__ import annotations
 from datetime import datetime
 import json
 import os
+import re
 from pathlib import Path
 import time
 from typing import Any, NamedTuple
@@ -142,6 +143,19 @@ def conditions(health: dict, observed: float, restarts_last_hour: dict[str, int]
     return out
 
 
+def updater_failure(health: dict) -> tuple[str, str] | None:
+    """(last run, problem) when the image updater's last run failed or left
+    images behind (``FAILED:`` / ``PARTIAL:`` in its status file), else None."""
+    updater = health.get('updater') if isinstance(health, dict) else None
+    if not isinstance(updater, dict):
+        return None
+    text = str(updater.get('text') or '')
+    bad = re.search(r'^(?:FAILED|PARTIAL):\s*(.+)$', text, re.M)
+    if not bad:
+        return None
+    return str(updater.get('last_run') or updater.get('mtime') or ''), bad[1].strip()[:200]
+
+
 class HostWatch:
     """Debounced alerts from successive snapshots; state survives restarts."""
 
@@ -268,6 +282,9 @@ def describe(health: dict, observed: float) -> list[str]:
     if isinstance(updater, dict):
         applied = ', '.join(updater.get('applied') or []) or 'nothing'
         lines.append(f"Image updater last ran {updater.get('last_run') or '?'}; applied: {applied}.")
+        failure = updater_failure(health)
+        if failure:
+            lines.append(f"Its last run had a problem: {failure[1]}.")
     for array in _list(health, 'raid'):
         single = ' (single disk, no redundancy)' if array.get('slots') == '1/1' else ''
         lines.append(f"RAID {array.get('name')} {array.get('level')} [{array.get('slots')}] [{array.get('pattern')}]"

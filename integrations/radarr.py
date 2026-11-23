@@ -183,6 +183,114 @@ def add_movie(
     return post()
 
 
+_MAX_BATCH = 15
+
+
+def _clear_match(results: list[dict[str, Any]]) -> dict[str, Any] | None:
+    """The one result a plain title clearly means: the only result, or the
+    top-ranked one when no other result shares its title (the same test
+    ``media_selections.is_clear_pick`` applies to a single add)."""
+    if not results:
+        return None
+    top = results[0]
+
+    def norm(item: dict[str, Any]) -> str:
+        return " ".join(str(item.get("title", "")).lower().split())
+
+    if len(results) == 1 or sum(norm(m) == norm(top) for m in results[:_MAX_CANDIDATES]) == 1:
+        return top
+    return None
+
+
+def add_movies(titles: Any, quality: str | None = None, confirmed: bool = False) -> str:
+    """Look up and add several movies Nick named in one request.
+
+    Each title is looked up on its own (year-aware, like ``find_movie``); a
+    title whose top match is plain is added straight away, one already in the
+    library is reported, and an ambiguous or missing one is listed for Nick
+    to settle with find_movie/add_movie. Nick naming the titles is the
+    confirmation, the same rule as a single add of a plain match.
+    """
+    if isinstance(titles, str):
+        titles = titles.replace(";", "\n").split("\n")
+    names: list[str] = []
+    for item in titles if isinstance(titles, (list, tuple)) else []:
+        name = " ".join(str(item).split()).strip()
+        if name and name.lower() not in (n.lower() for n in names):
+            names.append(name)
+    if not names:
+        return "Which movies, sir? Give me the titles."
+    if len(names) > _MAX_BATCH:
+        return f"That's {len(names)} titles, sir; I'll take {_MAX_BATCH} at a time."
+    if not confirmed:
+        return "I won't add anything until you confirm the titles, sir."
+    if not servarr.is_configured(_SERVICE):
+        return "Radarr isn't configured, sir."
+
+    profile_id, profile_detail = servarr.resolve_quality(_SERVICE, quality)
+    if profile_id is None:
+        return profile_detail
+    root_path, root_detail = servarr.resolve_root_folder(_SERVICE, None)
+    if root_path is None:
+        return root_detail
+
+    added: list[str] = []
+    have: list[str] = []
+    problems: list[str] = []
+    for name in names:
+        ok, results = candidates(name)
+        if not ok:
+            problems.append(f"{name}: lookup failed ({results})")
+            continue
+        if not results:
+            problems.append(f"{name}: no match on Radarr")
+            continue
+        movie = _clear_match(results)
+        if movie is None:
+            options = "; ".join(_describe(m) for m in results[:3])
+            problems.append(f"{name}: several matches, not added ({options})")
+            continue
+        year = movie.get("year")
+        label = f"{movie.get('title', name)} ({year})" if year else str(movie.get("title", name))
+        if _in_library(movie):
+            have.append(label)
+            continue
+        result = _post_movie(movie, profile_id, root_path)
+        if result:
+            problems.append(f"{label}: {result}")
+        else:
+            added.append(label)
+    log.info("Batch movie add: %d added, %d already in, %d unresolved", len(added), len(have), len(problems))
+
+    parts = []
+    if added:
+        parts.append(f"Added {len(added)} on the {profile_detail} profile, searches underway: " + ", ".join(added) + ".")
+    if have:
+        parts.append("Already in the library: " + ", ".join(have) + ".")
+    if problems:
+        parts.append("Not added:\n" + "\n".join(f"- {p}" for p in problems)
+                     + "\nFor these, use find_movie and add_movie (ask Nick which one when several match).")
+    return "\n".join(parts)
+
+
+def _post_movie(movie: dict[str, Any], profile_id: int, root_path: str) -> str:
+    """POST one looked-up movie to Radarr. "" on success, else the problem."""
+    tmdb_id = movie.get("tmdbId")
+    body = dict(movie)
+    body.update({"qualityProfileId": profile_id, "rootFolderPath": root_path, "monitored": True,
+                 "minimumAvailability": "released", "addOptions": {"searchForMovie": True}})
+    outcome = servarr.call(_SERVICE, "POST", "/api/v3/movie", json=body)
+    if outcome.ok:
+        return ""
+    if outcome.kind != "timeout":
+        return str(outcome.payload)
+    # The add may have landed before the answer timed out; never re-POST.
+    ok, check = _lookup(f"tmdb:{tmdb_id}")
+    if ok and isinstance(check, list) and any(_in_library(m) for m in check if m.get("tmdbId") == tmdb_id):
+        return ""
+    return f"{outcome.payload} I couldn't confirm it was added; check before retrying"
+
+
 def history(limit: int = 10) -> str:
     """Return recent Radarr activity without changing the library."""
     limit = max(1, min(50, int(limit or 10)))

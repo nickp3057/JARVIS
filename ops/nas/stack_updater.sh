@@ -34,6 +34,26 @@ stale(){
   [ -n "$run" ] && [ -n "$tag" ] && [ "$run" != "$tag" ]
 }
 
+# Registries rate-limit now and then (lscr.io's "toomanyrequests" aborted the
+# whole run on 2026-11-15 and 11-22): retry each pull with backoff, and skip
+# an image that still won't pull rather than updating nothing.
+PULL_TRIES=4
+PULL_FAILED=""
+pull_retry(){
+  local service="$1" project="$2" n
+  for n in $(seq 1 "$PULL_TRIES"); do
+    docker compose --project-name "$project" pull $service >> "$LOG" 2>&1 && return 0
+    if [ "$n" -lt "$PULL_TRIES" ]; then
+      log "pull ${service:-$project} failed (try $n), retrying"
+      sleep $((n * 30))
+    fi
+  done
+  PULL_FAILED="$PULL_FAILED ${service:-$project}"
+  echo "PULL FAILED: ${service:-$project}" >> "$STATUS"
+  log "pull ${service:-$project} failed $PULL_TRIES times; skipping it this run"
+  return 1
+}
+
 exec 9>"$WD/stack.lock"
 flock -w 900 9 || { log "lock timeout, aborting"; exit 1; }
 
@@ -46,7 +66,7 @@ cd /volume1/docker
 CHANGED=""
 for S in $AUTO; do
   PHASE="pull-$S"
-  docker compose --project-name stack pull "$S" >> "$LOG" 2>&1
+  pull_retry "$S" stack || continue
   PHASE="inspect-$S"
   if stale "$S"; then
     CHANGED="$CHANGED $S"
@@ -56,6 +76,8 @@ for S in $AUTO; do
     [ "$rc" = 1 ] || failed "$rc"
   fi
 done
+# Nothing pulled at all: the registry or network is down, not one image.
+if [ "$(echo $PULL_FAILED)" = "$(echo $AUTO)" ]; then PHASE=pull-all; failed 1; fi
 
 if [ -n "$CHANGED" ] && [ "$CHECK_ONLY" = "0" ]; then
   if echo "$CHANGED" | grep -qw gluetun; then
@@ -87,9 +109,9 @@ fi
 PHASE=plex-directory
 cd /volume1/docker/plex
 PHASE=pull-plex
-docker compose --project-name plex pull >> "$LOG" 2>&1
-PHASE=inspect-plex
-if stale plex; then
+if ! pull_retry "" plex; then
+  :
+elif stale plex; then
   if [ "$CHECK_ONLY" = "0" ]; then
     PHASE=recreate-plex
     docker compose --project-name plex up -d >> "$LOG" 2>&1
@@ -113,5 +135,11 @@ PHASE=final-status
 DOWN=$(docker ps -a --filter 'status=exited' --format '{{.Names}}' | tr '\n' ' ')
 [ -n "$DOWN" ] && { echo "EXITED: $DOWN" >> "$STATUS"; log "WARNING exited: $DOWN"; }
 # Keep old images available for manual rollback after an update.
+if [ -n "$PULL_FAILED" ]; then
+  # Core (brain/arr_stack.auto_retry_update) re-runs the updater on PARTIAL.
+  echo "PARTIAL: could not pull$PULL_FAILED; everything else updated" >> "$STATUS"
+  log "=== updater done (partial: could not pull$PULL_FAILED) ==="
+  exit 3
+fi
 echo "SUCCESS: update completed" >> "$STATUS"
 log "=== updater done ==="

@@ -145,6 +145,15 @@ def _nas(alert: event_bus.Alert, live: _Live) -> bool | None:
     return False
 
 
+def _arr_update(alert: event_bus.Alert, live: _Live) -> bool | None:
+    """Still failing while the NAS updater's last run failed."""
+    from integrations import nas_host, nas_stack
+    parsed = nas_host.from_status(nas_stack.watchdog_status())
+    if parsed is None or not isinstance(parsed[0].get("updater"), dict):
+        return None
+    return nas_host.updater_failure(parsed[0]) is not None
+
+
 CHECKS: dict[str, Callable[[event_bus.Alert, _Live], bool | None]] = {
     "schwab_login": _schwab,
     "download_stalled": _torrent,
@@ -153,6 +162,7 @@ CHECKS: dict[str, Callable[[event_bus.Alert, _Live], bool | None]] = {
     "device_battery": _battery,
     "arr_stack": _arr,
     "nas_host": _nas,
+    "arr_update": _arr_update,
 }
 
 
