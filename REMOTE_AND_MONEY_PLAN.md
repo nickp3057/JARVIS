@@ -1,7 +1,7 @@
 # Remote access over nickolaspearson.com + the money advisor
 
-Planned 2026-11-23 with Nick. **Built 2026-11-23 (companion 6.124, Mooney 1.14.0), not deployed:** every step
-waits for Nick's go; the runbook is "Deploy (Nick)" at the end. Decisions he made are marked **Decided**; the
+Planned 2026-11-23 with Nick. **Built 2026-11-23 (companion 6.124, Mooney 1.14.0). Away access deployed the same
+evening; the money side is half deployed** (see "Deployment status"); the runbook is "Deploy (Nick)" at the end. Decisions he made are marked **Decided**; the
 questions still open are in "Open questions".
 
 ---
@@ -329,4 +329,21 @@ firewall fix done). Still open:
     `https://jarvis.nickolaspearson.com/api/money/transaction`, POST, header `Authorization: Bearer <token>`,
     JSON body `merchant` = Merchant, `amount` = Amount, `card` = Card (or Wallet pass name).
 11. After a week of dry run: review the log, tune, then `finance_settings dry_run=false` (or Settings > Money).
+
+## Deployment status (2026-11-23 evening)
+
+Nick: "keep the shortcut exception, deploy it", and **wait on linking the Apple Card** (step 10 not done).
+- Done: Core at aef1278+ on the Surface; Lightsail Caddy `# BEGIN JARVIS PROXY` live (backup
+  `/etc/caddy/Caddyfile.before-nick-site-20261123224138`); verified no cert → refused, cert without token → 401,
+  cert + token → 200 (~0.25 s), Shortcut path without token → 401, nickolaspearson.com still 200. Surface `.env`:
+  `JARVIS_TRUSTED_PROXIES`, `JARVIS_AWAY_CERT/KEY` (`memory/away/`); Core sees callers' real IPs; the away-access
+  monitor's round trip passes. Certificates in `~/.jarvis-devices` on the Mac (one passphrase for all,
+  `passphrase.txt`). iPhone has 6.124; JARVIS for Mac 2.1 installed with its certificate already in place.
+- Not yet: iPads (unreachable at install time); importing the `.p12` on the iPhone and iPads (AirDrop);
+  Lightsail `apt upgrade` (step 0).
+- Money: new backend files copied to the NAS (`~/Backend`, old files in `~/Backend-backup-20261123`),
+  `MOONEY_JARVIS_TOKEN` + `SYNC_INTERVAL_MIN` in its `.env`, `MOONEY_URL`/`MOONEY_JARVIS_TOKEN` in Core's `.env`
+  (advisor in dry run). Waiting on Nick: `cd ~/Backend && sudo docker compose up -d --build` on the NAS (docker
+  needs his password); then the Mooney 1.14.0 install (the Mooney checkout also holds other uncommitted work)
+  and "Allow Spending Access" for MACU. `MOONEY_APP_TOKEN` stays unset until that app is installed.
 

@@ -7,7 +7,7 @@
 # ~/.jarvis-devices (override with JARVIS_DEVICES_DIR); never commit any of it.
 #
 #   ops/remote/make-device-cert.sh ca              # once: the CA (key stays on this Mac)
-#   ops/remote/make-device-cert.sh device iphone   # iphone.p12 (asks for a passphrase)
+#   ops/remote/make-device-cert.sh device iphone   # iphone.p12 (asks for a passphrase, or JARVIS_P12_PASS)
 #   ops/remote/make-device-cert.sh device ipad-air
 #   ops/remote/make-device-cert.sh device ipad-mini
 #   ops/remote/make-device-cert.sh device mac
@@ -59,7 +59,8 @@ device)
     LEGACY=()
     openssl version | grep -Eq '^OpenSSL [3-9]' && LEGACY=(-legacy)
     openssl pkcs12 -export "${LEGACY[@]}" -inkey "$DIR/$NAME.key" -in "$DIR/$NAME.crt" -certfile "$DIR/ca.crt" \
-        -name "JARVIS $NAME" -keypbe PBE-SHA1-3DES -certpbe PBE-SHA1-3DES -macalg sha1 -out "$DIR/$NAME.p12"
+        -name "JARVIS $NAME" -keypbe PBE-SHA1-3DES -certpbe PBE-SHA1-3DES -macalg sha1 -out "$DIR/$NAME.p12" \
+        ${JARVIS_P12_PASS:+-passout env:JARVIS_P12_PASS}
     rm -f "$DIR/$NAME.key"   # the .p12 holds it now
     echo "Made $DIR/$NAME.p12. AirDrop it to the device and import it in the companion's Settings."
     ;;
