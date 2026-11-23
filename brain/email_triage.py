@@ -486,6 +486,14 @@ def _rule_label(rule: dict[str, Any], labels: dict[str, str]) -> tuple[str, str]
     if name is None and "/" not in wanted:
         leaf = [n for n in labels if n.lower().rsplit("/", 1)[-1] == wanted.lower()]
         name = leaf[0] if len(leaf) == 1 else None
+    if name is None and "/" in wanted:
+        # Nest under the parent Nick already has, in his spelling: a rule
+        # saying "Kinda Important/Amazon" must not create a second
+        # "Kinda Important" beside his "Kinda important" (2026-11-23).
+        parent, leaf_name = wanted.rsplit("/", 1)
+        existing = {n.lower(): n for n in labels}.get(parent.lower())
+        if existing:
+            wanted = f"{existing}/{leaf_name}"
     if name is None:
         if dry_run():
             log.info("Email rule %s: folder %s doesn't exist (dry run, not creating)", rule["id"], wanted)

@@ -386,3 +386,17 @@ class GmailHelperTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class RuleLabelParentTests(unittest.TestCase):
+    def test_new_nested_folder_uses_the_existing_parents_spelling(self):
+        from unittest.mock import patch
+        from brain import email_triage
+        from integrations import gmail
+        labels = {"Kinda important": "L1", "Kinda important/Receipts": "L2"}
+        with patch.object(email_triage, "dry_run", return_value=False), \
+             patch.object(gmail, "create_label", return_value="L9") as create:
+            name, label_id = email_triage._rule_label(
+                {"id": "r1", "folder": "Kinda Important/Amazon", "color": ""}, labels)
+        create.assert_called_once_with("Kinda important/Amazon")
+        self.assertEqual((name, label_id), ("Kinda important/Amazon", "L9"))
