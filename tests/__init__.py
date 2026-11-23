@@ -35,3 +35,7 @@ os.environ["TTS_PROVIDER"] = "elevenlabs"
 # that stages one (a download retry against the dev .env's Radarr, say).
 # Off for every test; tests/test_auto_heal.py turns it on with faked fixes.
 os.environ["AUTO_REPAIR_ENABLED"] = "false"
+# The failed-token lockout (app/auth_guard.py) would start answering 429 once
+# the whole suite's deliberate 401s from "testclient" pass 20. Off for every
+# test; tests/test_auth_guard.py turns it on.
+os.environ["JARVIS_AUTH_LOCKOUT_FAILURES"] = "0"

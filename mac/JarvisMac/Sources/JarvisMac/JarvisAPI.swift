@@ -61,7 +61,7 @@ struct JarvisAPI {
         request.setValue("1", forHTTPHeaderField: "X-Jarvis-Stream-Segments")
         request.httpBody = try JSONEncoder().encode(Body(message: message, sessionID: sessionID))
 
-        let (bytes, response) = try await URLSession.shared.bytes(for: request)
+        let (bytes, response) = try await Self.reporting { try await MacCertificateDelegate.session.bytes(for: request) }
         let http = response as? HTTPURLResponse
         let code = http?.statusCode ?? 0
         if code == 401 { throw JarvisAPIError.unauthorized }
@@ -152,6 +152,17 @@ struct JarvisAPI {
 
     // MARK: Plumbing
 
+    /// An address that never answered: re-check home vs away for next time.
+    private static func reporting<T>(_ body: () async throws -> T) async throws -> T {
+        do {
+            return try await body()
+        } catch let error as URLError where [.cannotConnectToHost, .cannotFindHost, .timedOut, .secureConnectionFailed,
+                                              .networkConnectionLost, .dnsLookupFailed].contains(error.code) {
+            await MainActor.run { MacSettings.current?.refreshRoute() }
+            throw error
+        }
+    }
+
     private func makeRequest(_ method: String, _ path: String, query: [URLQueryItem] = [],
                              timeout: TimeInterval = 30) -> URLRequest {
         var url = baseURL.appending(path: path)
@@ -180,7 +191,7 @@ struct JarvisAPI {
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
             request.httpBody = body
         }
-        let (data, response) = try await URLSession.shared.data(for: request)
+        let (data, response) = try await Self.reporting { try await MacCertificateDelegate.session.data(for: request) }
         let code = (response as? HTTPURLResponse)?.statusCode ?? 0
         if code == 401 { throw JarvisAPIError.unauthorized }
         guard (200..<300).contains(code) else { throw JarvisAPIError.server(code, Self.detail(data)) }

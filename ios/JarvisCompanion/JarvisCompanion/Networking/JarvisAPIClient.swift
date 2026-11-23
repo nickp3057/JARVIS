@@ -37,14 +37,18 @@ enum JarvisAPIError: LocalizedError {
         }
     }
 
-    /// URLError codes worth translating, with a nudge toward the usual suspect
-    /// on this setup: the phone having dropped off the Tailscale network.
+    /// URLError codes worth translating, with a nudge toward the usual
+    /// suspects on this setup (Core down, or away access not set up).
     private static func describe(_ error: URLError) -> String {
         switch error.code {
         case .timedOut:
             return "JARVIS didn't respond in time. It may still be working through a long tool call — try again in a moment."
         case .cannotConnectToHost:
-            return "Couldn't connect to JARVIS. Is the server running, and is Tailscale connected on this device?"
+            return "Couldn't connect to JARVIS. Is the server running? Away from home, check Settings > Server > Away access."
+        case .clientCertificateRequired, .clientCertificateRejected:
+            return "Away access needs this device's certificate. Import it in Settings > Server > Away access."
+        case .secureConnectionFailed:
+            return "The secure connection to jarvis.nickolaspearson.com failed. Is this device's certificate imported (Settings > Server > Away access)?"
         case .cannotFindHost:
             return "Couldn't find that host. Double-check the server address in Settings."
         case .notConnectedToInternet:
@@ -403,11 +407,76 @@ struct JarvisAPIClient {
     /// One session for the whole app. A `URLSession` retains itself until it is
     /// invalidated, so building one per request would leak; the per-request
     /// timeout is set on the `URLRequest` instead.
+    /// Its delegate presents this device's certificate when Lightsail's
+    /// Caddy asks for one (away access, `DeviceCertificate`).
     private static let sharedSession: URLSession = {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.waitsForConnectivity = false
-        return URLSession(configuration: configuration)
+        return URLSession(configuration: configuration, delegate: ClientCertificateDelegate.shared, delegateQueue: nil)
     }()
+
+    /// A home/away switch: drop whatever is still talking to the old address
+    /// (streams, sockets), so each reconnects on the new one.
+    static func cancelRequests(to base: URL) {
+        sharedSession.getAllTasks { tasks in
+            for task in tasks {
+                guard let url = task.originalRequest?.url, ServerRoute.sameServer(url, base) else { continue }
+                task.cancel()
+            }
+        }
+    }
+
+    /// Errors that mean the address never answered (so even a POST never
+    /// arrived): worth one try on the other route. Timeouts and dropped
+    /// connections only count for reads.
+    private static func unreachable(_ error: URLError, method: String?) -> Bool {
+        switch error.code {
+        case .cannotConnectToHost, .cannotFindHost, .dnsLookupFailed, .secureConnectionFailed,
+             .clientCertificateRequired, .clientCertificateRejected:
+            return true
+        case .timedOut, .networkConnectionLost:
+            return (method ?? "GET") == "GET"
+        default:
+            return false
+        }
+    }
+
+    private static func rebase(_ request: URLRequest, onto base: URL) -> URLRequest? {
+        guard let url = request.url, var parts = URLComponents(url: url, resolvingAgainstBaseURL: false),
+              let target = URLComponents(url: base, resolvingAgainstBaseURL: false) else { return nil }
+        let socket = parts.scheme == "ws" || parts.scheme == "wss"
+        parts.scheme = socket ? (target.scheme == "https" ? "wss" : "ws") : target.scheme
+        parts.host = target.host
+        parts.port = target.port
+        var moved = request
+        moved.url = parts.url
+        return moved
+    }
+
+    /// `session.data`, with one retry on the other route (home <-> away)
+    /// when this address can't be reached at all; the route flips with it.
+    private func fetch(for request: URLRequest) async throws -> (Data, URLResponse) {
+        do {
+            return try await session.data(for: request)
+        } catch let error as URLError where Self.unreachable(error, method: request.httpMethod) {
+            let base = baseURL
+            guard let other = await MainActor.run(body: { ServerRoute.shared.failover(from: base) }),
+                  let retried = Self.rebase(request, onto: other) else { throw error }
+            return try await session.data(for: retried)
+        }
+    }
+
+    /// `session.bytes` for streams: no retry here (the stream's loop
+    /// reconnects), but an unreachable address flips the route first.
+    private func openStream(for request: URLRequest) async throws -> (URLSession.AsyncBytes, URLResponse) {
+        do {
+            return try await session.bytes(for: request)
+        } catch let error as URLError where Self.unreachable(error, method: "GET") {
+            let base = baseURL
+            _ = await MainActor.run { ServerRoute.shared.failover(from: base) }
+            throw error
+        }
+    }
 
     private let session: URLSession
     private let baseURL: URL
@@ -426,10 +495,8 @@ struct JarvisAPIClient {
     @MainActor
     static func make(from settings: AppSettings) throws -> JarvisAPIClient {
         let token = settings.apiToken.trimmingCharacters(in: .whitespacesAndNewlines)
-        let address = settings.baseURLString.trimmingCharacters(in: .whitespacesAndNewlines)
-
-        guard !address.isEmpty, !token.isEmpty else { throw JarvisAPIError.notConfigured }
-        guard let url = settings.resolvedBaseURL else { throw JarvisAPIError.invalidBaseURL(address) }
+        guard settings.hasAddress, !token.isEmpty else { throw JarvisAPIError.notConfigured }
+        guard let url = settings.resolvedBaseURL else { throw JarvisAPIError.invalidBaseURL(settings.homeURLString) }
 
         return JarvisAPIClient(baseURL: url, token: token)
     }
@@ -564,7 +631,7 @@ struct JarvisAPIClient {
         let data: Data
         let response: URLResponse
         do {
-            (data, response) = try await session.data(for: request)
+            (data, response) = try await fetch(for: request)
         } catch let error as URLError {
             throw JarvisAPIError.transport(error)
         }
@@ -598,7 +665,7 @@ struct JarvisAPIClient {
         request.httpBody = try JSONEncoder().encode(ChatRequest(message: message, sessionID: sessionID, requestID: requestID))
 
         do {
-            let (bytes, response) = try await session.bytes(for: request)
+            let (bytes, response) = try await openStream(for: request)
             let http = try validate(response)
             if let boundSessionID = http.value(forHTTPHeaderField: "X-Jarvis-Session-ID") {
                 await onSession(boundSessionID)
@@ -640,7 +707,7 @@ struct JarvisAPIClient {
         request.timeoutInterval = 60  // Core sends a keep-alive every 15 s
         request.setValue("text/event-stream", forHTTPHeaderField: "Accept")
         do {
-            let (bytes, response) = try await session.bytes(for: request)
+            let (bytes, response) = try await openStream(for: request)
             _ = try validate(response)
             for try await line in bytes.lines {
                 try Task.checkCancellation()
@@ -677,7 +744,7 @@ struct JarvisAPIClient {
         request.timeoutInterval = 60  // Core sends a keep-alive every 15 s
         request.setValue("text/event-stream", forHTTPHeaderField: "Accept")
         do {
-            let (bytes, response) = try await session.bytes(for: request)
+            let (bytes, response) = try await openStream(for: request)
             _ = try validate(response)
             for try await line in bytes.lines {
                 try Task.checkCancellation()
@@ -702,7 +769,7 @@ struct JarvisAPIClient {
         request.timeoutInterval = 60  // Core sends a keep-alive every 15 s
         request.setValue("text/event-stream", forHTTPHeaderField: "Accept")
         do {
-            let (bytes, response) = try await session.bytes(for: request)
+            let (bytes, response) = try await openStream(for: request)
             _ = try validate(response)
             for try await line in bytes.lines {
                 try Task.checkCancellation()
@@ -718,7 +785,7 @@ struct JarvisAPIClient {
 
     func checkHealth() async throws {
         let request = request(path: "health")
-        let (data, response) = try await session.data(for: request)
+        let (data, response) = try await fetch(for: request)
         _ = try validate(response, data: data)
     }
 
@@ -733,20 +800,20 @@ struct JarvisAPIClient {
         var request = request(path: "sessions/\(sessionID)", method: "PATCH")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try JSONSerialization.data(withJSONObject: ["title": title])
-        let (data, response) = try await session.data(for: request)
+        let (data, response) = try await fetch(for: request)
         _ = try validate(response, data: data)
     }
 
     func deleteSession(_ sessionID: String) async throws {
         let request = request(path: "sessions/\(sessionID)", method: "DELETE")
-        let (data, response) = try await session.data(for: request)
+        let (data, response) = try await fetch(for: request)
         _ = try validate(response, data: data)
     }
 
     func sessions() async throws -> [ServerSession] {
         struct Envelope: Decodable { let sessions: [ServerSession] }
         let request = request(path: "sessions")
-        let (data, response) = try await session.data(for: request)
+        let (data, response) = try await fetch(for: request)
         _ = try validate(response, data: data)
         return try JSONDecoder().decode(Envelope.self, from: data).sessions
     }
@@ -754,7 +821,7 @@ struct JarvisAPIClient {
     func messages(for sessionID: String) async throws -> [ServerMessage] {
         struct Envelope: Decodable { let messages: [ServerMessage] }
         let request = request(path: "sessions/\(sessionID)")
-        let (data, response) = try await session.data(for: request)
+        let (data, response) = try await fetch(for: request)
         _ = try validate(response, data: data)
         return try JSONDecoder().decode(Envelope.self, from: data).messages
     }
@@ -774,7 +841,7 @@ struct JarvisAPIClient {
         let data: Data
         let response: URLResponse
         do {
-            (data, response) = try await session.data(for: request)
+            (data, response) = try await fetch(for: request)
         } catch let error as URLError {
             throw JarvisAPIError.transport(error)
         }
@@ -800,7 +867,7 @@ struct JarvisAPIClient {
         let data: Data
         let response: URLResponse
         do {
-            (data, response) = try await session.data(for: request)
+            (data, response) = try await fetch(for: request)
         } catch let error as URLError {
             throw JarvisAPIError.transport(error)
         }
@@ -993,7 +1060,7 @@ struct JarvisAPIClient {
         let data: Data
         let response: URLResponse
         do {
-            (data, response) = try await session.data(for: request)
+            (data, response) = try await fetch(for: request)
         } catch let error as URLError {
             throw JarvisAPIError.transport(error)
         }
@@ -1059,7 +1126,7 @@ struct JarvisAPIClient {
     /// nil when that lens isn't sending (404).
     func cameraFrame(lens: String? = nil) async throws -> Data? {
         let r = cameraFrameRequest(lens: lens)
-        let (data, response) = try await session.data(for: r)
+        let (data, response) = try await fetch(for: r)
         guard let http = response as? HTTPURLResponse else { throw JarvisAPIError.malformedResponse(nil) }
         if http.statusCode == 404 { return nil }
         _ = try validate(response, data: data)
@@ -1071,7 +1138,7 @@ struct JarvisAPIClient {
         let data: Data
         let response: URLResponse
         do {
-            (data, response) = try await session.data(for: r)
+            (data, response) = try await fetch(for: r)
         } catch let error as URLError {
             throw JarvisAPIError.transport(error)
         }
@@ -1211,6 +1278,16 @@ struct JarvisAPIClient {
         _ = try await sendJSON(SharedTheme.self, path: "api/theme", method: "PUT", body: Body(experiments: experiments))
     }
 
+    // MARK: - Money advisor (Settings > Money)
+
+    func moneyStatus() async throws -> MoneyStatus {
+        try await getJSON(MoneyStatus.self, path: "api/money")
+    }
+
+    func saveMoneySettings(_ settings: MoneySettings) async throws -> MoneyStatus {
+        try await sendJSON(MoneyStatus.self, path: "api/money/settings", method: "PUT", body: settings)
+    }
+
     // MARK: - Donna (private counsellor)
 
     /// Donna's replies can include a lookup on a trusted site; give her room.
@@ -1327,7 +1404,7 @@ struct JarvisAPIClient {
         }
         r.setValue("image/jpeg, image/png", forHTTPHeaderField: "Accept")
         r.cachePolicy = .returnCacheDataElseLoad
-        let (data, response) = try await session.data(for: r)
+        let (data, response) = try await fetch(for: r)
         if (response as? HTTPURLResponse)?.statusCode == 404 { return nil }
         _ = try validate(response, data: data)
         return data
@@ -1379,7 +1456,7 @@ struct JarvisAPIClient {
             r.url = components.url
         }
         r.setValue("image/jpeg, image/png", forHTTPHeaderField: "Accept")
-        let (data, response) = try await session.data(for: r)
+        let (data, response) = try await fetch(for: r)
         if (response as? HTTPURLResponse)?.statusCode == 404 { return nil }
         _ = try validate(response, data: data)
         return data
@@ -1390,7 +1467,7 @@ struct JarvisAPIClient {
         let data: Data
         let response: URLResponse
         do {
-            (data, response) = try await session.data(for: r)
+            (data, response) = try await fetch(for: r)
         } catch let error as URLError {
             throw JarvisAPIError.transport(error)
         }
@@ -1448,7 +1525,7 @@ struct JarvisAPIClient {
         let data: Data
         let response: URLResponse
         do {
-            (data, response) = try await session.data(for: request)
+            (data, response) = try await fetch(for: request)
         } catch let error as URLError {
             throw JarvisAPIError.transport(error)
         }
@@ -1489,7 +1566,7 @@ struct JarvisAPIClient {
         request.timeoutInterval = 60  // Core sends a keep-alive every 15 s
         request.setValue("text/event-stream", forHTTPHeaderField: "Accept")
         do {
-            let (bytes, response) = try await session.bytes(for: request)
+            let (bytes, response) = try await openStream(for: request)
             _ = try validate(response)
             for try await line in bytes.lines {
                 try Task.checkCancellation()
@@ -1744,7 +1821,7 @@ struct JarvisAPIClient {
         let data: Data
         let response: URLResponse
         do {
-            (data, response) = try await session.data(for: request)
+            (data, response) = try await fetch(for: request)
         } catch let error as URLError {
             throw JarvisAPIError.transport(error)
         }

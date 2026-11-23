@@ -25,7 +25,7 @@ from app import status_hub
 from brain.debug_reports import create_debug_report
 from brain.agent import stream_round_breaks
 from brain.runtime import JarvisRuntime
-from app import client_tokens
+from app import auth_guard, client_tokens
 from brain import event_bus, traffic, voice_presence
 from integrations import media_doctor, media_requests
 from brain import incident_reports, maintenance, self_repair
@@ -187,13 +187,39 @@ def runtime() -> JarvisRuntime:
         return _runtime
 
 
-def authorize(authorization: str | None = Header(default=None)) -> None:
+def _client_ip(connection: Request | WebSocket | None) -> str | None:
+    """The caller's address: the phone's real one behind Lightsail, since
+    uvicorn trusts X-Forwarded-For only from JARVIS_TRUSTED_PROXIES."""
+    client = getattr(connection, "client", None)
+    return client.host if client else None
+
+
+def _refuse(ip: str | None) -> HTTPException:
+    """A wrong token: count it, and refuse harder once the address is locked out."""
+    auth_guard.record_failure(ip)
+    if auth_guard.blocked(ip):
+        return HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                             detail="Too many wrong tokens; try again later")
+    return HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
+
+
+def _check_admin(authorization: str | None, ip: str | None) -> None:
     expected = os.getenv("JARVIS_API_TOKEN", "").strip()
     if not expected:
         raise HTTPException(status_code=503, detail="JARVIS_API_TOKEN is not configured")
     supplied = authorization.removeprefix("Bearer ").strip() if authorization else ""
     if not hmac.compare_digest(supplied, expected):
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
+        raise _refuse(ip)
+
+
+def authorize(request: Request, authorization: str | None = Header(default=None)) -> None:
+    """The companion's admin token. A valid token always gets in; wrong ones
+    count toward the lockout (app/auth_guard.py)."""
+    _check_admin(authorization, _client_ip(request))
+
+
+def _authorize_socket(socket: WebSocket) -> None:
+    _check_admin(socket.headers.get("authorization"), _client_ip(socket))
 
 
 def require_scope(scope: str):
@@ -202,7 +228,7 @@ def require_scope(scope: str):
     Client tokens (app/client_tokens.py) let a TV or dashboard read alerts
     and status without ever holding the admin token. Returns the client's
     name, or None for the admin token."""
-    def dependency(authorization: str | None = Header(default=None)) -> str | None:
+    def dependency(request: Request, authorization: str | None = Header(default=None)) -> str | None:
         supplied = authorization.removeprefix("Bearer ").strip() if authorization else ""
         expected = os.getenv("JARVIS_API_TOKEN", "").strip()
         if expected and hmac.compare_digest(supplied, expected):
@@ -211,11 +237,21 @@ def require_scope(scope: str):
         if client is None:
             if not expected:
                 raise HTTPException(status_code=503, detail="JARVIS_API_TOKEN is not configured")
-            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
+            raise _refuse(_client_ip(request))
         if scope not in client[1]:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=f"Token lacks scope {scope}")
         return client[0]
     return dependency
+
+
+def _lockout_alert(ip: str, count: int) -> None:
+    runtime().raise_alert(
+        "security", "Someone is guessing JARVIS's token",
+        f"{count} wrong tokens from {ip}; that address is locked out for a while.",
+        source="auth", severity="warning", dedupe_key=f"auth-lockout-{ip}", cooldown_s=3600)
+
+
+auth_guard.on_lockout = _lockout_alert
 
 
 _status_read = Depends(require_scope("status:read"))
@@ -235,7 +271,7 @@ class ChatResponse(BaseModel):
 @app.websocket("/api/voice/live")
 async def companion_voice(socket: WebSocket) -> None:
     try:
-        authorize(socket.headers.get("authorization"))
+        _authorize_socket(socket)
     except HTTPException:
         await socket.close(code=1008)
         return
@@ -249,7 +285,7 @@ async def voice_satellite(socket: WebSocket) -> None:
     ``?name=bed`` (or ``door``). In: binary 16 kHz mono int16 PCM. Out: JSON
     control messages and the reply's PCM. Companion token only."""
     try:
-        authorize(socket.headers.get("authorization"))
+        _authorize_socket(socket)
     except HTTPException:
         await socket.close(code=1008)
         return
@@ -1833,7 +1869,7 @@ async def client_events(
     since: int = 0,
     only: str | None = None,
     last_event_id: str | None = Header(default=None, alias="Last-Event-ID"),
-    _: None = Depends(require_scope("events:read")),
+    client: str | None = Depends(require_scope("events:read")),
 ) -> StreamingResponse:
     """Server-sent events of every bus alert (brain/event_bus.py).
 
@@ -1874,6 +1910,10 @@ async def client_events(
     event_bus.subscribe_cards(name, on_event)
 
     def frame(alert: event_bus.Alert) -> str:
+        # A private alert (money) still moves the id, but only the companion's
+        # own token sees what it says; client tokens (the TV) get a comment.
+        if alert.private and client is not None:
+            return f"id: {alert.id}\n: private\n\n"
         return f"id: {alert.id}\nevent: alert\ndata: {json.dumps(alert.to_dict())}\n\n"
 
     def card_frame(card: event_bus.Card) -> str:
@@ -2259,6 +2299,74 @@ def push_status(_: None = Depends(authorize)) -> dict[str, object]:
     return notifications.status()
 
 
+# --- Money (brain/finance_advisor.py, REMOTE_AND_MONEY_PLAN.md Part 2) ---------
+
+class ApplePayment(BaseModel):
+    """What the iPhone's "Transaction" Shortcut automation sends on every Apple Pay payment."""
+    merchant: str = Field(min_length=1, max_length=120)
+    amount: str | float = Field(description='"$12.50", "12.50" or 12.5')
+    card: str = Field(default="", max_length=60)
+    id: str | None = Field(default=None, max_length=80)
+
+
+def _money_amount(raw: str | float) -> float:
+    import re
+    if isinstance(raw, (int, float)):
+        value = float(raw)
+    else:
+        text = re.sub(r"[^0-9.,\-]", "", raw).replace(",", "")
+        try:
+            value = float(text)
+        except ValueError:
+            raise HTTPException(status_code=422, detail=f"Not an amount: {raw!r}") from None
+    if not 0 < abs(value) < 100_000:
+        raise HTTPException(status_code=422, detail="Amount out of range")
+    return round(abs(value), 2)
+
+
+@app.post("/api/money/transaction")
+def money_transaction(payment: ApplePayment, _: str | None = Depends(require_scope("money:write"))) -> dict[str, object]:
+    """One Apple Pay payment from the Shortcut, into Mooney's ledger (Apple
+    Card can't be read through Plaid); the advisor checks it at once."""
+    from brain import finance_advisor
+    from integrations import mooney
+    if not mooney.configured():
+        raise HTTPException(status_code=503, detail="Mooney isn't linked (MOONEY_URL / MOONEY_JARVIS_TOKEN)")
+    try:
+        entry = finance_advisor.record_apple_pay(merchant=payment.merchant, amount=_money_amount(payment.amount),
+                                                 card=payment.card or "Apple Pay", entry_id=payment.id or "")
+    except mooney.MooneyError as error:
+        raise HTTPException(status_code=502, detail=str(error)) from error
+    if _runtime is not None:
+        _runtime.wake_finance()
+    return {"ok": True, "id": entry}
+
+
+class MoneySettingsRequest(BaseModel):
+    weekly_budget: float | None = Field(default=None, ge=0, le=100_000)
+    big_purchase: float | None = Field(default=None, ge=0, le=100_000)
+    quiet_start: str | None = Field(default=None, max_length=5)
+    quiet_end: str | None = Field(default=None, max_length=5)
+    dry_run: bool | None = None
+
+
+@app.get("/api/money")
+def money_status(_: None = Depends(authorize)) -> dict[str, object]:
+    """Settings > Money in the companion: the advisor's settings and its recent notices."""
+    from brain import finance_advisor
+    return finance_advisor.status()
+
+
+@app.put("/api/money/settings")
+def money_settings(request: MoneySettingsRequest, _: None = Depends(authorize)) -> dict[str, object]:
+    from brain import finance_advisor
+    try:
+        finance_advisor.update_settings(**request.model_dump(exclude_none=True))
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+    return finance_advisor.status()
+
+
 def run_server() -> None:
     """Run the companion API using environment-configured bind settings."""
     import uvicorn
@@ -2272,4 +2380,8 @@ def run_server() -> None:
         # restart sat in "Waiting for connections to close" until systemd's
         # 90 s stop timeout killed it. They reconnect and replay on their own.
         timeout_graceful_shutdown=5,
+        # Behind Lightsail's Caddy (jarvis.nickolaspearson.com) the caller's
+        # real address arrives in X-Forwarded-For; trust it only from there.
+        proxy_headers=True,
+        forwarded_allow_ips=os.getenv("JARVIS_TRUSTED_PROXIES", "127.0.0.1").strip() or "127.0.0.1",
     )

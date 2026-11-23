@@ -37,10 +37,11 @@ Pearson-Stark-Jarvis/
 ├── app/
 │   ├── main.py              Entry point. GUI / text / voice / server modes
 │   ├── companion_voice.py   Live transcript WebSocket, release-to-commit, streamed text/PCM
-│   ├── client_tokens.py     Scoped per-client tokens (events:read, status:read, chat, settings:write, wake:write, playback:write) + CLI (create/grant/list/revoke); hashes in memory/client_tokens.json
+│   ├── auth_guard.py        Failed-token lockout (per client IP; never refuses a valid token) + the "guessing" alert
+│   ├── client_tokens.py     Scoped per-client tokens (events:read, status:read, chat, settings:write, wake:write, playback:write, money:write) + CLI (create/grant/list/revoke); hashes in memory/client_tokens.json
 │   └── server.py            Authenticated HTTP bridge for the iOS companion (+ /api/clients/events SSE)
 │
-├── mac/JarvisMac/           JARVIS for Mac 2.0: native SwiftUI client (Overview, Chat, Home, Media, Alerts, Skills & Fixes, Donna, menu bar panel); SwiftPM, build.sh installs ~/Applications/JARVIS.app
+├── mac/JarvisMac/           JARVIS for Mac 2.1 (home/away + device certificate): native SwiftUI client (Overview, Chat, Home, Media, Alerts, Skills & Fixes, Donna, menu bar panel); SwiftPM, build.sh installs ~/Applications/JARVIS.app
 │
 ├── brain/
 │   ├── agent.py             JarvisAgent: session management, tool loop, history
@@ -78,6 +79,8 @@ Pearson-Stark-Jarvis/
 │   ├── email_triage.py      Email subagent: trash noise, file missionary mail, keep the rest, unsubscribe list
 │   ├── email_rules.py       Email filing rules (sender/subject -> folder, label colour); applied by the sorter before the model
 │   ├── watches.py           "Let me know when X happens": durable web watches checked by the watcher subagent
+│   ├── away_access.py       Round trip through jarvis.nickolaspearson.com with Core's device cert; alerts when away access is down
+│   ├── finance_advisor.py   Money advisor: $125 week, heads-ups, nudges, Sunday review, arguing back (Mooney data; model only for words)
 │   ├── investing.py         Investing subagents: target weights, daily advisor, crash watch, paper playground
 │   ├── trading.py           Real Schwab orders: sizes them, enforces caps/cash-only/stocks+ETFs, waits for Nick's Approve
 │   ├── agent_roster.py      Who works for JARVIS: the agents behind GET /api/agents and the companion's Agents map
@@ -116,6 +119,7 @@ Pearson-Stark-Jarvis/
 │   ├── nas_host.py          NAS host-health snapshot (containers, RAID, SMART, volumes, temps): debounced alerts + incident-report lines
 │   ├── media_doctor.py      Traces one title request→arr→indexer→qBit→import→Plex; names the stalled stage; fixes via confirm_gate
 │   ├── plex.py              Minimal Plex client (title search + library rescan) for the media doctor; movie/part lookup + sessions for light sync
+│   ├── mooney.py            Mooney's money hub on the NAS (transactions, budget snapshot, annotations, advisor notes)
 │   ├── schwab.py            Charles Schwab: OAuth (7-day login), holdings every 30 s, live prices over the streamer, place_order (only brain/trading.py calls it)
 │   └── spotify.py           Spotipy wrapper: play/pause/skip/volume/transfer/now-playing
 │
@@ -615,6 +619,52 @@ scenes, media requests) shows under JARVIS's reply as a card with
 or `deny <code>` as Nick's own chat message, so the gate decides it exactly
 as if he typed it (no new approval path, recorded in history, no model call).
 `deny <code>` (also decline/reject/cancel <code>) drops just that proposal.
+
+### Away access: jarvis.nickolaspearson.com *(new 2026-11-23, companion 6.124)*
+The companion no longer needs Tailscale (REMOTE_AND_MONEY_PLAN.md, Part 1).
+- **Route:** `ServerRoute` (iOS) picks home (`http://10.0.0.73:8000`, LAN) on
+  Wi-Fi when `/health` answers within 1.5 s, else away
+  (`https://jarvis.nickolaspearson.com`, Lightsail's Caddy proxying over the
+  tailnet to Core). Cellular goes straight to away. A request that can't
+  connect retries once on the other address and flips the route; streams on
+  the old address are cancelled and reconnect. Settings > Server: home, away,
+  optional Tailscale fallback, Automatic / Home / Away. JARVIS for Mac does the
+  same (home when it answers, else away).
+- **Device certificate (mTLS):** Caddy refuses any TLS handshake without a
+  cert from Nick's private CA. `ops/remote/make-device-cert.sh` makes the CA
+  (`~/.jarvis-devices`, never in a repo), one `.p12` per device, and `core`
+  (PEM) for Core's own monitor; `install-ca` copies the CA cert into
+  `nickolaspearson-site/deploy/`, whose `deploy/from-mac.sh` then installs the
+  `# BEGIN JARVIS PROXY` Caddy block (and takes `jarvis.` off the site block).
+  Import: Settings > Server > Away access (iOS, Keychain) or Settings (Mac,
+  a 0600 file, opened in memory).
+- **Core:** `app/auth_guard.py` failed-token lockout; uvicorn trusts
+  `X-Forwarded-For` only from `JARVIS_TRUSTED_PROXIES`; the away-access
+  monitor raises one "Away access is down" alert after two failed round trips
+  and clears it when the route answers.
+
+### Money advisor (Mooney) *(new 2026-11-23)*
+`brain/finance_advisor.py`, data from Mooney's money hub (`integrations/mooney.py`,
+`mooney/Backend`): Plaid transactions (MACU debit, Chase) and Apple Pay payments
+from Nick's iPhone Shortcut (`POST /api/money/transaction`, a `money:write`
+client token; Apple Card can't be read through Plaid).
+- **Budget:** $125 a week (Mon-Sun) on MACU debit; Apple Card and Chase kept
+  apart (monthly totals + heads-ups); transfers and card payments never count.
+  Reimbursed/split charges are netted out; excuses stay counted but noted.
+- **Notices** (rules fixed, `FINANCE_MODEL` only writes the words): a heads-up
+  over $50 on any card at once; one same-day nudge at most (ahead of the $125
+  pace, or one merchant 3x in 7 days); Sunday 12:00 review (a week over $125
+  gets a proper scolding); the 1st, last month by card. Never in quiet hours
+  (Settings > Money in the companion). `dry_run` (on at first) logs instead of
+  sending; Nick reviews the log, then turns it off.
+- **Tools:** `spending_summary(period, category?)`, `explain_transaction`
+  (arguing back: reimbursed / split / excused / mistake, optional rule to
+  remember), `finance_settings` (budget, heads-up line, quiet hours, dry run,
+  which account counts where, the log).
+- **Privacy:** notices are private bus alerts (the companion sees them; the
+  TV's stream gets a bare `: private` frame, glance never shows them); the
+  tools are locked to Nick (phone, desktop, or a matched voiceprint); spending
+  never becomes a profile fact. State: `memory/finance.json`.
 
 ### Investing (background subagents) *(new 2026-11-09)*
 Nick's plan, designed with him 2026-11-09 (`brain/investing.py`). The agents
@@ -1181,6 +1231,13 @@ LOCAL_MODEL_API_KEY=         # optional; never logged
 JARVIS_API_TOKEN=           # required bearer token
 JARVIS_SERVER_HOST=0.0.0.0
 JARVIS_SERVER_PORT=8000
+JARVIS_TRUSTED_PROXIES=127.0.0.1  # Surface: 100.119.21.113 (Lightsail), the only proxy whose X-Forwarded-For is believed
+JARVIS_AUTH_LOCKOUT_FAILURES=20   # app/auth_guard.py: wrong tokens from one address inside the window...
+JARVIS_AUTH_LOCKOUT_WINDOW_S=600  # ...block it (429) for JARVIS_AUTH_LOCKOUT_S, one "security" alert; 0 failures = off
+JARVIS_AUTH_LOCKOUT_S=900         # a valid token is never refused
+JARVIS_AWAY_URL=https://jarvis.nickolaspearson.com  # brain/away_access.py round-trips here every AWAY_ACCESS_INTERVAL_S (600)
+JARVIS_AWAY_CERT=           # Core's own device cert (ops/remote/make-device-cert.sh device core); both set = monitor on
+JARVIS_AWAY_KEY=            # AWAY_ACCESS_MONITOR_ENABLED=false turns it off
 WAKE_UP_LIGHTS=1            # I'm up (phone or TV) turns on every light (strip segments skipped); 0 = off
 ROOM_VOICE=0                # 1 = "Hey JARVIS" on the Surface mic/speakers inside Core (speech/room_voice.py)
 SATELLITE_ARBITRATION_MS=350  # when the desk mic and an iPad satellite both hear "Hey JARVIS", wait this long and let the higher score answer
@@ -1256,6 +1313,11 @@ SCHWAB_CALLBACK_URL=https://127.0.0.1:8182   # exactly what the Schwab app has r
 SCHWAB_HUB_URL=             # borrow the Schwab hub's login instead: https://schwab.nickolaspearson.com/api/token
 SCHWAB_HUB_SECRET=          # the "jarvis" program secret from the hub page; both set = borrowing
 SCHWAB_LOGIN_PAGE=          # optional; default the hub's front page
+MOONEY_URL=                 # Mooney's money hub on the NAS, e.g. http://<NAS tailnet IP>:4001 (integrations/mooney.py)
+MOONEY_JARVIS_TOKEN=        # the backend's MOONEY_JARVIS_TOKEN: read spending, write notes/annotations, never link
+FINANCE_ENABLED=true        # the money advisor (brain/finance_advisor.py); needs both MOONEY_* set
+FINANCE_INTERVAL_S=900      # how often its rules run (an Apple Pay payment runs them at once)
+FINANCE_MODEL=auto:haiku    # writes the notices' words; the rules never use the model
 INVESTING_ENABLED=true      # the investing subagents (brain/investing.py); they propose, Nick approves
 TRADING_ENABLED=true        # kill switch for real Schwab orders (brain/trading.py); each still needs Nick's Approve
 TRADING_MAX_ORDER_USD=100   # largest single order JARVIS may stage

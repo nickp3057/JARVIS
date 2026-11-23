@@ -18,6 +18,7 @@ struct SettingsView: View {
     @State private var showingKnowledge = false
     @State private var showingAgents = false
     @ObservedObject private var push = PushRegistrar.shared
+    @ObservedObject private var route = ServerRoute.shared
     @State private var hostBattery: HostBattery?
 
     var body: some View {
@@ -70,6 +71,10 @@ struct SettingsView: View {
                     group("Accounts") {
                         NavigationLink { page("Charles Schwab") { SchwabPanel() } } label: {
                             row("Charles Schwab", symbol: "chart.line.uptrend.xyaxis", tint: .green)
+                        }
+                        divider
+                        NavigationLink { page("Money") { MoneyPanel() } } label: {
+                            row("Money", symbol: "dollarsign.circle", tint: .mint)
                         }
                     }
                     group {
@@ -140,7 +145,7 @@ struct SettingsView: View {
             JarvisCoreMark(size: 46, animated: false)
             VStack(alignment: .leading, spacing: 3) {
                 Text("JARVIS Core").font(.headline)
-                Text(settings.isConfigured ? settings.baseURLString : "Not connected yet")
+                Text(settings.isConfigured ? "Connected \(route.current.label)" : "Not connected yet")
                     .font(.caption).foregroundStyle(.secondary).lineLimit(1)
             }
             Spacer()
@@ -181,14 +186,10 @@ struct SettingsView: View {
         .navigationBarTitleDisplayMode(.inline)
     }
 
-    private var connectionPanel: some View {
+    @ViewBuilder private var connectionPanel: some View {
         CockpitPanel("Connection", symbol: "network") {
             Text("JARVIS Core").font(.headline)
-            TextField("Server address", text: $settings.baseURLString)
-                .keyboardType(.URL).textContentType(.URL)
-                .textInputAutocapitalization(.never).autocorrectionDisabled()
-                .padding(13).background(.black.opacity(0.2), in: .rect(cornerRadius: 12))
-                .accessibilityLabel("Server address")
+            ServerAddressFields()
             HStack {
                 Group {
                     if revealToken { TextField("API token", text: $settings.apiToken) }
@@ -201,7 +202,7 @@ struct SettingsView: View {
                 .accessibilityLabel(revealToken ? "Hide token" : "Show token")
             }
             .padding(.leading, 13).background(.black.opacity(0.2), in: .rect(cornerRadius: 12))
-            Text("Your token is stored securely in Keychain. Use your home network or Tailscale address.")
+            Text("Your token is stored securely in Keychain.")
                 .font(.caption).foregroundStyle(.secondary)
             if let error = settings.tokenStorageError {
                 Label(error, systemImage: "exclamationmark.triangle").foregroundStyle(JarvisTheme.amber)
@@ -223,6 +224,7 @@ struct SettingsView: View {
                     .font(.footnote).foregroundStyle(connectionSucceeded ? JarvisTheme.success : JarvisTheme.amber)
             }
         }
+        AwayAccessPanel()
     }
 
     @ViewBuilder private var studyPanel: some View {
@@ -276,7 +278,7 @@ struct SettingsView: View {
                 try await JarvisAPIClient.make(from: settings).checkHealth()
                 guard identity == settings.connectionIdentity else { return }
                 connectionSucceeded = true
-                connectionResult = "Connected. JARVIS is within reach."
+                connectionResult = "Connected \(ServerRoute.shared.current.label). JARVIS is within reach."
             } catch {
                 guard identity == settings.connectionIdentity else { return }
                 connectionSucceeded = false

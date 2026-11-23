@@ -63,6 +63,12 @@ class Alert:
         data.pop("grouping")
         return data
 
+    @property
+    def private(self) -> bool:
+        """Nick's eyes only (the money advisor): never on a client-token
+        stream like the TV's, nor on the glance screen."""
+        return bool(self.context.get("private"))
+
 
 Subscriber = Callable[[Alert], Any]
 

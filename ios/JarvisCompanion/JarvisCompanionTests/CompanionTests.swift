@@ -63,7 +63,7 @@ final class CompanionTests: XCTestCase {
         defaults = UserDefaults(suiteName: suite)!
         settings = AppSettings(defaults: defaults, keychain: MemoryTokenStore())
         settings.apiToken = "test"
-        settings.baseURLString = "http://localhost:8000"
+        settings.homeURLString = "http://localhost:8000"
         // Transport and token storage never touch the real app or require signing.
         let config = URLSessionConfiguration.ephemeral
         config.protocolClasses = [MockProtocol.self]
@@ -652,7 +652,7 @@ final class CompanionTests: XCTestCase {
         let first = HubViewModel(settings: settings, clientFactory: { client }, snapshotDefaults: defaults)
         await first.refreshNow()
         XCTAssertNotNil(first.now.value)
-        settings.baseURLString = "http://different-server:8000"
+        settings.homeURLString = "http://different-server:8000"
         let other = HubViewModel(settings: settings, clientFactory: { client }, snapshotDefaults: defaults)
         XCTAssertNil(other.now.value)
     }

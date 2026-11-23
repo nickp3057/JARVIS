@@ -17,6 +17,7 @@ struct JarvisCompanionApp: App {
             academicNotifications: AcademicNotificationScheduler()
         ))
         PushRegistrar.shared.attach(settings)
+        ServerRoute.shared.start(settings)  // home or away, picked on its own
     }
 
     var body: some Scene {
@@ -28,6 +29,7 @@ struct JarvisCompanionApp: App {
                 .onChange(of: scenePhase) { _, phase in
                     switch phase {
                     case .active:
+                        ServerRoute.shared.reevaluate()
                         chat.appBecameActive()
                         if settings.isConfigured { Task { await hub.refreshNow() } }
                         Task { await PushRegistrar.shared.refresh() }

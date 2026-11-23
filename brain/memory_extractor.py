@@ -135,6 +135,8 @@ Rules:
   routine.*, project.*, goal.*).
 - Never store secrets, passwords, card or account numbers, or medical details
   Nick did not explicitly ask JARVIS to keep.
+- Never store spending details (what Nick bought, where, how much, budgets,
+  balances, excuses for a purchase). The money advisor keeps those privately.
 - The episode line is for a daily log: fill it only when the turn completed a
   task, made a plan or decision, or changed a setting or preference. Write it
   in past tense, one sentence, mentioning the specific thing. Leave it empty

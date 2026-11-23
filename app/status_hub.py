@@ -318,7 +318,7 @@ def glance_status() -> dict[str, Any]:
         and not str(t.get("state", "")).startswith(("paused", "stopped", "error", "missing"))
     ]
     cutoff = time.time() - 24 * 3600
-    alerts = [a.to_dict() for a in reversed(event_bus.since(0, limit=200)) if a.created_at >= cutoff]
+    alerts = [a.to_dict() for a in reversed(event_bus.since(0, limit=200)) if a.created_at >= cutoff and not a.private]
     return {
         "generated_at": time.time(),
         "address": (os.getenv("ADDRESS") or "sir").strip() or "sir",

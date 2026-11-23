@@ -14,6 +14,8 @@ full access. Every other client gets its own token here, limited to scopes:
                    which also turns on the good-morning lights.
 - ``playback:write`` the TV's Plex position for light sync
                    (``POST /api/tv/playback``). Nothing else.
+- ``money:write``  the iPhone's Apple Pay Shortcut: one payment
+                   (``POST /api/money/transaction``). Nothing else, not even reads.
 
 Only a SHA-256 of each token is stored (``memory/client_tokens.json``,
 gitignored); the token itself is printed once at creation. Manage from the
@@ -35,7 +37,8 @@ import sys
 import threading
 import time
 
-SCOPES = frozenset({"events:read", "status:read", "chat", "settings:write", "wake:write", "playback:write"})
+SCOPES = frozenset({"events:read", "status:read", "chat", "settings:write", "wake:write", "playback:write",
+                    "money:write"})
 _FILE = Path(__file__).resolve().parents[1] / "memory" / "client_tokens.json"
 _lock = threading.Lock()
 

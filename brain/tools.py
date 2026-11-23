@@ -964,6 +964,61 @@ def _tool_kill_camera(_: dict[str, Any]) -> str:
     return f"Room camera locked off for {round(camera.KILL_SECONDS / 60)} minutes, sir."
 
 
+def _money_ready() -> str | None:
+    from integrations import mooney
+    if not mooney.configured():
+        return "Tool error: Mooney isn't linked yet (MOONEY_URL / MOONEY_JARVIS_TOKEN in .env)."
+    return None
+
+
+def _tool_spending_summary(args: dict[str, Any]) -> str:
+    from brain import finance_advisor
+    if (problem := _money_ready()):
+        return problem
+    try:
+        return finance_advisor.spending_summary(str(args.get("period") or "week"), str(args.get("category") or ""))
+    except Exception as exc:  # noqa: BLE001
+        return f"Tool error: couldn't read spending from Mooney: {exc}"
+
+
+def _tool_explain_transaction(args: dict[str, Any]) -> str:
+    from brain import finance_advisor
+    if (problem := _money_ready()):
+        return problem
+    amount = args.get("amount")
+    back = args.get("amount_back")
+    try:
+        return finance_advisor.explain_transaction(
+            str(args.get("description") or ""), str(args.get("kind") or "excused"),
+            float(back) if back is not None else None, merchant=str(args.get("merchant") or ""),
+            amount=float(amount) if amount is not None else None, days=int(args.get("days") or 14),
+            remember=str(args.get("remember") or ""))
+    except Exception as exc:  # noqa: BLE001
+        return f"Tool error: couldn't annotate the charge: {exc}"
+
+
+def _tool_finance_settings(args: dict[str, Any]) -> str:
+    from brain import finance_advisor
+    try:
+        if args.get("account") and args.get("role"):
+            line = finance_advisor.set_role(str(args["account"]), str(args["role"]))
+        else:
+            line = ""
+        changes = {k: args[k] for k in ("weekly_budget", "big_purchase", "quiet_start", "quiet_end", "dry_run")
+                   if args.get(k) is not None}
+        conf = finance_advisor.update_settings(**changes) if changes else finance_advisor.settings()
+    except Exception as exc:  # noqa: BLE001
+        return f"Tool error: {exc}"
+    lines = [line] if line else []
+    lines.append(f"Weekly budget ${conf['weekly_budget']:.0f} (Mon-Sun), heads-up over ${conf['big_purchase']:.0f}, "
+                 f"quiet {conf['quiet_start']}-{conf['quiet_end']}, "
+                 f"{'dry run (logged, not sent)' if conf['dry_run'] else 'live'}.")
+    if args.get("show_log"):
+        for entry in finance_advisor.recent_log(10):
+            lines.append(f"- {entry['at']} {entry['title']}{'' if entry['sent'] else ' (dry run)'}: {entry['body']}")
+    return "\n".join(lines)
+
+
 def _tool_portfolio_summary(_: dict[str, Any]) -> str:
     from integrations import schwab
     return schwab.describe()
@@ -2595,6 +2650,53 @@ _CUSTOM_TOOLS: list[dict[str, Any]] = [
         ),
         "input_schema": {"type": "object", "properties": {}},
     },
+    # --- Money advisor (Mooney) -------------------------------------------
+    {
+        "name": "spending_summary",
+        "description": (
+            "Nick's spending from Mooney (Plaid: MACU debit, Chase; Apple Pay via his Shortcut, incl. Apple "
+            "Card), net of reimbursements: the $125 weekly budget (Mon-Sun, MACU debit), Apple Card and Chase "
+            "kept separate, top merchants, excuses noted. Only for Nick himself."
+        ),
+        "input_schema": {"type": "object", "properties": {
+            "period": {"type": "string", "enum": ["week", "last_week", "month", "last_month"]},
+            "category": {"type": "string", "description": "Optional filter: a merchant or Plaid category word, e.g. food."},
+        }},
+    },
+    {
+        "name": "explain_transaction",
+        "description": (
+            "Nick argues a charge ('that was golf, I got paid back', 'I was hungry', 'split it with Sam', "
+            "'that's a mistake'): finds the charge by merchant/amount/description in the last days and records "
+            "it in Mooney (both apps show it). kind: reimbursed (amount_back netted out; all of it if omitted), "
+            "split (amount_back = what others paid; half if omitted), excused (still counts, reason noted), "
+            "mistake (dropped). remember: a rule to keep ('golf is usually split'). Accept a fair excuse "
+            "graciously; if the result says the excuse is repeating, call it out with dry wit."
+        ),
+        "input_schema": {"type": "object", "properties": {
+            "description": {"type": "string", "description": "Nick's explanation, in his words."},
+            "kind": {"type": "string", "enum": ["reimbursed", "split", "excused", "mistake"]},
+            "merchant": {"type": "string"},
+            "amount": {"type": "number", "description": "The charge's amount, if he said it."},
+            "amount_back": {"type": "number"},
+            "days": {"type": "integer", "description": "How far back to look (default 14)."},
+            "remember": {"type": "string"},
+        }, "required": ["description", "kind"]},
+    },
+    {
+        "name": "finance_settings",
+        "description": (
+            "The money advisor's settings: weekly_budget (125), big_purchase heads-up line (50), quiet hours "
+            "(HH:MM), dry_run (true = notices only logged). account + role puts an account or Shortcut card "
+            "in a budget (weekly, apple_card, chase, other). show_log lists recent notices. No arguments: show them."
+        ),
+        "input_schema": {"type": "object", "properties": {
+            "weekly_budget": {"type": "number"}, "big_purchase": {"type": "number"},
+            "quiet_start": {"type": "string"}, "quiet_end": {"type": "string"}, "dry_run": {"type": "boolean"},
+            "account": {"type": "string"}, "role": {"type": "string", "enum": ["weekly", "apple_card", "chase", "other"]},
+            "show_log": {"type": "boolean"},
+        }},
+    },
     # --- Charles Schwab ----------------------------------------------------
     {
         "name": "portfolio_summary",
@@ -3432,6 +3534,9 @@ _DISPATCH: dict[str, Callable[[dict[str, Any]], str]] = {
     "get_wake_up": _tool_get_wake_up,
     "skip_wake_up": _tool_skip_wake_up,
     "portfolio_summary": _tool_portfolio_summary,
+    "spending_summary": _tool_spending_summary,
+    "explain_transaction": _tool_explain_transaction,
+    "finance_settings": _tool_finance_settings,
     "investing_status": _tool_investing_status,
     "investing_run": _tool_investing_run,
     "set_portfolio_targets": _tool_set_portfolio_targets,

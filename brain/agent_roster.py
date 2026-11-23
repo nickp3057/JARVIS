@@ -71,6 +71,19 @@ def _watch_state() -> tuple[bool, str]:
 
 
 # id, kind, name, role, SF Symbol, schedule, job/spec-name prefixes ("a|b"), state() -> (on, note), needs_you() -> count
+def _money_state() -> tuple[bool, str]:
+    from brain import finance_advisor
+    from integrations import mooney
+
+    if not mooney.configured():
+        return False, "Waiting for Mooney to be linked (MOONEY_URL, MOONEY_JARVIS_TOKEN)."
+    if not finance_advisor.enabled():
+        return False, "Switched off (FINANCE_ENABLED)."
+    if finance_advisor.settings()["dry_run"]:
+        return True, "Dry run: notices are logged, not sent."
+    return True, ""
+
+
 _AGENTS: list[dict[str, Any]] = [
     {"id": "memory", "kind": "helper", "name": "Memory keeper", "symbol": "brain.head.profile",
      "role": "After every conversation, saves anything worth remembering about you.",
@@ -104,6 +117,9 @@ _AGENTS: list[dict[str, Any]] = [
     {"id": "skills", "kind": "subagent", "name": "Skill drafter", "symbol": "wand.and.stars",
      "role": "Turns a skill request into a new skill built from JARVIS's own tools (you approve it), or says what it'd take.",
      "schedule": "When you tap Draft a skill", "jobs": "skill_drafter", "state": lambda: (True, "")},
+    {"id": "money", "kind": "subagent", "name": "Money advisor", "symbol": "dollarsign.circle",
+     "role": "Watches your spending through Mooney: the $125 week, big-purchase heads-ups, Sunday's review. Writes the words; the rules are fixed.",
+     "schedule": "Every 15 minutes; Sunday 12:00 review", "jobs": "finance_", "state": _money_state},
     {"id": "playground", "kind": "subagent", "name": "Playground trader", "symbol": "dice",
      "role": "Trades its own small account however it likes; scored against plain VOO.",
      "schedule": "Mondays, 10:30 AM ET", "jobs": "investing_playground", "state": _investing_state},

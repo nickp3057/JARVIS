@@ -339,6 +339,15 @@ class JarvisRuntime:
                 and not getattr(self, "_presence_started", False):
             self._presence_started = True
             self._spawn(self._presence_monitor_loop)
+        from brain import finance_advisor
+        if finance_advisor.enabled() and not getattr(self, "_finance_started", False):
+            self._finance_started = True
+            self._spawn(self._finance_loop)
+        from brain import away_access
+        if _monitor_on("AWAY_ACCESS_MONITOR_ENABLED") and away_access.configured() \
+                and not getattr(self, "_away_access_started", False):
+            self._away_access_started = True
+            self._spawn(self._away_access_loop)
         if _monitor_on("MONITOR_WATCHDOG_ENABLED") and not getattr(self, "_watchdog_started", False):
             self._watchdog_started = True
             threading.Thread(target=self._watchdog_loop, daemon=True).start()
@@ -354,6 +363,70 @@ class JarvisRuntime:
         if attr:
             setattr(self, attr, thread)
         return thread
+
+    def _finance_loop(self) -> None:
+        """The money advisor's rules every FINANCE_INTERVAL_S (900), plus a
+        pass right after an Apple Pay payment arrives (brain/finance_advisor.py)."""
+        self._finance_wake = getattr(self, "_finance_wake", None) or threading.Event()
+        while not self._stop_monitors.is_set():
+            self.finance_pass()
+            self._finance_wake.wait(_env_float("FINANCE_INTERVAL_S", 900.0, 60.0))
+            self._finance_wake.clear()
+
+    def finance_pass(self) -> int:
+        """Check the rules once and deliver what's due; returns how many notices."""
+        from brain import finance_advisor
+        from integrations import mooney
+        try:
+            notices = finance_advisor.check()
+        except Exception:  # noqa: BLE001 - Mooney down: try again next pass
+            log.exception("Finance pass failed")
+            return 0
+        dry = finance_advisor.settings()["dry_run"]
+        for kind, title, body, _facts in notices:
+            finance_advisor.record(kind, title, body, sent=not dry)
+            if dry:
+                continue
+            # Private: the companion sees it, the TV's stream and glance never do.
+            self.raise_alert("finance", title, body, source="money", severity="info",
+                             context={"private": True}, inbox_kind="finance", thread_id="finance",
+                             **({} if kind == "heads_up" else {"passive": True}))
+            try:
+                mooney.add_note(kind, title, body)  # Mooney's advisor card
+            except Exception as exc:  # noqa: BLE001
+                log.warning("Advisor note not saved in Mooney: %s", exc)
+        return len(notices)
+
+    def wake_finance(self) -> None:
+        """An Apple Pay payment just landed: run the rules now, not in 15 minutes."""
+        wake = getattr(self, "_finance_wake", None)
+        if wake is not None:
+            wake.set()
+
+    def _away_access_loop(self) -> None:
+        """The companion's away route (jarvis.nickolaspearson.com through
+        Lightsail) every AWAY_ACCESS_INTERVAL_S (600): two failures raise one
+        alert, the next success clears it (brain/away_access.py)."""
+        from brain import away_access
+        watch = away_access.AwayWatch()
+        while not self._stop_monitors.is_set():
+            try:
+                ok, detail = away_access.check()
+                change = watch.step(ok)
+                if change == "down":
+                    self.raise_alert(
+                        "away_access", "Away access is down",
+                        f"The companion can't reach JARVIS through {away_access.url()} away from home "
+                        f"({detail}). Check Lightsail, Caddy and Lightsail's Tailscale.",
+                        source="away-access", severity="warning")
+                elif change == "up":
+                    event_bus.resolve([a.id for a in event_bus.since(0, limit=500) if a.kind == "away_access"])
+                    self.record_event(kind="alert", source="away-access", title="Away access is back",
+                                      detail=f"{away_access.url()} answers again.")
+            except Exception:  # noqa: BLE001 - a bad pass must not end the loop
+                log.exception("Away access check failed")
+            if self._stop_monitors.wait(_env_float("AWAY_ACCESS_INTERVAL_S", 600.0, 60.0)):
+                break
 
     def _presence_monitor_loop(self) -> None:
         """Nick leaving and coming home (brain/presence.py), every

@@ -5,7 +5,7 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 
-VERSION="2.0"
+VERSION="2.1"
 APP="$HOME/Applications/JARVIS.app"
 
 swift build -c release --product JarvisMac

@@ -47,6 +47,10 @@ class Speaker:
 
 OWNER = Speaker("nick", True, reason="authenticated channel")
 
+# Nick's spending (brain/finance_advisor.py): answers only to Nick's phone, the
+# desktop, or a room voice that matched his voiceprint. Never a guest, never the TV.
+FINANCE_TOOLS = frozenset({"spending_summary", "explain_transaction", "finance_settings"})
+
 # Changes to who JARVIS is or what he remembers, his settings, and Nick's protocols.
 LOCKED_TOOLS = frozenset({
     # memory about Nick and JARVIS
@@ -67,7 +71,7 @@ LOCKED_TOOLS = frozenset({
     "add_email_rule", "list_email_rules", "remove_email_rule",
     # Nick's money: holdings, targets, approving trades
     "portfolio_summary", "investing_status", "investing_run", "set_portfolio_targets", "decide_investment", "record_holding",
-    "place_trade",
+    "place_trade", *FINANCE_TOOLS,
     # what JARVIS is watching the web for on Nick's behalf
     "cancel_watch",
 })
@@ -116,6 +120,10 @@ def may_move_money() -> bool:
 def refusal(tool: str) -> str | None:
     """The tool result for a locked tool asked for by a guest (or a money
     tool asked for by an unconfirmed room voice), else None."""
+    if tool in FINANCE_TOOLS and trusted() and not may_move_money():
+        return (f"Refused: {tool} reads Nick's spending, which only answers to his phone or his confirmed "
+                "voice (voice ID is off, nothing is enrolled, or it couldn't confirm him). Tell him: "
+                '"Your spending stays between us and your phone, sir."')
     if tool in MONEY_TOOLS and trusted() and not may_move_money():
         return (f"Refused: {tool} moves Nick's money, and on the room mic that needs a positive voiceprint "
                 "match (voice ID is off, nothing is enrolled, or it couldn't confirm him). Nothing was "

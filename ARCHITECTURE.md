@@ -362,6 +362,9 @@ runtime knows, the more JARVIS feels like one mind instead of several scripts.
 
 ## Runtime Monitor Settings
 
+- Away access (`brain/away_access.py`, `_away_access_loop`): on when `JARVIS_AWAY_CERT`/`JARVIS_AWAY_KEY` exist and `AWAY_ACCESS_MONITOR_ENABLED` isn't false; every `AWAY_ACCESS_INTERVAL_S` (600). Two failures raise one `away_access` alert; recovery resolves it.
+- Money advisor (`brain/finance_advisor.py`, `_finance_loop`): on when `MOONEY_URL` + `MOONEY_JARVIS_TOKEN` are set and `FINANCE_ENABLED` isn't false; every `FINANCE_INTERVAL_S` (900) and right after an Apple Pay payment (`wake_finance`). Its alerts carry `context.private`, so client-token streams and glance skip them.
+
 - Watchdog (`brain/watchdog.py`): monitors start via `JarvisRuntime._spawn` so `_watchdog_loop` can restart dead ones and report frozen ones; new monitors must use `_spawn`, not a bare `threading.Thread`. `MONITOR_WATCHDOG_*` / `MONITOR_RESTART_MAX` / `MONITOR_HANG_S`. The systemd watchdog pings from the server lifespan while `/health` answers.
 - Autopilot (`brain/auto_heal.py`): rides the arr monitor's poll
   (`_arr_autopilot`) and the download monitor's stall staging; `AUTO_REPAIR_*`

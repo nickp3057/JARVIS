@@ -10,7 +10,7 @@ This repo maintains its own living docs — read them before making changes:
 - `ARCHITECTURE.md` — the target layered architecture (Perception / Memory / Reasoning / Agency / Presence) and the runtime design rule.
 - `FUTURE_SESSIONS.md` — Nick's goals for the self-learning/self-healing direction, his ever-growing wishlist (integrations, JARVIS TV launcher checklist, loose ends), and the prioritized backlog for future sessions. `SELF_HEALING_HANDOFF.md` is the review checklist for the most recent self-healing work.
 - `OVERNIGHT_HANDOFF.md` — status, evidence and review checklist for the 2026-09-22 overnight overhaul (alerts, confirmation gate, notifications, performance).
-- `REMOTE_AND_MONEY_PLAN.md` — planned, not built: the companion reaching Core through `jarvis.nickolaspearson.com` (Lightsail proxy + device certificate, auto home/away, no Tailscale on the phone) and the Mooney-linked money advisor ($125 weekly budget, Plaid + Apple Pay Shortcut); Nick's decisions and open questions.
+- `REMOTE_AND_MONEY_PLAN.md` — built 2026-11-23, not deployed: the companion reaching Core through `jarvis.nickolaspearson.com` (Lightsail proxy + device certificate, auto home/away, no Tailscale on the phone) and the Mooney-linked money advisor ($125 weekly budget, Plaid + Apple Pay Shortcut); Nick's decisions, what changed while building, and the deploy runbook.
 - `IOS_REDESIGN_PLAN.md` — the hub-first JarvisCompanion redesign (Phase 4): what was built, what's left, and open questions.
 
 Keep both updated when you change behavior they describe (new tools, new .env vars, new monitors, shipped roadmap items).

@@ -175,7 +175,7 @@ class CardBusTests(unittest.TestCase):
     def _stream(self, only: str | None, publish) -> list[str]:  # noqa: ANN001
         async def scenario() -> list[str]:
             request = Mock(is_disconnected=AsyncMock(return_value=False))
-            response = await server.client_events(request, since=0, only=only, last_event_id=None, _=None)
+            response = await server.client_events(request, since=0, only=only, last_event_id=None, client=None)
             frames = response.body_iterator
             try:
                 threading.Timer(0.1, publish).start()

@@ -337,7 +337,7 @@ class ClientTokenTests(unittest.TestCase):
 
         async def scenario() -> list[str]:
             request = Mock(is_disconnected=AsyncMock(return_value=False))
-            response = await server.client_events(request, since=0, last_event_id="1", _=None)
+            response = await server.client_events(request, since=0, last_event_id="1", client=None)
             self.assertEqual(response.media_type, "text/event-stream")
             frames = response.body_iterator
             try:

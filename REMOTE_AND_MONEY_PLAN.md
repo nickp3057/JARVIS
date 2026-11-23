@@ -1,7 +1,8 @@
 # Remote access over nickolaspearson.com + the money advisor
 
-Planned 2026-11-23 with Nick. Nothing here is built or deployed yet. Nick wants every detail settled before
-anything ships. Decisions he made are marked **Decided**; the questions still open are in "Open questions" at the end.
+Planned 2026-11-23 with Nick. **Built 2026-11-23 (companion 6.124, Mooney 1.14.0), not deployed:** every step
+waits for Nick's go; the runbook is "Deploy (Nick)" at the end. Decisions he made are marked **Decided**; the
+questions still open are in "Open questions".
 
 ---
 
@@ -270,3 +271,62 @@ firewall fix done). Still open:
 5. JARVIS: `integrations/mooney.py`, Apple Pay Shortcut endpoint, `brain/finance_advisor.py`, tools, Money
    settings (quiet hours) in the companion, triggers in dry-run for a week.
 6. Go live: real pushes, weekly review Sunday 12:00.
+
+---
+
+## Built 2026-11-23 (what differs from the plan above)
+
+- **Caddy asks for the certificate instead of requiring it** (`mode verify_if_given`), and aborts any request
+  without one, **except `POST /api/money/transaction`**: the Apple Pay Shortcut runs inside iOS Shortcuts,
+  which can't present a client certificate, so with strict mTLS it would only work at home. That one endpoint
+  takes a write-only `money:write` token (it can record a payment, nothing else, not even read) and the
+  failed-token lockout applies. A wrong certificate still fails at the handshake. Tested locally against Caddy
+  2.11: no cert → aborted, rogue cert → handshake refused, Nick's cert → through, `../` and `%2F` tricks
+  → aborted. **Nick decides:** keep the exception, or deploy with `JARVIS_SHORTCUT_OPEN=0` (strict; the
+  Shortcut then only records payments made at home).
+- **Revocation:** CA rotation (`make-device-cert.sh ca --rotate`, re-issue, redeploy), no fingerprint list.
+- **Core's own certificate** (`device core`, PEM) is what the away-access monitor uses for its round trip.
+- **Monthly category budgets (`set_budget`) were folded into `finance_settings`:** Nick's answers replaced them
+  with the $125 week + Apple Card/Chase totals. The nudge rules are the weekly pace and repeat merchants.
+- **Mooney's backend stays open until `MOONEY_APP_TOKEN` is set**, so it can deploy before the app that sends
+  the token (otherwise the current app is locked out).
+- **All Mooney changes are uncommitted** in `~/Developer/projects/mooney`: that checkout already had someone's
+  uncommitted widget/Dashboard/pbxproj work in the same files, and Mooney's rule is a version bump in every
+  commit (pbxproj), so both are left for Nick to review and commit together. Backend: `Backend/server.js`,
+  `storage.js`, `db.js`, `sync.js`, `test/`, `Dockerfile` (Node 24), `.env.example`, `package.json`
+  (`npm test`: 3 passing). App: `Store/MoneyHub.swift`, `Views/AdvisorCardSection.swift` (new),
+  `Store/PlaidClient.swift` (token header), `Store/AppStore.swift` (snapshot on save, never decoy),
+  `Views/BankConnectionSettingsView.swift`, `Views/DashboardView.swift` (advisor card), version 1.14.0.
+
+## Deploy (Nick), in order
+
+**Away access**
+0. Lightsail: `sudo apt update && sudo apt upgrade -y` (reboot if asked).
+1. Core: `deploy/surface.sh`. Then on the Surface add `JARVIS_TRUSTED_PROXIES=100.119.21.113` to `.env` and restart
+   (`sudo systemctl restart jarvis-api`). Harmless before the proxy exists.
+2. Mac: `ops/remote/make-device-cert.sh ca`, then `device iphone`, `device ipad-air`, `device ipad-mini`,
+   `device mac`, `device core` (each `.p12` asks for a passphrase), then `install-ca`.
+3. `cd ~/Developer/projects/nickolaspearson-site && bash deploy/from-mac.sh`. Check from the Mac (off Tailscale is
+   best): `curl https://jarvis.nickolaspearson.com/health` → connection closed;
+   `curl --cert ~/.jarvis-devices/core.crt --key ~/.jarvis-devices/core.key https://jarvis.nickolaspearson.com/health`
+   → 401; add `-H "Authorization: Bearer $JARVIS_API_TOKEN"` → 200.
+4. Copy `core.crt` + `core.key` to the Surface (`~/jarvis/memory/away/`, `chmod 600` the key), set
+   `JARVIS_AWAY_CERT` / `JARVIS_AWAY_KEY`, restart: the away-access monitor starts.
+5. Install companion 6.124 on the iPhone and both iPads; `mac/JarvisMac/build.sh --open`. AirDrop each `.p12`,
+   import it (Settings > Server > Away access; Mac: Settings). Test on cellular with Tailscale **off**.
+
+**Money**
+6. NAS: deploy the Mooney backend (`docker compose up -d --build` in its folder) **without** the tokens first.
+   It migrates `item.json` → `items.json` and starts syncing (MACU fails with ADDITIONAL_CONSENT_REQUIRED until 8).
+7. Install Mooney 1.14.0. Make two tokens (`openssl rand -hex 32`): paste the first into Mooney > Settings > Bank
+   Connection > Backend Token; then put both in the backend's `.env` as `MOONEY_APP_TOKEN` / `MOONEY_JARVIS_TOKEN`
+   (+ `SYNC_INTERVAL_MIN=60`) and restart it.
+8. Mooney > Bank Connection: **Allow Spending Access** (MACU re-consent), **Add Another Bank or Card** (Chase).
+9. Core `.env`: `MOONEY_URL=http://<NAS>:4001`, `MOONEY_JARVIS_TOKEN=...`; restart. The advisor starts in
+   **dry run** (logged, not sent): Settings > Money in the companion shows the log; set quiet hours there.
+10. Apple Pay Shortcut: on the Surface `python -m app.client_tokens create apple-pay money:write`. Shortcuts >
+    Automation > Transaction (all cards) > Run Immediately > *Get Contents of URL*
+    `https://jarvis.nickolaspearson.com/api/money/transaction`, POST, header `Authorization: Bearer <token>`,
+    JSON body `merchant` = Merchant, `amount` = Amount, `card` = Card (or Wallet pass name).
+11. After a week of dry run: review the log, tune, then `finance_settings dry_run=false` (or Settings > Money).
+
