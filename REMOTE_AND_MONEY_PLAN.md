@@ -7,8 +7,45 @@ anything ships. Decisions he made are marked **Decided**; the questions still op
 
 ## Part 1: The companion reaches JARVIS through `jarvis.nickolaspearson.com`
 
-**Decided:** auto home/away. On home Wi-Fi the app uses the Surface's LAN address; anywhere else it uses
-`https://jarvis.nickolaspearson.com`. The phone no longer needs Tailscale for JARVIS.
+**Nick's goal, in his words:** "just to not need Tailscale for JARVIS. That's it." Without opening the Surface to
+the internet, and without being restricted by Cloudflare.
+
+**Decided (final, 2026-11-23):** **Lightsail reverse proxy + device certificate (mTLS)**, with auto home/away in
+the app.
+
+```
+Phone ──HTTPS + device cert──▶ Lightsail Caddy (public, Nick's own server) ──tailnet──▶ Surface Core :8000 (private)
+```
+
+- On home Wi-Fi the app uses the Surface's LAN address. Anywhere else it uses
+  `https://jarvis.nickolaspearson.com`. The phone and iPads no longer need Tailscale for JARVIS. Tailscale stays
+  only on the Surface, Lightsail and the NAS.
+- **The Surface never listens to the internet.** Only Lightsail is public, as it already is for the website.
+- **No third party in the middle.** TLS ends on Nick's own Lightsail server, so Donna, arr requests and the camera
+  all work without restrictions.
+- **Only Nick's devices get through.** Caddy requires a client certificate that only his iPhone and iPads hold,
+  and refuses everything else before Core sees it. The JARVIS token is a second lock behind it.
+
+### Rejected options and why
+- **Cloudflare Tunnel:** fastest away (estimated 40–60 ms), but Cloudflare decrypts traffic in the middle, so
+  Donna would have had to be blocked on that path, plus Cloudflare's terms on video (the camera). Nick didn't want
+  restrictions or a third party seeing his traffic.
+- **Port-forwarding the Surface:** never. Nick doesn't want the Surface open to the internet.
+- **Token-only proxy (no device cert):** the token would be the only lock on Core from the whole internet (Schwab
+  trade approvals, room control, camera). Replaced by the device certificate.
+
+### Speed (measured from school, 2026-11-23)
+| Route | Round trip |
+|---|---|
+| Phone → Surface over Tailscale (today) | ~45 ms (DERP Denver) |
+| School → Lightsail (Ohio) | ~60 ms |
+| Lightsail → Surface, before the firewall fix | 84 ms (DERP Toronto relay) |
+| Lightsail → Surface, **after** the firewall fix | **~55 ms, direct** (`direct 3.128.92.104:41641`) |
+| **Domain route total, away** | **~115 ms** |
+
+About a tenth of a second per tap away from home, vs about 0.05 s today. Chat feels the same (the model takes
+seconds). Home is unchanged (LAN). **Done 2026-11-23:** Nick added the Lightsail firewall rule **UDP 41641, any
+IPv4**, so Lightsail and the Surface connect directly. Keep it; the website's chat path uses it too.
 
 ### What exists (verified 2026-11-23)
 - `*.nickolaspearson.com` is a DNS-only wildcard (Cloudflare nameservers, not proxied) to the Lightsail server
@@ -29,6 +66,12 @@ anything ships. Decisions he made are marked **Decided**; the questions still op
    up like the site block):
    ```
    jarvis.nickolaspearson.com {
+       tls {
+           client_auth {
+               mode require_and_verify
+               trust_pool file /etc/caddy/jarvis-devices-ca.pem   # Nick's private device CA
+           }
+       }
        reverse_proxy 100.69.8.11:8000 {
            flush_interval -1              # stream SSE/voice immediately, no buffering
            header_up X-Forwarded-For {remote_host}
@@ -40,7 +83,21 @@ anything ships. Decisions he made are marked **Decided**; the questions still op
        log { output file /var/log/caddy/jarvis.log }
    }
    ```
-   No Caddy rate-limit (needs a plugin); the lockout lives in Core (item 3).
+   No Caddy rate-limit (needs a plugin); the lockout lives in Core (item 3). The `client_auth` block applies only
+   to this site; the main site, waste, coopa, chores and schwab are untouched.
+1b. **Device certificates (mTLS).**
+   - A small private CA made once on the Mac (`ops/remote/make-device-cert.sh`): CA key kept offline (Mac
+     Keychain or a file outside the repo, never committed). The CA *certificate* goes to Lightsail
+     (`/etc/caddy/jarvis-devices-ca.pem`).
+   - One client certificate per device (`iphone`, `ipad-air`, `ipad-mini`, `mac`), each a `.p12` with a
+     passphrase, valid 2 years. To revoke a lost device, re-issue the CA or move Caddy to a list of allowed
+     cert fingerprints (decide at build time; fingerprint list is simpler).
+   - **iOS apps can't use certificates installed as profiles** (those are for Safari/Mail), so the app imports
+     the `.p12` itself: Settings → "Away access" → "Import device certificate" (Files/AirDrop + passphrase) →
+     stored in the app's Keychain (`SecPKCS12Import`), and every `URLSession` (data, SSE, voice websocket)
+     answers `NSURLAuthenticationMethodClientCertificate` challenges with it. One shared session delegate.
+   - JARVIS for Mac does the same.
+   - Without the cert the app still works at home (LAN) and over Tailscale; Settings says "Away access: not set up".
 2. **Core trusts `X-Forwarded-For` only from Lightsail.** Run uvicorn with `proxy_headers=True,
    forwarded_allow_ips="100.119.21.113"` (new `.env` `JARVIS_TRUSTED_PROXIES`), so logs and the lockout see the
    phone's real IP and nobody else can spoof one.
@@ -70,18 +127,22 @@ anything ships. Decisions he made are marked **Decided**; the questions still op
    addresses; the TV stays LAN-only; the website keeps its own `jarvis.json` path.
 
 ### Security posture after this
-The admin token becomes the only lock on Core from the whole internet, and Core can approve Schwab trades,
-control the room and show the camera. Mitigations in this plan: HTTPS only, the lockout, the alert, and the token
-staying in the Keychain. Follow-up worth doing soon after: the deferred **Face ID gate** for camera and trade
-approvals in the app (memory: camera-faceid-backlog). A device certificate (mTLS) was offered and not chosen; it
-can be added later in Caddy without touching Core.
+Two locks in front of Core: the device certificate at Caddy (strangers never reach Core) and the JARVIS token. Plus
+HTTPS, the failed-token lockout, the guessing alert, and the reachability monitor. The Surface stays off the
+internet. **Lightsail becomes the front door, so it must be kept patched**: the Lightsail console showed
+"Security update recommended" (CVE-2026-98432, Linux blueprint) on 2026-11-23. Follow-up: the deferred **Face ID
+gate** for camera and trade approvals in the app (memory: camera-faceid-backlog).
 
 ### Rollout (each step only when Nick says go)
+0. **Nick, on Lightsail:** `sudo apt update && sudo apt upgrade -y` (and reboot if asked). Firewall rule UDP 41641
+   already done.
 1. Core: proxy headers + lockout + monitor (deploy, harmless without the proxy).
-2. Lightsail: Caddy block (`bash deploy/from-mac.sh`), then `curl https://jarvis.nickolaspearson.com/api/glance`
-   → 401 proves the path.
-3. App build with home/away, installed to iPhone + both iPads. Keep the Tailscale fallback for a week, then
-   decide whether to turn Tailscale off on the phone.
+2. Make the CA and device certs on the Mac.
+3. Lightsail: Caddy block with `client_auth` (`bash deploy/from-mac.sh`). Prove it: `curl` **without** a cert →
+   TLS refused; `curl --cert` with the Mac's cert → `/api/glance` 401 (no token) → with token 200.
+4. App build with home/away + certificate import, installed to iPhone + both iPads (and the Mac app). Import each
+   device's cert. Test away on cellular with Tailscale **off**.
+5. Keep Tailscale installed on the phone as a backup for a week, then Nick decides whether to remove it.
 
 ---
 
@@ -165,24 +226,8 @@ heads-up**.
 
 ## Nick's answers (2026-11-23, later the same day)
 
-### Remote access: security and speed
-- **Security:** the domain is less private than Tailscale. Anyone can reach Core, and the token is the only lock.
-  The device certificate (mTLS in Caddy, or Cloudflare Access) is now leaning **yes**, together with the Face ID
-  gate for camera and trades. Final call when Part 1 is built.
-- **Speed, measured from school:**
-
-  | Route | Round trip |
-  |---|---|
-  | Phone → Surface over Tailscale | ~41 ms (DERP Denver) |
-  | School → Lightsail | 40–60 ms |
-  | Lightsail → Surface | 84 ms (DERP **Toronto**; no direct connection) |
-
-  So away traffic is about 2–3× slower per request until Lightsail and the Surface connect directly. The Surface's
-  NAT is easy (`netcheck`: UDP true, MappingVariesByDestIP false), so Lightsail's firewall is the blocker.
-  **Fix 1, in progress:** Nick opens UDP 41641 in the Lightsail firewall, then re-measure with
-  `tailscale ping 100.119.21.113` from the Surface. If it's still slow, **fix 2:** Cloudflare Tunnel from the
-  Surface (DNS is already on Cloudflare; a nearby edge; Cloudflare Access as the device lock). A specific
-  `jarvis` record overrides the Lightsail wildcard.
+### Remote access
+Settled: see Part 1 (Lightsail + device certificate; firewall fix done; measurements there).
 
 ### Money
 - **Plaid is production** (the MACU balance in Mooney is real). Pay-as-you-go rates show only in the Plaid
@@ -211,8 +256,17 @@ heads-up**.
   considered, but a pattern of the same excuse is called out. JARVIS may concede a good argument.
 
 ## Open questions (Nick)
-Answered above: Plaid environment, accounts, budget, numbers, tone. Still open:
-1. Lightsail firewall result (fix 1) → Lightsail proxy or Cloudflare Tunnel.
-2. Device certificate: yes/no once Part 1 is built.
-3. Plaid's actual Transactions price (Nick: check the Plaid dashboard's billing page).
-4. Away access: after a week, turn Tailscale off on the phone, or keep it as the fallback?
+Answered: Plaid environment, accounts, budget, numbers, tone, away-access design (Lightsail + device cert;
+firewall fix done). Still open:
+1. Plaid's actual Transactions price (Nick: check the Plaid dashboard's billing page).
+2. After a week of away access: remove Tailscale from the phone, or keep it as a backup?
+3. Quiet hours: Nick sets them in the app once the Money settings exist.
+
+## Build order (nothing deploys without Nick's go)
+1. Part 1 Core pieces (proxy headers, lockout, monitor) + tests.
+2. Part 1 app: home/away routing + certificate import (iPhone, iPads, Mac app).
+3. Mooney backend: auth tokens, multi-item, Transactions sync, new endpoints (sandbox first).
+4. Mooney app: token, spending access (update-mode re-consent for MACU, add Chase), budget snapshot, advisor card.
+5. JARVIS: `integrations/mooney.py`, Apple Pay Shortcut endpoint, `brain/finance_advisor.py`, tools, Money
+   settings (quiet hours) in the companion, triggers in dry-run for a week.
+6. Go live: real pushes, weekly review Sunday 12:00.
