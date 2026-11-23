@@ -163,13 +163,56 @@ heads-up**.
 
 ---
 
+## Nick's answers (2026-11-23, later the same day)
+
+### Remote access: security and speed
+- **Security:** the domain is less private than Tailscale. Anyone can reach Core, and the token is the only lock.
+  The device certificate (mTLS in Caddy, or Cloudflare Access) is now leaning **yes**, together with the Face ID
+  gate for camera and trades. Final call when Part 1 is built.
+- **Speed, measured from school:**
+
+  | Route | Round trip |
+  |---|---|
+  | Phone → Surface over Tailscale | ~41 ms (DERP Denver) |
+  | School → Lightsail | 40–60 ms |
+  | Lightsail → Surface | 84 ms (DERP **Toronto**; no direct connection) |
+
+  So away traffic is about 2–3× slower per request until Lightsail and the Surface connect directly. The Surface's
+  NAT is easy (`netcheck`: UDP true, MappingVariesByDestIP false), so Lightsail's firewall is the blocker.
+  **Fix 1, in progress:** Nick opens UDP 41641 in the Lightsail firewall, then re-measure with
+  `tailscale ping 100.119.21.113` from the Surface. If it's still slow, **fix 2:** Cloudflare Tunnel from the
+  Surface (DNS is already on Cloudflare; a nearby edge; Cloudflare Access as the device lock). A specific
+  `jarvis` record overrides the Lightsail wildcard.
+
+### Money
+- **Plaid is production** (the MACU balance in Mooney is real). Pay-as-you-go rates show only in the Plaid
+  dashboard. The one unverified third-party figure is ~$0.25/account/month for Transactions and ~$0.05 per balance
+  check. Mooney's live balance uses the per-request balance call (`accountsBalanceGet`), which may already cost more
+  than Transactions would. Once Transactions syncs, take the balance from the sync and keep paid checks to an
+  explicit "refresh now".
+- **Accounts:** MACU checking (Plaid), Chase (Plaid; it's the Amazon card). Apple Card: **Plaid can't** read it
+  normally. FinanceKit needs an Apple-approved managed entitlement and an organization developer account. Plan:
+  an **iOS Shortcuts "Transaction" automation**, which fires on every Apple Pay payment with merchant, amount and
+  card, and POSTs to Core (new `POST /api/money/transaction`, `money:write` client token). Monthly Apple Card
+  statement export (Wallet) to fill gaps. The Shortcut also catches MACU debit Apple Pay instantly. Delta card:
+  skip (unused, saves a Plaid account).
+- **Budget model:**
+  - *Weekly $125 on MACU debit* = everyday spending. The $125 auto-transfer lands Sunday night/Monday morning, so a
+    budget week is **Monday 00:00 – Sunday 23:59**, local time.
+  - *Apple Card* = "outside the weekly budget" (weird/bigger buys). Not counted against the $125, watched separately:
+    the >$50 heads-up and a monthly total, so it doesn't quietly become the real budget.
+  - *Chase* = Amazon. A monthly total, plus the >$50 heads-up.
+  - Transfers between Nick's own accounts and card payments are never spending.
+- **Big purchase:** anything over **$50**, any card.
+- **Weekly review:** **Sunday 12:00**, before the new $125 lands: the week vs $125, top merchants, excuses noted.
+- **Quiet hours:** a setting Nick sets in the companion app (a Money section in Settings, stored on Core).
+- **Tone:** dry and teasing. **A bad week (over $125) gets a proper scolding**, still in character, never cruel.
+  He can argue ("golf, got paid back", "I was hungry"). Reimbursements net out; excuses are recorded and
+  considered, but a pattern of the same excuse is called out. JARVIS may concede a good argument.
+
 ## Open questions (Nick)
-1. **Plaid environment:** is the backend on `production` today (is the live MACU balance real)? Transactions in
-   production needs Plaid to enable the product on the account and is billed per connected account; check the
-   Plaid dashboard.
-2. **Which accounts:** MACU checking, plus which credit cards (and their banks)?
-3. **Budgets:** use Mooney's buckets/bills as the budget, or set monthly limits per category (food, golf, gas,
-   fun...)? Or both?
-4. **Numbers:** the big-purchase amount, quiet hours, and the weekly review's day and time.
-5. **Tone:** how blunt? (Default: dry, a little teasing, never preachy, one line.)
-6. **Away access:** after a week, turn Tailscale off on the phone, or keep it as the fallback?
+Answered above: Plaid environment, accounts, budget, numbers, tone. Still open:
+1. Lightsail firewall result (fix 1) → Lightsail proxy or Cloudflare Tunnel.
+2. Device certificate: yes/no once Part 1 is built.
+3. Plaid's actual Transactions price (Nick: check the Plaid dashboard's billing page).
+4. Away access: after a week, turn Tailscale off on the phone, or keep it as the fallback?
