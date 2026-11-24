@@ -104,7 +104,9 @@ IPv4**, so Lightsail and the Surface connect directly. Keep it; the website's ch
    phone's real IP and nobody else can spoof one.
 3. **Failed-token lockout in Core.** `authorize`/`require_scope` count 401s per client IP: 20 in 10 min blocks
    that IP for 15 min (`JARVIS_AUTH_LOCKOUT_*`), and one `security` alert "Someone is guessing JARVIS's token from
-   <ip>". Never locks out a request that has a valid token. Tests for both.
+   <ip>". Never locks out a request that has a valid token. Tests for both. A request with no token at all is
+   not counted (2026-11-24): the apps' home/away check asks `/health` bare every few seconds, and counting it
+   locked Nick's own iPhone, iPad and Mac out all night and raised the "guessing" alert.
 4. **A reachability monitor.** Core checks `https://jarvis.nickolaspearson.com/health` (round trip through
    Lightsail) every 10 min; two failures in a row raise one "Away access is down" alert (Lightsail down, Caddy
    down, or Lightsail's Tailscale dropped). Clears itself.

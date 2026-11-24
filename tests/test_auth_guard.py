@@ -65,6 +65,22 @@ class LockoutTests(unittest.TestCase):
             server._runtime = None
 
 
+    def test_bare_home_probe_is_not_a_guess(self) -> None:
+        class FakeRuntime:
+            brain_online = True
+            brain_label = "Test"
+        server._runtime = FakeRuntime()
+        try:
+            client = TestClient(server.app, base_url="http://localhost")
+            with patch.dict(os.environ, {"JARVIS_API_TOKEN": "right"}):
+                for _ in range(10):  # the apps' home/away check sends no token
+                    self.assertEqual(client.get("/health").status_code, 401)
+                self.assertEqual(self.alerts, [])
+                self.assertEqual(client.get("/health", headers={"Authorization": "Bearer wrong"}).status_code, 401)
+        finally:
+            server._runtime = None
+
+
 class AwayWatchTests(unittest.TestCase):
     def test_two_failures_alert_once_and_success_clears(self) -> None:
         watch = away_access.AwayWatch()

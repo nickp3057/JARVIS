@@ -1236,7 +1236,7 @@ JARVIS_SERVER_HOST=0.0.0.0
 JARVIS_SERVER_PORT=8000
 JARVIS_TRUSTED_PROXIES=127.0.0.1  # Surface: 100.119.21.113 (Lightsail), the only proxy whose X-Forwarded-For is believed
 JARVIS_AUTH_LOCKOUT_FAILURES=20   # app/auth_guard.py: wrong tokens from one address inside the window...
-JARVIS_AUTH_LOCKOUT_WINDOW_S=600  # ...block it (429) for JARVIS_AUTH_LOCKOUT_S, one "security" alert; 0 failures = off
+JARVIS_AUTH_LOCKOUT_WINDOW_S=600  # ...block it (429) for JARVIS_AUTH_LOCKOUT_S, one "security" alert; 0 failures = off; no token at all (the apps' home/away /health probe) never counts
 JARVIS_AUTH_LOCKOUT_S=900         # a valid token is never refused
 JARVIS_AWAY_URL=https://jarvis.nickolaspearson.com  # brain/away_access.py round-trips here every AWAY_ACCESS_INTERVAL_S (600)
 JARVIS_AWAY_CERT=           # Core's own device cert (ops/remote/make-device-cert.sh device core); both set = monitor on

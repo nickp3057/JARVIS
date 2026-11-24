@@ -218,9 +218,15 @@ def _client_ip(connection: Request | WebSocket | None) -> str | None:
     return client.host if client else None
 
 
-def _refuse(ip: str | None) -> HTTPException:
-    """A wrong token: count it, and refuse harder once the address is locked out."""
-    auth_guard.record_failure(ip)
+def _refuse(ip: str | None, supplied: str = "") -> HTTPException:
+    """A wrong token: count it, and refuse harder once the address is locked out.
+
+    No token at all isn't a guess: the apps' home/away check asks /health
+    bare, every few seconds (ServerRoute.answers, JarvisMac refreshRoute), and
+    counting those locked Nick's own devices out and raised the "someone is
+    guessing JARVIS's token" alert all night (2026-11-24)."""
+    if supplied:
+        auth_guard.record_failure(ip)
     if auth_guard.blocked(ip):
         return HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS,
                              detail="Too many wrong tokens; try again later")
@@ -233,7 +239,7 @@ def _check_admin(authorization: str | None, ip: str | None) -> None:
         raise HTTPException(status_code=503, detail="JARVIS_API_TOKEN is not configured")
     supplied = authorization.removeprefix("Bearer ").strip() if authorization else ""
     if not hmac.compare_digest(supplied, expected):
-        raise _refuse(ip)
+        raise _refuse(ip, supplied)
 
 
 def authorize(request: Request, authorization: str | None = Header(default=None)) -> None:
@@ -261,7 +267,7 @@ def require_scope(scope: str):
         if client is None:
             if not expected:
                 raise HTTPException(status_code=503, detail="JARVIS_API_TOKEN is not configured")
-            raise _refuse(_client_ip(request))
+            raise _refuse(_client_ip(request), supplied)
         if scope not in client[1]:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=f"Token lacks scope {scope}")
         return client[0]
