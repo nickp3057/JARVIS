@@ -4,7 +4,9 @@ A second Radarr instance (service ``radarr4k``: ``RADARR4K_URL`` /
 ``RADARR4K_API_KEY``) downloads a 4K web release into its own root folder,
 ``/volume2/data/media/temp-4k-movies`` on the NAS. Plex reads that folder as part
 of the Movies library and shows the 4K file as a second version of the same
-movie. The 1080p copy in the main Radarr is never touched.
+movie. The copy in the main Radarr is never touched. A film already in 4K is
+refused, except a 4K remux: those are too heavy for some TVs to stream, so a
+lighter 4K copy is fetched next to it.
 
 The clock starts when the 4K file lands: ``TEMP_4K_HOURS`` (default 48) later,
 the runtime's temp-4K monitor deletes the movie and its file from the 4K Radarr
@@ -125,12 +127,22 @@ def _match_library(title: str, movies: list[dict[str, Any]]) -> tuple[dict[str, 
     return None, f"Several films match {title}: {listing}. Which one, sir?"
 
 
+def _quality(movie: dict[str, Any]) -> dict[str, Any]:
+    return ((movie.get("movieFile") or {}).get("quality") or {}).get("quality") or {}
+
+
 def _resolution(movie: dict[str, Any]) -> int:
-    quality = ((movie.get("movieFile") or {}).get("quality") or {}).get("quality") or {}
     try:
-        return int(quality.get("resolution") or 0)
+        return int(_quality(movie).get("resolution") or 0)
     except (TypeError, ValueError):
         return 0
+
+
+def _is_remux(movie: dict[str, Any]) -> bool:
+    """A full-disc 4K remux (60-100 Mbps) is too heavy for some TVs to stream,
+    so a lighter temporary 4K copy is still worth fetching next to it."""
+    quality = _quality(movie)
+    return str(quality.get("modifier") or "").lower() == "remux" or "remux" in str(quality.get("name") or "").lower()
 
 
 # --- Tool actions ---------------------------------------------------------------------
@@ -164,8 +176,9 @@ def request(title: str, hours: float | None = None) -> str:
             return (f"{_label(existing)} is already on its way in 4K, sir; I'll keep it "
                     f"{_span(keep)} once it lands.")
 
-    if _resolution(movie) >= 2160:
+    if _resolution(movie) >= 2160 and not _is_remux(movie):
         return f"{_label(movie)} is already 4K in your library, sir. Nothing to fetch."
+    lighter = _resolution(movie) >= 2160
 
     added, detail, adopted = _add_to_4k(tmdb_id)
     if added is None:
@@ -185,6 +198,9 @@ def request(title: str, hours: float | None = None) -> str:
     with _lock:
         state = [e for e in _load() if e.get("tmdb_id") != tmdb_id] + [entry]
         _save(state)
+    if lighter:
+        return (f"Searching for a lighter 4K copy of {_label(entry)}, sir; your remux stays exactly "
+                f"where it is. I'll tell you when it's ready and remove it {_span(keep)} after that.")
     return (f"Searching for a 4K copy of {_label(entry)}, sir. I'll tell you when it's ready, "
             f"and remove it {_span(keep)} after that so the 1080p copy is all that's left.")
 

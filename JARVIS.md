@@ -800,7 +800,10 @@ entry in `brain/agent_roster.py` (name, kind, icon, description, schedule);
   lists, `remove` drops one early. The runtime's temp-4K monitor alerts when
   it lands and deletes it `TEMP_4K_HOURS` (48) later; requests with no 4K
   release after `TEMP_4K_GIVE_UP_HOURS` (72) are dropped. Movies only; the
-  1080p file is never touched; already-4K films are refused. State:
+  library file is never touched (so it's fine for films Nick says never to
+  touch); already-4K films are refused unless the library copy is a 4K remux
+  (too heavy for some TVs to stream: a lighter 4K copy is fetched beside it,
+  2026-11-24). State:
   `memory/temp_4k.json`. Setup: "Temporary 4K Radarr setup" below.
 - `find_series(title)` — Sonarr `/series/lookup`. Same shape, TVDB id.
 - `add_series(tvdb_id, quality?, root_folder?, monitor?, season_folder?, confirmed)`

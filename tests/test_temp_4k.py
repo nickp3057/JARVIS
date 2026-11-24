@@ -14,6 +14,8 @@ LIBRARY = [
      "movieFile": {"quality": {"quality": {"resolution": 1080}}}},
     {"id": 3, "tmdbId": 155, "title": "The Dark Knight", "year": 2008,
      "movieFile": {"quality": {"quality": {"resolution": 2160}}}},
+    {"id": 4, "tmdbId": 157336, "title": "Interstellar", "year": 2014,
+     "movieFile": {"quality": {"quality": {"name": "Remux-2160p", "resolution": 2160, "modifier": "remux"}}}},
 ]
 
 
@@ -104,6 +106,13 @@ class TempFourKTests(unittest.TestCase):
     def test_already_4k_needs_nothing(self):
         self.assertIn("already 4K", temp_4k.request("The Dark Knight"))
         self.assertEqual(self.arr.four_k, {})
+
+    def test_4k_remux_gets_a_lighter_copy(self):
+        reply = temp_4k.request("Interstellar")
+        self.assertIn("lighter 4K copy", reply)
+        (added,) = self.arr.four_k.values()
+        self.assertEqual(added["rootFolderPath"], "/temp-4k-movies")
+        self.assertEqual(temp_4k.entries()[0]["tmdb_id"], 157336)
 
     def test_app_listing_extend_and_remove(self):
         temp_4k.request("Chamber of Secrets", hours=24)
