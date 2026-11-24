@@ -182,5 +182,21 @@ class PhoneSightingTests(unittest.TestCase):
         note.assert_called_once_with("172.58.10.2")
 
 
+    def test_geofence_report_and_zone_routes(self):
+        with patch.dict(os.environ, {"JARVIS_API_TOKEN": "test-token"}):
+            client = TestClient(server.app)
+            self.addCleanup(client.close)
+            auth = {"Authorization": "Bearer test-token"}
+            states = (True, [{"entity_id": "person.nick", "state": "home", "last_updated": "2026-11-24T14:00:00+00:00"},
+                             {"entity_id": "zone.home", "state": "1",
+                              "attributes": {"latitude": 40.5, "longitude": -111.9, "radius": 22}}])
+            with patch("integrations.home_assistant.get_states", return_value=states):
+                body = client.post("/api/presence/phone", json={"where": "away"}, headers=auth).json()
+                self.assertEqual(body["location"], "away")
+                self.assertEqual(client.post("/api/presence/phone", json={"where": "mars"}, headers=auth).status_code, 422)
+                zone = client.get("/api/presence/zone", headers=auth).json()["zone"]
+        self.assertEqual(zone, {"latitude": 40.5, "longitude": -111.9, "radius": 22.0})
+
+
 if __name__ == "__main__":
     unittest.main()

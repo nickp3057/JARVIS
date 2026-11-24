@@ -17,6 +17,13 @@ tracks the iPhone (``person.nick``, GPS, location "Always"), so:
   acts on them: an inbox line both ways, and on leaving, a push if room
   lights were left on, with a Turn them off button (category ``LEFT_ON``).
 
+**The phone's geofence (2026-11-24, companion 6.128).** Nick: "I don't even
+want to think about it." The iPhone app watches a circle around home
+(``home_zone()``, from HA's ``zone.home``, at least 150 m) with iOS region
+monitoring, which wakes the app on leaving or arriving even when it isn't
+running, and it posts ``POST /api/presence/phone`` → ``report()``. That is
+the main signal; the address sightings below are the backup.
+
 **The phone's own requests (2026-11-24).** Home Assistant has no external
 URL, so away from home Wi-Fi the HA app can't post its location and
 ``person.nick`` stays "home" from the last report (it never left "home"
@@ -116,8 +123,13 @@ def _load_phone() -> None:
 
 def note_phone(ip: str | None, *, now: float | None = None) -> None:
     """The iPhone just reached Core from ``ip``. Never raises."""
-    where = classify(ip)
-    if where is None:
+    report(classify(ip), now=now, source="address")
+
+
+def report(where: str | None, *, now: float | None = None, source: str = "geofence") -> None:
+    """The phone's word on where it is: its geofence (iOS wakes the app on
+    crossing the home zone, app open or not) or the address it called from."""
+    if where not in ("home", "away"):
         return
     now = time.time() if now is None else now
     with _lock:
@@ -135,7 +147,23 @@ def note_phone(ip: str | None, *, now: float | None = None) -> None:
             except OSError:
                 log.debug("Couldn't save the phone sighting", exc_info=True)
     if changed:
-        log.info("Presence: the iPhone reached Core from %s, so %s", "home" if where == "home" else "outside", where)
+        log.info("Presence: the iPhone says %s (%s)", where, source)
+
+
+def home_zone() -> dict[str, float] | None:
+    """HA's zone.home as {"latitude", "longitude", "radius"}: the circle the
+    phone's geofence watches. None when HA can't say."""
+    from integrations import home_assistant
+    ok, payload = home_assistant.get_states()
+    if not ok or not isinstance(payload, list):
+        return None
+    zone = next((e for e in payload if isinstance(e, dict) and e.get("entity_id") == "zone.home"), None)
+    attrs = (zone or {}).get("attributes") or {}
+    try:
+        return {"latitude": float(attrs["latitude"]), "longitude": float(attrs["longitude"]),
+                "radius": float(attrs.get("radius") or 100)}
+    except (KeyError, TypeError, ValueError):
+        return None
 
 
 def phone_sighting() -> tuple[str | None, float]:

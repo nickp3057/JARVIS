@@ -17,6 +17,7 @@ struct JarvisCompanionApp: App {
             academicNotifications: AcademicNotificationScheduler()
         ))
         PushRegistrar.shared.attach(settings)
+        PresenceGeofence.shared.attach(settings)  // before iOS hands a background crossing over
         ServerRoute.shared.start(settings)  // home or away, picked on its own
     }
 
@@ -25,7 +26,10 @@ struct JarvisCompanionApp: App {
             RootView(chat: chat, hub: hub)
                 .environmentObject(settings)
                 // onChange(of: scenePhase) misses the first .active at launch.
-                .task { VoicePresence.shared.start(settings) }
+                .task {
+                    VoicePresence.shared.start(settings)
+                    await PresenceGeofence.shared.refresh()
+                }
                 .onChange(of: scenePhase) { _, phase in
                     switch phase {
                     case .active:
@@ -33,6 +37,7 @@ struct JarvisCompanionApp: App {
                         chat.appBecameActive()
                         if settings.isConfigured { Task { await hub.refreshNow() } }
                         Task { await PushRegistrar.shared.refresh() }
+                        Task { await PresenceGeofence.shared.refresh() }
                         VoicePresence.shared.start(settings)  // iPad: "Hey JARVIS" overlay
                     case .inactive, .background:
                         chat.appBecameInactive()

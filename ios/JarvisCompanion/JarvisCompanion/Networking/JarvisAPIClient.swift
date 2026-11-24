@@ -898,6 +898,29 @@ struct JarvisAPIClient {
                                                          deviceName: String(name.prefix(80))))
     }
 
+    // MARK: - Presence (the iPhone's home geofence; see PresenceGeofence)
+
+    struct HomeZone: Codable, Equatable {
+        let latitude: Double
+        let longitude: Double
+        let radius: Double
+    }
+
+    private struct HomeZoneResponse: Decodable { let zone: HomeZone }
+    private struct PhonePresenceBody: Encodable { let `where`: String }
+    private struct PhonePresenceResponse: Decodable { let ok: Bool }
+
+    /// The circle around home to watch (Home Assistant's zone.home).
+    func homeZone() async throws -> HomeZone {
+        try await getJSON(HomeZoneResponse.self, path: "api/presence/zone").zone
+    }
+
+    /// The phone just left ("away") or reached ("home") the home circle.
+    func reportPresence(_ place: String) async throws {
+        _ = try await postJSON(PhonePresenceResponse.self, path: "api/presence/phone",
+                               body: PhonePresenceBody(where: place))
+    }
+
     // MARK: - Media requests (search -> request -> confirm; see MediaRequestView)
 
     private struct MediaRequestBody: Encodable {

@@ -823,6 +823,28 @@ def presence_status(_: None = _status_read) -> dict[str, object]:
             "phone": {"where": where, "at": at or None}}
 
 
+class PhonePresence(BaseModel):
+    where: str = Field(pattern="^(home|away)$")
+
+
+@app.post("/api/presence/phone")
+def presence_phone(body: PhonePresence, _: None = Depends(authorize)) -> dict[str, object]:
+    """The iPhone's geofence crossed the home circle (iOS wakes the app for it)."""
+    from brain import presence
+    presence.report(body.where, source="geofence")
+    return {"ok": True, "location": presence.location(fresh=True)}
+
+
+@app.get("/api/presence/zone")
+def presence_zone(_: None = Depends(authorize)) -> dict[str, object]:
+    """The circle around home the iPhone's geofence watches (HA's zone.home)."""
+    from brain import presence
+    zone = presence.home_zone()
+    if zone is None:
+        raise HTTPException(status_code=503, detail="Home Assistant hasn't said where home is")
+    return {"zone": zone}
+
+
 @app.post("/api/presence/lights-off")
 def presence_lights_off(_: None = Depends(authorize)) -> dict[str, object]:
     """The "You left lights on" push's Turn them off button."""
