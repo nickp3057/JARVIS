@@ -3092,9 +3092,10 @@ _CUSTOM_TOOLS: list[dict[str, Any]] = [
             "monthly or yearly chores): due on set dates; interval_value = months between them "
             "(1, 2, 3, 4, 6 or 12), fixed_month/fixed_day = one of the dates (day 31 = last day). "
             "\"Once a quarter\" = 3 from Jan 1 (Jan 1, Apr 1, Jul 1, Oct 1); \"twice a year\" = 6 "
-            "from Jan 1 unless he names dates. interval: N days/weeks/months/years after the last "
-            "time, only when he says it's counted from when he last did it, or for daily/weekly "
-            "chores ('water the bonsai every week' = interval 1 weeks). "
+            "from Jan 1 unless he names dates. Weekly on a set weekday ('take the trash out every "
+            "Sunday'): fixed_calendar with interval_unit 'weeks' and fixed_day = weekday 1 (Mon)-7 (Sun). interval: N days/weeks/months/years after the last "
+            "time, only when he says it's counted from when he last did it, or for daily chores "
+            "or a weekly one with no set day ('water the bonsai every week' = interval 1 weeks). "
             "log_only: no countdown, just a log of when it was done."
         ),
         "input_schema": {

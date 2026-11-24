@@ -403,14 +403,20 @@ struct MaintenanceEditor: View {
             Picker("How often", selection: $draft.calendarPeriod.animation()) {
                 ForEach(MaintenanceTaskDraft.calendarPeriods, id: \.months) { Text($0.name).tag($0.months) }
             }
-            if draft.calendarPeriod > 1 {
-                Picker(draft.calendarPeriod == 12 ? "Month" : "Starting", selection: monthBinding) {
-                    ForEach(1...12, id: \.self) { Text(Calendar.current.monthSymbols[$0 - 1]).tag($0) }
+            if draft.calendarPeriod == 0 {
+                Picker("Day", selection: $draft.weekday) {
+                    ForEach([1, 2, 3, 4, 5, 6, 7], id: \.self) { Text(MaintenanceTaskDraft.weekdayName($0)).tag($0) }
                 }
-            }
-            Picker("Day", selection: dayBinding) {
-                ForEach(1...30, id: \.self) { Text(MaintenanceTaskDraft.ordinal($0)).tag($0) }
-                Text("Last day").tag(31)
+            } else {
+                if draft.calendarPeriod > 1 {
+                    Picker(draft.calendarPeriod == 12 ? "Month" : "Starting", selection: monthBinding) {
+                        ForEach(1...12, id: \.self) { Text(Calendar.current.monthSymbols[$0 - 1]).tag($0) }
+                    }
+                }
+                Picker("Day", selection: dayBinding) {
+                    ForEach(1...30, id: \.self) { Text(MaintenanceTaskDraft.ordinal($0)).tag($0) }
+                    Text("Last day").tag(31)
+                }
             }
         } header: {
             Text("Due on")

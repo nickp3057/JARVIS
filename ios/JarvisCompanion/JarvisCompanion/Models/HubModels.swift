@@ -640,8 +640,9 @@ struct MaintenanceLogEntry: Codable, Identifiable, Hashable {
 /// applies on create, so a new task can start from when it was last done.
 struct MaintenanceTaskDraft: Encodable {
     /// Months between set dates, with the editor's names for them.
+    /// 0 is "Weekly": every week on `weekday` (sent as interval_unit "weeks").
     static let calendarPeriods: [(months: Int, name: String)] = [
-        (1, "Monthly"), (2, "Every 2 months"), (3, "Quarterly"), (4, "Every 4 months"),
+        (0, "Weekly"), (1, "Monthly"), (2, "Every 2 months"), (3, "Quarterly"), (4, "Every 4 months"),
         (6, "Twice a year"), (12, "Every year"),
     ]
 
@@ -654,6 +655,8 @@ struct MaintenanceTaskDraft: Encodable {
     var calendarPeriod = 3
     var fixedMonth: Int? = 1
     var fixedDay: Int? = 1
+    /// Weekly calendar only: ISO weekday, 1 Monday ... 7 Sunday.
+    var weekday = 7
     /// Calendar only: limit the dates to these months (e.g. Mar–Oct).
     var seasonStart: Int?
     var seasonEnd: Int?
@@ -665,14 +668,17 @@ struct MaintenanceTaskDraft: Encodable {
     init(_ task: MaintenanceTask) {
         name = task.name
         scheduleType = task.scheduleType
-        if task.scheduleType == "fixed_calendar" {
+        if task.scheduleType == "fixed_calendar", task.intervalUnit == "weeks" {
+            calendarPeriod = 0
+            weekday = task.fixedDay ?? 7
+        } else if task.scheduleType == "fixed_calendar" {
             calendarPeriod = task.intervalValue ?? 12
         } else {
             intervalValue = task.intervalValue ?? 6
             intervalUnit = task.intervalUnit ?? "months"
         }
         fixedMonth = task.fixedMonth ?? 1
-        fixedDay = task.fixedDay
+        fixedDay = calendarPeriod == 0 ? 1 : task.fixedDay
         seasonStart = task.seasonStart
         seasonEnd = task.seasonEnd
         notes = task.notes
@@ -685,12 +691,19 @@ struct MaintenanceTaskDraft: Encodable {
 
     /// The months a calendar schedule lands in, January first.
     var calendarMonths: [Int] {
+        guard calendarPeriod > 0 else { return (1...12).filter(inSeason) }
         let first = ((fixedMonth ?? 1) - 1) % calendarPeriod + 1
         return stride(from: first, through: 12, by: calendarPeriod).filter(inSeason)
     }
 
     /// "Jan 1 · Apr 1 · Jul 1 · Oct 1", matching what Core will show.
     var calendarPreview: String {
+        if calendarPeriod == 0 {
+            let day = Self.weekdayName(weekday)
+            guard let start = seasonStart, let end = seasonEnd else { return "Every \(day)" }
+            let months = Calendar.current.shortMonthSymbols
+            return "Every \(day), \(months[start - 1])–\(months[end - 1])"
+        }
         let names = calendarMonths.map { Calendar.current.shortMonthSymbols[$0 - 1] }
         if calendarPeriod == 1 && seasonStart == nil {
             return fixedDay == 31 ? "The last day of every month" : "The \(Self.ordinal(fixedDay ?? 1)) of every month"
@@ -698,6 +711,11 @@ struct MaintenanceTaskDraft: Encodable {
         if names.isEmpty { return "None of these dates fall in that season" }
         if fixedDay == 31 { return "Last day of " + names.joined(separator: ", ") }
         return names.map { "\($0) \(fixedDay ?? 1)" }.joined(separator: " · ")
+    }
+
+    /// ISO weekday (1 Monday ... 7 Sunday) to its name.
+    static func weekdayName(_ iso: Int) -> String {
+        Calendar.current.weekdaySymbols[iso % 7]
     }
 
     static func ordinal(_ day: Int) -> String {
@@ -729,6 +747,12 @@ struct MaintenanceTaskDraft: Encodable {
         case "interval":
             try values.encodeIfPresent(intervalValue, forKey: .intervalValue)
             try values.encodeIfPresent(intervalUnit, forKey: .intervalUnit)
+        case "fixed_calendar" where calendarPeriod == 0:
+            try values.encode(1, forKey: .intervalValue)
+            try values.encode("weeks", forKey: .intervalUnit)
+            try values.encode(weekday, forKey: .fixedDay)
+            try values.encodeIfPresent(seasonStart, forKey: .seasonStart)
+            try values.encodeIfPresent(seasonEnd, forKey: .seasonEnd)
         case "fixed_calendar":
             try values.encode(calendarPeriod, forKey: .intervalValue)
             try values.encodeIfPresent(fixedMonth, forKey: .fixedMonth)

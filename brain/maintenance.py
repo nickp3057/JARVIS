@@ -12,6 +12,11 @@ Three schedule types:
   counts for that date; a missed date stays overdue until it's done. An
   optional season (``season_start``..``season_end`` months, may wrap the
   new year) skips dates outside it, e.g. fertilizing only Mar-Oct.
+  *Weekly on a weekday* (2026-11-24, Nick wanted Weekly under "On dates"):
+  ``interval_unit = "weeks"`` with ``fixed_day`` the ISO weekday (1 Mon ..
+  7 Sun) and no ``fixed_month``; due every week on that day, a season skips
+  the weeks outside it (mow Apr-Oct), and doing it up to two days early
+  counts for that week.
 - ``log_only``: no due date, just "last done N days ago".
 
 Days are local calendar days, computed here so every client shows the same
@@ -42,6 +47,8 @@ SOON_DAYS = 7
 CALENDAR_PERIODS = (1, 2, 3, 4, 6, 12)
 _PERIOD_NAMES = {1: "Monthly", 2: "Every 2 months", 3: "Quarterly", 4: "Every 4 months",
                  6: "Twice a year", 12: "Every year"}
+_WEEKDAYS = ("Mondays", "Tuesdays", "Wednesdays", "Thursdays", "Fridays", "Saturdays", "Sundays")
+_WEEKLY_GRACE_DAYS = 2
 _SCHEMA_VERSION = 2
 
 # (name, months between, anchored on Jan 1)
@@ -164,6 +171,38 @@ def _occurrence(year: int, month: int, day: int | None) -> date:
     return date(year, month, min(day or 1, calendar.monthrange(year, month)[1]))
 
 
+def weekly_calendar(task: dict[str, Any]) -> bool:
+    """A calendar task that falls every week on one weekday."""
+    return task.get("schedule_type") == "fixed_calendar" and task.get("interval_unit") == "weeks"
+
+
+def _next_weekly(task: dict[str, Any], last_done: date | None, today: date) -> date | None:
+    weekday = int(task.get("fixed_day") or 7)
+
+    def step(day: date, direction: int) -> date | None:
+        for _ in range(60):  # a season always holds a week within ~a year
+            if in_season(task, day.month):
+                return day
+            day += timedelta(weeks=direction)
+        return None
+
+    upcoming = step(today + timedelta(days=(weekday - today.isoweekday()) % 7), 1)
+    if upcoming is None:
+        return None
+    previous = step(upcoming - timedelta(weeks=1), -1)
+    grace = timedelta(days=_WEEKLY_GRACE_DAYS)
+
+    def satisfied(due: date) -> bool:
+        return last_done is not None and last_done >= due - grace
+
+    created = date.fromisoformat(str(task["created_at"])[:10])
+    if previous is not None and created <= previous and not satisfied(previous):
+        return previous
+    if satisfied(upcoming):
+        return step(upcoming + timedelta(weeks=1), 1)
+    return upcoming
+
+
 def calendar_period(task: dict[str, Any]) -> int:
     """Months between a calendar task's dates (older rows had none: yearly)."""
     value = task.get("interval_value")
@@ -208,6 +247,8 @@ def next_due(task: dict[str, Any], last_done: date | None, today: date) -> date 
         if last_done is None:
             return today
         return _add_interval(last_done, int(task["interval_value"]), str(task["interval_unit"]))
+    if kind == "fixed_calendar" and weekly_calendar(task):
+        return _next_weekly(task, last_done, today)
     if kind == "fixed_calendar":
         period, day = calendar_period(task), task["fixed_day"]
         residue = (int(task["fixed_month"]) - 1) % period
@@ -268,6 +309,8 @@ def schedule_label(task: dict[str, Any]) -> str:
     if kind == "fixed_calendar":
         period, day = calendar_period(task), task["fixed_day"]
         season = f", {season_text(task)}" if season_text(task) else ""
+        if weekly_calendar(task):
+            return f"Weekly on {_WEEKDAYS[int(day or 7) - 1]}{season}"
         if period == 1:
             if day == 31:
                 return "Monthly on the last day" + season
@@ -281,6 +324,8 @@ def schedule_label(task: dict[str, Any]) -> str:
 def soon_days(task: dict[str, Any]) -> int:
     """How close to its due date a task counts as "soon": SOON_DAYS, or the
     last quarter of a shorter interval (a weekly chore: the day before)."""
+    if weekly_calendar(task):
+        return 1  # the day before
     if task.get("schedule_type") == "interval" and task.get("interval_unit") in ("days", "weeks"):
         period = int(task.get("interval_value") or 1) * (7 if task["interval_unit"] == "weeks" else 1)
         return min(SOON_DAYS, max(1, period // 4))
@@ -324,6 +369,17 @@ def _validated(fields: dict[str, Any]) -> dict[str, Any]:
         if unit not in INTERVAL_UNITS:
             raise ValueError(f"interval_unit must be one of {', '.join(INTERVAL_UNITS)}.")
         clean.update(interval_value=value, interval_unit=unit)
+    elif kind == "fixed_calendar" and fields.get("interval_unit") == "weeks":
+        day = fields.get("fixed_day")
+        if not isinstance(day, int) or isinstance(day, bool) or not 1 <= day <= 7:
+            raise ValueError("A weekly date needs fixed_day = the weekday, 1 (Monday) to 7 (Sunday).")
+        start, end = fields.get("season_start"), fields.get("season_end")
+        if (start is None) != (end is None):
+            raise ValueError("A season needs both season_start and season_end (months 1-12).")
+        if start is not None and not all(isinstance(m, int) and not isinstance(m, bool) and 1 <= m <= 12
+                                         for m in (start, end)):
+            raise ValueError("season_start and season_end must be months 1-12.")
+        clean.update(interval_value=1, interval_unit="weeks", fixed_day=day, season_start=start, season_end=end)
     elif kind == "fixed_calendar":
         month, day = fields.get("fixed_month"), fields.get("fixed_day")
         period = fields.get("interval_value")

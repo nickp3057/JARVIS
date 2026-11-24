@@ -113,6 +113,37 @@ class DateMathTests(unittest.TestCase):
                                 "fixed_day": 31}), "Monthly on the last day")
 
 
+class WeeklyCalendarTests(MaintenanceTestCase):
+    """Weekly under "On dates" (2026-11-24): every week on one weekday."""
+
+    TASK = {"schedule_type": "fixed_calendar", "interval_unit": "weeks", "interval_value": 1, "fixed_day": 7,
+            "created_at": "2026-11-01T00:00:00"}
+
+    def test_next_sunday_early_and_missed(self) -> None:
+        tue = date(2026, 11, 24)  # a Tuesday; last Sunday was the 22nd
+        self.assertEqual(maintenance.next_due(self.TASK, date(2026, 11, 22), tue), date(2026, 11, 29))
+        # Missed last Sunday: overdue for it.
+        self.assertEqual(maintenance.next_due(self.TASK, date(2026, 11, 15), tue), date(2026, 11, 22))
+        # Done Friday counts for the coming Sunday.
+        self.assertEqual(maintenance.next_due(self.TASK, date(2026, 11, 27), date(2026, 11, 27)), date(2026, 12, 6))
+        # Sunday itself, not yet done: due today.
+        self.assertEqual(maintenance.next_due(self.TASK, date(2026, 11, 22), date(2026, 11, 29)), date(2026, 11, 29))
+
+    def test_season_skips_winter_weeks_and_label(self) -> None:
+        mow = {**self.TASK, "fixed_day": 6, "season_start": 4, "season_end": 10}
+        self.assertEqual(maintenance.next_due(mow, date(2026, 10, 31), date(2026, 11, 24)), date(2027, 4, 3))
+        self.assertEqual(maintenance.schedule_label(mow), "Weekly on Saturdays, Apr\u2013Oct")
+        self.assertEqual(maintenance.soon_days(mow), 1)
+
+    def test_create_and_validate(self) -> None:
+        task = maintenance.create_task({"name": "Trash out", "schedule_type": "fixed_calendar",
+                                        "interval_unit": "weeks", "fixed_day": 7})
+        self.assertEqual(task["schedule_label"], "Weekly on Sundays")
+        with self.assertRaises(ValueError):
+            maintenance.create_task({"name": "x", "schedule_type": "fixed_calendar", "interval_unit": "weeks",
+                                     "fixed_day": 8})
+
+
 class StoreTests(MaintenanceTestCase):
     def test_seeds_once_and_never_return(self) -> None:
         names = [t["name"] for t in maintenance.list_tasks()]
