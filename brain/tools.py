@@ -3092,8 +3092,9 @@ _CUSTOM_TOOLS: list[dict[str, Any]] = [
             "monthly or yearly chores): due on set dates; interval_value = months between them "
             "(1, 2, 3, 4, 6 or 12), fixed_month/fixed_day = one of the dates (day 31 = last day). "
             "\"Once a quarter\" = 3 from Jan 1 (Jan 1, Apr 1, Jul 1, Oct 1); \"twice a year\" = 6 "
-            "from Jan 1 unless he names dates. interval: N days/months/years after the last time, "
-            "only when he says it's counted from when he last did it (or for days/weeks). "
+            "from Jan 1 unless he names dates. interval: N days/weeks/months/years after the last "
+            "time, only when he says it's counted from when he last did it, or for daily/weekly "
+            "chores ('water the bonsai every week' = interval 1 weeks). "
             "log_only: no countdown, just a log of when it was done."
         ),
         "input_schema": {
@@ -3103,7 +3104,7 @@ _CUSTOM_TOOLS: list[dict[str, Any]] = [
                 "schedule_type": {"type": "string", "enum": ["interval", "fixed_calendar", "log_only"]},
                 "interval_value": {"type": "integer", "minimum": 1,
                                    "description": "interval: how many units; fixed_calendar: months between dates."},
-                "interval_unit": {"type": "string", "enum": ["days", "months", "years"]},
+                "interval_unit": {"type": "string", "enum": ["days", "weeks", "months", "years"]},
                 "fixed_month": {"type": "integer", "minimum": 1, "maximum": 12},
                 "fixed_day": {"type": "integer", "minimum": 1, "maximum": 31},
                 "season_start": {"type": "integer", "minimum": 1, "maximum": 12,

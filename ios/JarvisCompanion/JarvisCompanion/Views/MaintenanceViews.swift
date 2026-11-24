@@ -451,6 +451,7 @@ struct MaintenanceEditor: View {
             Picker("Unit", selection: Binding(get: { draft.intervalUnit ?? "months" },
                                               set: { draft.intervalUnit = $0 })) {
                 Text("Days").tag("days")
+                Text("Weeks").tag("weeks")
                 Text("Months").tag("months")
                 Text("Years").tag("years")
             }

@@ -1620,7 +1620,7 @@ class MaintenanceTaskRequest(BaseModel):
     schedule_type: str = Field(pattern="^(interval|fixed_calendar|log_only)$")
     # interval: how many units; fixed_calendar: months between dates (1/2/3/4/6/12).
     interval_value: int | None = Field(default=None, ge=1, le=3650)
-    interval_unit: str | None = Field(default=None, pattern="^(days|months|years)$")
+    interval_unit: str | None = Field(default=None, pattern="^(days|weeks|months|years)$")
     fixed_month: int | None = Field(default=None, ge=1, le=12)
     fixed_day: int | None = Field(default=None, ge=1, le=31)
     # fixed_calendar only: skip dates outside these months (may wrap the year).

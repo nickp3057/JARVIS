@@ -123,6 +123,19 @@ class StoreTests(MaintenanceTestCase):
         maintenance._schema_ready_paths.clear()
         self.assertIsNone(maintenance.find_task("bonsai"))
 
+    def test_weekly_is_soon_only_the_day_before(self) -> None:
+        bonsai = maintenance.create_task({"name": "Water bonsai", "schedule_type": "interval",
+                                          "interval_value": 1, "interval_unit": "weeks"})
+        self.assertEqual(bonsai["schedule_label"], "Weekly")
+        self.assertEqual(bonsai["status"], "due")
+        done = maintenance.complete_task(bonsai["id"])
+        self.assertEqual((done["days_remaining"], done["status"]), (7, "ok"))
+        self.assertNotIn("Water bonsai", {t["name"] for t in maintenance.due_within()})
+        later = date.today() + timedelta(days=6)
+        task = maintenance.get_task(bonsai["id"], today=later)
+        self.assertEqual((task["days_remaining"], task["status"]), (1, "soon"))
+        self.assertIn("Water bonsai", {t["name"] for t in maintenance.due_within(today=later)})
+
     def test_complete_resets_countdown_and_history_and_undo(self) -> None:
         oil = maintenance.create_task({"name": "Oil change", "schedule_type": "interval",
                                        "interval_value": 6, "interval_unit": "months"})

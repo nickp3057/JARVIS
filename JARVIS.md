@@ -752,7 +752,9 @@ entry in `brain/agent_roster.py` (name, kind, icon, description, schedule);
   dates: `interval_value` = months between them, 1/2/3/4/6/12, anchored on
   `fixed_month`/`fixed_day`, day 31 = last day; quarterly = Jan 1, Apr 1,
   Jul 1, Oct 1; a missed date stays overdue, doing it a little early counts),
-  `interval` (N days/months/years after the last time), or `log_only`;
+  `interval` (N days/weeks/months/years after the last time; a weekly chore
+  is "soon" only the day before, the last quarter of any short interval),
+  or `log_only`;
   optional `last_done` starts an interval countdown from then. The companion
   editor's Repeats picker is On dates / After last done / Log. Calendar
   tasks can have a season (`season_start`/`season_end` months, may wrap the
@@ -2544,7 +2546,7 @@ there, so edit files with a `sudo python3` one-shot or vi.
   with a countdown and a log (`brain/maintenance.py`, `memory/maintenance.db`).
   Seeded once on first run with Rotate mattress (6 months), Replace car scent
   and Trim bonsai (quarterly); deleted seeds never return. Interval tasks are
-  due N days/months/years after the last completion (never done = due today;
+  due N days/weeks/months/years after the last completion (never done = due today;
   month math clamps, so Aug 31 + 6 months = Feb 28). Fixed-calendar tasks are
   due on a month/day yearly, and doing one up to 30 days early counts for
   that year. Log-only tasks just show "done N days ago". Days are

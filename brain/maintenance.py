@@ -2,8 +2,9 @@
 of every time it was done.
 
 Three schedule types:
-- ``interval``: due ``interval_value`` days/months/years after the last
-  completion; never done means due today.
+- ``interval``: due ``interval_value`` days/weeks/months/years after the
+  last completion; never done means due today. A short interval is "soon"
+  only in its last quarter (a weekly chore: the day before), not all week.
 - ``fixed_calendar``: due on set calendar dates, every ``interval_value``
   months (1, 2, 3, 4, 6 or 12; 12 when unset) anchored on ``fixed_month`` and
   ``fixed_day`` (day 31 = the month's last day). Quarterly from Jan 1 is Jan 1,
@@ -34,7 +35,7 @@ log = get_logger(__name__)
 _DB_PATH = Path(__file__).resolve().parent.parent / "memory" / "maintenance.db"
 
 SCHEDULE_TYPES = ("interval", "fixed_calendar", "log_only")
-INTERVAL_UNITS = ("days", "months", "years")
+INTERVAL_UNITS = ("days", "weeks", "months", "years")
 # Within this many days of the due date a task counts as "soon".
 SOON_DAYS = 7
 # Months between dates for a calendar schedule: they must divide the year.
@@ -152,6 +153,8 @@ def add_months(start: date, months: int) -> date:
 def _add_interval(start: date, value: int, unit: str) -> date:
     if unit == "days":
         return start + timedelta(days=value)
+    if unit == "weeks":
+        return start + timedelta(weeks=value)
     if unit == "years":
         return add_months(start, value * 12)
     return add_months(start, value)
@@ -259,6 +262,8 @@ def schedule_label(task: dict[str, Any]) -> str:
     kind = task["schedule_type"]
     if kind == "interval":
         value, unit = int(task["interval_value"]), str(task["interval_unit"])
+        if value == 1 and unit == "weeks":
+            return "Weekly"
         return f"Every {unit[:-1]}" if value == 1 else f"Every {value} {unit}"
     if kind == "fixed_calendar":
         period, day = calendar_period(task), task["fixed_day"]
@@ -273,14 +278,23 @@ def schedule_label(task: dict[str, Any]) -> str:
     return "Log only"
 
 
-def _status(days_remaining: int | None) -> str:
+def soon_days(task: dict[str, Any]) -> int:
+    """How close to its due date a task counts as "soon": SOON_DAYS, or the
+    last quarter of a shorter interval (a weekly chore: the day before)."""
+    if task.get("schedule_type") == "interval" and task.get("interval_unit") in ("days", "weeks"):
+        period = int(task.get("interval_value") or 1) * (7 if task["interval_unit"] == "weeks" else 1)
+        return min(SOON_DAYS, max(1, period // 4))
+    return SOON_DAYS
+
+
+def _status(days_remaining: int | None, soon: int = SOON_DAYS) -> str:
     if days_remaining is None:
         return "log"
     if days_remaining < 0:
         return "overdue"
     if days_remaining == 0:
         return "due"
-    return "soon" if days_remaining <= SOON_DAYS else "ok"
+    return "soon" if days_remaining <= soon else "ok"
 
 
 # --- Validation ----------------------------------------------------------------
@@ -369,7 +383,7 @@ def _serialize(row: sqlite3.Row, today: date) -> dict[str, Any]:
         days_since=(today - last_day).days if last_day else None,
         next_due=due.isoformat() if due else None,
         days_remaining=days_remaining,
-        status=_status(days_remaining),
+        status=_status(days_remaining, soon_days(task)),
         schedule_label=schedule_label(task),
     )
     return task
@@ -410,7 +424,8 @@ def get_task(task_id: int, today: date | None = None) -> dict[str, Any] | None:
 
 def due_within(days: int = SOON_DAYS, today: date | None = None) -> list[dict[str, Any]]:
     """Overdue and upcoming tasks for the Now feed."""
-    return [t for t in list_tasks(today) if t["days_remaining"] is not None and t["days_remaining"] <= days]
+    return [t for t in list_tasks(today)
+            if t["days_remaining"] is not None and t["days_remaining"] <= min(days, soon_days(t))]
 
 
 def history(task_id: int) -> list[dict[str, Any]] | None:
