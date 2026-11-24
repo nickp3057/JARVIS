@@ -115,6 +115,7 @@ Pearson-Stark-Jarvis/
 │   │                        resolver + NL quality-phrase fuzzy matching
 │   ├── radarr.py            find_movie (lookup) / add_movie (confirm-gated) / add_movies (batch) / change_movie_quality
 │   ├── temp_4k.py           temporary 4K copies via a second Radarr (radarr4k), auto-removed
+│   ├── tv_direct.py         room TV remote straight from Core (Android TV Remote protocol), HA fallback
 │   ├── sonarr.py            find_series (lookup) / add_series (confirm-gated)
 │   ├── nas_host.py          NAS host-health snapshot (containers, RAID, SMART, volumes, temps): debounced alerts + incident-report lines
 │   ├── media_doctor.py      Traces one title request→arr→indexer→qBit→import→Plex; names the stalled stage; fixes via confirm_gate
@@ -395,6 +396,15 @@ RMS envelope from ElevenLabs audio drives the orb in real time using a monotonic
 - Companion remote (top of the Hub tab, `TVRemoteView`): power, D-pad +
   OK, back, home, play/pause, volume, mute → `POST /api/tv/remote {key}`
   (admin) → `remote.send_command` (DPAD_*, BACK, HOME, MEDIA_*, VOLUME_*).
+- Direct path (2026-11-24, `integrations/tv_direct.py`): every remote button,
+  app/input launch, power and `play_plex` deep link first goes over Core's own
+  Android TV Remote connection to the TV (`androidtvremote2`, the protocol
+  the Google TV app and HA use; kept open with auto-reconnect), so a busy NAS
+  (Home Assistant) can't slow the remote; on failure it falls back to Home
+  Assistant. Needs `TV_HOST` plus a one-time pairing on the Surface
+  (`.venv/bin/python -m integrations.tv_direct pair`, enter the code the TV
+  shows; cert in `memory/tv_remote/`, gitignored), then a Core restart.
+  `TV_REMOTE_DIRECT=0` turns it off.
 
 ### Charles Schwab
 - `portfolio_summary` — live value, today's and yesterday's change, overall
@@ -1343,6 +1353,7 @@ BARN_DOOR_EFFECTS=light.nick_strip_lights=Rainbow-A,light.desk_lights_2=Rainbow 
 #   Govee DIY scenes (Nick's own rainbows) go by their dropdown instead:
 #   BARN_DOOR_EFFECTS=select.nick_strip_lights_diy_scene=Real Rainbow,select.desk_lights_diy_scene=New Rainbow   (Nick's picks)
 TV_REMOTE_ENTITY=remote.nick_s_room_tv   # HA Android TV Remote entity for Nick's room TV
+TV_REMOTE_DIRECT=1          # integrations/tv_direct.py: Core talks to the TV itself (needs TV_HOST + one-time pair); 0 = HA only
 LIGHT_SYNC=1                # light sync master switch (its monitor starts only when on; restart after turning it on)
 LIGHT_SYNC_STRIPS=10.0.0.125,10.0.0.221   # Govee razer-stream lights (strip H618E, desk H618A), LAN UDP 4003
 LIGHT_SYNC_LAMP=10.0.0.164  # Govee lamp (H6004), colorwc; blank = no lamp

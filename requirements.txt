@@ -28,6 +28,9 @@ google-api-python-client>=2.100.0
 google-auth-oauthlib>=1.2.0
 google-auth-httplib2>=0.2.0
 
+# Room TV remote straight from Core, no Home Assistant hop (integrations/tv_direct.py)
+androidtvremote2==0.3.3
+
 # iOS companion API
 fastapi>=0.115.0
 uvicorn[standard]>=0.30.0  # standard pulls httptools, uvloop, watchfiles (what the Surface runs)

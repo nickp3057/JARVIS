@@ -7,7 +7,9 @@ from fastapi.testclient import TestClient
 
 import app.server as server
 from brain import tools
-from integrations import home_assistant, tv_remote
+import asyncio
+
+from integrations import home_assistant, tv_direct, tv_remote
 
 
 class TvRemoteTests(unittest.TestCase):
@@ -18,6 +20,39 @@ class TvRemoteTests(unittest.TestCase):
         request = patch.object(home_assistant, "_request", return_value=(True, []))
         self.request = request.start()
         self.addCleanup(request.stop)
+        direct = patch.object(tv_direct, "configured", return_value=False)
+        self.direct = direct.start()
+        self.addCleanup(direct.stop)
+
+    def test_direct_connection_skips_home_assistant(self) -> None:
+        self.direct.return_value = True
+        with patch.object(tv_direct, "press_key", return_value=(True, "ok")) as key, \
+                patch.object(tv_direct, "launch", return_value=(True, "ok")) as launch:
+            self.assertTrue(tv_remote.press("up")[0])
+            self.assertTrue(tv_remote.press("app_plex")[0])
+        key.assert_called_once_with("DPAD_UP")
+        launch.assert_called_once_with("com.plexapp.android")
+        self.request.assert_not_called()
+
+    def test_direct_failure_falls_back_to_home_assistant(self) -> None:
+        self.direct.return_value = True
+        with patch.object(tv_direct, "press_key", return_value=(False, "the TV didn't answer in time")):
+            self.assertTrue(tv_remote.press("ok")[0])
+        self.request.assert_called_once_with("POST", "/api/services/remote/send_command", json={
+            "entity_id": "remote.nick_s_room_tv", "command": "DPAD_CENTER"})
+
+    def test_direct_power_only_toggles_when_needed(self) -> None:
+        class Fake:
+            def __init__(self, is_on):
+                self.is_on, self.sent = is_on, []
+
+            def send_key_command(self, code):
+                self.sent.append(code)
+        for is_on, on, expected in ((True, True, []), (False, True, ["POWER"]), (True, False, ["POWER"]),
+                                    (None, True, ["WAKEUP"]), (None, False, ["SLEEP"])):
+            fake = Fake(is_on)
+            asyncio.run(tv_direct._set_power(fake, on))
+            self.assertEqual(fake.sent, expected, (is_on, on))
 
     def test_cast_turn_on_becomes_a_remote_power_on(self) -> None:
         ok, message = home_assistant.call_service("media_player", "turn_on", "media_player.nicks_room_tv")

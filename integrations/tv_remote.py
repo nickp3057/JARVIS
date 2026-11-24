@@ -7,12 +7,16 @@ Google Cast ones open Home Assistant's cast screen when "turned on", so
 ``home_assistant.call_service`` sends on/off for any of ``TV_MEDIA_PLAYERS``
 here instead. The companion's remote (``POST /api/tv/remote``) and the
 ``tv_power`` tool both land here.
+
+Each command tries Core's own connection to the TV first
+(``integrations/tv_direct.py``, once paired) so a busy NAS can't slow the
+remote, and falls back to Home Assistant when that can't get through.
 """
 from __future__ import annotations
 
 import os
 
-from integrations import home_assistant
+from integrations import home_assistant, tv_direct
 from jarvis_logger import get_logger
 
 log = get_logger(__name__)
@@ -63,7 +67,31 @@ def is_tv_player(entity_id: str | None) -> bool:
     return bool(entity_id) and entity_id.strip().lower() in {p.strip().lower() for p in players.split(",")}
 
 
+def _direct(what: str, attempt) -> bool:
+    """Try the direct connection; True when it got through."""
+    if not tv_direct.configured():
+        return False
+    ok, detail = attempt()
+    if not ok:
+        log.warning("TV direct remote couldn't %s (%s); using Home Assistant", what, detail)
+    return ok
+
+
+def _send_key(code: str) -> tuple[bool, str]:
+    if _direct(f"press {code}", lambda: tv_direct.press_key(code)):
+        return True, "ok"
+    return home_assistant.call_service("remote", "send_command", entity(), {"command": code})
+
+
+def _launch(activity: str) -> tuple[bool, str]:
+    if _direct(f"open {activity}", lambda: tv_direct.launch(activity)):
+        return True, "ok"
+    return home_assistant.call_service("remote", "turn_on", entity(), {"activity": activity})
+
+
 def power(on: bool) -> tuple[bool, str]:
+    if _direct("switch power", lambda: tv_direct.power(on)):
+        return True, f"TV {'on' if on else 'off'}, sir."
     ok, detail = home_assistant.call_service("remote", "turn_on" if on else "turn_off", entity())
     if ok:
         return True, f"TV {'on' if on else 'off'}, sir."
@@ -76,21 +104,21 @@ def press(key: str) -> tuple[bool, str]:
     if key in ("power_on", "power_off"):
         return power(key == "power_on")
     if key in APPS:  # wakes the TV if needed and opens the app
-        return home_assistant.call_service("remote", "turn_on", entity(), {"activity": APPS[key]})
+        return _launch(APPS[key])
     if key.startswith("hdmi_") and key[5:].isdigit():
         link = input_link(int(key[5:]))
         if link is None:
             raise ValueError(f"The TV has no {key.replace('_', ' ').upper()}.")
-        return home_assistant.call_service("remote", "turn_on", entity(), {"activity": link})
+        return _launch(link)
     code = KEYS.get(key)
     if code is None:
         raise ValueError(f"Unknown button {key!r}.")
-    return home_assistant.call_service("remote", "send_command", entity(), {"command": code})
+    return _send_key(code)
 
 
 def stop_playback() -> tuple[bool, str]:
     """Stop whatever is playing (the remote's MEDIA_STOP; Plex closes the player)."""
-    return home_assistant.call_service("remote", "send_command", entity(), {"command": "MEDIA_STOP"})
+    return _send_key("MEDIA_STOP")
 
 
 def play_plex(rating_key: str | int, server: str | None) -> tuple[bool, str]:
@@ -101,7 +129,7 @@ def play_plex(rating_key: str | int, server: str | None) -> tuple[bool, str]:
     link = f"plex://play/?metadataKey={quote(f'/library/metadata/{rating_key}', safe='')}"
     if server:
         link += f"&server={server}"
-    return home_assistant.call_service("remote", "turn_on", entity(), {"activity": link})
+    return _launch(link)
 
 
 def play_item(rating_key: str, kind: str, title: str, *, verify_s: float | None = None,
