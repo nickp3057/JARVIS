@@ -761,7 +761,11 @@ entry in `brain/agent_roster.py` (name, kind, icon, description, schedule);
 - `add_maintenance_task(name, schedule_type, ...)` — `fixed_calendar` (set
   dates: `interval_value` = months between them, 1/2/3/4/6/12, anchored on
   `fixed_month`/`fixed_day`, day 31 = last day; quarterly = Jan 1, Apr 1,
-  Jul 1, Oct 1; a missed date stays overdue, doing it a little early counts),
+  Jul 1, Oct 1; a missed date stays overdue, doing it a little early counts;
+  **weekly on a weekday** since 2026-11-24, companion 6.133: `interval_unit`
+  "weeks" + `fixed_day` = ISO weekday 1-7, "Weekly on Sundays", two days
+  early counts, a season skips winter weeks; the editor's How often menu
+  lists Weekly first with a weekday picker),
   `interval` (N days/weeks/months/years after the last time; a weekly chore
   is "soon" only the day before, the last quarter of any short interval),
   or `log_only`;
