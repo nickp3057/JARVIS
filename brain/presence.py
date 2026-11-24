@@ -16,12 +16,32 @@ tracks the iPhone (``person.nick``, GPS, location "Always"), so:
   the edge of the home zone doesn't flap. The runtime's presence monitor
   acts on them: an inbox line both ways, and on leaving, a push if room
   lights were left on, with a Turn them off button (category ``LEFT_ON``).
+
+**The phone's own requests (2026-11-24).** Home Assistant has no external
+URL, so away from home Wi-Fi the HA app can't post its location and
+``person.nick`` stays "home" from the last report (it never left "home"
+from 11-19 to 11-24, school days included), and the room kept talking.
+The companion now reaches Core through the Lightsail proxy when away, and
+Core sees its real address, so ``note_phone`` (called by the server for
+every successful iPhone request on the admin token) records a sighting:
+a public address means away, a home LAN address means home, a tailnet one
+says nothing. ``location()`` takes whichever is newer, HA's last report
+(``last_updated``) or the phone's last sighting. Sightings survive a
+restart (``memory/presence.json``). Caveats: the phone has to have talked
+to JARVIS since leaving (opening the app, a widget or a Shortcut does it);
+the app on cellular *at home* would read as away until HA reports again;
+and an address in ``PRESENCE_HOME_IPS`` (the house's public IP, if the app
+ever uses the domain at home) counts as home.
 """
 from __future__ import annotations
 
+import ipaddress
+import json
 import os
 import threading
 import time
+from datetime import datetime
+from pathlib import Path
 from typing import Any, Callable, NamedTuple
 
 from jarvis_logger import get_logger
@@ -30,6 +50,10 @@ log = get_logger(__name__)
 
 _cache: dict[str, Any] = {"at": 0.0, "value": None}
 _lock = threading.Lock()
+_PHONE_FILE = Path(__file__).resolve().parents[1] / "memory" / "presence.json"
+_phone: dict[str, Any] = {"loaded": False, "where": None, "at": 0.0, "saved_at": 0.0}
+_TAILNET = ipaddress.ip_network("100.64.0.0/10")
+_ha_updated: dict[str, float] = {"at": 0.0}  # when person.nick last changed in HA (epoch s)
 
 
 def person_entity() -> str:
@@ -52,10 +76,92 @@ def _read() -> str | None:
     entity = next((e for e in payload if isinstance(e, dict) and str(e.get("entity_id", "")).lower() == wanted), None)
     if entity is None:
         return None
+    _ha_updated["at"] = _parse_time(entity.get("last_updated"))
     state = str(entity.get("state", "")).strip().lower()
     if state in {"", "unknown", "unavailable"}:
         return None
     return "home" if state == "home" else "away"  # "not_home" or another zone's name
+
+
+
+def classify(ip: str | None) -> str | None:
+    """Where a request from this address puts the phone: 'home' (LAN or a
+    PRESENCE_HOME_IPS address), 'away' (any other public address, i.e. through
+    the Lightsail proxy), None (tailnet, loopback, unparseable)."""
+    try:
+        addr = ipaddress.ip_address((ip or "").strip())
+    except ValueError:
+        return None
+    home = {h.strip() for h in os.getenv("PRESENCE_HOME_IPS", "").split(",") if h.strip()}
+    if str(addr) in home:
+        return "home"
+    if addr.is_loopback or addr.is_link_local or (addr.version == 4 and addr in _TAILNET):
+        return None
+    if addr.is_private:
+        return "home"
+    return "away" if addr.is_global else None
+
+
+def _load_phone() -> None:
+    if _phone["loaded"]:
+        return
+    _phone["loaded"] = True
+    try:
+        data = json.loads(_PHONE_FILE.read_text())
+        if data.get("where") in ("home", "away"):
+            _phone.update(where=data["where"], at=float(data.get("at") or 0), saved_at=float(data.get("at") or 0))
+    except (OSError, ValueError, TypeError):
+        pass
+
+
+def note_phone(ip: str | None, *, now: float | None = None) -> None:
+    """The iPhone just reached Core from ``ip``. Never raises."""
+    where = classify(ip)
+    if where is None:
+        return
+    now = time.time() if now is None else now
+    with _lock:
+        _load_phone()
+        changed = where != _phone["where"]
+        _phone.update(where=where, at=now)
+        if changed:
+            _cache.update(at=0.0)  # the room should hear about it on the next ask
+        # The file only needs to be roughly current: write on a change, else every 10 min.
+        if changed or now - _phone["saved_at"] > 600:
+            _phone["saved_at"] = now
+            try:
+                _PHONE_FILE.parent.mkdir(parents=True, exist_ok=True)
+                _PHONE_FILE.write_text(json.dumps({"where": where, "at": now}))
+            except OSError:
+                log.debug("Couldn't save the phone sighting", exc_info=True)
+    if changed:
+        log.info("Presence: the iPhone reached Core from %s, so %s", "home" if where == "home" else "outside", where)
+
+
+def phone_sighting() -> tuple[str | None, float]:
+    with _lock:
+        _load_phone()
+        return _phone["where"], _phone["at"]
+
+
+def _parse_time(text: Any) -> float:
+    try:
+        return datetime.fromisoformat(str(text)).timestamp()
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _combined() -> str | None:
+    """The newer of HA's last report and the phone's last sighting."""
+    try:
+        ha = _read()
+    except Exception:  # noqa: BLE001 - HA down still leaves the phone's word
+        log.debug("Presence read failed", exc_info=True)
+        ha = None
+    where, at = phone_sighting()
+    if where is not None and (ha is None or at > _ha_updated["at"]):
+        return where
+    return ha
 
 
 def location(*, fresh: bool = False) -> str | None:
@@ -67,7 +173,7 @@ def location(*, fresh: bool = False) -> str | None:
         if not fresh and _cache["at"] and now - _cache["at"] < _cache_s():
             return _cache["value"]
     try:
-        value = _read()
+        value = _combined()
     except Exception:  # noqa: BLE001 - presence never breaks a caller
         log.debug("Presence read failed", exc_info=True)
         value = None
@@ -79,6 +185,8 @@ def location(*, fresh: bool = False) -> str | None:
 def reset_for_tests() -> None:
     with _lock:
         _cache.update(at=0.0, value=None)
+        _phone.update(loaded=True, where=None, at=0.0, saved_at=0.0)
+        _ha_updated["at"] = 0.0
 
 
 class Change(NamedTuple):

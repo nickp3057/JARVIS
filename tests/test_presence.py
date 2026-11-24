@@ -120,5 +120,67 @@ class EndpointTests(unittest.TestCase):
         self.assertEqual(body["message"], "Turned off 1 light. Couldn't turn off Lamp.")
 
 
+class PhoneSightingTests(unittest.TestCase):
+    """The iPhone reaching Core through Lightsail means away even while HA,
+    unreachable from outside, still says home (2026-11-24)."""
+
+    def setUp(self):
+        import tempfile
+        from pathlib import Path
+        presence.reset_for_tests()
+        self.addCleanup(presence.reset_for_tests)
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        file_patch = patch.object(presence, "_PHONE_FILE", Path(tmp.name) / "presence.json")
+        file_patch.start()
+        self.addCleanup(file_patch.stop)
+
+    @staticmethod
+    def _ha(state, updated):
+        return True, [{"entity_id": "person.nick", "state": state, "last_updated": updated}]
+
+    def test_classify(self):
+        for ip, expected in (("10.0.0.20", "home"), ("192.168.1.4", "home"), ("172.58.10.2", "away"),
+                             ("8.8.8.8", "away"), ("100.69.8.11", None), ("127.0.0.1", None),
+                             ("testclient", None), (None, None)):
+            self.assertEqual(presence.classify(ip), expected, ip)
+        with patch.dict(os.environ, {"PRESENCE_HOME_IPS": "73.1.2.3"}):
+            self.assertEqual(presence.classify("73.1.2.3"), "home")
+
+    def test_newer_signal_wins(self):
+        morning = "2026-11-24T14:26:39+00:00"  # HA's last report, at home
+        at_school = presence._parse_time("2026-11-24T15:30:00+00:00")
+        presence.note_phone("172.58.10.2", now=at_school)
+        with patch("integrations.home_assistant.get_states", return_value=self._ha("home", morning)):
+            self.assertEqual(presence.location(fresh=True), "away")
+        evening = "2026-11-25T00:10:00+00:00"  # back on Wi-Fi, the HA app reports again
+        with patch("integrations.home_assistant.get_states", return_value=self._ha("home", evening)):
+            self.assertEqual(presence.location(fresh=True), "home")
+
+    def test_tailnet_says_nothing_and_ha_down_leaves_the_phone(self):
+        presence.note_phone("100.119.21.113", now=10**10)
+        with patch("integrations.home_assistant.get_states", return_value=self._ha("home", "2026-11-24T14:00:00+00:00")):
+            self.assertEqual(presence.location(fresh=True), "home")
+        presence.note_phone("8.8.8.8", now=1.0)
+        with patch("integrations.home_assistant.get_states", return_value=(False, "HA down")):
+            self.assertEqual(presence.location(fresh=True), "away")
+
+    def test_sighting_survives_a_restart(self):
+        presence.note_phone("8.8.8.8", now=1234.0)
+        presence._phone.update(loaded=False, where=None, at=0.0)
+        self.assertEqual(presence.phone_sighting(), ("away", 1234.0))
+
+    def test_server_records_only_the_iphone_on_the_admin_token(self):
+        with patch.dict(os.environ, {"JARVIS_API_TOKEN": "test-token"}), \
+             patch.object(presence, "note_phone") as note:
+            client = TestClient(server.app, client=("172.58.10.2", 5000))
+            self.addCleanup(client.close)
+            with patch("integrations.home_assistant.get_states", return_value=(False, "HA down")):
+                for device, token in (("iphone", "test-token"), ("ipad", "test-token"), ("iphone", "wrong")):
+                    client.get("/api/presence", headers={"Authorization": f"Bearer {token}",
+                                                         "X-Jarvis-Device": device})
+        note.assert_called_once_with("172.58.10.2")
+
+
 if __name__ == "__main__":
     unittest.main()

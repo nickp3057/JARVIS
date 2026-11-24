@@ -94,6 +94,27 @@ def _pushed(request: Request, label: str) -> None:
         pass
 
 
+def _is_phone(headers: dict[str, str]) -> bool:
+    """Nick's iPhone on the admin token (not an iPad, the Mac, or a client token
+    such as the website's, which also arrives through Lightsail)."""
+    if (headers.get("x-jarvis-device") or "").strip().lower() != "iphone":
+        return False
+    supplied = headers.get("authorization", "").removeprefix("Bearer ").strip()
+    expected = os.getenv("JARVIS_API_TOKEN", "").strip()
+    return bool(expected) and hmac.compare_digest(supplied, expected)
+
+
+def _note_phone(scope) -> None:
+    """A presence sighting (brain/presence.py): the iPhone's real address,
+    since uvicorn rewrites the client from X-Forwarded-For for Lightsail."""
+    try:
+        from brain import presence
+        client = scope.get("client")
+        presence.note_phone(client[0] if client else None)
+    except Exception:  # noqa: BLE001 - presence must never break a request
+        log.debug("Phone sighting failed", exc_info=True)
+
+
 class _TrafficTap:
     """Every request is a signal from its client to Core, and its answer a
     signal back once the reply has gone out (a camera frame, a status
@@ -121,10 +142,13 @@ class _TrafficTap:
         except Exception:  # noqa: BLE001 - the map must never break a request
             caller = None
         answered = {"ok": False}
+        phone = _is_phone(headers)
 
         async def reply(message):
             if message.get("type") == "http.response.start":
                 answered["ok"] = int(message.get("status", 500)) < 400
+                if phone and answered["ok"]:
+                    _note_phone(scope)
             await send(message)
             if (caller and answered["ok"] and message.get("type") == "http.response.body"
                     and not message.get("more_body", False)):
@@ -790,10 +814,13 @@ def skill_update(skill_id: str, request: SkillUpdate, _: None = Depends(authoriz
 
 @app.get("/api/presence")
 def presence_status(_: None = _status_read) -> dict[str, object]:
-    """Home or away, from Nick's iPhone GPS through Home Assistant (null when unknown)."""
+    """Home or away (null when unknown): the newer of the iPhone's GPS through
+    Home Assistant and where the phone last reached Core from."""
     from brain import presence
     from app import status_hub
-    return {"location": presence.location(), "person": presence.person_entity(), "room_quiet": status_hub.room_away()}
+    where, at = presence.phone_sighting()
+    return {"location": presence.location(), "person": presence.person_entity(), "room_quiet": status_hub.room_away(),
+            "phone": {"where": where, "at": at or None}}
 
 
 @app.post("/api/presence/lights-off")
